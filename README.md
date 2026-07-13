@@ -78,7 +78,8 @@ That's the whole idea: **code ⇄ scene, always in agreement.**
        public void Build(SceneRoot scene) => scene.Add("Hello").Transform(pos: (0, 1, 0));
    }
    ```
-3. **Build it** — menu **SceneBuilder ▸ Build**. Your scene materializes.
+3. **See it appear** — click **Build** in the SceneBuilder panel and your scene materializes. Prefer
+   hands-off? Toggle on **Auto-build** and it rebuilds whenever you save the file.
 4. **Edit either side** — tweak the code and rebuild, or move things in the editor and watch the file
    update. Point your AI assistant at the `.cs` file and let it go.
 
