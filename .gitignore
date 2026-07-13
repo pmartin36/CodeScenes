@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.dotnet/
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Ll]ogs/
+.vs/
