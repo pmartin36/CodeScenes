@@ -1,69 +1,129 @@
 # SceneBuilder
 
-**Code-native Unity scene authoring with bidirectional code↔scene sync.**
+> **Build your Unity scenes in code. Edit them in the editor. Keep both in sync — automatically.**
 
-Define a Unity scene as a flat C# builder file; on **Build** it materializes into a real Unity scene,
-and edits you make in the Unity editor **sync back** into the builder code. Built for LLM-driven
-workflows: an LLM authors and maintains scenes as code — its native substrate, a whole scene in
-context — while humans keep editing visually in the editor, and the two stay in agreement.
+Define a Unity scene as a plain C# file. Hit **Build** and it constructs the real scene. Then move
+things around in the Unity editor, and your code rewrites itself to match. It's a two-way street
+between your code and your scene — and it's what finally lets AI assistants build Unity scenes *well*.
 
-> The GitHub repo is named `UnitySceneManager`; the product/plugin is **SceneBuilder**.
+> 🚧 **Early development.** The design is locked and the engine is being built test-first. Not usable
+> yet — ⭐ the repo to follow along. See [Status](#status).
 
-## Why
+---
 
-- **Wedge — code-native authoring.** Existing Unity AI tools drive the editor via one tool-call per
-  action. SceneBuilder makes the scene a single coherent code artifact the model can read, generate,
-  and validate against a schema — playing to the LLM's strengths instead of fighting them.
-- **Moat — the sync layer.** Construction from code is commodity (Unity's Editor APIs already do it).
-  The value is the durable, *living* code↔scene relationship: a stable identity map plus a
-  reconciliation engine that keeps both sides honest. Nobody has shipped this for Unity.
+## Why you'd want this
 
-## Architecture
+If you've asked an AI assistant to build a Unity scene, you know the pain: it fumbles through the
+editor one click at a time, loses the thread, and leaves you nothing clean to review. And if you've
+ever put a `.unity` file in git, you know the *other* pain — unreadable diffs and merge conflicts you'd
+never wish on a teammate.
 
-Split along the testability seam:
+SceneBuilder fixes both by making your scene **code**:
 
-- **`SceneBuilder.Core`** — Unity-free .NET (`netstandard2.1`). Parses builder files (Roslyn), diffs,
-  produces materialize Plans (code→scene) and source patches (scene→code), owns the canonical
-  serializer and the identity map. **Fully unit-tested headless** via `dotnet test` — no mocks.
-- **`SceneBuilder.Editor` / `.Authoring`** (Unity 6) — the thin in-editor adapter (executes Plans,
-  reads scene snapshots, captures `ObjectChangeEvents`) and the fluent builder API. Consumed by a Unity
-  project as a local UPM package.
+- 🤖 **AI builds scenes the way it's actually good at — writing code.** Your whole scene fits in the
+  model's context as one readable file it can generate, refactor, and sanity-check. No more clicking
+  around the editor on your behalf.
+- 🔁 **True two-way sync.** Change the code → the scene updates. Drag something in the editor → the code
+  updates. You're never trapped on one side.
+- 🌳 **Scenes you can diff, review, and merge.** Your scene is clean C# in git — real pull-request
+  diffs, not a wall of YAML.
+- 🎛️ **You keep the editor.** This isn't "give up Unity's editor." Lay things out visually when that's
+  faster; the code just follows along.
 
-Correctness backbone: state reconciliation keyed on Unity's durable `GlobalObjectId`; the editor event
-stream is only a trigger. Builds reconcile **in place** (never wipe-and-recreate) to preserve identity.
+---
 
-## Status — work in progress
+## What it looks like
 
-- **Specs:** complete — `specs/00-foundation.md` is the authoritative contract; milestones **M0–M11**
-  plus `specs/needs_research/`.
-- **Core:** M0 (skeleton & harness) done; **M1** (hierarchy + transforms) and **M2** (sync-back) in
-  progress, built test-first behind a `dotnet test` gate.
-- **Unity adapter:** not started — built after the Core M0–M2 API is green.
+Write a scene:
 
-## Build & test the Core
+```csharp
+public class MainMenu : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var player = scene.Add("Player").Transform(pos: (0, 1, 0));
+        player.Component<Rigidbody>(rb => rb.Set(r => r.mass, 5f));
+
+        var door = scene.Add("Door").Transform(pos: (4, 0, 0));
+        scene.Add("OpenButton").Component<Button>(b => b.OnClick(door, nameof(Door.Open)));
+    }
+}
+```
+
+Hit **SceneBuilder ▸ Build** — the scene appears in Unity, wired up and ready.
+
+Now drag `Player` somewhere in the Scene view and save. Your file updates itself:
+
+```diff
+-        var player = scene.Add("Player").Transform(pos: (0, 1, 0));
++        var player = scene.Add("Player").Transform(pos: (2.5f, 1, -3));
+```
+
+That's the whole idea: **code ⇄ scene, always in agreement.**
+
+---
+
+## Getting started
+
+> ⚠️ Not usable yet — this is the intended flow for the first release.
+
+1. **Install** — in Unity, open *Package Manager ▸ Add package from git URL* and paste:
+   ```
+   https://github.com/pmartin36/UnitySceneManager.git
+   ```
+2. **Write a scene** — create `Assets/Scenes/MainMenu.cs`:
+   ```csharp
+   public class MainMenu : ISceneDefinition
+   {
+       public void Build(SceneRoot scene) => scene.Add("Hello").Transform(pos: (0, 1, 0));
+   }
+   ```
+3. **Build it** — menu **SceneBuilder ▸ Build**. Your scene materializes.
+4. **Edit either side** — tweak the code and rebuild, or move things in the editor and watch the file
+   update. Point your AI assistant at the `.cs` file and let it go.
+
+Prefer to see it run first? Import the **Round-Trip Demo** sample from the package
+(*Package Manager ▸ SceneBuilder ▸ Samples ▸ Import*) and follow its README.
+
+---
+
+## How it works
+
+Your builder file is the source of truth. SceneBuilder compares what your code describes against
+what's actually in the scene and reconciles the difference — in whichever direction you changed. Every
+object gets a stable identity, so an edit in the editor updates the *right* line of code, and a
+rebuild never wipes and recreates your scene. Flat, AI-generated code round-trips perfectly; keep
+loops and helpers for procedural bits and those stay code-driven.
+
+## Status
+
+Active, early development — designed spec-first, then built test-first.
+
+| | |
+|---|---|
+| ✅ **Design** | Complete — see [`specs/`](specs/); `specs/00-foundation.md` is the contract. |
+| 🔨 **Engine** (`SceneBuilder.Core`) | Building now, behind a real test gate. |
+| ⏭️ **Unity editor plugin** | Next up. |
+| 🔮 **Then** | Components & fields, asset & cross-object references, prefabs, UnityEvents, animation. |
+
+⭐ Star the repo to follow along.
+
+---
+
+## Contributing / poking around
+
+The engine is plain .NET with zero Unity dependency, so it runs fully headless:
 
 ```sh
-# dotnet 8 SDK required (this machine has it at ~/.dotnet)
-export PATH="$HOME/.dotnet:$PATH"
 dotnet test SceneBuilder.sln
 ```
 
-## Layout
+Everything — architecture and every milestone — is written up in [`specs/`](specs/). Start with
+`specs/00-foundation.md`.
 
-```
-SceneBuilder.Core/         # Unity-free brains (parse / diff / plan / reconcile / identity)
-SceneBuilder.Core.Tests/   # xUnit — real behavior tests, headless
-SceneBuilder.sln
-specs/
-  00-foundation.md         # THE CONTRACT — read this first
-  01-m0 … 12-m11           # milestone specs
-  needs_research/          # not-yet-spec-ready problems
-  completed/               # milestones move here once green + confirmed in Unity
-```
+## License
 
-The Unity test project that consumes this plugin lives separately and references it via a local UPM
-`file:` path.
+TBD.
 
-## Specs
-
-Start with **`specs/00-foundation.md`**, then `specs/01-m0-skeleton.md` onward.
+<sub>Repo is currently named `UnitySceneManager`; the plugin is `SceneBuilder`. Both will be renamed
+once the name settles.</sub>
