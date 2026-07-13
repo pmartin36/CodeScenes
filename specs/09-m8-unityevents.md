@@ -11,8 +11,8 @@ This milestone introduces new types/ops not in `00-foundation.md`. They are flag
     Target     : ValueNode      // MUST be ObjectRef (scene target, §3/M5) or AssetRef (asset target, §3/M4); null Target allowed (dangling call)
     MethodName : string         // Unity m_MethodName; the setter or method invoked
     CallState  : "Off" | "RuntimeOnly" | "EditorAndRuntime"   // == UnityEventCallState; default "RuntimeOnly"
-    ArgMode    : "void" | "int" | "float" | "string" | "bool" | "object"   // == PersistentListenerMode (see mapping in Risks)
-    ArgValue   : ValueNode?      // present iff ArgMode != "void":
+    ArgMode    : "void" | "int" | "float" | "string" | "bool" | "object" | "dynamic"   // == PersistentListenerMode; "dynamic"==EventDefined (m_Mode 0): method receives the event's OWN runtime arg(s)
+    ArgValue   : ValueNode?      // present iff ArgMode is a static value mode (int/float/string/bool/object); void AND dynamic carry no ArgValue:
                                  //   int→Primitive(int), float→Primitive(float), string→Primitive(string),
                                  //   bool→Primitive(bool), object→ObjectRef | AssetRef (the m_ObjectArgument)
   ```
@@ -30,13 +30,16 @@ Everything else binds to `00-foundation.md` verbatim (§2 seam, §3 `ObjectRef`/
 ## Goal
 Author and round-trip `UnityEvent` **persistent listeners** — the classic UI `Button.OnClick → call a
 method on a target object` wiring — in both directions, including the target (scene object or asset),
-the invoked method, the call state, and a single typed static argument.
+the invoked method, the call state, and either a single typed static argument OR a **dynamic** binding
+that forwards the event's own runtime argument(s) to the method (multi-arg `UnityEvent<T0,T1,…>`).
 
 ## In scope
 - Modeling `UnityEvent` persistent listeners as `ValueNode.UnityEventListeners` on any `UnityEvent`
   (and `UnityEvent<T>` for the single-arg static modes) serialized field.
-- `void` listeners (zero-arg method) and **1-arg static** listeners for arg modes
-  `int | float | string | bool | object`.
+- `void` listeners (zero-arg method), **1-arg static** listeners (`int | float | string | bool |
+  object`), and **dynamic** (EventDefined) listeners that forward the event's own runtime argument(s)
+  to a signature-matching method — this covers multi-argument `UnityEvent<T0,T1,…>` wiring (the args
+  are not stored; Unity passes them at invoke time).
 - Target resolution both ways: scene-object target via `ObjectRef` (depends on M5) and project-asset
   target via `AssetRef` (depends on M4).
 - `CallState` (`Off | RuntimeOnly | EditorAndRuntime`) round-trip.
@@ -48,11 +51,10 @@ the invoked method, the call state, and a single typed static argument.
   `.OnEvent(eventPath, target, methodName, …)` for non-Button `UnityEvent` fields.
 
 ## Out of scope
-- **Dynamic** (event-defined, `m_Mode == 0`) listeners that bind to the invoker's runtime argument —
-  parked; captured verbatim as `ValueNode.Unsupported` and flagged, never dropped (§7).
 - Runtime (`AddListener` / non-persistent) listeners — not serialized, out of the tool's remit.
-- Methods with **more than one** argument, or argument types outside the six modes (round-tripped as
-  `Unsupported`, flagged).
+- More than one *static* argument is not something Unity persists at all (a persistent call stores at
+  most one static arg, or uses dynamic forwarding); a static arg whose type is outside the six modes →
+  `Unsupported`, flagged.
 - Custom `[Serializable]` `UnityEvent` subclasses beyond field-typed discovery (handled generically if
   they serialize the standard `m_PersistentCalls` shape; exotic shapes → `Unsupported`).
 - Authoring-time validation that `methodName` exists / is signature-compatible on the target type
@@ -72,8 +74,8 @@ the invoked method, the call state, and a single typed static argument.
   `UnityEventListener ↔ persistent-call fields` (`m_Target`/`m_TargetAssemblyTypeName`, `m_MethodName`,
   `m_Mode`, `m_Arguments.{m_ObjectArgument,m_ObjectArgumentAssemblyTypeName,m_IntArgument,
   m_FloatArgument,m_StringArgument,m_BoolArgument}`, `m_CallState`) so the adapter is a dumb applier.
-  Contract: mode↔`ArgMode` table (Risks) is total and reversible for the six supported modes; mode `0`
-  (EventDefined) maps to `Unsupported`.
+  Contract: mode↔`ArgMode` table (Risks) is total and reversible for all seven modes; mode `0`
+  (EventDefined) maps to `ArgMode="dynamic"` (target+method preserved, no stored `ArgValue`).
 - **Diff** — `Diff` treats a `UnityEvent` field as changed when the ordered listener list differs by
   any of: count, per-index `Target` (compared on `ObjectRef.targetLogicalId` / `AssetRef.Guid`+`FileId`),
   `MethodName`, `ArgMode`, `ArgValue`, or `CallState`. Emits a single `SetUnityEvent` op for the field.
@@ -117,6 +119,10 @@ scene.Add("Button").Component<Button>(b => b.OnClick(mixer, nameof(Mixer.SetVol)
 
 // Generic UnityEvent field on any component:
 b.OnEvent(c => c.onValueChanged, target: hud, method: nameof(Hud.Refresh));                 // bool/int/etc. per field type
+
+// Dynamic — forward the event's own arg(s) to a matching method (covers multi-arg UnityEvent<T…>):
+slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, target: hud,
+                                        method: nameof(Hud.SetValue), dynamic: true));       // ArgMode "dynamic", no stored value
 ```
 - `target` is a builder **handle** (→ `ObjectRef`, §6) or an asset reference (→ `AssetRef`).
 - Lowering (Editor→Core): `.OnClick(...)`/`.OnEvent(...)` → `ComponentData.Fields[eventPath]` =
@@ -144,8 +150,12 @@ b.OnEvent(c => c.onValueChanged, target: hud, method: nameof(Hud.Refresh));     
   `.OnClick(...)` statement (or empties the list) via `SourcePatch`; empty list serializes as cleared.
 - **Diff idempotence**: identical desired/actual listener lists → zero `SetUnityEvent` ops.
 - **CallState round-trip**: `EditorAndRuntime` / `Off` survive both directions.
-- **Unsupported passthrough**: an `m_Mode == 0` (dynamic) or >1-arg call → `ValueNode.Unsupported`,
-  flagged, byte-identical round-trip; not converted to a supported mode.
+- **Dynamic (EventDefined) round-trip**: an `m_Mode == 0` listener → `ArgMode="dynamic"`, no
+  `ArgValue`, target+method preserved; round-trips; authoring emits the `dynamic: true` form; a
+  multi-arg `UnityEvent<int,float>` wired dynamically preserves target+method through both directions.
+- **Unsupported passthrough**: a persistent call with a genuinely non-standard shape (e.g. a static
+  arg whose type is outside the six modes) → `ValueNode.Unsupported`, flagged, byte-identical
+  round-trip; not coerced into a supported mode.
 - **Conflict**: a snapshot listener whose target maps to no `LogicalId`/asset → surfaced conflict, no
   patch emitted.
 
@@ -164,7 +174,10 @@ b.OnEvent(c => c.onValueChanged, target: hud, method: nameof(Hud.Refresh));     
    `callState: EditorAndRuntime`.
 6. In Unity, remove the OnClick entry → save. **Expected:** the `.OnClick(...)` statement is removed
    from source.
-7. Re-run Materialize with no code change. **Expected:** no plan ops (idempotent).
+7. In Unity, wire a `Slider.onValueChanged` **dynamically** to a `Hud.SetValue(float)` method (drag it
+   under the "Dynamic float" section) → save. **Expected:** source becomes
+   `.OnEvent(x => x.onValueChanged, target: hud, method: nameof(Hud.SetValue), dynamic: true)`; round-trips.
+8. Re-run Materialize with no code change. **Expected:** no plan ops (idempotent).
 
 ## Dependencies
 - **M3** (components + serialized fields; `ComponentData.Fields` by `propertyPath`).
@@ -173,9 +186,11 @@ b.OnEvent(c => c.onValueChanged, target: hud, method: nameof(Hud.Refresh));     
 - **M2** (Reconcile + Roslyn `SourcePatch` machinery for statement/arg edits).
 
 ## Risks/notes
-- **Mode ↔ ArgMode table** (`PersistentListenerMode`): `0 EventDefined`→`Unsupported`,
+- **Mode ↔ ArgMode table** (`PersistentListenerMode`): `0 EventDefined`→`dynamic`,
   `1 Void`→`void`, `2 Object`→`object`, `3 Int`→`int`, `4 Float`→`float`, `5 String`→`string`,
-  `6 Bool`→`bool`. `UnityEventCallState`: `0 Off`, `1 RuntimeOnly`, `2 EditorAndRuntime`.
+  `6 Bool`→`bool`. `UnityEventCallState`: `0 Off`, `1 RuntimeOnly`, `2 EditorAndRuntime`. In dynamic
+  mode the method's parameter types are those of the event's generic args (`UnityEvent<T…>`), derivable
+  from the field type; Core stores only target+method and lets the adapter wire via the dynamic API.
 - `m_TargetAssemblyTypeName` / `m_ObjectArgumentAssemblyTypeName` are Unity-populated; Core stores the
   method/target type via existing `TypeRef`/refs and lets the adapter's typed `AddPersistentListener`
   API repopulate them — avoids assembly-qualified-name drift across Unity versions.

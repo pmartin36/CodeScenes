@@ -97,7 +97,7 @@ TypeRef
 
 ValueNode  =  one of
   Primitive(kind: bool|int|long|float|double|string, value)
-  Enum(typeFullName, name)
+  Enum(typeFullName, members: string[], isFlags: bool)   // simple enum: members=[name], isFlags=false; [Flags]: OR-combined members
   Vec2 | Vec3 | Vec4 | Quat | Color(...)      // structured value POCOs
   AssetRef(ref: AssetRef)                      // reference to a project asset
   ObjectRef(targetLogicalId: string)           // reference to another node/component IN this scene
@@ -323,6 +323,10 @@ the authoritative index so the additions stay coherent. Each is defined in the o
 | `PropertyOverride`/`OverrideTarget`/`AddedComponent` + 4 override collections on `PrefabInstanceNode` | prefab override round-trip | M10 |
 | `AnimationClipSpec`/`AnimationTrack`/`EasingKind`/`GeneratedClipRef` | easing-clip generation | M11 |
 
-**Parked as `Unsupported`, candidate for `needs_research`:** `[Flags]` enum combinations (M3);
-`[SerializeReference]` **graph sharing** (shared `rid`/cycles) (M9); dynamic/multi-arg UnityEvent
-modes (M8). These round-trip verbatim and are flagged; promote if demand appears.
+**Promoted to milestone scope (2026-07-13, both actively used):** `[Flags]` enum combinations are now
+**in M3 scope** (`Enum` carries OR-combined members); dynamic/multi-arg (EventDefined) UnityEvent
+listeners are now **in M8 scope** (forwarding the event's own runtime args to a matching method).
+
+**Still parked as `Unsupported` (round-trips verbatim, flagged):** `[SerializeReference]` **graph
+sharing** — shared `rid` objects / reference cycles — is genuinely open and rare; tracked in
+`needs_research/serializereference-graph-sharing.md`. Promote if demand appears.

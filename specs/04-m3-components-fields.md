@@ -39,7 +39,7 @@ serialized path.
   private serialized members regardless of C# accessibility.
 - `ValueNode` coverage for this milestone:
   - `Primitive` — `bool`, `int`, `long`, `float`, `double`, `string`.
-  - `Enum` — non-flags enums by member name.
+  - `Enum` — enums by member name, **including `[Flags]` combinations** (`isFlags:true`, OR-combined members).
   - `Vec2`, `Vec3`, `Vec4`, `Quat`, `Color`.
   - `Nested` — nested `[Serializable]` struct/class (recursive).
   - `List` — `List<T>`/`T[]` of any of the above (order-significant).
@@ -63,8 +63,6 @@ serialized path.
   encountered → `ValueNode.Unsupported`.
 - `UnityEvent` / OnClick persistent listeners — **M8** → `Unsupported`.
 - `[SerializeReference]` managed-reference polymorphism — **M9** → `Unsupported`.
-- `[Flags]` enum combinations — not modeled by `Enum(name)` in M3 → `Unsupported` (single-value
-  enums are in scope). Flagged, round-trips verbatim.
 - Deep script-GUID (`MonoScript`) identity for MonoBehaviours — **M4**. M3 resolves MonoBehaviours by
   full type name only.
 - `RectTransform`, prefab instances, transform/name/parent sync (M1/M2/M-later).
@@ -99,7 +97,8 @@ serialized path.
     pending adapter resolution).
   - `.Set("_maxHealth", 100)` → `Fields["_maxHealth"] = Primitive(int, 100)` (private serialized
     field by path; no special-casing vs public).
-  - Enum literal `Faction.Enemy` → `Enum(typeFullName: "Game.Faction", name: "Enemy")`.
+  - Enum literal `Faction.Enemy` → `Enum("Game.Faction", ["Enemy"], isFlags:false)`. A `[Flags]`
+    OR-expression `Layers.Ground | Layers.Water` → `Enum("Game.Layers", ["Ground","Water"], isFlags:true)`.
   - `new Vector3(1,2,3)` / `new Color(1,0,0,1)` / `new Vector2(...)` / `new Vector4(...)` /
     `Quaternion(...)` literals → the matching structured `ValueNode`.
   - A nested initializer for a `[Serializable]` type → `Nested(fields)`; a collection literal →
@@ -135,7 +134,8 @@ serialized path.
     order.
   - Floating-point values (`float`/`double`, and vector/quat/color components) are formatted
     round-trip-invariant (shortest round-trippable form, invariant culture).
-  - `Enum` serialized as `typeFullName + name`; `Unsupported` serialized as its verbatim `rawToken`.
+  - `Enum` serialized as `typeFullName` + members: a single name, or (for `[Flags]`) the members
+    joined by `|` in **sorted** order (deterministic); `Unsupported` serialized as its verbatim `rawToken`.
 - **Value equality** used by the differ is **exact on canonical form** (no float tolerance), so
   determinism and change-detection agree.
 
@@ -154,13 +154,14 @@ Thin, logic-light Unity-side pieces (confirmed by the checklist, not unit-tested
    | `Float` (32-bit)              | `Primitive(float, floatValue)`            | `floatValue`                             |
    | `Float` (`type=="double"`)    | `Primitive(double, doubleValue)`          | `doubleValue`                            |
    | `String`                      | `Primitive(string, stringValue)`          | `stringValue`                            |
-   | `Enum` (non-flags)            | `Enum(fieldType.FullName, enumNames[enumValueIndex])` | set `enumValueIndex` from name |
+   | `Enum` (non-flags)            | `Enum(FullName, [enumNames[enumValueIndex]], isFlags:false)` | set `enumValueIndex` from the single name |
+   | `Enum` (`[Flags]`)            | `Enum(FullName, decompose enumValueFlag→member names, isFlags:true)` | set `enumValueFlag` = OR of the members' bits |
    | `Vector2/3/4`                 | `Vec2/3/4`                                | `vector2/3/4Value`                       |
    | `Quaternion`                  | `Quat`                                     | `quaternionValue`                        |
    | `Color`                       | `Color`                                    | `colorValue`                             |
    | `Generic` (`isArray`)         | `List(items)` via `GetArrayElementAtIndex`| resize + recurse per element             |
    | `Generic` (non-array)         | `Nested(fields)` via child iteration      | recurse into children                    |
-   | `Enum` with `[Flags]`, `ObjectReference`, `ManagedReference`, and all others | `Unsupported(rawToken)` | **no-op** (flagged) |
+   | `ObjectReference`, `ManagedReference`, and all others | `Unsupported(rawToken)` | **no-op** (flagged) |
 
    Writes call `ApplyModifiedProperties` once per component. Enum `typeFullName` comes from
    reflecting the field's managed type (needed because `SerializedProperty` alone gives only names).
@@ -212,6 +213,7 @@ public class DemoScene : ISceneDefinition {
             h.Set("_maxHealth", 100);            // [SerializeField] private int _maxHealth
             h.Set(x => x.regenPerSecond, 2.5f);  // public serialized field, typed
             h.Set(x => x.faction, Faction.Enemy);// enum
+            h.Set(x => x.hitLayers, Layers.Ground | Layers.Water); // [Flags] enum combination
             h.Set(x => x.tint, new Color(1, 0, 0, 1));
         });
         // A component previously present in the scene but omitted here is removed on Materialize
@@ -246,6 +248,9 @@ Real `dotnet test` xUnit tests in `SceneBuilder.Core.Tests` (headless, no mocks)
 4. **Parse each ValueNode kind.** bool/int/long/float/double/string, `Enum`, `Vec2/3/4`, `Quat`,
    `Color`, a `Nested` initializer, and a `List` literal each parse to the correct node with correct
    values and (for List) order.
+4b. **Parse `[Flags]` enum.** `Layers.Ground | Layers.Water` → `Enum("Game.Layers", ["Ground","Water"],
+   isFlags:true)`; canonical form joins members by `|` in sorted order (`Ground|Water`); round-trips.
+   Adapter read of `enumValueFlag` decomposes the bitmask to the same member set; write ORs the bits.
 5. **Materialize add.** Desired GO has a `Rigidbody` the snapshot lacks → `Plan` contains
    `AddComponent(UnityEngine.Rigidbody)` immediately followed by its `SetField` ops in field order.
 6. **Materialize remove.** Snapshot GO has a `BoxCollider` not in desired → `Plan` contains
@@ -310,9 +315,9 @@ A milestone-DONE requires: Core tests green in CI **and** every checklist step p
   must fail **loud and located** on any member it cannot resolve rather than guess. The raw
   `.Set("m_Mass", …)` escape hatch is always available as the deterministic fallback and is the form
   Reconcile emits for newly-detected fields.
-- **Enum type resolution** needs the field's managed type (via reflection) to fill
-  `Enum.typeFullName`; `SerializedProperty` exposes only names. `[Flags]` combinations are out of
-  scope → `Unsupported`.
+- **Enum type resolution** needs the field's managed type (via reflection) to fill `Enum.typeFullName`
+  and, for `[Flags]`, to decompose `enumValueFlag` into member bits (and OR them back on write);
+  `SerializedProperty` exposes only names/indices, so the reflected type is required.
 - **`Integer`/`Float` width disambiguation** (int vs long, float vs double) relies on
   `SerializedProperty.type`; the dispatch table pins the exact branch.
 - **Nested/List depth** — recursion must be bounded and must not follow object references (those are
