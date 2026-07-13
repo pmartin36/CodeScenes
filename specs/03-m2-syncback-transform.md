@@ -158,3 +158,7 @@ non-conforming files fail loud/located and are not patched.
   self-event suppression is M7. M2 avoids loops by reconciling against the freshly written source’s
   model (which now matches the scene → empty diff).
 - Confirmation/preview before writing source (§7) — never last-write-wins.
+- **Sample seed (§12):** the M2 confirmation example (a small hierarchy authored in a builder file,
+  then moved/renamed/reparented in Unity) is the seed of the shipped `Samples~/RoundTripDemo`. Once M2
+  is green, this exact example is promoted verbatim into the package sample — it demonstrates the moat
+  (scene→code) that the sample's Readme walks through.

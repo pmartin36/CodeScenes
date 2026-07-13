@@ -330,3 +330,39 @@ listeners are now **in M8 scope** (forwarding the event's own runtime args to a 
 **Still parked as `Unsupported` (round-trips verbatim, flagged):** `[SerializeReference]` **graph
 sharing** — shared `rid` objects / reference cycles — is genuinely open and rare; tracked in
 `needs_research/serializereference-graph-sharing.md`. Promote if demand appears.
+
+---
+
+## 12. Packaging & sample
+
+The plugin ships as ONE UPM package, `com.scenebuilder`, developed in this repo and consumed by a
+Unity project (e.g. `SceneBuilderTest`) via a local `file:` reference. Layout:
+
+```
+com.scenebuilder/
+  package.json            # lists the RoundTripDemo under "samples"
+  Runtime/                # SceneBuilder.Authoring — the fluent ISceneDefinition/SceneRoot API (refs UnityEngine)
+  Editor/                 # SceneBuilder.Editor — adapter: menu, PlanExecutor, snapshot reader, ObjectChangeEvents (refs UnityEditor + Core + Authoring)
+  <Core dependency>       # SceneBuilder.Core — same source the dotnet tests build; asmdef noEngineReferences
+  Samples~/
+    RoundTripDemo/
+      ExampleScene.cs     # the example builder file
+      README.md           # (or a Readme.asset) the two-way demo script
+```
+
+- **`Samples~` is the idiomatic mechanism** — hidden from compilation until the user clicks **Import**
+  in Package Manager, which copies it into `Assets/Samples/com.scenebuilder/<version>/RoundTripDemo/`.
+  It lives in the repo *inside the one package* — NOT a separate sibling package or a second `file:` ref.
+- **The sample generates its scene on first Build** (menu: SceneBuilder ▸ Build) rather than shipping a
+  pre-baked `.unity` + sidecar. Why: (1) robustness — the sidecar's `GlobalObjectId`s are minted against
+  the real scene in the user's own project, avoiding cross-project identity staleness; (2) it is the
+  better demo — materializing a scene from code shows the wedge, then editing the scene shows the moat.
+  The Readme is a 3-beat script: **Build** (code→scene) → **edit the `.cs` and rebuild** → **edit in
+  Unity and Sync** (scene→code).
+- **User-authored builder files** live in the project's `Assets/…` (referencing the Authoring
+  assembly), next to their `Assets/Scenes/*.unity` + `*.sbmap.json`. Core parses builder files as text
+  (Roslyn), never executes them, so their location is flexible for Core; the Unity project is their home
+  for type-checking and versioning.
+- **Development sequencing:** the M1/M2 confirmation example is authored directly in the test project's
+  `Assets` first (fastest iteration), then promoted verbatim into `Samples~/RoundTripDemo/` once the
+  round-trip is proven. **The confirmation example IS the shipped sample.**
