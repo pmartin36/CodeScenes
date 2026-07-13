@@ -73,7 +73,9 @@ namespace SceneBuilder.Core.Parsing
         // Recognizes the synthesized-id shape `{parentLogicalId+"/"}{name}/{index}`: the last
         // '/'-segment must parse as an int, and the remaining prefix must equal
         // `parentLogicalId + "/"` (or be empty when parentLogicalId is null/empty).
-        private static bool TryParseSynthesized(string logicalId, string? parentLogicalId, out string name, out int index)
+        // Internal so ConflictDetector (Reconcile) can reuse the same recognizer instead of
+        // reinventing the shape check.
+        internal static bool TryParseSynthesized(string logicalId, string? parentLogicalId, out string name, out int index)
         {
             name = "";
             index = 0;

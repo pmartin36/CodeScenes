@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Core.Parsing
 {
@@ -46,8 +47,9 @@ namespace SceneBuilder.Core.Parsing
             };
 
             var identityMap = BuildIdentityMap(ctx.Roots, existingMap);
+            var anchors = BuildAnchors(ctx.Roots);
 
-            return new ParseResult { Model = model, IdentityMap = identityMap };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -167,7 +169,7 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
-        private static void ProcessAddChain(IdentifierNameSyntax receiver, List<(string Method, ArgumentListSyntax Args)> calls, string? handleName, ParserContext ctx)
+        private static void ProcessAddChain(IdentifierNameSyntax receiver, List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls, string? handleName, ParserContext ctx)
         {
             NodeBuilder? parentNode = null;
             List<NodeBuilder> targetList;
@@ -193,6 +195,7 @@ namespace SceneBuilder.Core.Parsing
 
             var name = EvalStringLiteral(addArgs[0].Expression);
             var node = new NodeBuilder { Name = name };
+            node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
 
             var explicitId = ApplyChainedCalls(node, calls.Skip(1).ToList());
 
@@ -214,11 +217,11 @@ namespace SceneBuilder.Core.Parsing
 
         // Applies non-Add chained calls as property setters on `node`; returns the explicit
         // `.Id(...)` value if present (caller decides how it factors into LogicalId priority).
-        private static string? ApplyChainedCalls(NodeBuilder node, List<(string Method, ArgumentListSyntax Args)> calls)
+        private static string? ApplyChainedCalls(NodeBuilder node, List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls)
         {
             string? explicitId = null;
 
-            foreach (var (method, args) in calls)
+            foreach (var (method, args, _) in calls)
             {
                 switch (method)
                 {
@@ -293,9 +296,9 @@ namespace SceneBuilder.Core.Parsing
 
         // ---- Invocation-chain unwrap ----------------------------------------------------
 
-        private static (IdentifierNameSyntax Receiver, List<(string Method, ArgumentListSyntax Args)> Calls) UnwrapChain(ExpressionSyntax expression)
+        private static (IdentifierNameSyntax Receiver, List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> Calls) UnwrapChain(ExpressionSyntax expression)
         {
-            var calls = new List<(string Method, ArgumentListSyntax Args)>();
+            var calls = new List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
             ExpressionSyntax current = expression;
 
             while (true)
@@ -304,7 +307,7 @@ namespace SceneBuilder.Core.Parsing
                 {
                     if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
                     {
-                        calls.Add((memberAccess.Name.Identifier.Text, invocation.ArgumentList));
+                        calls.Add((memberAccess.Name.Identifier.Text, invocation.ArgumentList, invocation));
                         current = memberAccess.Expression;
                         continue;
                     }
@@ -457,6 +460,31 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
+        // ---- Anchor construction -----------------------------------------------------------
+
+        // Builds one LogicalId->SourceSpan entry per parsed node, pre-order, keyed by each node's
+        // FINAL LogicalId (post `.Id(...)` resolution) — mirrors BuildIdentityMap/CollectIdentityEntries.
+        private static IReadOnlyDictionary<string, SourceSpan> BuildAnchors(List<NodeBuilder> roots)
+        {
+            var anchors = new Dictionary<string, SourceSpan>();
+            foreach (var root in roots)
+            {
+                CollectAnchors(root, anchors);
+            }
+
+            return anchors;
+        }
+
+        private static void CollectAnchors(NodeBuilder node, Dictionary<string, SourceSpan> anchors)
+        {
+            anchors[node.LogicalId] = node.AnchorSpan;
+
+            foreach (var child in node.Children)
+            {
+                CollectAnchors(child, anchors);
+            }
+        }
+
         // ---- Materialization --------------------------------------------------------------
 
         private static GameObjectNode BuildNode(NodeBuilder builder) => new()
@@ -499,6 +527,7 @@ namespace SceneBuilder.Core.Parsing
             public Vec3? Position;
             public Quat? Rotation;
             public Vec3? Scale;
+            public SourceSpan AnchorSpan;
             public readonly List<NodeBuilder> Children = new();
         }
 
