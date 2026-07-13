@@ -1,10 +1,36 @@
+# ---- .NET build output ----
 bin/
 obj/
+[Bb]in/
+[Oo]bj/
+
+# ---- IDE / editor ----
+.vs/
+.idea/
+.vscode/
 *.user
+*.suo
+*.userprefs
+
+# ---- local toolchain (dotnet installed to ~/.dotnet for this machine) ----
 .dotnet/
+
+# ---- tdd-pipeline internal handoff artifacts ----
+.agent_handoffs/
+
+# ---- Unity (guards, in case package/sample content lands in this repo) ----
+# NOTE: hand-authored *.csproj / *.sln (the .NET Core solution) and *.meta / *.asmdef
+# are intentionally NOT ignored — they are source here, not Unity-generated.
 [Ll]ibrary/
 [Tt]emp/
-[Oo]bj/
-[Bb]uild/
 [Ll]ogs/
-.vs/
+[Mm]emoryCaptures/
+[Uu]ser[Ss]ettings/
+*.pidb
+*.pdb
+*.mdb
+*.unitypackage
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
