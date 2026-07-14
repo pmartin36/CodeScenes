@@ -1,0 +1,6 @@
+{
+    "name": "SceneBuilder.Authoring",
+    "rootNamespace": "SceneBuilder.Authoring",
+    "references": [],
+    "autoReferenced": true
+}

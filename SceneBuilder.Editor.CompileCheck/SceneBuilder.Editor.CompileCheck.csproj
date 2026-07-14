@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Compile-ONLY gate: proves the Unity Authoring + Editor adapter (com.scenebuilder/) compiles
+       against the real Unity 6000.5 DLLs, headlessly, so adapter compile errors are caught by CI
+       before they ever reach the editor. This assembly is never run. -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <UnityManaged>/home/paul/Unity/Hub/Editor/6000.5.3f1/Editor/Data/Managed</UnityManaged>
+    <!-- Unity DLLs trip some analyzers; we only care about C# compile success. -->
+    <NoWarn>$(NoWarn);CS0436;CS0618;CS0114;CS0108</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../com.scenebuilder/Runtime/**/*.cs" />
+    <Compile Include="../com.scenebuilder/Editor/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../SceneBuilder.Core/SceneBuilder.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="$(UnityManaged)/UnityEngine.dll"><Private>false</Private></Reference>
+    <Reference Include="$(UnityManaged)/UnityEditor.dll"><Private>false</Private></Reference>
+    <Reference Include="$(UnityManaged)/UnityEngine/*.dll"><Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>

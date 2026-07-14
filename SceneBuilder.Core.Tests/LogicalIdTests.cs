@@ -56,5 +56,27 @@ namespace SceneBuilder.Core.Tests
             // The newly inserted sibling gets a fresh synthesized id, not a collision with Wall's.
             Assert.Equal("parent/NewSibling/2", newSiblingB.LogicalId);
         }
+
+        [Fact]
+        public void LogicalId_Synthesize_RoundTripsThroughTryParse_RootParent()
+        {
+            var id = LogicalIdResolver.Synthesize(null, "Wall", 2);
+
+            Assert.Equal("Wall/2", id);
+            Assert.True(LogicalIdResolver.TryParseSynthesized(id, null, out var name, out var index));
+            Assert.Equal("Wall", name);
+            Assert.Equal(2, index);
+        }
+
+        [Fact]
+        public void LogicalId_Synthesize_RoundTripsThroughTryParse_NestedParent()
+        {
+            var id = LogicalIdResolver.Synthesize("a/b/Player/1", "Door", 0);
+
+            Assert.Equal("a/b/Player/1/Door/0", id);
+            Assert.True(LogicalIdResolver.TryParseSynthesized(id, "a/b/Player/1", out var name, out var index));
+            Assert.Equal("Door", name);
+            Assert.Equal(0, index);
+        }
     }
 }

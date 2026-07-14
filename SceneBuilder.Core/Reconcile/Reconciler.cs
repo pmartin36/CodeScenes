@@ -123,7 +123,7 @@ namespace SceneBuilder.Core.Reconcile
         {
             if (model.Position != snapshot.Position)
             {
-                yield return new PatchArgument { Anchor = logicalId, ArgName = "pos", NewExpr = Vec3Expr(snapshot.Position) };
+                yield return new PatchArgument { Anchor = logicalId, ArgName = "pos", NewExpr = SourceExpr.Vec3Literal(snapshot.Position) };
             }
 
             if (model.Rotation != snapshot.Rotation)
@@ -132,13 +132,13 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     Anchor = logicalId,
                     ArgName = "rot",
-                    NewExpr = Vec3Expr(Rotation.QuatToEuler(snapshot.Rotation)),
+                    NewExpr = SourceExpr.Vec3Literal(Rotation.QuatToEuler(snapshot.Rotation)),
                 };
             }
 
             if (model.Scale != snapshot.Scale)
             {
-                yield return new PatchArgument { Anchor = logicalId, ArgName = "scale", NewExpr = Vec3Expr(snapshot.Scale) };
+                yield return new PatchArgument { Anchor = logicalId, ArgName = "scale", NewExpr = SourceExpr.Vec3Literal(snapshot.Scale) };
             }
         }
 
@@ -163,15 +163,6 @@ namespace SceneBuilder.Core.Reconcile
                 modelByLogicalId[node.LogicalId] = node;
                 FlattenModel(node.Children, modelByLogicalId);
             }
-        }
-
-        private static string Vec3Expr(Vec3 v) =>
-            "(" + FormatFloat(v.X) + ", " + FormatFloat(v.Y) + ", " + FormatFloat(v.Z) + ")";
-
-        private static string FormatFloat(float value)
-        {
-            var rounded = Math.Round((double)value, 4, MidpointRounding.AwayFromZero);
-            return rounded.ToString("0.####", CultureInfo.InvariantCulture);
         }
 
         private static string Quote(string value) => "\"" + value + "\"";

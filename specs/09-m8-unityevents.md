@@ -90,6 +90,12 @@ that forwards the event's own runtime argument(s) to the method (multi-arg `Unit
   target resolving to a project asset GUID → `AssetRef`; neither → conflict.
 - **Fail-loud** — a listener whose `MethodName` is empty or whose `Target` is unresolved is reported
   with object+field+source/scene location (§7), not silently pruned.
+- **UnityEvent on a newly-created object (§13).** A listener on a Button/object that was editor-created
+  in the same edit inherits the M4/M5 create-with-payload seam: the `.OnClick(…)`/`.OnEvent(…)` call is
+  appended onto that object's just-created statement in the same Reconcile pass (owner and any new listener
+  target mapped in-memory via M2b's `AddedEntry`, §13 rule 1; two-pass when the target is also new), or
+  reported and converged on a guaranteed second Sync (§13 rule 2) — never silently dropped. Cites §13
+  (create-with-payload).
 
 ## Editor adapter deliverables
 - **Read**: for each `UnityEvent` serialized field, read persistent calls via `SerializedObject` at
@@ -158,6 +164,11 @@ slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, target: hud,
   round-trip; not coerced into a supported mode.
 - **Conflict**: a snapshot listener whose target maps to no `LogicalId`/asset → surfaced conflict, no
   patch emitted.
+- **`Reconcile_UnityEventOnNewObject_Converges`** (§13 create-with-payload): a newly editor-created
+  Button/object carrying a UnityEvent listener in one edit → the `.OnClick(…)` call is appended onto that
+  object's just-created statement in the same pass (owner mapped via M2b's `AddedEntry`; two-pass when
+  the listener target is also new), or reported and converged on a second Sync; second Sync of the
+  unchanged scene is a no-op; no silent drop.
 
 ## Unity confirmation checklist
 1. Open a scene with a `Button` (`door` GameObject present, `Door.Open()` public). Author

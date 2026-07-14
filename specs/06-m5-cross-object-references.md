@@ -66,6 +66,12 @@ Functions/behaviors (each a testable contract):
   to the new target's handle name.
 - **Reconcile → SourcePatch (null):** a snapshot field now `{fileID: 0}` where source had a handle →
   patch the argument to `null` (None). And the reverse (None → a handle).
+- **Cross-ref on/to a newly-created object (§13).** A cross-object ref whose source object OR target was
+  editor-created in the same edit resolves against M2b's in-memory `AddedEntry` (§13 rule 1): the ref is
+  appended onto the just-created statement, and when the target is ALSO new it resolves two-pass (source
+  and target appended in pass 1, the handle wired in pass 2). Where single-pass is infeasible, it is
+  reported and converges on a guaranteed second Sync (§13 rule 2) — never a silent null. Cites §13
+  (create-with-payload).
 - **Dangling → conflict:** a snapshot `GlobalObjectId` that maps to no `IdentityMap` entry (target
   deleted), or a source handle whose `LogicalId` has no live object, produces a located conflict
   naming source object, field, and the missing target — never a silent null.
@@ -127,6 +133,11 @@ adapter boundary (Core works in LogicalIds/GlobalObjectIds, never touches `Unity
 8. **Dangling ref → conflict:** GlobalObjectId with no IdentityMap entry (deleted target), or handle
    whose LogicalId has no live object → located conflict naming source object/field/missing target.
 9. **Null round-trip:** `ObjectRef(null)` Materialize→Plan→(mock)→snapshot→Reconcile preserves None.
+10. **`Reconcile_CrossRefOnNewObject_Converges`** (§13 create-with-payload). A newly editor-created object
+    carrying a cross-object ref in one edit → the handle argument is appended onto that object's
+    just-created statement (owner mapped via M2b's `AddedEntry`); when the target is also new it resolves
+    two-pass; otherwise reported and converged on a second Sync. Second Sync of the unchanged scene is a
+    no-op; never a silent null.
 
 ## Unity confirmation checklist
 1. Author `FooScene` where `Opener`'s `Button.target` is the `Door` handle (Door declared **after**

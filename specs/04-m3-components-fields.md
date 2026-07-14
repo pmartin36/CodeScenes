@@ -2,8 +2,15 @@
 
 ### Additions to the contract
 
-M3 introduces **one** concept not literally present in §3, flagged here per the foundation rule:
+M3 introduces **two** concepts not literally present in §3, flagged here per the foundation rule:
 
+- **`ReorderComponent` Plan op** + **component `ReorderStatement` source edit** — reordering existing
+  components (see In scope). `ReorderComponent(gameObjectLogicalId, componentLogicalId, toIndex)` is a
+  new `PlanOp` (extends the §5 op vocabulary, symmetric with `ReorderChild`), emitted by Materialize
+  to make the live component order match `GameObjectNode.Components[]`. The scene→code direction
+  reuses the §2/§11 `SourcePatch` `ReorderStatement` edit form (already defined for statement
+  reordering) applied to the `.Component<T>()` statements. Low-severity; `Transform` is never
+  reordered (it is not in `Components[]`).
 - **Provisional authored-member field key** — a transient `ComponentData.Fields` key of the form
   `member:<name>` (e.g. `member:mass`) produced by Core's Roslyn parse when a field was authored with
   the *typed* setter `.Set(r => r.mass, v)`. Core cannot resolve a member selector to a serialized
@@ -32,6 +39,16 @@ serialized path.
 
 - Add / remove `ComponentData` on a `GameObjectNode`, **ordered**, **excluding `Transform`** (the
   Transform is owned by M1/M2 and is never added or removed here).
+- **Reorder existing components** (Unity's Inspector move-up / move-down), **both directions**
+  (`GameObjectNode.Components[]` is already ordered per §3). **Low-severity**, but closed here so
+  order round-trips:
+  - **Materialize** (code→scene): when a component is present in both desired and actual but at a
+    different index, emit a `ReorderComponent` op to move the live component so the on-object order
+    matches desired `Components[]` order (no add/remove).
+  - **Reconcile** (scene→code): a component reordered in the scene relative to the source → reorder
+    the `.Component<T>()` statements to match the scene, via a `ReorderStatement` `SourcePatch`
+    (span-local move of whole statements; the setters inside each statement are untouched).
+  - **`Transform` is never reordered** (it is not a member of `Components[]`).
 - Setting serialized fields generically through `SerializedObject` / `SerializedProperty` in the
   Editor adapter, dispatched on `SerializedPropertyType`.
 - `[SerializeField] private` fields addressed by serialized path (e.g. `_health`). Treated as the
@@ -81,8 +98,9 @@ serialized path.
   `FullName`).
 - **`ValueNode`** (§3): M3 implements construction, canonical serialization, and value-equality for
   `Primitive`, `Enum`, `Vec2/3/4`, `Quat`, `Color`, `Nested`, `List`, `Unsupported`.
-- **`Plan` ops** (§5, unchanged): M3 emits `AddComponent`, `RemoveComponent`, `SetField(path,value)`
-  where `value` is a `ValueNode`.
+- **`Plan` ops** (§5): M3 emits `AddComponent`, `RemoveComponent`, `SetField(path,value)`
+  where `value` is a `ValueNode`, plus the new **`ReorderComponent(gameObjectLogicalId,
+  componentLogicalId, toIndex)`** op (flagged in the additions note) for order-only changes.
 - Field-key convention `member:<name>` (see additions note) plus the requirement that Core parse
   produce it for typed setters.
 
@@ -113,6 +131,9 @@ serialized path.
   - Component present in both, a field value differs → a single `SetField(path, value)` for the
     changed path only.
   - Emitted component ops respect `desired` `Components[]` order.
+  - A component present in both `desired` and `actual` but at a **different index** (no add/remove)
+    → a `ReorderComponent(gameObjectLogicalId, componentLogicalId, toIndex)` op moving it to its
+    desired index; `Transform` never participates.
   - A field whose value is `Unsupported` emits **no** `SetField` (skipped, flagged in the plan
     preview); the live scene value is left untouched.
 - **Reconcile → `SourcePatch`** (`Diff(expected, actual)` keyed on GlobalObjectId):
@@ -120,12 +141,21 @@ serialized path.
     `.Component<T>(…)` statement (with raw-path setters for its fields) + a new IdentityMap entry.
   - An IdentityMap component entry whose GlobalObjectId is absent from the snapshot → delete the
     corresponding statement (span-local).
+  - A component whose scene order differs from source order (same set, no add/remove) → reorder the
+    `.Component<T>()` statements to match the scene via a `ReorderStatement` `SourcePatch` (whole
+    statements moved; each statement's setters left intact). `Transform` is never reordered.
   - A field value that differs between `expected` and `actual` → a **span-local** patch of the value
     argument only. For a field authored with a typed selector, the selector (`r => r.mass`) is left
     untouched and only the literal argument is rewritten. Newly-detected fields are written in raw
     `.Set("m_Path", value)` form.
   - A snapshot field that is `Unsupported` is **not** overwritten in source and the corresponding
     source token is **not** touched (flagged in the preview).
+  - **Component on a newly-created object (§13).** A snapshot component whose owning GameObject was ALSO
+    editor-created in the same edit attaches to that just-appended object statement in the same Reconcile
+    pass — the owner is mapped in-memory via M2b's `AddedEntry` (§13 rule 1), so M3 appends its
+    `.Component<T>(…)` onto the new statement — or converges on a guaranteed SECOND Sync (§13 rule 2:
+    report the deferred component, second Sync attaches it and is then a no-op). Never silently dropped.
+    Cites §13 (create-with-payload).
   - Anything not localizable to a single construct → **conflict**, surfaced, never flattened (§5/§7).
 - **Canonical serialization** (Core canonical serializer, extended):
   - Each in-scope `ValueNode` kind has a deterministic text form; two structurally equal
@@ -170,9 +200,11 @@ Thin, logic-light Unity-side pieces (confirmed by the checklist, not unit-tested
    the serialized path equals the member name; for built-ins it maps the C# member to Unity's
    `m_`-mangled path (e.g. `mass → m_Mass`, `useGravity → m_UseGravity`). Runs on the *desired*
    model before `Diff` in both directions. Unresolvable member → located error (§7).
-3. **Component add/remove** — `AddComponent` via `GameObject.AddComponent(Type)` (Type resolved from
-   `TypeRef.FullName` across loaded assemblies / `TypeCache`); `RemoveComponent` via
-   `Object.DestroyImmediate(component)`. Never touches `Transform`.
+3. **Component add/remove/reorder** — `AddComponent` via `GameObject.AddComponent(Type)` (Type
+   resolved from `TypeRef.FullName` across loaded assemblies / `TypeCache`); `RemoveComponent` via
+   `Object.DestroyImmediate(component)`; **`ReorderComponent`** via
+   `ComponentUtility.MoveComponentUp`/`MoveComponentDown` (repeated until the component sits at
+   `toIndex`). Never touches `Transform`.
 4. **Read a component's serialized fields into `ValueNode`s** for the snapshot — iterate the
    component's `SerializedObject` visible properties, **skipping** the internal bookkeeping set
    (`m_Script`, `m_ObjectHideFlags`, `m_CorrespondingSourceObject`, `m_PrefabInstance`,
@@ -267,12 +299,24 @@ Real `dotnet test` xUnit tests in `SceneBuilder.Core.Tests` (headless, no mocks)
     IdentityMap entry is produced.
 11. **Reconcile removed component → SourcePatch.** IdentityMap component entry whose `GlobalObjectId`
     is absent from the snapshot → patch deletes that statement.
+11a. **`Materialize_ComponentOrderDiffers_EmitsReorder`.** Desired `Components[]` order differs from
+    the snapshot order for the same component set (no add/remove) → `Plan` contains a
+    `ReorderComponent(...)` moving the component to its desired index, and **no** `AddComponent` /
+    `RemoveComponent`; a `Transform` present in the snapshot never appears in a reorder op.
+11b. **`Reconcile_ComponentReorderedInScene_ReordersStatements`.** Snapshot component order differs
+    from source order (same set) → `SourcePatch` is a `ReorderStatement` moving the `.Component<T>()`
+    statements to match the scene; each statement's setters are unchanged; `Transform` untouched.
 12. **[SerializeField] private addressed correctly.** `Fields["_health"]` survives
     parse → diff → patch with the key `_health` preserved verbatim end-to-end (no `m_`/accessibility
     mangling).
 13. **Unsupported round-trips verbatim.** A field authored as an unsupported token parses to
     `Unsupported(raw)`; canonical serialize == the input token; Materialize emits **no** `SetField`
     for it; Reconcile does **not** overwrite it; it is flagged in both previews.
+13b. **`Reconcile_ComponentOnNewlyCreatedObject_ConvergesInOnePass`** (§13 create-with-payload). A
+    snapshot whose newly editor-created GameObject carries a component in a single edit → M3 appends the
+    `.Component<T>(…)` onto that object's just-appended statement (owner mapped in-memory via M2b's
+    `AddedEntry`) in one Reconcile pass, or reports and converges on a second Sync; a second Sync of the
+    unchanged scene is a no-op. No silent drop.
 14. **Canonical determinism per kind.** Serializing each `ValueNode` kind twice is byte-identical;
     two structurally equal `SceneModel`s serialize identically; `Fields`/`Nested` keys appear in
     sorted order; floats are round-trip-invariant; `Vec3(1,2,3)` vs `Vec3(1,2,3.0000001)` diff as
@@ -294,6 +338,11 @@ Real `dotnet test` xUnit tests in `SceneBuilder.Core.Tests` (headless, no mocks)
    3f))` in source → Materialize → the live `Rigidbody.mass == 3`.
 5. **Remove a component from source.** Delete a `.Component<T>()` call → Materialize → the component
    is removed from the GameObject; `Transform` is untouched.
+5a. **Reorder components (both directions).** On a GameObject with two+ components, use the
+   Inspector's component context menu **Move Up / Move Down** to change their order → Reconcile → the
+   `.Component<T>()` statements reorder to match the scene, setters unchanged. Then swap two
+   `.Component<T>()` statements in source → Materialize → the live component order updates to match;
+   `Transform` stays first and is never moved.
 6. **Unsupported field is preserved.** With a field of an out-of-scope type present, run a full
    round-trip → the value is unchanged in **both** scene and source and is shown flagged in the
    plan/patch preview.

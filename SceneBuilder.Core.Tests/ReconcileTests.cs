@@ -41,6 +41,35 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void Reconcile_MoveToFractionalPosition_EmitsCompilableFloatLiterals()
+        {
+            var model = new SceneModel
+            {
+                SchemaVersion = 1,
+                Roots = new[] { new GameObjectNode { LogicalId = "root-1", Name = "Root" } },
+            };
+
+            var driftedTransform = new TransformData { Position = new Vec3(0f, 1.53f, 0f) };
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[] { new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = driftedTransform } },
+            };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var patchArg = Assert.IsType<PatchArgument>(Assert.Single(result.Patch.Edits));
+            // Non-integer components MUST carry the 'f' suffix, else the generated (int,double,int)
+            // tuple won't convert to the (float,float,float) authoring API parameter (won't compile).
+            Assert.Equal("(0, 1.53f, 0)", patchArg.NewExpr);
+        }
+
+        [Fact]
         public void Reconcile_Rename_ProducesNameArgumentPatch_LogicalIdUnchanged()
         {
             var model = new SceneModel

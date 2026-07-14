@@ -66,6 +66,14 @@ namespace SceneBuilder.Core.Parsing
                 return queue.Dequeue();
             }
 
+            return Synthesize(parentLogicalId, name, siblingIndex);
+        }
+
+        // Shared synthesized-id formula: {parentLogicalId+"/"}{name}/{siblingIndex}. Reused by
+        // Resolve's priority-3 fallback above and by the Reconciler (b2) to predict a created
+        // node's id; TryParseSynthesized below remains its exact inverse.
+        internal static string Synthesize(string? parentLogicalId, string name, int siblingIndex)
+        {
             var prefix = string.IsNullOrEmpty(parentLogicalId) ? string.Empty : parentLogicalId + "/";
             return $"{prefix}{name}/{siblingIndex}";
         }

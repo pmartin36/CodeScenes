@@ -1,7 +1,7 @@
 # SceneBuilder — Foundation Spec (the contract)
 
-This is the authoritative contract. Every milestone spec (M0–M7) binds to the types, identity
-model, seam, and conventions defined here. Milestone specs MUST use these type names verbatim and
+This is the authoritative contract. Every milestone spec (M0–M11, plus M1b/M2b/M2c/M-UI) binds to the
+types, identity model, seam, and conventions defined here. Milestone specs MUST use these type names verbatim and
 MUST NOT invent parallel concepts; if a milestone needs a new type, it names it and flags it at the
 top of its doc as an addition to this contract.
 
@@ -99,7 +99,7 @@ ValueNode  =  one of
   Primitive(kind: bool|int|long|float|double|string, value)
   Enum(typeFullName, members: string[], isFlags: bool)   // simple enum: members=[name], isFlags=false; [Flags]: OR-combined members
   Vec2 | Vec3 | Vec4 | Quat | Color(...)      // structured value POCOs
-  AssetRef(ref: AssetRef)                      // reference to a project asset
+  AssetRef(ref: AssetRef?)                     // reference to a project asset; ref == null means None/unassigned (symmetric with ObjectRef's null)
   ObjectRef(targetLogicalId: string)           // reference to another node/component IN this scene
   List(items: ValueNode[])
   Nested(fields: Map<string, ValueNode>)       // nested [Serializable] struct/class
@@ -120,6 +120,12 @@ what the differ consumes as "actual state."
 
 **Rotation note:** stored canonically as a quaternion; the builder API authors it as Euler angles
 for readability, and codegen emits Euler. Canonical serialization uses quaternion to avoid ambiguity.
+
+**RectTransform note:** `TransformData.Kind == "RectTransform"` carries additional UI fields
+(`anchoredPosition`, `sizeDelta`, `anchorMin`, `anchorMax`, `pivot`, `offsetMin`/`offsetMax`) beyond
+`Position/Rotation/Scale`. The RectTransform milestone owns their shape + round-trip; other milestones
+treat a RectTransform's UI fields as `Unsupported` (preserved, flagged) until then. UI work (M8
+Button/OnClick) depends on this milestone landing.
 
 ---
 
@@ -172,6 +178,16 @@ carries identity.
     SetAssetRef(path,guid,fileId)`.
 5. Adapter executes the Plan **in place** (reconcile-into-existing — NEVER wipe-and-recreate; this
    preserves GlobalObjectId identity). New objects get their GlobalObjectId recorded to the map on save.
+
+**Non-destructive invariant (Materialize — load-bearing; every caller inherits it):** Materialize
+destroys or mutates a scene object/component **only if it is in the IdentityMap** (this tool created it
+from code on a prior build) **AND absent from the desired model** (the code removed it). Anything **not
+in the map** — a GameObject or component the user added in the editor — is **preserved untouched: never
+destroyed, never modified.** Concretely, the `Diff` in step 3 must NOT emit `DestroyObject` /
+`RemoveComponent` for an actual-scene item whose `GlobalObjectId` is absent from the map; unmapped
+actuals are invisible to Materialize's removal logic. This is what lets "Build" run against a scene the
+user has also hand-edited without nuking their work — it is a reconcile, not a replace. (Owned/tested by
+the non-destructive-materialize milestone; stated here because it binds every code→scene caller.)
 
 ### Scene → Code (`Reconcile`)
 1. Read live scene → `SceneSnapshot` (actual).
@@ -227,15 +243,24 @@ public class FooScene : ISceneDefinition {
 - **Core (TDD, real tests):** `SceneBuilder.Core.Tests` (xUnit, `dotnet test`, headless). Covers the
   data model, canonical serializer, differ, Materialize→Plan, Reconcile→SourcePatch, Roslyn
   parse/patch, IdentityMap. These are the `tdd-pipeline`'s RED/GREEN tests — real behavior, no mocks.
-- **Editor adapter (manual + later EditMode):** the user drives Unity per a **confirmation checklist**
-  and, from M2 on, optional Unity Test Framework EditMode tests runnable via
-  `-batchmode -runTests` for regression.
-- A milestone is DONE only when: Core tests green in CI **and** the user's Unity confirmation
-  checklist passes on a real edit.
+- **Editor adapter (pipeline-built, headless COMPILE gate):** the Unity Authoring + Editor adapter is a
+  **first-class pipeline deliverable** — the `tdd-pipeline` writes it end-to-end; it is **never hand-wired
+  by the assistant.** It is gated headlessly by **`SceneBuilder.Editor.CompileCheck`**, a compile-only
+  project that references the installed Unity 6000.5 DLLs
+  (`~/Unity/Hub/Editor/6000.5.3f1/Editor/Data/Managed/{UnityEngine.dll, UnityEditor.dll, UnityEngine/*.dll}`)
+  and includes all `com.scenebuilder/Runtime` + `Editor` sources, so **adapter compile errors are caught
+  in CI before the editor.** Only genuine RUNTIME behavior is confirmed by the user via the milestone's
+  Unity confirmation checklist. (A future full runtime gate via `unity -batchmode -runTests`/`-executeMethod`
+  is possible since the editor is installed here, but not required.)
+- **Gate command** for a milestone that touches the adapter: `dotnet build SceneBuilder.sln && dotnet test
+  SceneBuilder.sln` (the build compiles Core + the adapter compile-check; the test runs the Core suite).
+- A milestone is DONE only when: `dotnet test` is green, the **adapter compile-check builds**, **and** the
+  user's Unity confirmation checklist passes on a real runtime edit. The assistant does no build work
+  between the pipeline and the user's editor test.
 
 ---
 
-## 9. Milestone-spec template (every M0–M7 doc follows this exactly)
+## 9. Milestone-spec template (every milestone doc follows this exactly)
 
 ```
 # Mn — <title>
@@ -263,19 +288,29 @@ public class FooScene : ISceneDefinition {
   hardcoded empty `Root` GameObject; establish the build trigger + Core/Editor round-trip of a Plan.
 - **M1 Flat hierarchy + transforms, one-way** — `SceneModel` for GO tree + names + transforms;
   Materialize; write IdentityMap with GlobalObjectIds. One direction only.
+- **M1b Non-destructive Materialize (reconcile-into-existing Build)** — Build reconciles in place, never
+  wipes; enforces §5 via `IdentityMap.IsManaged` so user-hand-added objects are never destroyed and
+  GlobalObjectIds persist across rebuilds. *(Build-order note: listed here next to M1 conceptually, but
+  depends on M2's full scene-discovering snapshot reader — schedule M1b after M2.)*
 - **M2 Sync-back for transform/name/parent** — Snapshot reader + Reconcile + Roslyn SourcePatch for
   move/rename/reparent/reorder. **First proof of the moat.**
-- **M3 Components + serialized fields** — add/remove components; typed setters + generic `.Set(path,
-  value)`; primitives/enums/vectors/colors; both directions. Includes `[SerializeField]` privates.
-- **M4 Asset references** — path→GUID resolve+persist, display re-derive; MeshRenderer.material,
-  MeshFilter.mesh, MonoScript identity, asset object-ref fields; both directions; move/rename stable;
-  missing-asset errors.
+- **M2b Structural sync-back (create/delete objects, scene→code)** — `AppendStatement`/`RemoveStatement`
+  + handle-introduction + `ReconcileResult` map deltas; create/delete a GameObject in the editor round-trips.
+- **M2c Flag sync-back (tag/layer/active/static, scene→code)** — Reconcile diffs the four GameObject
+  flags on existing mapped objects → patch/introduce/remove the `.Tag/.Layer/.Active/.Static` call.
+- **M3 Components + serialized fields** — add/remove/**reorder** components; typed setters + generic
+  `.Set(path, value)`; primitives/enums (incl. `[Flags]`)/vectors/colors/nested/list; both directions.
+  Includes `[SerializeField]` privates.
+- **M4 Asset references** — path→GUID resolve+persist, display re-derive; material/mesh/MonoScript/asset
+  fields; **clear-to-None** (`AssetRef(null)`); both directions; move/rename stable; missing-asset errors.
 - **M5 Cross-object references (handles)** — `ObjectRef` model; handle resolution; round-trip when a
   reference is rewired in Unity.
 - **M6 Prefab instances (whole, no override round-trip)** — instantiate-by-GUID; detect instance
   presence on sync; overrides read-only/deferred.
 - **M7 Robustness** — self-event suppression, domain-reload survival, external-edit reconciliation,
   canonical determinism hardening, repeated round-trip stability.
+- **M-UI RectTransform sync** — RectTransform UI fields (anchoredPosition/sizeDelta/anchors/pivot), both
+  directions; `.RectTransform(...)` authoring; the layout foundation M8's UI Buttons sit on.
 - **M8 UnityEvents / OnClick wiring** — author & round-trip `UnityEvent` persistent listeners
   (target object, method, argument mode); the button-`OnClick`-a-method case end to end.
 - **M9 `[SerializeReference]` polymorphism** — author & round-trip managed-reference fields
@@ -289,7 +324,7 @@ public class FooScene : ISceneDefinition {
   is explicitly deferred to `needs_research`.
 
 ### Folders
-- `specs/*.md` — the active contract (this file) + milestone specs **M0–M11**.
+- `specs/*.md` — the active contract (this file) + milestone specs **M0, M1, M1b, M2, M2b, M2c, M3–M11, M-UI**.
 - `specs/completed/` — a milestone moves here once its Core tests are green in CI **and** the user's
   Unity confirmation checklist passes.
 - `specs/needs_research/` — open problems not yet spec-ready, each a research stub (not a build
@@ -322,6 +357,13 @@ the authoritative index so the additions stay coherent. Each is defined in the o
 | `ValueNode.ManagedReference`, op `SetManagedReference` | `[SerializeReference]` polymorphic value | M9 |
 | `PropertyOverride`/`OverrideTarget`/`AddedComponent` + 4 override collections on `PrefabInstanceNode` | prefab override round-trip | M10 |
 | `AnimationClipSpec`/`AnimationTrack`/`EasingKind`/`GeneratedClipRef` | easing-clip generation | M11 |
+| `InstantiatePrefab` PlanOp | instantiate a prefab asset into the scene | M6 |
+| `IdentityMap.IsManaged(goid)→bool` | single guard so Materialize never destroys unmapped user objects (§5) | M1b |
+| `AppendStatement`/`RemoveStatement`; `ReconcileResult.AddedEntries`/`RemovedLogicalIds` | structural sync-back (create/delete objects) | M2b |
+| `PatchFlagArgument`/`IntroduceFlagCall`/`RemoveFlagCall` | flag (tag/layer/active/static) sync-back | M2c |
+| `ReorderComponent` PlanOp (`ReorderStatement` reused) | component reorder | M3 |
+| `AssetRef(null)` via `SetAssetRef` null-guid | clear an asset field to None | M4 |
+| `TransformData` RectTransform Vec2 fields; `SetRectTransform`; `SourceExpr.Vec2Literal`; `.RectTransform(...)` | RectTransform UI sync | M-UI |
 
 **Promoted to milestone scope (2026-07-13, both actively used):** `[Flags]` enum combinations are now
 **in M3 scope** (`Enum` carries OR-combined members); dynamic/multi-arg (EventDefined) UnityEvent
@@ -366,3 +408,30 @@ com.scenebuilder/
 - **Development sequencing:** the M1/M2 confirmation example is authored directly in the test project's
   `Assets` first (fastest iteration), then promoted verbatim into `Samples~/RoundTripDemo/` once the
   round-trip is proven. **The confirmation example IS the shipped sample.**
+
+---
+
+## 13. Composition rules (create-with-payload seams)
+
+A scene object created in the editor rarely arrives bare — it usually carries components, asset/cross
+references, or UnityEvents. Round-tripping such an object spans milestones (the structural milestone
+creates the GameObject; M3 its components; M4/M5 its refs; M8 its events). To prevent "works in the
+demo, drops data on the real edit," these rules bind **every** milestone whose Reconcile can encounter a
+**newly-created, still-unmapped** object:
+
+1. **Single-pass, dependency-ordered where possible.** In ONE Reconcile, a created object's statement is
+   appended first, then — in the same pass, once its `AddedEntry` makes it mapped in-memory — its
+   components, fields, and refs are appended onto that statement. Reconcile builds its in-memory identity
+   map incrementally so later stages see the just-created object as mapped.
+2. **Guaranteed convergence if multi-pass.** Where single-pass ordering is genuinely infeasible, the
+   milestone MUST (a) append what it can, (b) **report** (Conflict) every deferred piece with
+   object + what + why, and (c) guarantee a SECOND Reconcile (no further scene edits) completes the
+   remainder and is then a no-op. Silent partial application is forbidden (§7).
+3. **No orphaned payload.** A component/ref/event whose owning object could not be created or anchored is
+   reported, never attached to the wrong construct.
+4. **Delete cascades.** Deleting a created object removes its statement AND the payload statements
+   authored on it; payload whose owner survives is untouched.
+
+Each participating milestone's spec must state which of its Reconcile behaviors take part in a
+create-with-payload composition and cite this section, and include at least one test that creates an
+object **with** that payload in a single scene edit and asserts convergence.

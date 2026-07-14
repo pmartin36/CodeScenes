@@ -1,0 +1,11 @@
+{
+    "name": "SceneBuilder.Editor",
+    "rootNamespace": "SceneBuilder.Editor",
+    "references": [
+        "SceneBuilder.Authoring"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "autoReferenced": true
+}
