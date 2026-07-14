@@ -30,6 +30,14 @@ namespace SceneBuilder.Core.Parsing
                 case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.BitwiseOrExpression):
                     return ParseFlagsEnum(binary, expr);
 
+                case InvocationExpressionSyntax invocation
+                    when invocation.Expression is IdentifierNameSyntax id && id.Identifier.Text == "Asset":
+                    return ParseAsset(invocation);
+
+                case MemberAccessExpressionSyntax member
+                    when member.Expression.ToString() == "Asset" && member.Name.Identifier.Text == "None":
+                    return new ValueNode.AssetRef(null);
+
                 case MemberAccessExpressionSyntax memberAccess:
                     return new ValueNode.Enum(
                         memberAccess.Expression.ToString(),
@@ -261,6 +269,21 @@ namespace SceneBuilder.Core.Parsing
 
             value = default;
             return false;
+        }
+
+        private static ValueNode ParseAsset(InvocationExpressionSyntax invocation)
+        {
+            var args = invocation.ArgumentList.Arguments;
+            if (args.Count != 1) return Unsupported(invocation);
+            var arg = args[0].Expression;
+            if (arg is LiteralExpressionSyntax lit)
+            {
+                if (lit.IsKind(SyntaxKind.StringLiteralExpression))
+                    return new ValueNode.AssetRef(new AssetRef { DisplayPath = lit.Token.ValueText });
+                if (lit.IsKind(SyntaxKind.NullLiteralExpression))
+                    return new ValueNode.AssetRef(null);
+            }
+            return Unsupported(invocation);
         }
 
         private static ValueNode.Unsupported Unsupported(ExpressionSyntax expr) => new(expr.ToString());
