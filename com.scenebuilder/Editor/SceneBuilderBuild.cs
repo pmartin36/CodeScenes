@@ -47,19 +47,36 @@ namespace SceneBuilder.Editor
                 // §M3: rewrite transient member:<name> field keys to real serialized paths BEFORE diff.
                 var desired = AuthoredPathResolver.Resolve(parse.Model);
 
+                // Structurally remap the freshly-parsed model against the PRIOR sidecar so a renamed
+                // or reordered handle-less object inherits its prior GlobalObjectId (no dup-create),
+                // and a removed object survives as an orphan for the removal path to destroy. First
+                // build (no sidecar) => empty prior => all-new, which is correct.
+                var priorSidecar = existingMap ?? new IdentityMap();
+                var remapped = IdentityRemapper.Remap(parse.Model, priorSidecar);
+
                 // Read the CURRENT open scene as `actual` — never NewScene / wipe.
                 var scene = EditorSceneManager.GetActiveScene();
                 var snapshot = SceneSnapshotReader.Read(scene);
 
-                var plan = Materializer.Materialize(desired, snapshot, parse.IdentityMap);
+                var plan = Materializer.Materialize(desired, snapshot, remapped);
 
-                var execution = PlanExecutor.Execute(plan, parse.IdentityMap, scene);
+                var execution = PlanExecutor.Execute(plan, remapped, scene);
 
                 EditorSceneManager.MarkSceneDirty(scene);
                 EditorSceneManager.SaveScene(scene, ScenePath);
 
-                // GlobalObjectIds are stable only after save; capture (survivors keep theirs) + persist.
-                var map = WithGlobalObjectIds(parse.IdentityMap, execution) with { Scene = ScenePath };
+                // Persist the CURRENT code structure only (drop destroyed orphans), carrying the
+                // remapped fingerprint (Name+SiblingIndex) and inherited GlobalObjectIds, then stamp
+                // the post-save GlobalObjectIds for objects the execution created/touched.
+                var currentLogicalIds = new HashSet<string>(parse.IdentityMap.Entries.Select(e => e.LogicalId));
+                var currentStructure = new IdentityMap
+                {
+                    SchemaVersion = parse.IdentityMap.SchemaVersion,
+                    Scene = ScenePath,
+                    Assets = parse.IdentityMap.Assets,
+                    Entries = remapped.Entries.Where(e => currentLogicalIds.Contains(e.LogicalId)).ToArray(),
+                };
+                var map = WithGlobalObjectIds(currentStructure, execution);
                 File.WriteAllText(SidecarPath, IdentityMapJson.Serialize(map));
                 AssetDatabase.Refresh();
 

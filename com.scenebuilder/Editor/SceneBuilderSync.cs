@@ -73,6 +73,7 @@ namespace SceneBuilder.Editor
                     return;
                 }
 
+                var currentSource = source;
                 if (hasSourceEdits)
                 {
                     // Component edits anchor on component LogicalIds — merge those anchors in.
@@ -80,6 +81,7 @@ namespace SceneBuilder.Editor
                     var newSource = SourcePatchApplier.Apply(source, result.Patch, anchors);
                     if (newSource != source)
                     {
+                        currentSource = newSource;
                         File.WriteAllText(BuilderPath, newSource);
                         Debug.Log($"[SceneBuilder] Synced {result.Patch.Edits.Length} edit(s) back into {BuilderPath}.");
                     }
@@ -87,7 +89,7 @@ namespace SceneBuilder.Editor
 
                 if (hasMapDelta)
                 {
-                    UpdateSidecar(map, result);
+                    UpdateSidecar(map, result, currentSource);
                 }
 
                 AssetDatabase.Refresh();
@@ -117,16 +119,25 @@ namespace SceneBuilder.Editor
         }
 
         // §M2b: add AddedEntries, drop RemovedLogicalIds. No scene re-save (created GameObjects'
-        // GlobalObjectIds already came from the snapshot).
-        private static void UpdateSidecar(IdentityMap map, ReconcileResult result)
+        // GlobalObjectIds already came from the snapshot). The persisted sidecar must ALSO carry the
+        // structural fingerprint (Name+SiblingIndex) for GameObject entries so the NEXT Build's
+        // IdentityRemapper can match by name/sibling — so we RE-PARSE the patched source (whose
+        // ParseResult.IdentityMap already populates Name+SiblingIndex) and carry the GlobalObjectIds
+        // over via the merged (survivor + reconcile-added) map.
+        private static void UpdateSidecar(IdentityMap map, ReconcileResult result, string currentSource)
         {
             var removed = new HashSet<string>(result.RemovedLogicalIds);
-            var entries = map.Entries
+            var mergedEntries = map.Entries
                 .Where(e => !removed.Contains(e.LogicalId))
                 .Concat(result.AddedEntries)
                 .ToArray();
+            var mergedMap = map with { Entries = mergedEntries };
 
-            var updated = map with { Entries = entries };
+            // BuilderParser.Parse carries each node's GlobalObjectId over from `mergedMap` by
+            // LogicalId while populating Name+SiblingIndex from the parsed structure.
+            var reparsed = BuilderParser.Parse(currentSource, mergedMap);
+
+            var updated = map with { Entries = reparsed.IdentityMap.Entries };
             File.WriteAllText(SidecarPath, IdentityMapJson.Serialize(updated));
             Debug.Log($"[SceneBuilder] Sidecar updated: +{result.AddedEntries.Length} / -{result.RemovedLogicalIds.Length} entr(ies).");
         }
