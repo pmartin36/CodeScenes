@@ -485,12 +485,12 @@ namespace SceneBuilder.Core.Reconcile
 
             if (edit.Tag != null)
             {
-                chain += $".Tag({SyntaxFactory.Literal(edit.Tag)})";
+                chain += $".Tag({SourceExpr.StringLiteral(edit.Tag)})";
             }
 
             if (edit.Layer != null)
             {
-                chain += $".Layer({edit.Layer.Value})";
+                chain += $".Layer({SourceExpr.IntLiteral(edit.Layer.Value)})";
             }
 
             if (edit.Active != null)

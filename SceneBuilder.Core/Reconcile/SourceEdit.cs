@@ -60,4 +60,23 @@ namespace SceneBuilder.Core.Reconcile
     {
         // Uses inherited SourceEdit.Anchor = the LogicalId of the statement to delete.
     }
+
+    public enum FlagKind { Tag, Layer, Active, Static }
+
+    public sealed record PatchFlagArgument : SourceEdit
+    {
+        public FlagKind Flag { get; init; }
+        public string NewExpr { get; init; } = "";
+    }
+
+    public sealed record IntroduceFlagCall : SourceEdit
+    {
+        public FlagKind Flag { get; init; }
+        public string? ArgExpr { get; init; }
+    }
+
+    public sealed record RemoveFlagCall : SourceEdit
+    {
+        public FlagKind Flag { get; init; }
+    }
 }

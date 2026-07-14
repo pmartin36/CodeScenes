@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using Microsoft.CodeAnalysis.CSharp;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
@@ -26,5 +27,18 @@ namespace SceneBuilder.Core.Reconcile
             var text = rounded.ToString("0.####", CultureInfo.InvariantCulture);
             return text.Contains(".") ? text + "f" : text;
         }
+
+        /// <summary>
+        /// A quoted, escaped C# string literal (including surrounding double quotes) for the given raw
+        /// value. Caller supplies the value WITHOUT quotes; this owns quoting/escaping.
+        /// </summary>
+        public static string StringLiteral(string value) =>
+            SyntaxFactory.Literal(value).ToString();
+
+        /// <summary>
+        /// A bare C# integer literal (invariant culture, no suffix/quotes).
+        /// </summary>
+        public static string IntLiteral(int value) =>
+            value.ToString(CultureInfo.InvariantCulture);
     }
 }

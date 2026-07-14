@@ -48,8 +48,9 @@ namespace SceneBuilder.Core.Parsing
 
             var identityMap = BuildIdentityMap(ctx.Roots, existingMap);
             var anchors = BuildAnchors(ctx.Roots);
+            var flagPresence = BuildFlagPresence(ctx.Roots);
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, FlagPresence = flagPresence };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -230,15 +231,19 @@ namespace SceneBuilder.Core.Parsing
                         break;
                     case "Tag":
                         node.Tag = EvalStringLiteral(args.Arguments[0].Expression);
+                        node.HasTag = true;
                         break;
                     case "Layer":
                         node.Layer = (int)EvalFloat(args.Arguments[0].Expression);
+                        node.HasLayer = true;
                         break;
                     case "Active":
                         node.Active = EvalBool(args.Arguments[0].Expression);
+                        node.HasActive = true;
                         break;
                     case "Static":
                         node.IsStatic = true;
+                        node.HasStatic = true;
                         break;
                     case "Id":
                         explicitId = EvalStringLiteral(args.Arguments[0].Expression);
@@ -485,6 +490,31 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
+        // ---- Flag presence construction -----------------------------------------------------
+
+        // Builds one LogicalId->FlagPresence entry per parsed node, pre-order, keyed by each
+        // node's FINAL LogicalId (post `.Id(...)` resolution) — mirrors BuildAnchors/CollectAnchors.
+        private static IReadOnlyDictionary<string, FlagPresence> BuildFlagPresence(List<NodeBuilder> roots)
+        {
+            var presence = new Dictionary<string, FlagPresence>();
+            foreach (var root in roots)
+            {
+                CollectFlagPresence(root, presence);
+            }
+
+            return presence;
+        }
+
+        private static void CollectFlagPresence(NodeBuilder node, Dictionary<string, FlagPresence> presence)
+        {
+            presence[node.LogicalId] = new FlagPresence(node.HasTag, node.HasLayer, node.HasActive, node.HasStatic);
+
+            foreach (var child in node.Children)
+            {
+                CollectFlagPresence(child, presence);
+            }
+        }
+
         // ---- Materialization --------------------------------------------------------------
 
         private static GameObjectNode BuildNode(NodeBuilder builder) => new()
@@ -524,6 +554,10 @@ namespace SceneBuilder.Core.Parsing
             public int Layer;
             public bool Active = true;
             public bool IsStatic;
+            public bool HasTag;
+            public bool HasLayer;
+            public bool HasActive;
+            public bool HasStatic;
             public Vec3? Position;
             public Quat? Rotation;
             public Vec3? Scale;
