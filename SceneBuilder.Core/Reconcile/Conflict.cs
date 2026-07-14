@@ -3,7 +3,9 @@ namespace SceneBuilder.Core.Reconcile
     public enum ConflictKind
     {
         AmbiguousAnchor,
-        MissingSourceAnchor
+        MissingSourceAnchor,
+        ReferencedHandle,
+        UnrepresentedComponents
     }
 
     public sealed record Conflict

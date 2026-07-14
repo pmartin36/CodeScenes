@@ -74,5 +74,15 @@ namespace SceneBuilder.Core.Reconcile
                 Reason = $"No source anchor for LogicalId '{logicalId}' (object exists in scene but has no builder statement).",
                 Location = null,
             };
+
+        public static Conflict UnanchorableDelete(string logicalId, string? globalObjectId) =>
+            new()
+            {
+                Kind = ConflictKind.MissingSourceAnchor,
+                LogicalId = logicalId,
+                GlobalObjectId = globalObjectId,
+                Reason = $"Cannot remove '{logicalId}': no source anchor/statement to delete (structural change not anchorable to a builder construct).",
+                Location = null,
+            };
     }
 }

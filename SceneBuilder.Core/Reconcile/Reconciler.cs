@@ -5,6 +5,7 @@ using System.Linq;
 using SceneBuilder.Core.Diff;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Parsing;
 
 namespace SceneBuilder.Core.Reconcile
 {
@@ -16,7 +17,8 @@ namespace SceneBuilder.Core.Reconcile
             SceneModel expected,
             SceneSnapshot actual,
             IdentityMap identityMap,
-            IReadOnlyDictionary<string, SourceSpan>? anchors = null)
+            IReadOnlyDictionary<string, SourceSpan>? anchors = null,
+            IReadOnlyCollection<string>? reservedIdentifiers = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
@@ -27,6 +29,10 @@ namespace SceneBuilder.Core.Reconcile
             var globalObjectIdToLogicalId = logicalIdToGlobalObjectId
                 .GroupBy(kv => kv.Value)
                 .ToDictionary(g => g.Key, g => g.First().Key);
+
+            var logicalIdToParentLogicalId = identityMap.Entries
+                .Where(e => e.Kind == "GameObject")
+                .ToDictionary(e => e.LogicalId, e => e.ParentLogicalId);
 
             var snapshotByGoid = new Dictionary<string, SnapshotEntry>();
             FlattenSnapshot(actual.Roots, null, snapshotByGoid);
@@ -116,7 +122,313 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
-            return new ReconcileResult { Patch = new SourcePatch { Edits = edits.ToArray() }, Conflicts = conflicts.ToArray() };
+            var addedEntries = new List<IdentityMapEntry>();
+            var removedLogicalIds = new List<string>();
+            var nextIndexByParentKey = new Dictionary<string, int>();
+            var introducedHandleByParent = new Dictionary<string, string>();
+
+            var reserved = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in identityMap.Entries)
+            {
+                reserved.Add(entry.LogicalId);
+            }
+
+            foreach (var logicalId in modelByLogicalId.Keys)
+            {
+                reserved.Add(logicalId);
+            }
+
+            if (reservedIdentifiers != null)
+            {
+                foreach (var identifier in reservedIdentifiers)
+                {
+                    reserved.Add(identifier);
+                }
+            }
+
+            DetectAppends(
+                actual.Roots,
+                null,
+                true,
+                expected,
+                globalObjectIdToLogicalId,
+                modelByLogicalId,
+                logicalIdToGlobalObjectId,
+                logicalIdToParentLogicalId,
+                reserved,
+                introducedHandleByParent,
+                nextIndexByParentKey,
+                edits,
+                addedEntries,
+                removedLogicalIds,
+                conflicts);
+
+            DetectRemovals(identityMap, anchors, snapshotByGoid, edits, removedLogicalIds, conflicts);
+
+            return new ReconcileResult
+            {
+                Patch = new SourcePatch { Edits = edits.ToArray() },
+                Conflicts = conflicts.ToArray(),
+                AddedEntries = addedEntries.ToArray(),
+                RemovedLogicalIds = removedLogicalIds.ToArray(),
+            };
+        }
+
+        // Snapshot-driven create-detection: walks the ACTUAL (scene) tree depth-first looking
+        // for GameObjectIds absent from the IdentityMap. Emits an AppendStatement only for a
+        // create candidate whose parent is a root or an already-MAPPED parent. A create candidate
+        // with >=1 create-candidate child heads its own handle (b2-t3) so its descendants can be
+        // appended referencing it; a create candidate with no create-candidate children is a leaf
+        // (Handle stays null, recursion into its children is a no-op guard).
+        private static void DetectAppends(
+            SnapshotNode[] nodes,
+            string? parentLogicalId,
+            bool parentIsMapped,
+            SceneModel expected,
+            IReadOnlyDictionary<string, string> goidToLogicalId,
+            IReadOnlyDictionary<string, GameObjectNode> modelByLogicalId,
+            IReadOnlyDictionary<string, string> logicalIdToGlobalObjectId,
+            IReadOnlyDictionary<string, string?> logicalIdToParentLogicalId,
+            HashSet<string> reserved,
+            Dictionary<string, string> introducedHandleByParent,
+            Dictionary<string, int> nextIndexByParentKey,
+            List<SourceEdit> edits,
+            List<IdentityMapEntry> addedEntries,
+            List<string> removedLogicalIds,
+            List<Conflict> conflicts)
+        {
+            foreach (var node in nodes)
+            {
+                string? mappedLogicalId = null;
+                var isMapped = !string.IsNullOrEmpty(node.GlobalObjectId)
+                    && goidToLogicalId.TryGetValue(node.GlobalObjectId, out mappedLogicalId);
+
+                if (isMapped)
+                {
+                    DetectAppends(
+                        node.Children,
+                        mappedLogicalId,
+                        true,
+                        expected,
+                        goidToLogicalId,
+                        modelByLogicalId,
+                        logicalIdToGlobalObjectId,
+                        logicalIdToParentLogicalId,
+                        reserved,
+                        introducedHandleByParent,
+                        nextIndexByParentKey,
+                        edits,
+                        addedEntries,
+                        removedLogicalIds,
+                        conflicts);
+
+                    continue;
+                }
+
+                if (parentIsMapped)
+                {
+                    var parentKey = parentLogicalId ?? string.Empty;
+                    if (!nextIndexByParentKey.TryGetValue(parentKey, out var index))
+                    {
+                        index = parentLogicalId == null
+                            ? expected.Roots.Length
+                            : modelByLogicalId.TryGetValue(parentLogicalId, out var parentModel)
+                                ? parentModel.Children.Length
+                                : 0;
+                    }
+
+                    nextIndexByParentKey[parentKey] = index + 1;
+
+                    var grandparentLogicalId = parentLogicalId != null
+                        ? logicalIdToParentLogicalId.GetValueOrDefault(parentLogicalId)
+                        : null;
+                    var handleless = parentLogicalId != null
+                        && LogicalIdResolver.TryParseSynthesized(parentLogicalId, grandparentLogicalId, out _, out _);
+
+                    string? parentHandle;
+                    var introduceParentHandle = false;
+
+                    if (handleless)
+                    {
+                        if (!introducedHandleByParent.TryGetValue(parentLogicalId!, out var handle))
+                        {
+                            var parentName = modelByLogicalId.TryGetValue(parentLogicalId!, out var parentModelNode)
+                                ? parentModelNode.Name
+                                : parentLogicalId!;
+                            handle = HandleNaming.Derive(parentName, reserved);
+                            reserved.Add(handle);
+                            introducedHandleByParent[parentLogicalId!] = handle;
+                            removedLogicalIds.Add(parentLogicalId!);
+
+                            addedEntries.Add(new IdentityMapEntry
+                            {
+                                LogicalId = handle,
+                                GlobalObjectId = logicalIdToGlobalObjectId.GetValueOrDefault(parentLogicalId!, string.Empty),
+                                Kind = "GameObject",
+                                ParentLogicalId = grandparentLogicalId,
+                            });
+                        }
+
+                        parentHandle = handle;
+                        introduceParentHandle = true;
+                    }
+                    else
+                    {
+                        parentHandle = parentLogicalId;
+                    }
+
+                    // b2-t3: a node with >=1 create-candidate (unmapped, non-empty-goid) child
+                    // heads its own handle so its descendants can reference it - otherwise they
+                    // would be stranded (the old dead-end recursion below).
+                    var headsHandle = node.Children.Any(c =>
+                        !string.IsNullOrEmpty(c.GlobalObjectId) && !goidToLogicalId.ContainsKey(c.GlobalObjectId));
+
+                    string newLogicalId;
+                    string? ownHandle = null;
+
+                    if (headsHandle)
+                    {
+                        ownHandle = HandleNaming.Derive(node.Name, reserved);
+                        reserved.Add(ownHandle);
+                        newLogicalId = ownHandle;
+                    }
+                    else
+                    {
+                        newLogicalId = LogicalIdResolver.Synthesize(handleless ? parentHandle : parentLogicalId, node.Name, index);
+                    }
+
+                    edits.Add(new AppendStatement
+                    {
+                        NewLogicalId = newLogicalId,
+                        ParentAnchor = parentLogicalId,
+                        Name = node.Name,
+                        Transform = node.Transform != new TransformData() ? node.Transform : null,
+                        Active = node.Active != true ? node.Active : null,
+                        Tag = node.Tag != "Untagged" ? node.Tag : null,
+                        Layer = node.Layer != 0 ? node.Layer : null,
+                        IsStatic = node.IsStatic != false ? node.IsStatic : null,
+                        Handle = ownHandle,
+                        ParentHandle = parentHandle,
+                        IntroduceParentHandle = introduceParentHandle,
+                    });
+
+                    addedEntries.Add(new IdentityMapEntry
+                    {
+                        LogicalId = newLogicalId,
+                        GlobalObjectId = node.GlobalObjectId,
+                        Kind = "GameObject",
+                        ParentLogicalId = parentHandle,
+                    });
+
+                    if (node.Components.Length > 0)
+                    {
+                        conflicts.Add(new Conflict
+                        {
+                            Kind = ConflictKind.UnrepresentedComponents,
+                            LogicalId = newLogicalId,
+                            GlobalObjectId = node.GlobalObjectId,
+                            Reason = $"Created object '{newLogicalId}' carries {node.Components.Length} component(s) not represented in sync-back (components are M3, out of scope); appended as GameObject + transform + flags only.",
+                        });
+                    }
+
+                    DetectAppends(
+                        node.Children,
+                        headsHandle ? ownHandle : null,
+                        headsHandle,
+                        expected,
+                        goidToLogicalId,
+                        modelByLogicalId,
+                        logicalIdToGlobalObjectId,
+                        logicalIdToParentLogicalId,
+                        reserved,
+                        introducedHandleByParent,
+                        nextIndexByParentKey,
+                        edits,
+                        addedEntries,
+                        removedLogicalIds,
+                        conflicts);
+
+                    continue;
+                }
+
+                DetectAppends(
+                    node.Children,
+                    null,
+                    false,
+                    expected,
+                    goidToLogicalId,
+                    modelByLogicalId,
+                    logicalIdToGlobalObjectId,
+                    logicalIdToParentLogicalId,
+                    reserved,
+                    introducedHandleByParent,
+                    nextIndexByParentKey,
+                    edits,
+                    addedEntries,
+                    removedLogicalIds,
+                    conflicts);
+            }
+        }
+
+        // Symmetric to DetectAppends: walks the IdentityMap (code-side objects) looking for
+        // GameObject entries whose GlobalObjectId is absent from the live snapshot - i.e.
+        // scene-deleted objects. Emits one RemoveStatement + one RemovedLogicalIds entry per
+        // deleted object. Independent of Differ's ops (see research.md for why RemoveNode
+        // cannot be used here).
+        // A deleted entry that still heads a handle referenced by a surviving child (a
+        // GameObject child whose own GlobalObjectId is still present in the snapshot) cannot
+        // be removed - doing so would break the surviving child's statement. Such entries
+        // surface a ReferencedHandle conflict instead and are skipped entirely.
+        private static void DetectRemovals(
+            IdentityMap identityMap,
+            IReadOnlyDictionary<string, SourceSpan>? anchors,
+            IReadOnlyDictionary<string, SnapshotEntry> snapshotByGoid,
+            List<SourceEdit> edits,
+            List<string> removedLogicalIds,
+            List<Conflict> conflicts)
+        {
+            var childrenByParent = identityMap.Entries
+                .Where(e => e.Kind == "GameObject" && e.ParentLogicalId != null)
+                .GroupBy(e => e.ParentLogicalId!)
+                .ToDictionary(g => g.Key, g => g.ToArray());
+
+            foreach (var entry in identityMap.Entries)
+            {
+                if (entry.Kind != "GameObject" || string.IsNullOrEmpty(entry.GlobalObjectId))
+                {
+                    continue;
+                }
+
+                if (snapshotByGoid.ContainsKey(entry.GlobalObjectId))
+                {
+                    continue;
+                }
+
+                var hasSurvivingChild = childrenByParent.TryGetValue(entry.LogicalId, out var children)
+                    && children.Any(c => !string.IsNullOrEmpty(c.GlobalObjectId) && snapshotByGoid.ContainsKey(c.GlobalObjectId));
+
+                if (hasSurvivingChild)
+                {
+                    conflicts.Add(new Conflict
+                    {
+                        Kind = ConflictKind.ReferencedHandle,
+                        LogicalId = entry.LogicalId,
+                        GlobalObjectId = entry.GlobalObjectId,
+                        Reason = $"Cannot remove '{entry.LogicalId}': it heads a handle referenced by a surviving child statement.",
+                    });
+
+                    continue;
+                }
+
+                if (anchors != null && !anchors.ContainsKey(entry.LogicalId))
+                {
+                    conflicts.Add(ConflictDetector.UnanchorableDelete(entry.LogicalId, entry.GlobalObjectId));
+                    continue;
+                }
+
+                edits.Add(new RemoveStatement { Anchor = entry.LogicalId });
+                removedLogicalIds.Add(entry.LogicalId);
+            }
         }
 
         private static IEnumerable<SourceEdit> TransformEdits(string logicalId, TransformData model, TransformData snapshot)

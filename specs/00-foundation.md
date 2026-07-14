@@ -322,9 +322,14 @@ public class FooScene : ISceneDefinition {
   declarative set of common easing curves (linear, ease-in/out quad/cubic, bounce, elastic, etc.)
   applied to named properties; reference them from `Animator`/`Animation`. Advanced animation content
   is explicitly deferred to `needs_research`.
+- **M-Auto Automatic sync (auto-build/auto-sync toggles + drift indicator)** — makes the Build/Sync
+  buttons optional: auto-build on `.cs` save (code→scene) + auto-sync on scene edit (scene→code), behind
+  independent toggles, with debounce + one-authoritative-direction-per-cycle + conflict-surfacing (never
+  clobber, never a feedback loop). Depends on **M1b** (in-place build) + **M7** (self-event suppression).
+  Full always-on continuous per-keystroke sync stays parked in `needs_research`.
 
 ### Folders
-- `specs/*.md` — the active contract (this file) + milestone specs **M0, M1, M1b, M2, M2b, M2c, M3–M11, M-UI**.
+- `specs/*.md` — the active contract (this file) + milestone specs **M0, M1, M1b, M2, M2b, M2c, M3–M11, M-UI, M-Auto**.
 - `specs/completed/` — a milestone moves here once its Core tests are green in CI **and** the user's
   Unity confirmation checklist passes.
 - `specs/needs_research/` — open problems not yet spec-ready, each a research stub (not a build
@@ -364,6 +369,7 @@ the authoritative index so the additions stay coherent. Each is defined in the o
 | `ReorderComponent` PlanOp (`ReorderStatement` reused) | component reorder | M3 |
 | `AssetRef(null)` via `SetAssetRef` null-guid | clear an asset field to None | M4 |
 | `TransformData` RectTransform Vec2 fields; `SetRectTransform`; `SourceExpr.Vec2Literal`; `.RectTransform(...)` | RectTransform UI sync | M-UI |
+| `SceneBuilder` EditorWindow panel + auto-build/auto-sync triggers + `DriftState` (reuses M7 `SuppressionScope`; no new Core type) | automatic sync toggles + drift indicator | M-Auto |
 
 **Promoted to milestone scope (2026-07-13, both actively used):** `[Flags]` enum combinations are now
 **in M3 scope** (`Enum` carries OR-combined members); dynamic/multi-arg (EventDefined) UnityEvent

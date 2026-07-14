@@ -76,5 +76,138 @@ namespace SceneBuilder.Core.Tests
 
             Assert.DoesNotContain(result.Patch.Edits, e => e.Anchor == "root-1");
         }
+
+        [Fact]
+        public void Reconcile_DeleteWithReferencedHandle_SurfacesConflict_NoRemoval()
+        {
+            var child = new GameObjectNode { LogicalId = "child-1", Name = "Child" };
+            var parent = new GameObjectNode { LogicalId = "parent-1", Name = "Parent", Children = new[] { child } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { parent } };
+
+            // Parent's GlobalObjectId is absent from the snapshot (deleted in scene); the
+            // child's GlobalObjectId is still present (reparented to root, surviving).
+            var snapshotChild = new SnapshotNode { GlobalObjectId = "goid-child", Name = "Child" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotChild } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "parent-1", GlobalObjectId = "goid-parent", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "child-1",
+                        GlobalObjectId = "goid-child",
+                        Kind = "GameObject",
+                        ParentLogicalId = "parent-1",
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var conflict = Assert.Single(result.Conflicts, c => c.Kind == ConflictKind.ReferencedHandle);
+            Assert.Equal("parent-1", conflict.LogicalId);
+            Assert.Equal("goid-parent", conflict.GlobalObjectId);
+
+            Assert.DoesNotContain(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "parent-1");
+            Assert.DoesNotContain("parent-1", result.RemovedLogicalIds);
+        }
+
+        [Fact]
+        public void Reconcile_DeleteWithAllChildrenAlsoDeleted_NoConflict_StillRemoves()
+        {
+            var child = new GameObjectNode { LogicalId = "child-2", Name = "Child" };
+            var parent = new GameObjectNode { LogicalId = "parent-2", Name = "Parent", Children = new[] { child } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { parent } };
+
+            // Both parent and child are absent from the snapshot: the whole subtree was deleted.
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "parent-2", GlobalObjectId = "goid-parent2", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "child-2",
+                        GlobalObjectId = "goid-child2",
+                        Kind = "GameObject",
+                        ParentLogicalId = "parent-2",
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            Assert.DoesNotContain(result.Conflicts, c => c.Kind == ConflictKind.ReferencedHandle);
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "parent-2");
+            Assert.Contains("parent-2", result.RemovedLogicalIds);
+        }
+
+        [Fact]
+        public void Reconcile_UnanchorableStructuralChange_SurfacesConflict_DoesNotThrow()
+        {
+            var model = new SceneModel
+            {
+                SchemaVersion = 1,
+                Roots = new[] { new GameObjectNode { LogicalId = "ghost-1", Name = "Ghost" } },
+            };
+
+            // Object was deleted in the scene: snapshot is empty.
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "ghost-1", GlobalObjectId = "goid-ghost", Kind = "GameObject" },
+                },
+            };
+
+            // "ghost-1" deliberately has no entry in anchors -> its delete cannot be anchored.
+            var anchors = new Dictionary<string, SourceSpan>();
+
+            var result = Reconciler.Reconcile(model, snapshot, map, anchors);
+
+            var conflict = Assert.Single(result.Conflicts, c => c.Kind == ConflictKind.MissingSourceAnchor);
+            Assert.Equal("ghost-1", conflict.LogicalId);
+            Assert.Equal("goid-ghost", conflict.GlobalObjectId);
+
+            Assert.DoesNotContain(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "ghost-1");
+            Assert.DoesNotContain("ghost-1", result.RemovedLogicalIds);
+        }
+
+        [Fact]
+        public void Reconcile_DeleteWithAnchorPresent_StillRemoves_NoMissingSourceAnchorConflict()
+        {
+            var model = new SceneModel
+            {
+                SchemaVersion = 1,
+                Roots = new[] { new GameObjectNode { LogicalId = "anchored-1", Name = "Anchored" } },
+            };
+
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "anchored-1", GlobalObjectId = "goid-anchored", Kind = "GameObject" },
+                },
+            };
+
+            var anchors = new Dictionary<string, SourceSpan>
+            {
+                ["anchored-1"] = new SourceSpan(0, 10),
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map, anchors);
+
+            Assert.DoesNotContain(result.Conflicts, c => c.Kind == ConflictKind.MissingSourceAnchor);
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "anchored-1");
+            Assert.Contains("anchored-1", result.RemovedLogicalIds);
+        }
     }
 }
