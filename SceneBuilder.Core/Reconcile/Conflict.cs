@@ -4,8 +4,7 @@ namespace SceneBuilder.Core.Reconcile
     {
         AmbiguousAnchor,
         MissingSourceAnchor,
-        ReferencedHandle,
-        UnrepresentedComponents
+        ReferencedHandle
     }
 
     public sealed record Conflict

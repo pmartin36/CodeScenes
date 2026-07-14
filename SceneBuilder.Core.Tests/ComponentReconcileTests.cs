@@ -639,5 +639,77 @@ public class Scene5 : ISceneDefinition
             Assert.Equal("root-1/UnityEngine.BoxCollider#0", remove.Anchor);
             Assert.Contains("root-1/UnityEngine.BoxCollider#0", result.RemovedLogicalIds);
         }
+
+        // Spec §13/13b (create-with-payload). A newly editor-created GameObject that carries a
+        // component must attach it in the SAME Reconcile pass as the owner append - never a
+        // report-and-defer conflict, never silently dropped. Pass 1 emits owner append (with a
+        // Handle) + component attach + both AddedEntries in one shot; pass 2 of the unchanged
+        // scene (with pass 1's AddedEntries in the map and owner+component now in source) is a
+        // no-op (converges).
+        [Fact]
+        public void Reconcile_ComponentOnNewlyCreatedObject_ConvergesInOnePass()
+        {
+            var rbFields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(5f)) });
+
+            // The editor-created object + its component, identical across every pass.
+            SnapshotNode Created() => new SnapshotNode
+            {
+                GlobalObjectId = "goid-new",
+                Name = "NewThing",
+                Components = new[]
+                {
+                    new ComponentData { LogicalId = "unused", Type = new TypeRef("UnityEngine.Rigidbody"), Fields = rbFields },
+                },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { Created() } };
+
+            // ---- Pass 1: object not in source or map. Owner append + component attach, together. ----
+            var emptyModel = new SceneModel { SchemaVersion = 1, Roots = System.Array.Empty<GameObjectNode>() };
+            var pass1 = Reconciler.Reconcile(emptyModel, snapshot, new IdentityMap { Entries = System.Array.Empty<IdentityMapEntry>() });
+
+            var append = Assert.Single(pass1.Patch.Edits.OfType<AppendStatement>());
+            Assert.NotNull(append.Handle);
+
+            var attach = Assert.Single(pass1.Patch.Edits.OfType<AppendComponentStatement>());
+            Assert.Equal(append.NewLogicalId, attach.Anchor);
+            Assert.Equal(append.Handle, attach.OwnerHandle);
+            Assert.Equal("UnityEngine.Rigidbody", attach.TypeFullName);
+            Assert.Equal(rbFields, attach.Fields);
+
+            var objEntry = Assert.Single(pass1.AddedEntries, e => e.Kind == "GameObject" && e.GlobalObjectId == "goid-new");
+            Assert.Equal(append.NewLogicalId, objEntry.LogicalId);
+
+            var compEntry = Assert.Single(pass1.AddedEntries, e => e.Kind == "Component");
+            Assert.Equal($"{append.NewLogicalId}/UnityEngine.Rigidbody#0", compEntry.LogicalId);
+            Assert.Equal(append.NewLogicalId, compEntry.ParentLogicalId);
+
+            // The retired report-only path never fires for a representable component.
+            Assert.Empty(pass1.Conflicts);
+
+            // ---- Pass 2: apply pass 1 -> owner + component now mapped and present in source. ----
+            // Unchanged scene must converge: no further append, no re-attach.
+            var newLogicalId = objEntry.LogicalId;
+            var modelAfterPass1 = new SceneModel
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new GameObjectNode
+                    {
+                        LogicalId = newLogicalId,
+                        Name = "NewThing",
+                        Components = new[]
+                        {
+                            new ComponentData { LogicalId = compEntry.LogicalId, Type = new TypeRef("UnityEngine.Rigidbody"), Fields = rbFields },
+                        },
+                    },
+                },
+            };
+            var mapAfterPass1 = new IdentityMap { Entries = pass1.AddedEntries };
+            var pass2 = Reconciler.Reconcile(modelAfterPass1, snapshot, mapAfterPass1);
+
+            Assert.Empty(pass2.Patch.Edits);
+            Assert.Empty(pass2.Conflicts);
+        }
     }
 }

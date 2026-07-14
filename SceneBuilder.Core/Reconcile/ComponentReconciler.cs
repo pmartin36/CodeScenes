@@ -57,26 +57,15 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var componentLogicalId = $"{ownerLogicalId}/{key.TypeFullName}#{key.Ordinal}";
-
-                edits.Add(new AppendComponentStatement
-                {
-                    Anchor = ownerLogicalId,
-                    ComponentLogicalId = componentLogicalId,
-                    TypeFullName = key.TypeFullName,
-                    Fields = snapshotComps[i].Fields,
-                    OwnerHandle = null,
-                    IntroduceOwnerHandle = false,
-                });
-
-                addedEntries.Add(new IdentityMapEntry
-                {
-                    LogicalId = componentLogicalId,
-                    GlobalObjectId = "",
-                    Kind = "Component",
-                    ComponentType = key.TypeFullName,
-                    ParentLogicalId = ownerLogicalId,
-                });
+                EmitComponentAppend(
+                    ownerLogicalId,
+                    key.TypeFullName,
+                    key.Ordinal,
+                    snapshotComps[i].Fields,
+                    null,
+                    false,
+                    edits,
+                    addedEntries);
             }
 
             // (2) REMOVE: managed Component entry with no snapshot component at its (type,ordinal).
@@ -205,12 +194,47 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
-        private static ComponentData[] ExcludeTransform(ComponentData[] components) =>
+        // §13 one-pass attach (b4-t1) reuses this for the just-appended owner: same
+        // `{owner}/{Type}#{ordinal}` id scheme, same AppendComponentStatement + Component
+        // AddedEntry shape as the mapped-owner ADD path above — kept in exactly one place.
+        internal static void EmitComponentAppend(
+            string ownerLogicalId,
+            string typeFullName,
+            int ordinal,
+            FieldMap fields,
+            string? ownerHandle,
+            bool introduceOwnerHandle,
+            List<SourceEdit> edits,
+            List<IdentityMapEntry> addedEntries)
+        {
+            var componentLogicalId = $"{ownerLogicalId}/{typeFullName}#{ordinal}";
+
+            edits.Add(new AppendComponentStatement
+            {
+                Anchor = ownerLogicalId,
+                ComponentLogicalId = componentLogicalId,
+                TypeFullName = typeFullName,
+                Fields = fields,
+                OwnerHandle = ownerHandle,
+                IntroduceOwnerHandle = introduceOwnerHandle,
+            });
+
+            addedEntries.Add(new IdentityMapEntry
+            {
+                LogicalId = componentLogicalId,
+                GlobalObjectId = "",
+                Kind = "Component",
+                ComponentType = typeFullName,
+                ParentLogicalId = ownerLogicalId,
+            });
+        }
+
+        internal static ComponentData[] ExcludeTransform(ComponentData[] components) =>
             components.Where(c => c.Type.FullName != "UnityEngine.Transform").ToArray();
 
         // Mirrors Differ.ComputeComponentKeys (Differ.cs:257-270) — Differ.cs is out of this
         // slice's touch scope, so the tiny ordinal helper is duplicated here rather than shared.
-        private static (string TypeFullName, int Ordinal)[] ComputeComponentKeys(ComponentData[] components)
+        internal static (string TypeFullName, int Ordinal)[] ComputeComponentKeys(ComponentData[] components)
         {
             var keys = new (string TypeFullName, int Ordinal)[components.Length];
             var ordinalByType = new Dictionary<string, int>();

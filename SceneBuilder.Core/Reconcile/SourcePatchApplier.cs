@@ -11,7 +11,7 @@ namespace SceneBuilder.Core.Reconcile
 {
     // Applies a SourcePatch's SourceEdits to builder .cs source via Roslyn syntax-node
     // replacement, preserving all unrelated trivia (comments, blank lines, formatting).
-    public static class SourcePatchApplier
+    public static partial class SourcePatchApplier
     {
         private static readonly string[] TransformPositionalArgs = { "pos", "rot", "scale" };
 
@@ -60,6 +60,9 @@ namespace SceneBuilder.Core.Reconcile
                     case AppendStatement appendStatement:
                         ResolveAppendStatement(root, anchors, appendStatement, appendAnnotations, lastSiblingByParent, allTargets, appliers);
                         break;
+                    case AppendComponentStatement appendComponentStatement:
+                        ResolveAppendComponentStatement(root, anchors, appendComponentStatement, appendAnnotations, lastSiblingByParent, allTargets, appliers);
+                        break;
                     case PatchFlagArgument patchFlagArgument:
                         ResolvePatchFlagArgument(root, anchors, patchFlagArgument, allTargets, appliers);
                         break;
@@ -68,6 +71,12 @@ namespace SceneBuilder.Core.Reconcile
                         break;
                     case RemoveFlagCall removeFlagCall:
                         ResolveRemoveFlagCall(root, anchors, removeFlagCall, allTargets, appliers);
+                        break;
+                    case PatchComponentField patchComponentField:
+                        ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers);
+                        break;
+                    case IntroduceComponentField introduceComponentField:
+                        ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers);
                         break;
                     default:
                         throw Fail(root, $"Unsupported SourceEdit kind '{edit.GetType().Name}'.");
@@ -656,7 +665,16 @@ namespace SceneBuilder.Core.Reconcile
 
             var textSpan = TextSpan.FromBounds(span.Start, span.Start + span.Length);
             var node = root.FindNode(textSpan, getInnermostNodeForTie: true);
-            var invocation = node.FirstAncestorOrSelf<InvocationExpressionSyntax>(inv => inv.Span.Start == span.Start);
+
+            // Gate 1: GameObject anchors, whose span starts at the invocation's own start
+            // (e.g. `scene.Add(...)`). Gate 2 (tried only when gate 1 misses): component
+            // anchors, whose span starts mid-statement at the `.Component` member-access dot
+            // (BuilderParser.cs — anchorStart = memberAccess.OperatorToken.SpanStart), so no
+            // invocation begins at span.Start; match on the operator token instead.
+            var invocation =
+                node.FirstAncestorOrSelf<InvocationExpressionSyntax>(inv => inv.Span.Start == span.Start)
+                ?? node.FirstAncestorOrSelf<InvocationExpressionSyntax>(inv =>
+                    inv.Expression is MemberAccessExpressionSyntax ma && ma.OperatorToken.SpanStart == span.Start);
 
             if (invocation == null)
             {

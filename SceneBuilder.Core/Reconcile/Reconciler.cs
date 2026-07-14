@@ -380,11 +380,17 @@ namespace SceneBuilder.Core.Reconcile
                         parentHandle = parentLogicalId;
                     }
 
+                    // b4-t1 §13: representable (non-Transform) components force the owner to head
+                    // a handle too, so the same-batch component append (ComponentPatchApplier) has
+                    // an `OwnerHandle` to attach onto.
+                    var representableComponents = ComponentReconciler.ExcludeTransform(node.Components);
+
                     // b2-t3: a node with >=1 create-candidate (unmapped, non-empty-goid) child
                     // heads its own handle so its descendants can reference it - otherwise they
                     // would be stranded (the old dead-end recursion below).
                     var headsHandle = node.Children.Any(c =>
-                        !string.IsNullOrEmpty(c.GlobalObjectId) && !goidToLogicalId.ContainsKey(c.GlobalObjectId));
+                        !string.IsNullOrEmpty(c.GlobalObjectId) && !goidToLogicalId.ContainsKey(c.GlobalObjectId))
+                        || representableComponents.Length > 0;
 
                     string newLogicalId;
                     string? ownHandle = null;
@@ -423,15 +429,26 @@ namespace SceneBuilder.Core.Reconcile
                         ParentLogicalId = parentHandle,
                     });
 
-                    if (node.Components.Length > 0)
+                    // §13 one-pass attach: the owner is mapped IN-MEMORY by the AddedEntry just
+                    // above, so its components attach in this same pass instead of waiting for a
+                    // 2nd Sync. Reuses ComponentReconciler's ADD-emission shape (same
+                    // `{owner}/{Type}#{ordinal}` id, same AppendComponentStatement + Component
+                    // AddedEntry) rather than reinventing it here.
+                    if (representableComponents.Length > 0)
                     {
-                        conflicts.Add(new Conflict
+                        var keys = ComponentReconciler.ComputeComponentKeys(representableComponents);
+                        for (var i = 0; i < representableComponents.Length; i++)
                         {
-                            Kind = ConflictKind.UnrepresentedComponents,
-                            LogicalId = newLogicalId,
-                            GlobalObjectId = node.GlobalObjectId,
-                            Reason = $"Created object '{newLogicalId}' carries {node.Components.Length} component(s) not represented in sync-back (components are M3, out of scope); appended as GameObject + transform + flags only.",
-                        });
+                            ComponentReconciler.EmitComponentAppend(
+                                newLogicalId,
+                                keys[i].TypeFullName,
+                                keys[i].Ordinal,
+                                representableComponents[i].Fields,
+                                ownHandle,
+                                false,
+                                edits,
+                                addedEntries);
+                        }
                     }
 
                     DetectAppends(

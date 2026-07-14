@@ -518,7 +518,7 @@ namespace SceneBuilder.Core.Tests
             {
                 GlobalObjectId = "goid-new-with-components",
                 Name = "NewWithComponents",
-                Components = new[] { new ComponentData() },
+                Components = new[] { new ComponentData { Type = new TypeRef("UnityEngine.Rigidbody") } },
             };
             var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotExisting, snapshotNewWithComponents } };
 
@@ -532,19 +532,29 @@ namespace SceneBuilder.Core.Tests
 
             var result = Reconciler.Reconcile(model, snapshot, map);
 
-            // Append + map entry still emitted unchanged - components are never dropped silently.
-            var append = Assert.IsType<AppendStatement>(Assert.Single(result.Patch.Edits));
+            // §13 one-pass attach: owner append (with a Handle so the component can reference it)
+            // PLUS the component attach, in the same pass - components are never dropped silently
+            // and never deferred behind a conflict.
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendStatement>());
             Assert.Equal("NewWithComponents", append.Name);
+            Assert.NotNull(append.Handle);
 
-            var addedEntry = Assert.Single(result.AddedEntries);
-            Assert.Equal(append.NewLogicalId, addedEntry.LogicalId);
-            Assert.Equal("goid-new-with-components", addedEntry.GlobalObjectId);
+            var attach = Assert.Single(result.Patch.Edits.OfType<AppendComponentStatement>());
+            Assert.Equal(append.NewLogicalId, attach.Anchor);
+            Assert.Equal(append.Handle, attach.OwnerHandle);
+            Assert.Equal("UnityEngine.Rigidbody", attach.TypeFullName);
 
-            // Fail-loud: exactly one conflict reporting the unrepresented components, keyed to
-            // the newly-created object.
-            var conflict = Assert.Single(result.Conflicts, c => c.Kind == ConflictKind.UnrepresentedComponents);
-            Assert.Equal(append.NewLogicalId, conflict.LogicalId);
-            Assert.Equal("goid-new-with-components", conflict.GlobalObjectId);
+            var ownerEntry = Assert.Single(result.AddedEntries, e => e.Kind == "GameObject");
+            Assert.Equal(append.NewLogicalId, ownerEntry.LogicalId);
+            Assert.Equal("goid-new-with-components", ownerEntry.GlobalObjectId);
+
+            var componentEntry = Assert.Single(result.AddedEntries, e => e.Kind == "Component");
+            Assert.Equal($"{append.NewLogicalId}/UnityEngine.Rigidbody#0", componentEntry.LogicalId);
+            Assert.Equal(append.NewLogicalId, componentEntry.ParentLogicalId);
+
+            // The retired report-only path never fires for a representable component; the
+            // component is attached, not deferred behind a conflict.
+            Assert.Empty(result.Conflicts);
         }
 
         [Fact]
@@ -559,7 +569,9 @@ namespace SceneBuilder.Core.Tests
 
             var result = Reconciler.Reconcile(model, snapshot, map);
 
-            Assert.DoesNotContain(result.Conflicts, c => c.Kind == ConflictKind.UnrepresentedComponents);
+            // No components on the created object -> no component edits and no conflicts at all.
+            Assert.Empty(result.Patch.Edits.OfType<AppendComponentStatement>());
+            Assert.Empty(result.Conflicts);
         }
 
         [Fact]

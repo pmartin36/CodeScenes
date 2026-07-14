@@ -260,7 +260,7 @@ namespace SceneBuilder.Core.Tests
             {
                 GlobalObjectId = "goid-new",
                 Name = "NewThing",
-                Components = new[] { new ComponentData() },   // M3 fills this out; here it just marks payload
+                Components = new[] { new ComponentData { Type = new TypeRef("UnityEngine.Rigidbody") } },
             };
             var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { created } };
             var map = new IdentityMap { Entries = System.Array.Empty<IdentityMapEntry>() };
@@ -270,14 +270,34 @@ namespace SceneBuilder.Core.Tests
             // Object appended (not dropped)...
             var append = Assert.Single(result.Patch.Edits.OfType<AppendStatement>());
             Assert.Equal("NewThing", append.Name);
-            // ...component payload REPORTED, never silently dropped (§13)...
-            Assert.Contains(result.Conflicts, c => c.Kind == ConflictKind.UnrepresentedComponents);
-            // ...and an AddedEntry maps it so a second Reconcile converges (no re-append).
-            Assert.Single(result.AddedEntries, e => e.GlobalObjectId == "goid-new");
+            // ...component payload ATTACHED in the SAME pass, never silently dropped (§13)...
+            var attach = Assert.Single(result.Patch.Edits.OfType<AppendComponentStatement>());
+            Assert.Equal(append.NewLogicalId, attach.Anchor);
+            var componentEntry = Assert.Single(result.AddedEntries, e => e.Kind == "Component");
+            Assert.Equal($"{append.NewLogicalId}/UnityEngine.Rigidbody#0", componentEntry.LogicalId);
+            // ...and a GameObject AddedEntry maps it so a second Reconcile converges (no re-append).
+            Assert.Single(result.AddedEntries, e => e.Kind == "GameObject" && e.GlobalObjectId == "goid-new");
 
             var map2 = new IdentityMap { Entries = result.AddedEntries };
-            var result2 = Reconciler.Reconcile(model, snapshot, map2);
+            var modelAfter = new SceneModel
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new GameObjectNode
+                    {
+                        LogicalId = append.NewLogicalId,
+                        Name = "NewThing",
+                        Components = new[]
+                        {
+                            new ComponentData { LogicalId = componentEntry.LogicalId, Type = new TypeRef("UnityEngine.Rigidbody") },
+                        },
+                    },
+                },
+            };
+            var result2 = Reconciler.Reconcile(modelAfter, snapshot, map2);
             Assert.DoesNotContain(result2.Patch.Edits, e => e is AppendStatement);
+            Assert.DoesNotContain(result2.Patch.Edits, e => e is AppendComponentStatement);
         }
     }
 }
