@@ -23,7 +23,11 @@ namespace SceneBuilder.Core.Model
     [JsonDerivedType(typeof(ValueNode.Unsupported), "Unsupported")]
     public abstract record ValueNode
     {
-        public sealed record Primitive(PrimitiveKind Kind, object? Value) : ValueNode
+        public sealed record Primitive(
+            [property: JsonPropertyName("primitiveType")]
+            [property: JsonConverter(typeof(JsonStringEnumConverter))]
+            PrimitiveKind Kind,
+            object? Value) : ValueNode
         {
             public static Primitive Bool(bool value) => new(PrimitiveKind.Bool, value);
             public static Primitive Int(int value) => new(PrimitiveKind.Int, value);

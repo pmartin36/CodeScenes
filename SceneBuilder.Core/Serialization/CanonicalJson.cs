@@ -27,6 +27,8 @@ namespace SceneBuilder.Core.Serialization
                 WriteIndented = true,
             };
 
+            options.Converters.Add(new FieldMapJsonConverter());
+
             if (converters != null)
             {
                 foreach (var converter in converters)
