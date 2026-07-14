@@ -34,6 +34,11 @@ namespace SceneBuilder.Core.Diff
                     continue;
                 }
 
+                if (!identityMap.IsManaged(kv.Key))
+                {
+                    continue;
+                }
+
                 var logicalId = globalObjectIdToLogicalId.TryGetValue(kv.Key, out var lid) ? lid : "";
                 ops.Add(new RemoveNode { LogicalId = logicalId });
             }

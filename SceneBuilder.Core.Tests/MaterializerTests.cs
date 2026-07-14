@@ -76,5 +76,103 @@ namespace SceneBuilder.Core.Tests
 
             Assert.DoesNotContain(plan.Ops.OfType<SetField>(), op => op.Path != "m_LocalPosition" && op.Path != "m_LocalRotation" && op.Path != "m_LocalScale");
         }
+
+        [Fact]
+        public void Materialize_UnmappedActual_DirectCall_EmitsNoDestroy_GuardIsNotOptIn()
+        {
+            var model = new SceneModel { SchemaVersion = 1, Roots = System.Array.Empty<GameObjectNode>() };
+
+            var userCreated = new SnapshotNode { GlobalObjectId = "goid-user-created", Name = "UserCreated" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { userCreated } };
+
+            var map = new IdentityMap { Scene = "Assets/Scenes/Demo.unity" };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            Assert.Empty(plan.Ops.OfType<DestroyObject>());
+        }
+
+        [Fact]
+        public void Materialize_UnmappedUserComponent_IsNeverRemoved()
+        {
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode
+            {
+                GlobalObjectId = "goid-root",
+                Name = "Root",
+                Components = new[] { new ComponentData() },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            Assert.Empty(plan.Ops.OfType<DestroyObject>());
+            Assert.DoesNotContain(plan.Ops, op => op.GetType().Name == "RemoveComponent");
+            Assert.Empty(plan.Ops);
+        }
+
+        [Fact]
+        public void Materialize_AddedCodeObject_AppendsCreateOnly_WithoutRecreatingSiblings()
+        {
+            var existingRoot = new GameObjectNode { LogicalId = "root-1", Name = "Root" };
+            var newRoot = new GameObjectNode { LogicalId = "new-1", Name = "New" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { existingRoot, newRoot } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var create = Assert.Single(plan.Ops.OfType<CreateObject>());
+            Assert.Equal("new-1", create.LogicalId);
+            Assert.DoesNotContain(plan.Ops, op => op.LogicalId == "root-1");
+        }
+
+        [Fact]
+        public void Materialize_CodeEqualsScene_ProducesEmptyPlan()
+        {
+            var transform = new TransformData { Position = new Vec3(1, 2, 3), Rotation = Quat.Identity, Scale = Vec3.One };
+            var child = new GameObjectNode { LogicalId = "child-1", Name = "Child", Transform = transform };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = transform, Children = new[] { child } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotChild = new SnapshotNode { GlobalObjectId = "goid-child", Name = "Child", Transform = transform };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = transform, Children = new[] { snapshotChild } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = "child-1", GlobalObjectId = "goid-child", Kind = "GameObject" },
+                },
+            };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            Assert.Empty(plan.Ops);
+        }
     }
 }

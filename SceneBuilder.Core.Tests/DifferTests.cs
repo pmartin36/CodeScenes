@@ -83,5 +83,81 @@ namespace SceneBuilder.Core.Tests
             Assert.Empty(changeSet.Ops.OfType<AddNode>());
             Assert.Empty(changeSet.Ops.OfType<RemoveNode>());
         }
+
+        [Fact]
+        public void Diff_UnmappedActualAbsentFromDesired_IsNeverInDestroySet()
+        {
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root" };
+            var userCreated = new SnapshotNode { GlobalObjectId = "goid-user-created", Name = "UserCreated" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot, userCreated } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.Empty(changeSet.Ops.OfType<RemoveNode>());
+        }
+
+        [Fact]
+        public void Diff_MappedActualRemovedFromCode_ProducesDestroy()
+        {
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root" };
+            var snapshotRemoved = new SnapshotNode { GlobalObjectId = "goid-removed", Name = "Removed" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot, snapshotRemoved } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = "removed-1", GlobalObjectId = "goid-removed", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var removed = Assert.Single(changeSet.Ops.OfType<RemoveNode>());
+            Assert.Equal("removed-1", removed.LogicalId);
+            Assert.DoesNotContain(changeSet.Ops.OfType<RemoveNode>(), op => op.LogicalId == "root-1");
+        }
+
+        [Fact]
+        public void Diff_DriftedMappedActual_IsUpdatedInPlace_PreservingGlobalObjectId_NeverRemoveThenAdd()
+        {
+            var transform = new TransformData { Position = new Vec3(1, 2, 3), Rotation = Quat.Identity, Scale = Vec3.One };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = transform };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var driftedTransform = transform with { Position = new Vec3(9, 9, 9) };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = driftedTransform };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.Contains(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            Assert.Empty(changeSet.Ops.OfType<AddNode>());
+            Assert.Empty(changeSet.Ops.OfType<RemoveNode>());
+            Assert.Equal("goid-root", Assert.Single(map.Entries, e => e.LogicalId == "root-1").GlobalObjectId);
+        }
     }
 }
