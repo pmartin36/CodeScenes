@@ -60,6 +60,15 @@ namespace SceneBuilder.Core.Reconcile
                     case AppendStatement appendStatement:
                         ResolveAppendStatement(root, anchors, appendStatement, appendAnnotations, lastSiblingByParent, allTargets, appliers);
                         break;
+                    case PatchFlagArgument patchFlagArgument:
+                        ResolvePatchFlagArgument(root, anchors, patchFlagArgument, allTargets, appliers);
+                        break;
+                    case IntroduceFlagCall introduceFlagCall:
+                        ResolveIntroduceFlagCall(root, anchors, introduceFlagCall, allTargets, appliers);
+                        break;
+                    case RemoveFlagCall removeFlagCall:
+                        ResolveRemoveFlagCall(root, anchors, removeFlagCall, allTargets, appliers);
+                        break;
                     default:
                         throw Fail(root, $"Unsupported SourceEdit kind '{edit.GetType().Name}'.");
                 }
@@ -135,10 +144,7 @@ namespace SceneBuilder.Core.Reconcile
 
         private static InvocationExpressionSyntax? FindTransformInvocation(StatementSyntax statement)
         {
-            return statement.DescendantNodes()
-                .OfType<InvocationExpressionSyntax>()
-                .FirstOrDefault(inv => inv.Expression is MemberAccessExpressionSyntax member
-                    && member.Name.Identifier.Text == "Transform");
+            return FindFlagInvocation(statement, "Transform");
         }
 
         private static (ArgumentSyntax? Argument, int Index) FindTransformArgument(ArgumentListSyntax argList, string argName)
@@ -507,6 +513,134 @@ namespace SceneBuilder.Core.Reconcile
                 ? $"var {edit.Handle} = {chain};"
                 : $"{chain};";
         }
+
+        // ---- PatchFlagArgument ------------------------------------------------------------------
+
+        private static void ResolvePatchFlagArgument(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            PatchFlagArgument edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
+                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+
+            var flagName = FlagName(edit.Flag);
+            var flagInvocation = FindFlagInvocation(statement, flagName)
+                ?? throw Fail(statement, $"No .{flagName}(...) call found for anchor '{edit.Anchor}'.");
+
+            if (flagInvocation.ArgumentList.Arguments.Count < 1)
+            {
+                throw Fail(flagInvocation, $".{flagName}(...) call for anchor '{edit.Anchor}' has no argument to patch.");
+            }
+
+            var argExpr = flagInvocation.ArgumentList.Arguments[0].Expression;
+            allTargets.Add(argExpr);
+            appliers.Add(currentRoot =>
+            {
+                var current = currentRoot.GetCurrentNode(argExpr)!;
+                var replacement = SyntaxFactory.ParseExpression(edit.NewExpr).WithTriviaFrom(current);
+                return currentRoot.ReplaceNode(current, replacement);
+            });
+        }
+
+        // ---- IntroduceFlagCall ------------------------------------------------------------------
+
+        private static void ResolveIntroduceFlagCall(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            IntroduceFlagCall edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
+                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+
+            var chainExpr = GetChainExpression(statement);
+            var flagName = FlagName(edit.Flag);
+
+            allTargets.Add(chainExpr);
+            appliers.Add(currentRoot =>
+            {
+                var current = currentRoot.GetCurrentNode(chainExpr)!;
+
+                var argList = edit.ArgExpr == null
+                    ? SyntaxFactory.ArgumentList()
+                    : SyntaxFactory.ArgumentList(
+                        SyntaxFactory.SingletonSeparatedList(
+                            SyntaxFactory.Argument(SyntaxFactory.ParseExpression(edit.ArgExpr))));
+
+                var newCall = SyntaxFactory.InvocationExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            current.WithoutTrailingTrivia(),
+                            SyntaxFactory.IdentifierName(flagName)),
+                        argList)
+                    .WithTrailingTrivia(current.GetTrailingTrivia());
+
+                return currentRoot.ReplaceNode(current, newCall);
+            });
+        }
+
+        // ---- RemoveFlagCall ---------------------------------------------------------------------
+
+        private static void ResolveRemoveFlagCall(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            RemoveFlagCall edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
+                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+
+            var flagName = FlagName(edit.Flag);
+            var flagInvocation = FindFlagInvocation(statement, flagName)
+                ?? throw Fail(statement, $"No .{flagName}(...) call found for anchor '{edit.Anchor}'.");
+
+            allTargets.Add(flagInvocation);
+            appliers.Add(currentRoot =>
+            {
+                var current = currentRoot.GetCurrentNode(flagInvocation)!;
+                var member = (MemberAccessExpressionSyntax)current.Expression;
+                var replacement = member.Expression.WithTrailingTrivia(current.GetTrailingTrivia());
+                return currentRoot.ReplaceNode(current, replacement);
+            });
+        }
+
+        // ---- Flag helpers -----------------------------------------------------------------------
+
+        private static InvocationExpressionSyntax? FindFlagInvocation(StatementSyntax statement, string flagName)
+        {
+            return statement.DescendantNodes()
+                .OfType<InvocationExpressionSyntax>()
+                .FirstOrDefault(inv => inv.Expression is MemberAccessExpressionSyntax member
+                    && member.Name.Identifier.Text == flagName);
+        }
+
+        private static ExpressionSyntax GetChainExpression(StatementSyntax statement)
+        {
+            return statement switch
+            {
+                ExpressionStatementSyntax exprStatement => exprStatement.Expression,
+                LocalDeclarationStatementSyntax localDeclaration
+                    => localDeclaration.Declaration.Variables[0].Initializer!.Value,
+                _ => throw Fail(statement, $"Statement is not a fluent chain expression or declaration."),
+            };
+        }
+
+        private static string FlagName(FlagKind flag) => flag switch
+        {
+            FlagKind.Tag => "Tag",
+            FlagKind.Layer => "Layer",
+            FlagKind.Active => "Active",
+            FlagKind.Static => "Static",
+            _ => throw new ArgumentOutOfRangeException(nameof(flag), flag, "Unknown FlagKind."),
+        };
 
         // ---- Anchor resolution ------------------------------------------------------------------
 
