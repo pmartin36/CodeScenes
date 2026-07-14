@@ -84,5 +84,15 @@ namespace SceneBuilder.Core.Reconcile
                 Reason = $"Cannot remove '{logicalId}': no source anchor/statement to delete (structural change not anchorable to a builder construct).",
                 Location = null,
             };
+
+        public static Conflict UnanchorableComponentEdit(string componentLogicalId, string editKind) =>
+            new()
+            {
+                Kind = ConflictKind.MissingSourceAnchor,
+                LogicalId = componentLogicalId,
+                GlobalObjectId = null,
+                Reason = $"Cannot {editKind} for component '{componentLogicalId}': not localizable to a single source construct (§7).",
+                Location = null,
+            };
     }
 }
