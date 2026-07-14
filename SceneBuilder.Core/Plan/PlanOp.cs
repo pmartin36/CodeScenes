@@ -13,6 +13,9 @@ namespace SceneBuilder.Core.Plan
     [JsonDerivedType(typeof(SetActive), "SetActive")]
     [JsonDerivedType(typeof(SetStatic), "SetStatic")]
     [JsonDerivedType(typeof(SetField), "SetField")]
+    [JsonDerivedType(typeof(AddComponent), "AddComponent")]
+    [JsonDerivedType(typeof(RemoveComponent), "RemoveComponent")]
+    [JsonDerivedType(typeof(ReorderComponent), "ReorderComponent")]
     public abstract record PlanOp
     {
         [JsonPropertyOrder(0)]

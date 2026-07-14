@@ -68,11 +68,11 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(3, setFields.Length);
             Assert.Equal(new[] { "m_LocalPosition", "m_LocalRotation", "m_LocalScale" }, setFields.Select(f => f.Path));
 
-            var position = Assert.IsType<Vec3Value>(setFields[0].Value);
+            var position = Assert.IsType<ValueNode.Vec3>(setFields[0].Value);
             Assert.Equal(new Vec3(1, 2, 3), position.Value);
 
-            Assert.IsType<QuatValue>(setFields[1].Value);
-            Assert.IsType<Vec3Value>(setFields[2].Value);
+            Assert.IsType<ValueNode.Quat>(setFields[1].Value);
+            Assert.IsType<ValueNode.Vec3>(setFields[2].Value);
 
             Assert.DoesNotContain(plan.Ops.OfType<SetField>(), op => op.Path != "m_LocalPosition" && op.Path != "m_LocalRotation" && op.Path != "m_LocalScale");
         }

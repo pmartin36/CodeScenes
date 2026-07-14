@@ -53,21 +53,26 @@ namespace SceneBuilder.Core.Plan
         public string Path { get; init; } = "";
 
         [JsonPropertyOrder(2)]
-        public FieldValue Value { get; init; } = new Vec3Value();
+        public ValueNode Value { get; init; } = ValueNode.Primitive.Int(0);
     }
 
-    [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
-    [JsonDerivedType(typeof(Vec3Value), "Vec3")]
-    [JsonDerivedType(typeof(QuatValue), "Quat")]
-    public abstract record FieldValue;
-
-    public sealed record Vec3Value : FieldValue
+    public sealed record AddComponent : PlanOp
     {
-        public Vec3 Value { get; init; }
+        [JsonPropertyOrder(1)]
+        public TypeRef Type { get; init; } = new TypeRef("");
     }
 
-    public sealed record QuatValue : FieldValue
+    public sealed record RemoveComponent : PlanOp;
+
+    public sealed record ReorderComponent : PlanOp
     {
-        public Quat Value { get; init; }
+        [JsonPropertyOrder(1)]
+        public string GameObjectLogicalId { get; init; } = "";
+
+        [JsonPropertyOrder(2)]
+        public string ComponentLogicalId { get; init; } = "";
+
+        [JsonPropertyOrder(3)]
+        public int ToIndex { get; init; }
     }
 }

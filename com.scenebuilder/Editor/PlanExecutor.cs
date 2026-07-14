@@ -95,13 +95,13 @@ namespace SceneBuilder.Editor
         {
             switch (op.Value)
             {
-                case Vec3Value v when op.Path == "m_LocalPosition":
+                case ValueNode.Vec3 v when op.Path == "m_LocalPosition":
                     t.localPosition = new Vector3(v.Value.X, v.Value.Y, v.Value.Z);
                     break;
-                case Vec3Value v when op.Path == "m_LocalScale":
+                case ValueNode.Vec3 v when op.Path == "m_LocalScale":
                     t.localScale = new Vector3(v.Value.X, v.Value.Y, v.Value.Z);
                     break;
-                case QuatValue q when op.Path == "m_LocalRotation":
+                case ValueNode.Quat q when op.Path == "m_LocalRotation":
                     t.localRotation = new Quaternion(q.Value.X, q.Value.Y, q.Value.Z, q.Value.W);
                     break;
                 default:

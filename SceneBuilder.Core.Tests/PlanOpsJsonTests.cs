@@ -28,9 +28,30 @@ namespace SceneBuilder.Core.Tests
                 new SetLayer { LogicalId = "B", Layer = 8 },
                 new SetActive { LogicalId = "B", Active = false },
                 new SetStatic { LogicalId = "B", IsStatic = true },
-                new SetField { LogicalId = "B", Path = "m_LocalPosition", Value = new Vec3Value { Value = new Vec3(1, 2, 3) } },
-                new SetField { LogicalId = "B", Path = "m_LocalRotation", Value = new QuatValue { Value = new Quat(0, 0, 0, 1) } },
-                new SetField { LogicalId = "B", Path = "m_LocalScale", Value = new Vec3Value { Value = new Vec3(1, 1, 1) } },
+                new SetField { LogicalId = "B", Path = "m_LocalPosition", Value = new ValueNode.Vec3(new Vec3(1, 2, 3)) },
+                new SetField { LogicalId = "B", Path = "m_LocalRotation", Value = new ValueNode.Quat(new Quat(0, 0, 0, 1)) },
+                new SetField { LogicalId = "B", Path = "m_LocalScale", Value = new ValueNode.Vec3(new Vec3(1, 1, 1)) },
+            };
+            var plan = PlanWith(ops);
+
+            var json = PlanJson.Serialize(plan);
+            var back = PlanJson.Deserialize(json);
+
+            Assert.Equal(ops.Length, back.Ops.Length);
+            for (var i = 0; i < ops.Length; i++)
+            {
+                Assert.Equal(ops[i], back.Ops[i]);
+            }
+        }
+
+        [Fact]
+        public void M3ComponentPlanOps_RoundTripThroughPlanJson_Equal()
+        {
+            PlanOp[] ops =
+            {
+                new AddComponent { LogicalId = "comp-1", Type = new TypeRef("UnityEngine.Rigidbody") },
+                new RemoveComponent { LogicalId = "comp-2" },
+                new ReorderComponent { LogicalId = "comp-3", GameObjectLogicalId = "go-1", ComponentLogicalId = "comp-3", ToIndex = 2 },
             };
             var plan = PlanWith(ops);
 
@@ -54,6 +75,9 @@ namespace SceneBuilder.Core.Tests
         [InlineData(typeof(SetActive), "SetActive")]
         [InlineData(typeof(SetStatic), "SetStatic")]
         [InlineData(typeof(SetField), "SetField")]
+        [InlineData(typeof(AddComponent), "AddComponent")]
+        [InlineData(typeof(RemoveComponent), "RemoveComponent")]
+        [InlineData(typeof(ReorderComponent), "ReorderComponent")]
         public void EachPlanOp_Serializes_WithExpectedOpDiscriminator(System.Type opType, string expectedDiscriminator)
         {
             PlanOp op = opType.Name switch
@@ -66,7 +90,10 @@ namespace SceneBuilder.Core.Tests
                 nameof(SetLayer) => new SetLayer { LogicalId = "X" },
                 nameof(SetActive) => new SetActive { LogicalId = "X" },
                 nameof(SetStatic) => new SetStatic { LogicalId = "X" },
-                nameof(SetField) => new SetField { LogicalId = "X", Path = "m_LocalPosition", Value = new Vec3Value { Value = Vec3.Zero } },
+                nameof(SetField) => new SetField { LogicalId = "X", Path = "m_LocalPosition", Value = new ValueNode.Vec3(Vec3.Zero) },
+                nameof(AddComponent) => new AddComponent { LogicalId = "X", Type = new TypeRef("UnityEngine.Rigidbody") },
+                nameof(RemoveComponent) => new RemoveComponent { LogicalId = "X" },
+                nameof(ReorderComponent) => new ReorderComponent { LogicalId = "X", GameObjectLogicalId = "go", ComponentLogicalId = "X", ToIndex = 1 },
                 _ => throw new System.InvalidOperationException($"unhandled op type {opType.Name}"),
             };
             var plan = PlanWith(op);
@@ -85,13 +112,13 @@ namespace SceneBuilder.Core.Tests
             {
                 LogicalId = "B",
                 Path = "m_LocalPosition",
-                Value = new Vec3Value { Value = new Vec3(1, 2, 3) },
+                Value = new ValueNode.Vec3(new Vec3(1, 2, 3)),
             });
             var quatPlan = PlanWith(new SetField
             {
                 LogicalId = "B",
                 Path = "m_LocalRotation",
-                Value = new QuatValue { Value = new Quat(0, 0, 0, 1) },
+                Value = new ValueNode.Quat(new Quat(0, 0, 0, 1)),
             });
 
             using var vecDoc = JsonDocument.Parse(PlanJson.Serialize(vecPlan));
@@ -126,7 +153,7 @@ namespace SceneBuilder.Core.Tests
         {
             var plan = PlanWith(
                 new DestroyObject { LogicalId = "A" },
-                new SetField { LogicalId = "B", Path = "m_LocalScale", Value = new Vec3Value { Value = Vec3.One } });
+                new SetField { LogicalId = "B", Path = "m_LocalScale", Value = new ValueNode.Vec3(Vec3.One) });
 
             var json1 = PlanJson.Serialize(plan);
             var json2 = PlanJson.Serialize(plan);

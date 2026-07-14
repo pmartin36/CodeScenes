@@ -64,19 +64,19 @@ namespace SceneBuilder.Core.Materialize
                         {
                             LogicalId = setTransform.LogicalId,
                             Path = "m_LocalPosition",
-                            Value = new Vec3Value { Value = setTransform.Transform.Position },
+                            Value = new ValueNode.Vec3(setTransform.Transform.Position),
                         });
                         passB.Add(new SetField
                         {
                             LogicalId = setTransform.LogicalId,
                             Path = "m_LocalRotation",
-                            Value = new QuatValue { Value = setTransform.Transform.Rotation },
+                            Value = new ValueNode.Quat(setTransform.Transform.Rotation),
                         });
                         passB.Add(new SetField
                         {
                             LogicalId = setTransform.LogicalId,
                             Path = "m_LocalScale",
-                            Value = new Vec3Value { Value = setTransform.Transform.Scale },
+                            Value = new ValueNode.Vec3(setTransform.Transform.Scale),
                         });
                         break;
                 }

@@ -1,5 +1,9 @@
 namespace SceneBuilder.Core.Model
 {
-    // Minimal placeholder — M3 adds LogicalId/Type/Fields per §3; empty until then.
-    public record ComponentData;
+    public record ComponentData
+    {
+        public string LogicalId { get; init; } = "";
+        public TypeRef Type { get; init; } = new TypeRef("");
+        public FieldMap Fields { get; init; } = FieldMap.Empty;
+    }
 }
