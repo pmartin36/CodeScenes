@@ -13,8 +13,18 @@ namespace SceneBuilder.Core.Parsing
 
         public IReadOnlyDictionary<string, SourceSpan> Anchors { get; init; } = new Dictionary<string, SourceSpan>();
 
+        // b3-t1 stub: one entry per parsed component, keyed by the component's LogicalId,
+        // slicing the source to its `.Component<T>(...)` call. Kept SEPARATE from Anchors
+        // (GameObject-only). Population is BuilderParser's job (CollectComponentAnchors);
+        // this default (always empty) is a compile-only stub for the test-writer's RED tests.
+        public IReadOnlyDictionary<string, SourceSpan> ComponentAnchors { get; init; } = new Dictionary<string, SourceSpan>();
+
         // One entry per parsed node, keyed by the SAME final LogicalId as Anchors, recording
         // which of .Tag/.Layer/.Active/.Static physically appear in the node's builder chain.
         public IReadOnlyDictionary<string, FlagPresence> FlagPresence { get; init; } = new Dictionary<string, FlagPresence>();
+
+        // outer key = component LogicalId, inner key = field key -> the value argument's
+        // SourceSpan (b3-t2). Feed-forward for b5's span-local field-argument patching.
+        public IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> FieldArgumentSpans { get; init; } = new Dictionary<string, IReadOnlyDictionary<string, SourceSpan>>();
     }
 }

@@ -40,6 +40,11 @@ namespace SceneBuilder.Core.Parsing
                 ProcessStatement(statement, ctx);
             }
 
+            // Component LogicalIds depend on their owning node's FINAL LogicalId, which is
+            // only assigned once ProcessAddChain finishes (after ApplyChainedCalls, which is
+            // where Components are collected) — so this pass runs once the whole tree is built.
+            AssignComponentLogicalIds(ctx.Roots);
+
             var model = new SceneModel
             {
                 SchemaVersion = 1,
@@ -48,9 +53,11 @@ namespace SceneBuilder.Core.Parsing
 
             var identityMap = BuildIdentityMap(ctx.Roots, existingMap);
             var anchors = BuildAnchors(ctx.Roots);
+            var componentAnchors = BuildComponentAnchors(ctx.Roots);
             var flagPresence = BuildFlagPresence(ctx.Roots);
+            var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, FlagPresence = flagPresence };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -222,7 +229,7 @@ namespace SceneBuilder.Core.Parsing
         {
             string? explicitId = null;
 
-            foreach (var (method, args, _) in calls)
+            foreach (var (method, args, invocation) in calls)
             {
                 switch (method)
                 {
@@ -247,6 +254,9 @@ namespace SceneBuilder.Core.Parsing
                         break;
                     case "Id":
                         explicitId = EvalStringLiteral(args.Arguments[0].Expression);
+                        break;
+                    case "Component":
+                        ApplyComponent(node, args, invocation);
                         break;
                     default:
                         throw Fail(args, $"Unsupported builder call '.{method}(...)'");
@@ -297,6 +307,122 @@ namespace SceneBuilder.Core.Parsing
                     ctx.Handles.Remove(paramName);
                 }
             }
+        }
+
+        // ---- Component parsing (b3-t1) ---------------------------------------------------
+
+        // `.Component<T>(configure)` — T's FullName is recorded VERBATIM from the generic
+        // type-argument syntax (Core does no namespace resolution; fixtures author FQNs).
+        // The AnchorSpan slices ONLY this `.Component<T>(...)` call (dot through this call's
+        // own closing paren) — NOT the whole preceding chain.
+        private static void ApplyComponent(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
+        {
+            if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                memberAccess.Name is not GenericNameSyntax generic ||
+                generic.TypeArgumentList.Arguments.Count != 1)
+            {
+                throw Fail(invocation, "Component<T>() requires exactly one type argument");
+            }
+
+            var typeFullName = generic.TypeArgumentList.Arguments[0].ToString().Trim();
+            var anchorStart = memberAccess.OperatorToken.SpanStart;
+
+            var cb = new ComponentBuilder
+            {
+                TypeFullName = typeFullName,
+                AnchorSpan = new SourceSpan(anchorStart, invocation.Span.End - anchorStart),
+            };
+
+            if (args.Arguments.Count > 0)
+            {
+                ProcessComponentClosure(args.Arguments[0].Expression, cb);
+            }
+
+            node.Components.Add(cb);
+        }
+
+        // Mirrors ProcessClosure but self-contained: a component closure only contains
+        // `x.Set(...)` calls on the lambda parameter, no node handles / nested Add.
+        private static void ProcessComponentClosure(ExpressionSyntax closureExpression, ComponentBuilder cb)
+        {
+            if (closureExpression is not SimpleLambdaExpressionSyntax lambda)
+            {
+                throw Fail(closureExpression, "Unsupported closure form; expected a lambda like `c => ...`");
+            }
+
+            var paramName = lambda.Parameter.Identifier.Text;
+
+            switch (lambda.Body)
+            {
+                case BlockSyntax block:
+                    foreach (var statement in block.Statements)
+                    {
+                        if (statement is not ExpressionStatementSyntax exprStatement)
+                        {
+                            throw Fail(statement, "Unsupported statement in component closure (expected .Set(...) calls)");
+                        }
+
+                        ProcessComponentSetCall(exprStatement.Expression, paramName, cb);
+                    }
+                    break;
+
+                case ExpressionSyntax exprBody:
+                    ProcessComponentSetCall(exprBody, paramName, cb);
+                    break;
+
+                default:
+                    throw Fail(lambda.Body, "Unsupported lambda body");
+            }
+        }
+
+        private static void ProcessComponentSetCall(ExpressionSyntax expression, string paramName, ComponentBuilder cb)
+        {
+            if (expression is not InvocationExpressionSyntax setInvocation ||
+                setInvocation.Expression is not MemberAccessExpressionSyntax setMemberAccess ||
+                setMemberAccess.Name.Identifier.Text != "Set" ||
+                setMemberAccess.Expression is not IdentifierNameSyntax setReceiver ||
+                setReceiver.Identifier.Text != paramName)
+            {
+                throw Fail(expression, "Expected a `.Set(...)` call in component closure");
+            }
+
+            var (key, value, valueSpan) = ParseSetCall(setInvocation);
+            cb.Fields.Add(new KeyValuePair<string, ValueNode>(key, value));
+            cb.FieldValueSpans.Add(new KeyValuePair<string, SourceSpan>(key, valueSpan));
+        }
+
+        // Field-key convention (§ field-key convention): string-literal arg0 -> verbatim key
+        // (no m_/accessibility mangling); `r => r.member` lambda arg0 -> provisional
+        // "member:"+memberName key (unresolved — Core never maps member->serialized-path).
+        // KEY handling stays fail-loud (keys are not values); VALUE lowering is delegated to
+        // ValueNodeParser (b3-t2), which is total and never throws.
+        private static (string Key, ValueNode Value, SourceSpan ValueSpan) ParseSetCall(InvocationExpressionSyntax setInvocation)
+        {
+            var args = setInvocation.ArgumentList.Arguments;
+            if (args.Count != 2)
+            {
+                throw Fail(setInvocation, "Set(...) requires exactly two arguments");
+            }
+
+            string key;
+            var keyExpr = args[0].Expression;
+            if (keyExpr is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                key = literal.Token.ValueText;
+            }
+            else if (keyExpr is SimpleLambdaExpressionSyntax { Body: MemberAccessExpressionSyntax memberAccess })
+            {
+                key = "member:" + memberAccess.Name.Identifier.Text;
+            }
+            else
+            {
+                throw Fail(keyExpr, "Unsupported Set(...) key form (expected a string literal or `r => r.member`)");
+            }
+
+            var valueExpr = args[1].Expression;
+            var value = ValueNodeParser.Parse(valueExpr);
+            var valueSpan = new SourceSpan(valueExpr.SpanStart, valueExpr.Span.Length);
+            return (key, value, valueSpan);
         }
 
         // ---- Invocation-chain unwrap ----------------------------------------------------
@@ -422,6 +548,37 @@ namespace SceneBuilder.Core.Parsing
             throw Fail(expression, "Expected a numeric literal");
         }
 
+        // ---- Component LogicalId synthesis ------------------------------------------------
+
+        // Synthesizes each component's LogicalId as `{ownerLogicalId}/{Type.FullName}#{ordinal}`
+        // (ordinal among same-typed components on that owner) — deterministic-from-source, so
+        // an identical re-parse yields the identical id (second-Sync no-op holds), and stable
+        // against insertion of other-typed components. Runs once the whole tree's LogicalIds
+        // are finalized (see ParseCore).
+        private static void AssignComponentLogicalIds(List<NodeBuilder> roots)
+        {
+            foreach (var root in roots)
+            {
+                AssignComponentLogicalIds(root);
+            }
+        }
+
+        private static void AssignComponentLogicalIds(NodeBuilder node)
+        {
+            var ordinalByType = new Dictionary<string, int>();
+            foreach (var component in node.Components)
+            {
+                var ordinal = ordinalByType.TryGetValue(component.TypeFullName, out var count) ? count : 0;
+                ordinalByType[component.TypeFullName] = ordinal + 1;
+                component.LogicalId = $"{node.LogicalId}/{component.TypeFullName}#{ordinal}";
+            }
+
+            foreach (var child in node.Children)
+            {
+                AssignComponentLogicalIds(child);
+            }
+        }
+
         // ---- IdentityMap construction -----------------------------------------------------
 
         // Builds one IdentityMapEntry per parsed node, pre-order (document/declared order),
@@ -459,6 +616,18 @@ namespace SceneBuilder.Core.Parsing
                 ParentLogicalId = parentLogicalId,
             });
 
+            foreach (var component in node.Components)
+            {
+                entries.Add(new IdentityMapEntry
+                {
+                    LogicalId = component.LogicalId,
+                    GlobalObjectId = globalObjectIdByLogicalId.TryGetValue(component.LogicalId, out var componentGlobalObjectId) ? componentGlobalObjectId : "",
+                    Kind = "Component",
+                    ComponentType = component.TypeFullName,
+                    ParentLogicalId = node.LogicalId,
+                });
+            }
+
             foreach (var child in node.Children)
             {
                 CollectIdentityEntries(child, node.LogicalId, globalObjectIdByLogicalId, entries);
@@ -487,6 +656,65 @@ namespace SceneBuilder.Core.Parsing
             foreach (var child in node.Children)
             {
                 CollectAnchors(child, anchors);
+            }
+        }
+
+        // Builds one component-LogicalId->SourceSpan entry per parsed component, pre-order,
+        // kept SEPARATE from BuildAnchors/Anchors (GameObject-only).
+        private static IReadOnlyDictionary<string, SourceSpan> BuildComponentAnchors(List<NodeBuilder> roots)
+        {
+            var anchors = new Dictionary<string, SourceSpan>();
+            foreach (var root in roots)
+            {
+                CollectComponentAnchors(root, anchors);
+            }
+
+            return anchors;
+        }
+
+        private static void CollectComponentAnchors(NodeBuilder node, Dictionary<string, SourceSpan> anchors)
+        {
+            foreach (var component in node.Components)
+            {
+                anchors[component.LogicalId] = component.AnchorSpan;
+            }
+
+            foreach (var child in node.Children)
+            {
+                CollectComponentAnchors(child, anchors);
+            }
+        }
+
+        // Builds one componentLogicalId -> (fieldKey -> value SourceSpan) entry per parsed
+        // component, pre-order (mirrors BuildComponentAnchors/CollectComponentAnchors) — feed-
+        // forward for b5's span-local field-argument patching.
+        private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> BuildFieldArgumentSpans(List<NodeBuilder> roots)
+        {
+            var spans = new Dictionary<string, IReadOnlyDictionary<string, SourceSpan>>();
+            foreach (var root in roots)
+            {
+                CollectFieldArgumentSpans(root, spans);
+            }
+
+            return spans;
+        }
+
+        private static void CollectFieldArgumentSpans(NodeBuilder node, Dictionary<string, IReadOnlyDictionary<string, SourceSpan>> spans)
+        {
+            foreach (var component in node.Components)
+            {
+                var fieldSpans = new Dictionary<string, SourceSpan>();
+                foreach (var (key, span) in component.FieldValueSpans)
+                {
+                    fieldSpans[key] = span;
+                }
+
+                spans[component.LogicalId] = fieldSpans;
+            }
+
+            foreach (var child in node.Children)
+            {
+                CollectFieldArgumentSpans(child, spans);
             }
         }
 
@@ -531,7 +759,15 @@ namespace SceneBuilder.Core.Parsing
                 Rotation = builder.Rotation ?? Quat.Identity,
                 Scale = builder.Scale ?? Vec3.One,
             },
+            Components = builder.Components.Select(BuildComponent).ToArray(),
             Children = builder.Children.Select(BuildNode).ToArray(),
+        };
+
+        private static ComponentData BuildComponent(ComponentBuilder cb) => new()
+        {
+            LogicalId = cb.LogicalId,
+            Type = new TypeRef(cb.TypeFullName),
+            Fields = new FieldMap(cb.Fields),
         };
 
         // ---- Fail-loud helper -----------------------------------------------------------
@@ -563,6 +799,16 @@ namespace SceneBuilder.Core.Parsing
             public Vec3? Scale;
             public SourceSpan AnchorSpan;
             public readonly List<NodeBuilder> Children = new();
+            public readonly List<ComponentBuilder> Components = new();
+        }
+
+        private sealed class ComponentBuilder
+        {
+            public string TypeFullName = "";
+            public string LogicalId = "";
+            public SourceSpan AnchorSpan;
+            public readonly List<KeyValuePair<string, ValueNode>> Fields = new();
+            public readonly List<KeyValuePair<string, SourceSpan>> FieldValueSpans = new();
         }
 
         private sealed class ParserContext

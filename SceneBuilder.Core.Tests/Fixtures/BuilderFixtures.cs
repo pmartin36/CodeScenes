@@ -116,5 +116,110 @@ public class SiblingSceneB : ISceneDefinition
     }
 }
 ";
+
+        // b3-t1: .Component<T>() fixtures. Type arguments are authored FULLY QUALIFIED
+        // (Core does no namespace resolution — Type.FullName == typeArg.ToString() verbatim).
+
+        public const string ComponentWithRawField = @"
+public class ComponentRawFieldScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<UnityEngine.Rigidbody>(rb => rb.Set(""m_Mass"", 12f));
+    }
+}
+";
+
+        public const string ComponentWithTypedSetter = @"
+public class ComponentTypedSetterScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<UnityEngine.Rigidbody>(rb => rb.Set(r => r.mass, 12f));
+    }
+}
+";
+
+        public const string ComponentWithPrivateField = @"
+public class ComponentPrivateFieldScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<Game.Health>(h => h.Set(""_maxHealth"", 100));
+    }
+}
+";
+
+        // Two components chained onto the same node, in SOURCE order, for order/identity/anchor tests.
+        public const string ComponentSourceOrder = @"
+public class ComponentSourceOrderScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<UnityEngine.Rigidbody>(rb => rb.Set(""m_Mass"", 12f)).Component<Game.Health>(h => h.Set(""_maxHealth"", 100));
+    }
+}
+";
+
+        // b3-t2: one field per ValueNode kind (enum type authored fully-qualified per
+        // research Verdict #1/R1). Nested/List fixtures exercise structural (non-semantic)
+        // dispatch — Game.ImpactData/Game.Kitchen/Game.Oddity/Game.Trigger need not resolve.
+        public const string ComponentAllValueKinds = @"
+public class ComponentAllValueKindsScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Subject"").Component<Game.Kitchen>(c =>
+        {
+            c.Set(""flagBool"", true);
+            c.Set(""countInt"", 7);
+            c.Set(""bigLong"", 100L);
+            c.Set(""massFloat"", 12f);
+            c.Set(""ratioDouble"", 2.5);
+            c.Set(""label"", ""hello"");
+            c.Set(""faction"", Game.Faction.Enemy);
+            c.Set(""dir2"", new Vector2(1f, 2f));
+            c.Set(""dir3"", new Vector3(1f, 2f, 3f));
+            c.Set(""dir4"", new Vector4(1f, 2f, 3f, 4f));
+            c.Set(""rot"", new Quaternion(0f, 0f, 0f, 1f));
+            c.Set(""tint"", new Color(1f, 0f, 0f, 1f));
+            c.Set(""impact"", new Game.ImpactData { damage = 10, knockback = 2.5f });
+            c.Set(""order"", new int[] { 3, 1, 2 });
+        });
+    }
+}
+";
+
+        // b3-t2: flags-enum member order must not depend on source operand order.
+        public const string ComponentFlagsEnumGroundWater = @"
+public class ComponentFlagsEnumSceneA : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Zone"").Component<Game.Trigger>(t => t.Set(""layers"", Game.Layers.Ground | Game.Layers.Water));
+    }
+}
+";
+
+        public const string ComponentFlagsEnumWaterGround = @"
+public class ComponentFlagsEnumSceneB : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Zone"").Component<Game.Trigger>(t => t.Set(""layers"", Game.Layers.Water | Game.Layers.Ground));
+    }
+}
+";
+
+        // b3-t2: an unrecognized value form falls back to Unsupported(rawToken) — never fail-loud.
+        public const string ComponentUnsupportedValue = @"
+public class ComponentUnsupportedValueScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Weird"").Component<Game.Oddity>(o => o.Set(""m_Weird"", SomeWeirdExpr()));
+    }
+}
+";
     }
 }
