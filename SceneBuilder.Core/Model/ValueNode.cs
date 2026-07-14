@@ -21,6 +21,7 @@ namespace SceneBuilder.Core.Model
     [JsonDerivedType(typeof(ValueNode.Nested), "Nested")]
     [JsonDerivedType(typeof(ValueNode.List), "List")]
     [JsonDerivedType(typeof(ValueNode.Unsupported), "Unsupported")]
+    [JsonDerivedType(typeof(ValueNode.AssetRef), "AssetRef")]
     public abstract record ValueNode
     {
         public sealed record Primitive(
@@ -86,5 +87,9 @@ namespace SceneBuilder.Core.Model
         }
 
         public sealed record Unsupported(string RawToken) : ValueNode;
+
+        // Default record equality is correct: delegates to AssetRef.Equals through
+        // EqualityComparer<AssetRef?>.Default (null-safe).
+        public sealed record AssetRef(global::SceneBuilder.Core.Model.AssetRef? Ref) : ValueNode;
     }
 }
