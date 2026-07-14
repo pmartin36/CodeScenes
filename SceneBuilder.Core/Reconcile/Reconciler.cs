@@ -18,7 +18,8 @@ namespace SceneBuilder.Core.Reconcile
             SceneSnapshot actual,
             IdentityMap identityMap,
             IReadOnlyDictionary<string, SourceSpan>? anchors = null,
-            IReadOnlyCollection<string>? reservedIdentifiers = null)
+            IReadOnlyCollection<string>? reservedIdentifiers = null,
+            IReadOnlyDictionary<string, FlagPresence>? flagPresence = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
@@ -115,9 +116,79 @@ namespace SceneBuilder.Core.Reconcile
                         edits.Add(new ReorderStatement { Anchor = op.LogicalId, NewSiblingIndex = entry.SiblingIndex });
                         break;
 
+                    case SetTag:
+                        if (flagPresence != null)
+                        {
+                            var presence = flagPresence.TryGetValue(op.LogicalId, out var p) ? p : default;
+                            var flagEdit = ArgumentFlagEdit(
+                                op.LogicalId,
+                                FlagKind.Tag,
+                                presence.HasTag,
+                                entry.Node.Tag == "Untagged",
+                                SourceExpr.StringLiteral(entry.Node.Tag));
+                            if (flagEdit != null)
+                            {
+                                edits.Add(flagEdit);
+                            }
+                        }
+
+                        break;
+
+                    case SetLayer:
+                        if (flagPresence != null)
+                        {
+                            var presence = flagPresence.TryGetValue(op.LogicalId, out var p) ? p : default;
+                            var flagEdit = ArgumentFlagEdit(
+                                op.LogicalId,
+                                FlagKind.Layer,
+                                presence.HasLayer,
+                                entry.Node.Layer == 0,
+                                SourceExpr.IntLiteral(entry.Node.Layer));
+                            if (flagEdit != null)
+                            {
+                                edits.Add(flagEdit);
+                            }
+                        }
+
+                        break;
+
+                    case SetActive:
+                        if (flagPresence != null)
+                        {
+                            var presence = flagPresence.TryGetValue(op.LogicalId, out var p) ? p : default;
+                            var flagEdit = ArgumentFlagEdit(
+                                op.LogicalId,
+                                FlagKind.Active,
+                                presence.HasActive,
+                                entry.Node.Active,
+                                entry.Node.Active ? "true" : "false");
+                            if (flagEdit != null)
+                            {
+                                edits.Add(flagEdit);
+                            }
+                        }
+
+                        break;
+
+                    case SetStatic:
+                        if (flagPresence != null)
+                        {
+                            var presence = flagPresence.TryGetValue(op.LogicalId, out var p) ? p : default;
+                            if (entry.Node.IsStatic && !presence.HasStatic)
+                            {
+                                edits.Add(new IntroduceFlagCall { Anchor = op.LogicalId, Flag = FlagKind.Static, ArgExpr = null });
+                            }
+                            else if (!entry.Node.IsStatic && presence.HasStatic)
+                            {
+                                edits.Add(new RemoveFlagCall { Anchor = op.LogicalId, Flag = FlagKind.Static });
+                            }
+                        }
+
+                        break;
+
                     default:
-                        // SetTag/SetLayer/SetActive/SetStatic and AddNode/RemoveNode are out of
-                        // M2 sync-back scope; no SourceEdit is emitted for them.
+                        // AddNode/RemoveNode are out of M2 sync-back scope; no SourceEdit is
+                        // emitted for them.
                         break;
                 }
             }
@@ -478,5 +549,21 @@ namespace SceneBuilder.Core.Reconcile
         }
 
         private static string Quote(string value) => "\"" + value + "\"";
+
+        // Shared decision table for the three argument-carrying flags (Tag/Layer/Active).
+        // `present` = the flag call physically appears in the anchored statement (from
+        // FlagPresence); `isDefault` = the SNAPSHOT (scene) value equals the flag's type
+        // default. Static has no argument, so it is handled separately in the switch above.
+        private static SourceEdit? ArgumentFlagEdit(string anchor, FlagKind flag, bool present, bool isDefault, string literal)
+        {
+            if (present)
+            {
+                return isDefault
+                    ? new RemoveFlagCall { Anchor = anchor, Flag = flag }
+                    : new PatchFlagArgument { Anchor = anchor, Flag = flag, NewExpr = literal };
+            }
+
+            return isDefault ? null : new IntroduceFlagCall { Anchor = anchor, Flag = flag, ArgExpr = literal };
+        }
     }
 }
