@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
@@ -39,6 +40,12 @@ namespace SceneBuilder.Core.Reconcile
                         break;
                     case ReorderStatement reorderStatement:
                         ResolveReorderStatement(root, anchors, reorderStatement, allTargets, appliers);
+                        break;
+                    case RemoveStatement removeStatement:
+                        ResolveRemoveStatement(root, anchors, removeStatement, allTargets, appliers);
+                        break;
+                    case AppendStatement appendStatement:
+                        ResolveAppendStatement(root, anchors, appendStatement, allTargets, appliers);
                         break;
                     default:
                         throw Fail(root, $"Unsupported SourceEdit kind '{edit.GetType().Name}'.");
@@ -276,6 +283,171 @@ namespace SceneBuilder.Core.Reconcile
 
                 return currentRoot.ReplaceNode(currentBlock, newBlock);
             });
+        }
+
+        // ---- RemoveStatement --------------------------------------------------------------------
+
+        private static void ResolveRemoveStatement(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            RemoveStatement edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
+                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+
+            allTargets.Add(statement);
+            appliers.Add(currentRoot =>
+            {
+                var current = currentRoot.GetCurrentNode(statement)!;
+                return currentRoot.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;
+            });
+        }
+
+        // ---- AppendStatement ------------------------------------------------------------------
+
+        private static void ResolveAppendStatement(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            AppendStatement edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            if (edit.ParentAnchor == null)
+            {
+                var (buildMethod, sceneParamName) = FindBuildMethod(root);
+                var body = buildMethod.Body!;
+                var referenceStatement = body.Statements.Last();
+                var newStmt = ParseAppendStatement(edit, sceneParamName, referenceStatement);
+
+                allTargets.Add(body);
+                appliers.Add(currentRoot =>
+                {
+                    var currentBody = (BlockSyntax)currentRoot.GetCurrentNode(body)!;
+                    var newBody = currentBody.AddStatements(newStmt);
+                    return currentRoot.ReplaceNode(currentBody, newBody);
+                });
+            }
+            else
+            {
+                var parentInvocation = FindAnchorInvocation(root, anchors, edit.ParentAnchor);
+                var parentStatement = parentInvocation.FirstAncestorOrSelf<StatementSyntax>()
+                    ?? throw Fail(parentInvocation, $"Anchor '{edit.ParentAnchor}' is not inside a statement.");
+
+                var receiver = edit.ParentHandle
+                    ?? throw Fail(parentStatement, $"Anchor '{edit.ParentAnchor}' has no parent handle to append under.");
+
+                if (edit.IntroduceParentHandle)
+                {
+                    if (parentStatement is not ExpressionStatementSyntax parentExprStatement)
+                    {
+                        throw Fail(parentStatement, $"Anchor '{edit.ParentAnchor}' already declares a handle; cannot introduce '{receiver}' again.");
+                    }
+
+                    var declaration = BuildHandleDeclaration(parentExprStatement, receiver);
+                    var newStmt = ParseAppendStatement(edit, receiver, parentStatement);
+                    var annotation = new SyntaxAnnotation();
+                    var annotatedDeclaration = declaration.WithAdditionalAnnotations(annotation);
+
+                    allTargets.Add(parentStatement);
+                    appliers.Add(currentRoot =>
+                    {
+                        var currentParent = currentRoot.GetCurrentNode(parentStatement)!;
+                        currentRoot = currentRoot.ReplaceNode(currentParent, annotatedDeclaration);
+                        var declaredNode = currentRoot.GetAnnotatedNodes(annotation).Single();
+                        return currentRoot.InsertNodesAfter(declaredNode, new[] { newStmt });
+                    });
+                }
+                else
+                {
+                    var newStmt = ParseAppendStatement(edit, receiver, parentStatement);
+
+                    allTargets.Add(parentStatement);
+                    appliers.Add(currentRoot =>
+                    {
+                        var currentParent = currentRoot.GetCurrentNode(parentStatement)!;
+                        return currentRoot.InsertNodesAfter(currentParent, new[] { newStmt });
+                    });
+                }
+            }
+        }
+
+        private static StatementSyntax BuildHandleDeclaration(ExpressionStatementSyntax statement, string handle)
+        {
+            var text = $"var {handle} = {statement.Expression.WithoutTrivia().ToFullString()};";
+            return SyntaxFactory.ParseStatement(text)
+                .WithLeadingTrivia(statement.GetLeadingTrivia())
+                .WithTrailingTrivia(statement.GetTrailingTrivia());
+        }
+
+        private static StatementSyntax ParseAppendStatement(AppendStatement edit, string receiver, SyntaxNode referenceNode)
+        {
+            var text = BuildAppendStatementText(edit, receiver);
+            var indent = referenceNode.GetLeadingTrivia()
+                .LastOrDefault(t => t.IsKind(SyntaxKind.WhitespaceTrivia))
+                .ToString();
+
+            return SyntaxFactory.ParseStatement(text)
+                .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
+                .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
+        }
+
+        private static string BuildAppendStatementText(AppendStatement edit, string receiver)
+        {
+            var nameLiteral = SyntaxFactory.Literal(edit.Name).ToString();
+            var chain = $"{receiver}.Add({nameLiteral})";
+
+            if (edit.Transform != null)
+            {
+                var transform = edit.Transform;
+                var parts = new List<string>();
+
+                if (transform.Position != Vec3.Zero)
+                {
+                    parts.Add("pos: " + SourceExpr.Vec3Literal(transform.Position));
+                }
+
+                if (transform.Rotation != Quat.Identity)
+                {
+                    parts.Add("rot: " + SourceExpr.Vec3Literal(Rotation.QuatToEuler(transform.Rotation)));
+                }
+
+                if (transform.Scale != Vec3.One)
+                {
+                    parts.Add("scale: " + SourceExpr.Vec3Literal(transform.Scale));
+                }
+
+                if (parts.Count > 0)
+                {
+                    chain += ".Transform(" + string.Join(", ", parts) + ")";
+                }
+            }
+
+            if (edit.Tag != null)
+            {
+                chain += $".Tag({SyntaxFactory.Literal(edit.Tag)})";
+            }
+
+            if (edit.Layer != null)
+            {
+                chain += $".Layer({edit.Layer.Value})";
+            }
+
+            if (edit.Active != null)
+            {
+                chain += $".Active({(edit.Active.Value ? "true" : "false")})";
+            }
+
+            if (edit.IsStatic == true)
+            {
+                chain += ".Static()";
+            }
+
+            return edit.Handle != null
+                ? $"var {edit.Handle} = {chain};"
+                : $"{chain};";
         }
 
         // ---- Anchor resolution ------------------------------------------------------------------
