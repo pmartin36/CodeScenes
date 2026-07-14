@@ -16,5 +16,23 @@ namespace SceneBuilder.Core.Identity
 
         [JsonPropertyOrder(3)]
         public AssetEntry[] Assets { get; init; } = Array.Empty<AssetEntry>();
+
+        public bool IsManaged(string globalObjectId)
+        {
+            if (string.IsNullOrEmpty(globalObjectId))
+            {
+                return false;
+            }
+
+            foreach (var entry in Entries)
+            {
+                if (entry.GlobalObjectId == globalObjectId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }
