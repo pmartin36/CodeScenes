@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Materialize;
@@ -173,6 +174,240 @@ namespace SceneBuilder.Core.Tests
             var plan = Materializer.Materialize(model, snapshot, map);
 
             Assert.Empty(plan.Ops);
+        }
+
+        // M3 b4-t2: lower component ChangeOps (b4-t1 Differ) into Plan ops.
+
+        private static IdentityMap MatchedGameObjectMap(string logicalId = "root-1", string goid = "goid-root") =>
+            new()
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = logicalId, GlobalObjectId = goid, Kind = "GameObject" },
+                },
+            };
+
+        [Fact]
+        public void Materialize_ComponentAdd_EmitsAddComponentThenSetFields()
+        {
+            var rigidbody = new ComponentData
+            {
+                LogicalId = "rb-1",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(2)),
+                    new KeyValuePair<string, ValueNode>("m_Drag", ValueNode.Primitive.Float(0.5f)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { rigidbody } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            var ops = plan.Ops;
+            var addIndex = System.Array.FindIndex(ops, op => op is AddComponent ac && ac.LogicalId == "rb-1");
+            Assert.True(addIndex >= 0, "expected an AddComponent op for rb-1");
+
+            var addOp = Assert.IsType<AddComponent>(ops[addIndex]);
+            Assert.Equal("UnityEngine.Rigidbody", addOp.Type.FullName);
+
+            var followingSetFields = ops.Skip(addIndex + 1)
+                .TakeWhile(op => op is SetField sf && sf.LogicalId == "rb-1")
+                .Cast<SetField>()
+                .ToArray();
+
+            Assert.Equal(2, followingSetFields.Length);
+            Assert.Equal(new[] { "m_Mass", "m_Drag" }, followingSetFields.Select(f => f.Path));
+        }
+
+        [Fact]
+        public void Materialize_ComponentRemove_EmitsRemoveComponent_TransformExcluded()
+        {
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode
+            {
+                GlobalObjectId = "goid-root",
+                Name = "Root",
+                Components = new[]
+                {
+                    new ComponentData { Type = new TypeRef("UnityEngine.Transform") },
+                    new ComponentData { Type = new TypeRef("UnityEngine.BoxCollider") },
+                },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "bc-1",
+                        GlobalObjectId = "goid-bc-1",
+                        Kind = "Component",
+                        ComponentType = "UnityEngine.BoxCollider",
+                        ParentLogicalId = "root-1",
+                    },
+                },
+            };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var removes = plan.Ops.OfType<RemoveComponent>().ToArray();
+            var remove = Assert.Single(removes);
+            Assert.Equal("bc-1", remove.LogicalId);
+            Assert.DoesNotContain(plan.Ops, op => op is RemoveComponent rc && rc.LogicalId != "bc-1");
+        }
+
+        [Fact]
+        public void Materialize_FieldChangeAcrossKinds_EmitsSingleSetField()
+        {
+            ComponentData Component(string logicalId, FieldMap fields) => new()
+            {
+                LogicalId = logicalId,
+                Type = new TypeRef("Game.Health"),
+                Fields = fields,
+            };
+
+            var desiredFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("primitive", ValueNode.Primitive.Int(5)),
+                new KeyValuePair<string, ValueNode>("faction", new ValueNode.Enum("Game.Faction", new[] { "Enemy" }, false)),
+                new KeyValuePair<string, ValueNode>("velocity", new ValueNode.Vec3(new Vec3(1, 2, 3))),
+                new KeyValuePair<string, ValueNode>("tint", new ValueNode.Color(new Color(1, 0, 0, 1))),
+                new KeyValuePair<string, ValueNode>("nested", new ValueNode.Nested(new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("inner", ValueNode.Primitive.Int(1)),
+                }))),
+                new KeyValuePair<string, ValueNode>("items", new ValueNode.List(new ValueNode[] { ValueNode.Primitive.Int(1), ValueNode.Primitive.Int(2) })),
+            });
+
+            var actualFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("primitive", ValueNode.Primitive.Int(1)),
+                new KeyValuePair<string, ValueNode>("faction", new ValueNode.Enum("Game.Faction", new[] { "Neutral" }, false)),
+                new KeyValuePair<string, ValueNode>("velocity", new ValueNode.Vec3(new Vec3(0, 0, 0))),
+                new KeyValuePair<string, ValueNode>("tint", new ValueNode.Color(new Color(0, 0, 0, 1))),
+                new KeyValuePair<string, ValueNode>("nested", new ValueNode.Nested(new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("inner", ValueNode.Primitive.Int(0)),
+                }))),
+                new KeyValuePair<string, ValueNode>("items", new ValueNode.List(new ValueNode[] { ValueNode.Primitive.Int(9) })),
+            });
+
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { Component("health-1", desiredFields) } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode
+            {
+                GlobalObjectId = "goid-root",
+                Name = "Root",
+                Components = new[] { Component("health-1", actualFields) },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            var setFields = plan.Ops.OfType<SetField>().Where(op => op.LogicalId == "health-1").ToArray();
+            Assert.Equal(6, setFields.Length);
+            Assert.Equal(new[] { "primitive", "faction", "velocity", "tint", "nested", "items" }, setFields.Select(f => f.Path));
+            Assert.Equal(desiredFields["primitive"], Assert.Single(setFields, f => f.Path == "primitive").Value);
+            Assert.Equal(desiredFields["items"], Assert.Single(setFields, f => f.Path == "items").Value);
+        }
+
+        [Fact]
+        public void Materialize_ComponentOrder_RespectsDesiredOrder_TransformExcluded()
+        {
+            var rigidbody = new ComponentData { LogicalId = "rb-1", Type = new TypeRef("UnityEngine.Rigidbody") };
+            var boxCollider = new ComponentData { LogicalId = "bc-1", Type = new TypeRef("UnityEngine.BoxCollider") };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { rigidbody, boxCollider } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            var addComponentLogicalIdsInOrder = plan.Ops.OfType<AddComponent>().Select(op => op.LogicalId).ToArray();
+            Assert.Equal(new[] { "rb-1", "bc-1" }, addComponentLogicalIdsInOrder);
+            Assert.DoesNotContain(plan.Ops.OfType<AddComponent>(), op => op.Type.FullName == "UnityEngine.Transform");
+        }
+
+        [Fact]
+        public void Materialize_ComponentOrderDiffers_EmitsReorder()
+        {
+            var rigidbody = new ComponentData { LogicalId = "rb-1", Type = new TypeRef("UnityEngine.Rigidbody") };
+            var boxCollider = new ComponentData { LogicalId = "bc-1", Type = new TypeRef("UnityEngine.BoxCollider") };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { rigidbody, boxCollider } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode
+            {
+                GlobalObjectId = "goid-root",
+                Name = "Root",
+                Components = new[]
+                {
+                    new ComponentData { Type = new TypeRef("UnityEngine.Transform") },
+                    new ComponentData { Type = new TypeRef("UnityEngine.BoxCollider") },
+                    new ComponentData { Type = new TypeRef("UnityEngine.Rigidbody") },
+                },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            Assert.Empty(plan.Ops.OfType<AddComponent>());
+            Assert.Empty(plan.Ops.OfType<RemoveComponent>());
+
+            var reorders = plan.Ops.OfType<ReorderComponent>().ToArray();
+            Assert.Equal(2, reorders.Length);
+
+            var rbReorder = Assert.Single(reorders, r => r.ComponentLogicalId == "rb-1");
+            Assert.Equal("root-1", rbReorder.GameObjectLogicalId);
+            Assert.Equal(0, rbReorder.ToIndex);
+            Assert.Equal("rb-1", rbReorder.LogicalId);
+
+            var bcReorder = Assert.Single(reorders, r => r.ComponentLogicalId == "bc-1");
+            Assert.Equal(1, bcReorder.ToIndex);
+        }
+
+        [Fact]
+        public void Materialize_UnsupportedField_EmitsNoSetField_AndIsFlagged()
+        {
+            var desiredFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("weirdField", new ValueNode.Unsupported("SomeUnparseableExpr()")),
+            });
+            var actualFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("weirdField", ValueNode.Primitive.Int(0)),
+            });
+
+            var component = new ComponentData { LogicalId = "comp-1", Type = new TypeRef("Game.Weird"), Fields = desiredFields };
+            var actualComponent = new ComponentData { LogicalId = "comp-1", Type = new TypeRef("Game.Weird"), Fields = actualFields };
+
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { component } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            Assert.DoesNotContain(plan.Ops, op => op is SetField sf && sf.Path == "weirdField");
+
+            var skipped = Assert.Single(plan.Skipped);
+            Assert.Equal("comp-1", skipped.LogicalId);
+            Assert.Equal("weirdField", skipped.Path);
         }
     }
 }

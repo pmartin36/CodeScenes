@@ -54,4 +54,29 @@ namespace SceneBuilder.Core.Diff
     {
         public TransformData Transform { get; init; } = new();
     }
+
+    // M3 component ChangeOps (b4-t1). LogicalId (base) is the owning GameObject's LogicalId.
+    public sealed record AddComponent : ChangeOp
+    {
+        public ComponentData Component { get; init; } = new();
+    }
+
+    public sealed record RemoveComponent : ChangeOp
+    {
+        public string ComponentLogicalId { get; init; } = "";
+        public TypeRef ComponentType { get; init; } = new TypeRef("");
+    }
+
+    public sealed record SetField : ChangeOp
+    {
+        public string ComponentLogicalId { get; init; } = "";
+        public string Path { get; init; } = "";
+        public ValueNode Value { get; init; } = ValueNode.Primitive.Int(0);
+    }
+
+    public sealed record ReorderComponent : ChangeOp
+    {
+        public string ComponentLogicalId { get; init; } = "";
+        public int ToIndex { get; init; }
+    }
 }

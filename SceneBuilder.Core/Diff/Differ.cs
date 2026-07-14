@@ -25,7 +25,7 @@ namespace SceneBuilder.Core.Diff
             var visitedGoids = new HashSet<string>();
             var ops = new List<ChangeOp>();
 
-            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, ops);
+            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops);
 
             foreach (var kv in snapshotByGoid)
             {
@@ -66,6 +66,7 @@ namespace SceneBuilder.Core.Diff
             Dictionary<string, string> logicalIdToGlobalObjectId,
             Dictionary<string, SnapshotEntry> snapshotByGoid,
             HashSet<string> visitedGoids,
+            IdentityMap identityMap,
             List<ChangeOp> ops)
         {
             for (var i = 0; i < nodes.Length; i++)
@@ -75,14 +76,14 @@ namespace SceneBuilder.Core.Diff
                     && snapshotByGoid.TryGetValue(goid, out var entry))
                 {
                     visitedGoids.Add(goid);
-                    EmitEdits(node, parentLogicalId, i, logicalIdToGlobalObjectId, entry, ops);
+                    EmitEdits(node, parentLogicalId, i, logicalIdToGlobalObjectId, entry, identityMap, ops);
                 }
                 else
                 {
                     EmitCreate(node, parentLogicalId, ops);
                 }
 
-                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, ops);
+                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops);
             }
         }
 
@@ -92,6 +93,7 @@ namespace SceneBuilder.Core.Diff
             int siblingIndex,
             Dictionary<string, string> logicalIdToGlobalObjectId,
             SnapshotEntry entry,
+            IdentityMap identityMap,
             List<ChangeOp> ops)
         {
             var snapshot = entry.Node;
@@ -139,6 +141,132 @@ namespace SceneBuilder.Core.Diff
             {
                 ops.Add(new Reorder { LogicalId = node.LogicalId, SiblingIndex = siblingIndex });
             }
+
+            EmitComponentEdits(node, snapshot, identityMap, ops);
+        }
+
+        // Diffs components on a matched GameObject (b4-t1). Component correspondence between
+        // desired and actual is by (Type.FullName, ordinal-within-that-type) — this exactly
+        // reconstructs the LogicalId scheme the parser assigns
+        // (BuilderParser.AssignComponentLogicalIds), so desired-side identity is just the
+        // component's own LogicalId. Transform is excluded from the actual side (never authored,
+        // never removed/reordered). Removed-component identity is resolved from the IdentityMap's
+        // Component entries (managed gate), never synthesized.
+        private static void EmitComponentEdits(GameObjectNode node, SnapshotNode snapshot, IdentityMap identityMap, List<ChangeOp> ops)
+        {
+            var ownerLogicalId = node.LogicalId;
+            var desiredComps = node.Components;
+            var actualComps = snapshot.Components
+                .Where(c => c.Type.FullName != "UnityEngine.Transform")
+                .ToArray();
+
+            var desiredKeys = ComputeComponentKeys(desiredComps);
+            var actualKeys = ComputeComponentKeys(actualComps);
+
+            var desiredIndexByKey = new Dictionary<(string TypeFullName, int Ordinal), int>();
+            for (var i = 0; i < desiredComps.Length; i++)
+            {
+                desiredIndexByKey[desiredKeys[i]] = i;
+            }
+
+            var actualIndexByKey = new Dictionary<(string TypeFullName, int Ordinal), int>();
+            for (var i = 0; i < actualComps.Length; i++)
+            {
+                actualIndexByKey[actualKeys[i]] = i;
+            }
+
+            var managedEntriesByType = identityMap.Entries
+                .Where(e => e.Kind == "Component" && e.ParentLogicalId == ownerLogicalId)
+                .GroupBy(e => e.ComponentType ?? "")
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var addOps = new List<ChangeOp>();
+            var setFieldOps = new List<ChangeOp>();
+            var removeOps = new List<ChangeOp>();
+            var reorderOps = new List<ChangeOp>();
+
+            for (var i = 0; i < desiredComps.Length; i++)
+            {
+                var desiredComponent = desiredComps[i];
+                if (actualIndexByKey.TryGetValue(desiredKeys[i], out var actualIndex))
+                {
+                    var actualComponent = actualComps[actualIndex];
+                    foreach (var field in desiredComponent.Fields)
+                    {
+                        if (!actualComponent.Fields.TryGetValue(field.Key, out var actualValue) || actualValue != field.Value)
+                        {
+                            setFieldOps.Add(new SetField
+                            {
+                                LogicalId = ownerLogicalId,
+                                ComponentLogicalId = desiredComponent.LogicalId,
+                                Path = field.Key,
+                                Value = field.Value,
+                            });
+                        }
+                    }
+                }
+                else
+                {
+                    addOps.Add(new AddComponent { LogicalId = ownerLogicalId, Component = desiredComponent });
+                }
+            }
+
+            for (var i = 0; i < actualComps.Length; i++)
+            {
+                var key = actualKeys[i];
+                if (desiredIndexByKey.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                var actualComponent = actualComps[i];
+                if (managedEntriesByType.TryGetValue(actualComponent.Type.FullName, out var entries) && key.Ordinal < entries.Count)
+                {
+                    removeOps.Add(new RemoveComponent
+                    {
+                        LogicalId = ownerLogicalId,
+                        ComponentLogicalId = entries[key.Ordinal].LogicalId,
+                        ComponentType = actualComponent.Type,
+                    });
+                }
+            }
+
+            if (new HashSet<(string TypeFullName, int Ordinal)>(desiredKeys).SetEquals(actualKeys))
+            {
+                for (var i = 0; i < desiredComps.Length; i++)
+                {
+                    var actualIndex = actualIndexByKey[desiredKeys[i]];
+                    if (i != actualIndex)
+                    {
+                        reorderOps.Add(new ReorderComponent
+                        {
+                            LogicalId = ownerLogicalId,
+                            ComponentLogicalId = desiredComps[i].LogicalId,
+                            ToIndex = i,
+                        });
+                    }
+                }
+            }
+
+            ops.AddRange(addOps);
+            ops.AddRange(setFieldOps);
+            ops.AddRange(removeOps);
+            ops.AddRange(reorderOps);
+        }
+
+        private static (string TypeFullName, int Ordinal)[] ComputeComponentKeys(ComponentData[] components)
+        {
+            var keys = new (string TypeFullName, int Ordinal)[components.Length];
+            var ordinalByType = new Dictionary<string, int>();
+            for (var i = 0; i < components.Length; i++)
+            {
+                var typeFullName = components[i].Type.FullName;
+                var ordinal = ordinalByType.TryGetValue(typeFullName, out var count) ? count : 0;
+                ordinalByType[typeFullName] = ordinal + 1;
+                keys[i] = (typeFullName, ordinal);
+            }
+
+            return keys;
         }
 
         private static void EmitCreate(GameObjectNode node, string? parentLogicalId, List<ChangeOp> ops)

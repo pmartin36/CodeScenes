@@ -15,6 +15,7 @@ namespace SceneBuilder.Core.Materialize
 
             var passA = new List<PlanOp>();
             var passB = new List<PlanOp>();
+            var skipped = new List<SkippedField>();
 
             foreach (var op in changeSet.Ops)
             {
@@ -79,6 +80,48 @@ namespace SceneBuilder.Core.Materialize
                             Value = new ValueNode.Vec3(setTransform.Transform.Scale),
                         });
                         break;
+                    case Change.AddComponent addComponent:
+                        passB.Add(new AddComponent
+                        {
+                            LogicalId = addComponent.Component.LogicalId,
+                            Type = addComponent.Component.Type,
+                        });
+                        foreach (var (path, value) in addComponent.Component.Fields)
+                        {
+                            if (value is ValueNode.Unsupported)
+                            {
+                                skipped.Add(new SkippedField { LogicalId = addComponent.Component.LogicalId, Path = path });
+                            }
+                            else
+                            {
+                                passB.Add(new SetField { LogicalId = addComponent.Component.LogicalId, Path = path, Value = value });
+                            }
+                        }
+
+                        break;
+                    case Change.SetField setField:
+                        if (setField.Value is ValueNode.Unsupported)
+                        {
+                            skipped.Add(new SkippedField { LogicalId = setField.ComponentLogicalId, Path = setField.Path });
+                        }
+                        else
+                        {
+                            passB.Add(new SetField { LogicalId = setField.ComponentLogicalId, Path = setField.Path, Value = setField.Value });
+                        }
+
+                        break;
+                    case Change.RemoveComponent removeComponent:
+                        passB.Add(new RemoveComponent { LogicalId = removeComponent.ComponentLogicalId });
+                        break;
+                    case Change.ReorderComponent reorderComponent:
+                        passB.Add(new ReorderComponent
+                        {
+                            LogicalId = reorderComponent.ComponentLogicalId,
+                            GameObjectLogicalId = reorderComponent.LogicalId,
+                            ComponentLogicalId = reorderComponent.ComponentLogicalId,
+                            ToIndex = reorderComponent.ToIndex,
+                        });
+                        break;
                 }
             }
 
@@ -87,6 +130,7 @@ namespace SceneBuilder.Core.Materialize
                 SchemaVersion = desired.SchemaVersion,
                 ScenePath = identityMap.Scene,
                 Ops = passA.Concat(passB).ToArray(),
+                Skipped = skipped.ToArray(),
             };
         }
     }

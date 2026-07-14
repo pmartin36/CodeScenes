@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Diff;
 using SceneBuilder.Core.Identity;
@@ -158,6 +159,210 @@ namespace SceneBuilder.Core.Tests
             Assert.Empty(changeSet.Ops.OfType<AddNode>());
             Assert.Empty(changeSet.Ops.OfType<RemoveNode>());
             Assert.Equal("goid-root", Assert.Single(map.Entries, e => e.LogicalId == "root-1").GlobalObjectId);
+        }
+
+        [Fact]
+        public void Diff_ComponentInDesiredOnly_EmitsAddComponent()
+        {
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Rigidbody#0",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(12f)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var add = Assert.Single(changeSet.Ops.OfType<AddComponent>());
+            Assert.Equal("root-1", add.LogicalId);
+            Assert.Equal(desiredComponent, add.Component);
+            Assert.Empty(changeSet.Ops.OfType<SetField>());
+        }
+
+        [Fact]
+        public void Diff_ComponentInActualOnly_ManagedRemoved_UnmanagedAndTransformNeverRemoved()
+        {
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var transformComponent = new ComponentData { Type = new TypeRef("UnityEngine.Transform") };
+            var managedRigidbody = new ComponentData { Type = new TypeRef("UnityEngine.Rigidbody") };
+            var unmanagedBoxCollider = new ComponentData { Type = new TypeRef("UnityEngine.BoxCollider") };
+            var snapshotRoot = new SnapshotNode
+            {
+                GlobalObjectId = "goid-root",
+                Name = "Root",
+                Components = new[] { transformComponent, managedRigidbody, unmanagedBoxCollider },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "root-1/UnityEngine.Rigidbody#0",
+                        GlobalObjectId = "",
+                        Kind = "Component",
+                        ComponentType = "UnityEngine.Rigidbody",
+                        ParentLogicalId = "root-1",
+                    },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var removed = Assert.Single(changeSet.Ops.OfType<RemoveComponent>());
+            Assert.Equal("root-1", removed.LogicalId);
+            Assert.Equal("root-1/UnityEngine.Rigidbody#0", removed.ComponentLogicalId);
+            Assert.Equal("UnityEngine.Rigidbody", removed.ComponentType.FullName);
+            Assert.DoesNotContain(changeSet.Ops.OfType<RemoveComponent>(), op => op.ComponentType.FullName == "UnityEngine.Transform");
+            Assert.DoesNotContain(changeSet.Ops.OfType<RemoveComponent>(), op => op.ComponentType.FullName == "UnityEngine.BoxCollider");
+        }
+
+        [Fact]
+        public void Diff_FieldValueDiffers_EmitsSingleSetFieldForChangedPathOnly()
+        {
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Rigidbody#0",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(12f)),
+                    new KeyValuePair<string, ValueNode>("m_Drag", ValueNode.Primitive.Float(0f)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(8f)),
+                    new KeyValuePair<string, ValueNode>("m_Drag", ValueNode.Primitive.Float(0f)),
+                }),
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("root-1", setField.LogicalId);
+            Assert.Equal("root-1/UnityEngine.Rigidbody#0", setField.ComponentLogicalId);
+            Assert.Equal("m_Mass", setField.Path);
+            Assert.Equal(ValueNode.Primitive.Float(12f), setField.Value);
+            Assert.Empty(changeSet.Ops.OfType<AddComponent>());
+            Assert.Empty(changeSet.Ops.OfType<RemoveComponent>());
+        }
+
+        [Fact]
+        public void Diff_FieldExactEquality_OneUlpFloatDiffers_EmitsSetField()
+        {
+            var baseline = 1.0f;
+            var oneUlpMore = System.MathF.BitIncrement(baseline);
+
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Rigidbody#0",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(baseline)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(oneUlpMore)),
+                }),
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("m_Mass", setField.Path);
+            Assert.Equal(ValueNode.Primitive.Float(baseline), setField.Value);
+        }
+
+        [Fact]
+        public void Diff_SameComponentSetDifferentOrder_EmitsReorder_NoAddRemove()
+        {
+            var desiredRigidbody = new ComponentData { LogicalId = "root-1/UnityEngine.Rigidbody#0", Type = new TypeRef("UnityEngine.Rigidbody") };
+            var desiredBoxCollider = new ComponentData { LogicalId = "root-1/UnityEngine.BoxCollider#0", Type = new TypeRef("UnityEngine.BoxCollider") };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredRigidbody, desiredBoxCollider } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var transformComponent = new ComponentData { Type = new TypeRef("UnityEngine.Transform") };
+            var actualBoxCollider = new ComponentData { Type = new TypeRef("UnityEngine.BoxCollider") };
+            var actualRigidbody = new ComponentData { Type = new TypeRef("UnityEngine.Rigidbody") };
+            var snapshotRoot = new SnapshotNode
+            {
+                GlobalObjectId = "goid-root",
+                Name = "Root",
+                Components = new[] { transformComponent, actualBoxCollider, actualRigidbody },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.Empty(changeSet.Ops.OfType<AddComponent>());
+            Assert.Empty(changeSet.Ops.OfType<RemoveComponent>());
+            var reorders = changeSet.Ops.OfType<ReorderComponent>().ToArray();
+            Assert.Contains(reorders, r => r.ComponentLogicalId == "root-1/UnityEngine.Rigidbody#0" && r.ToIndex == 0);
+            Assert.Contains(reorders, r => r.ComponentLogicalId == "root-1/UnityEngine.BoxCollider#0" && r.ToIndex == 1);
         }
     }
 }
