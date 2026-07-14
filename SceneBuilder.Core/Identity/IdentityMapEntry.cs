@@ -18,5 +18,11 @@ namespace SceneBuilder.Core.Identity
 
         [JsonPropertyOrder(4)]
         public string? ParentLogicalId { get; init; }
+
+        [JsonPropertyOrder(5)]
+        public string Name { get; init; } = "";
+
+        [JsonPropertyOrder(6)]
+        public int SiblingIndex { get; init; } = 0;
     }
 }

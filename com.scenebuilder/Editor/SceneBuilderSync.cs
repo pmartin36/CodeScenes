@@ -51,7 +51,8 @@ namespace SceneBuilder.Editor
                     reservedIdentifiers: null,
                     flagPresence: parse.FlagPresence,
                     componentAnchors: parse.ComponentAnchors,
-                    fieldArgumentSpans: fieldArgumentSpans);
+                    fieldArgumentSpans: fieldArgumentSpans,
+                    handles: parse.Handles);
 
                 foreach (var c in result.Conflicts)
                 {

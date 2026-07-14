@@ -594,9 +594,9 @@ namespace SceneBuilder.Core.Parsing
                 ?? new Dictionary<string, string>();
 
             var entries = new List<IdentityMapEntry>();
-            foreach (var root in roots)
+            for (var i = 0; i < roots.Count; i++)
             {
-                CollectIdentityEntries(root, null, globalObjectIdByLogicalId, entries);
+                CollectIdentityEntries(roots[i], null, i, globalObjectIdByLogicalId, entries);
             }
 
             return new IdentityMap
@@ -608,7 +608,7 @@ namespace SceneBuilder.Core.Parsing
             };
         }
 
-        private static void CollectIdentityEntries(NodeBuilder node, string? parentLogicalId, Dictionary<string, string> globalObjectIdByLogicalId, List<IdentityMapEntry> entries)
+        private static void CollectIdentityEntries(NodeBuilder node, string? parentLogicalId, int siblingIndex, Dictionary<string, string> globalObjectIdByLogicalId, List<IdentityMapEntry> entries)
         {
             entries.Add(new IdentityMapEntry
             {
@@ -617,6 +617,8 @@ namespace SceneBuilder.Core.Parsing
                 Kind = "GameObject",
                 ComponentType = null,
                 ParentLogicalId = parentLogicalId,
+                Name = node.Name,
+                SiblingIndex = siblingIndex,
             });
 
             foreach (var component in node.Components)
@@ -631,9 +633,9 @@ namespace SceneBuilder.Core.Parsing
                 });
             }
 
-            foreach (var child in node.Children)
+            for (var i = 0; i < node.Children.Count; i++)
             {
-                CollectIdentityEntries(child, node.LogicalId, globalObjectIdByLogicalId, entries);
+                CollectIdentityEntries(node.Children[i], node.LogicalId, i, globalObjectIdByLogicalId, entries);
             }
         }
 

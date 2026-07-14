@@ -31,11 +31,47 @@ namespace SceneBuilder.Editor
             "m_GameObject",
         };
 
+        // Per-type default-field reference maps (propertyPath -> default ValueNode), built once by
+        // instantiating a throwaway component and cached by System.Type. A null entry means the
+        // default instance could not be constructed for that type — fall back to capturing all
+        // supported fields (no default-filtering) for it.
+        private static readonly Dictionary<Type, IReadOnlyDictionary<string, ValueNode>?> DefaultFieldCache = new();
+
         // ---- Read (component -> ComponentData) ---------------------------------------------
 
         public static ComponentData ReadComponent(Component component)
         {
-            var so = new SerializedObject(component);
+            var fields = CollectFields(new SerializedObject(component));
+            var defaults = GetDefaultFieldMap(component.GetType());
+
+            var kept = new List<KeyValuePair<string, ValueNode>>(fields.Count);
+            foreach (var field in fields)
+            {
+                // Skip fields whose value equals a freshly-constructed default instance's value
+                // (ValueNode is a record, so value-equality holds). When no default reference is
+                // available (construction failed), keep everything — never drop user data.
+                if (defaults != null
+                    && defaults.TryGetValue(field.Key, out var defaultValue)
+                    && defaultValue.Equals(field.Value))
+                {
+                    continue;
+                }
+
+                kept.Add(field);
+            }
+
+            return new ComponentData
+            {
+                Type = new TypeRef(component.GetType().FullName),
+                Fields = new FieldMap(kept),
+            };
+        }
+
+        // Collects the supported, non-bookkeeping top-level serialized fields of a component as
+        // (propertyPath -> ValueNode) pairs. Shared by the real-component read path and the
+        // default-reference builder so both filter identically.
+        private static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so)
+        {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
             var it = so.GetIterator();
@@ -62,11 +98,52 @@ namespace SceneBuilder.Editor
                 fields.Add(new KeyValuePair<string, ValueNode>(it.propertyPath, value));
             }
 
-            return new ComponentData
+            return fields;
+        }
+
+        // Builds (and caches) the default-value reference map for a component type by adding a
+        // throwaway instance to a hidden GameObject. Returns null (cached) when the type cannot be
+        // instantiated standalone, signalling the caller to skip default-filtering for it.
+        private static IReadOnlyDictionary<string, ValueNode>? GetDefaultFieldMap(Type type)
+        {
+            if (DefaultFieldCache.TryGetValue(type, out var cached))
             {
-                Type = new TypeRef(component.GetType().FullName),
-                Fields = new FieldMap(fields),
-            };
+                return cached;
+            }
+
+            IReadOnlyDictionary<string, ValueNode>? map = null;
+            GameObject? temp = null;
+            try
+            {
+                temp = new GameObject { hideFlags = HideFlags.HideAndDontSave };
+                var defaultComponent = temp.AddComponent(type);
+                if (defaultComponent is not null)
+                {
+                    var dict = new Dictionary<string, ValueNode>();
+                    foreach (var field in CollectFields(new SerializedObject(defaultComponent)))
+                    {
+                        dict[field.Key] = field.Value;
+                    }
+
+                    map = dict;
+                }
+            }
+            catch
+            {
+                // AddComponent threw (e.g. type requires siblings or isn't addable standalone) —
+                // fall back to no default-filtering for this type rather than crash the sync.
+                map = null;
+            }
+            finally
+            {
+                if (temp is not null)
+                {
+                    UnityEngine.Object.DestroyImmediate(temp);
+                }
+            }
+
+            DefaultFieldCache[type] = map;
+            return map;
         }
 
         private static ValueNode ReadProperty(SerializedProperty p)
