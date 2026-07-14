@@ -28,6 +28,19 @@ namespace SceneBuilder.Core.Reconcile
             var allTargets = new List<SyntaxNode>();
             var appliers = new List<Func<SyntaxNode, SyntaxNode>>();
 
+            // One annotation per AppendStatement in this batch, keyed by NewLogicalId, so a
+            // same-batch child can locate its parent's freshly-inserted statement even though the
+            // Applier otherwise resolves every edit against the original unmutated tree.
+            var appendAnnotations = new Dictionary<string, SyntaxAnnotation>();
+            foreach (var appendEdit in patch.Edits.OfType<AppendStatement>())
+            {
+                appendAnnotations[appendEdit.NewLogicalId] = new SyntaxAnnotation();
+            }
+
+            // Tracks the most-recently-resolved same-batch sibling under each fresh parent, so
+            // multiple children appended under one new-subtree parent preserve emission order.
+            var lastSiblingByParent = new Dictionary<string, SyntaxAnnotation>();
+
             foreach (var edit in patch.Edits)
             {
                 switch (edit)
@@ -45,7 +58,7 @@ namespace SceneBuilder.Core.Reconcile
                         ResolveRemoveStatement(root, anchors, removeStatement, allTargets, appliers);
                         break;
                     case AppendStatement appendStatement:
-                        ResolveAppendStatement(root, anchors, appendStatement, allTargets, appliers);
+                        ResolveAppendStatement(root, anchors, appendStatement, appendAnnotations, lastSiblingByParent, allTargets, appliers);
                         break;
                     default:
                         throw Fail(root, $"Unsupported SourceEdit kind '{edit.GetType().Name}'.");
@@ -312,15 +325,20 @@ namespace SceneBuilder.Core.Reconcile
             CompilationUnitSyntax root,
             IReadOnlyDictionary<string, SourceSpan> anchors,
             AppendStatement edit,
+            Dictionary<string, SyntaxAnnotation> appendAnnotations,
+            Dictionary<string, SyntaxAnnotation> lastSiblingByParent,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
+            var ownAnnotation = appendAnnotations[edit.NewLogicalId];
+
             if (edit.ParentAnchor == null)
             {
                 var (buildMethod, sceneParamName) = FindBuildMethod(root);
                 var body = buildMethod.Body!;
-                var referenceStatement = body.Statements.Last();
-                var newStmt = ParseAppendStatement(edit, sceneParamName, referenceStatement);
+                var indent = BodyIndent(root);
+                var newStmt = ParseAppendStatement(edit, sceneParamName, indent)
+                    .WithAdditionalAnnotations(ownAnnotation);
 
                 allTargets.Add(body);
                 appliers.Add(currentRoot =>
@@ -328,6 +346,30 @@ namespace SceneBuilder.Core.Reconcile
                     var currentBody = (BlockSyntax)currentRoot.GetCurrentNode(body)!;
                     var newBody = currentBody.AddStatements(newStmt);
                     return currentRoot.ReplaceNode(currentBody, newBody);
+                });
+            }
+            else if (appendAnnotations.ContainsKey(edit.ParentAnchor))
+            {
+                // Parent is appended in THIS SAME batch (e.g. a b2-t3 new-subtree: parent+child
+                // both AppendStatements), so it has no anchor in the ORIGINAL source yet. Relay
+                // placement via the parent's (or previous same-batch sibling's) annotation instead
+                // of FindAnchorInvocation.
+                var receiver = edit.ParentHandle
+                    ?? throw Fail(root, $"AppendStatement '{edit.NewLogicalId}' targets same-batch parent '{edit.ParentAnchor}' but has no ParentHandle.");
+
+                var anchorAnnotation = lastSiblingByParent.TryGetValue(edit.ParentAnchor, out var siblingAnnotation)
+                    ? siblingAnnotation
+                    : appendAnnotations[edit.ParentAnchor];
+                lastSiblingByParent[edit.ParentAnchor] = ownAnnotation;
+
+                var indent = BodyIndent(root);
+                var newStmt = ParseAppendStatement(edit, receiver, indent)
+                    .WithAdditionalAnnotations(ownAnnotation);
+
+                appliers.Add(currentRoot =>
+                {
+                    var parentNode = currentRoot.GetAnnotatedNodes(anchorAnnotation).Single();
+                    return currentRoot.InsertNodesAfter(parentNode, new[] { newStmt });
                 });
             }
             else
@@ -347,7 +389,8 @@ namespace SceneBuilder.Core.Reconcile
                     }
 
                     var declaration = BuildHandleDeclaration(parentExprStatement, receiver);
-                    var newStmt = ParseAppendStatement(edit, receiver, parentStatement);
+                    var newStmt = ParseAppendStatement(edit, receiver, IndentOf(parentStatement))
+                        .WithAdditionalAnnotations(ownAnnotation);
                     var annotation = new SyntaxAnnotation();
                     var annotatedDeclaration = declaration.WithAdditionalAnnotations(annotation);
 
@@ -362,7 +405,8 @@ namespace SceneBuilder.Core.Reconcile
                 }
                 else
                 {
-                    var newStmt = ParseAppendStatement(edit, receiver, parentStatement);
+                    var newStmt = ParseAppendStatement(edit, receiver, IndentOf(parentStatement))
+                        .WithAdditionalAnnotations(ownAnnotation);
 
                     allTargets.Add(parentStatement);
                     appliers.Add(currentRoot =>
@@ -382,16 +426,30 @@ namespace SceneBuilder.Core.Reconcile
                 .WithTrailingTrivia(statement.GetTrailingTrivia());
         }
 
-        private static StatementSyntax ParseAppendStatement(AppendStatement edit, string receiver, SyntaxNode referenceNode)
+        private static StatementSyntax ParseAppendStatement(AppendStatement edit, string receiver, string indent)
         {
             var text = BuildAppendStatementText(edit, receiver);
-            var indent = referenceNode.GetLeadingTrivia()
-                .LastOrDefault(t => t.IsKind(SyntaxKind.WhitespaceTrivia))
-                .ToString();
 
             return SyntaxFactory.ParseStatement(text)
                 .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
                 .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
+        }
+
+        private static string IndentOf(SyntaxNode node)
+        {
+            return node.GetLeadingTrivia()
+                .LastOrDefault(t => t.IsKind(SyntaxKind.WhitespaceTrivia))
+                .ToString();
+        }
+
+        private static string BodyIndent(SyntaxNode root)
+        {
+            var (buildMethod, _) = FindBuildMethod(root);
+            var body = buildMethod.Body!;
+
+            return body.Statements.Count > 0
+                ? IndentOf(body.Statements[0])
+                : IndentOf(buildMethod) + "    ";
         }
 
         private static string BuildAppendStatementText(AppendStatement edit, string receiver)

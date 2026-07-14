@@ -444,5 +444,136 @@ public class AppendIntroduceHandleScene : ISceneDefinition
             var child = Assert.Single(parent.Children);
             Assert.Equal("NewChild", child.Name);
         }
+
+        // ---- AppendStatement: same-batch new subtree + empty body (FINAL F1/F2) -----------
+
+        private const string AppendSubtreeFixture = @"
+public class AppendSubtreeScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        // Existing root, untouched.
+        var existing = scene.Add(""Existing"");
+    }
+}
+";
+
+        [Fact]
+        public void Append_NewSubtree_ParentThenChild_ChildLandsAfterParent_SameBatch()
+        {
+            // Exact shape b2-t3 emits (ReconcileTests.cs:481-498): a fresh parent AppendStatement
+            // (Handle == NewLogicalId == "parent") followed by a child AppendStatement whose
+            // ParentAnchor is that SAME batch's fresh handle, not a pre-existing source anchor.
+            var source = AppendSubtreeFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendStatement
+                    {
+                        NewLogicalId = "parent",
+                        Name = "Parent",
+                        Handle = "parent",
+                    },
+                    new AppendStatement
+                    {
+                        NewLogicalId = "parent/Child/0",
+                        ParentAnchor = "parent",
+                        ParentHandle = "parent",
+                        Name = "Child",
+                    },
+                },
+            };
+
+            // Must NOT throw PatchException("No anchor found for logical id 'parent'").
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            // Unrelated pre-existing statement + comment untouched.
+            Assert.Contains("        // Existing root, untouched.\n        var existing = scene.Add(\"Existing\");", result);
+
+            // Child lands on the line immediately after the parent, referencing its handle.
+            Assert.Contains(
+                "        var parent = scene.Add(\"Parent\");\n        parent.Add(\"Child\");\n",
+                result);
+
+            var reparsed = BuilderParser.Parse(result);
+            var parent = Assert.Single(reparsed.Model.Roots, r => r.Name == "Parent");
+            var child = Assert.Single(parent.Children);
+            Assert.Equal("Child", child.Name);
+        }
+
+        [Fact]
+        public void Append_TwoChildrenUnderFreshParent_PreservesSiblingOrder()
+        {
+            var source = AppendSubtreeFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendStatement { NewLogicalId = "parent", Name = "Parent", Handle = "parent" },
+                    new AppendStatement
+                    {
+                        NewLogicalId = "parent/Child0/0",
+                        ParentAnchor = "parent",
+                        ParentHandle = "parent",
+                        Name = "Child0",
+                    },
+                    new AppendStatement
+                    {
+                        NewLogicalId = "parent/Child1/1",
+                        ParentAnchor = "parent",
+                        ParentHandle = "parent",
+                        Name = "Child1",
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.True(
+                result.IndexOf("Child0", StringComparison.Ordinal) < result.IndexOf("Child1", StringComparison.Ordinal),
+                "Expected Child0 to precede Child1 (emission order preserved for idempotent re-parse).");
+
+            var reparsed = BuilderParser.Parse(result);
+            var parent = Assert.Single(reparsed.Model.Roots, r => r.Name == "Parent");
+            Assert.Equal(2, parent.Children.Length);
+            Assert.Equal("Child0", parent.Children[0].Name);
+            Assert.Equal("Child1", parent.Children[1].Name);
+        }
+
+        private const string AppendEmptyBodyFixture = @"
+public class AppendEmptyBodyScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+    }
+}
+";
+
+        [Fact]
+        public void Append_RootIntoEmptyBuildBody_DoesNotThrow_AppendsAtBodyIndent()
+        {
+            var source = AppendEmptyBodyFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendStatement { NewLogicalId = "New", Name = "New" },
+                },
+            };
+
+            // Must NOT throw ArgumentOutOfRangeException (body.Statements.Last() on an empty body).
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            var reparsed = BuilderParser.Parse(result);
+            var appended = Assert.Single(reparsed.Model.Roots);
+            Assert.Equal("New", appended.Name);
+        }
     }
 }
