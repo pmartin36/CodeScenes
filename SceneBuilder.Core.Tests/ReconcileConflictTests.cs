@@ -209,5 +209,75 @@ namespace SceneBuilder.Core.Tests
             Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "anchored-1");
             Assert.Contains("anchored-1", result.RemovedLogicalIds);
         }
+
+        // §13 rule 4 (delete cascade): deleting a created/coded object removes its OWN statement AND the
+        // payload statements authored on it (here, its child). Payload whose owner survives is untouched
+        // (covered by Reconcile_DeleteWithReferencedHandle_SurfacesConflict_NoRemoval).
+        [Fact]
+        public void Reconcile_DeleteCascade_RemovesPayloadStatements()
+        {
+            var child = new GameObjectNode { LogicalId = "cascade-child", Name = "Child" };
+            var parent = new GameObjectNode { LogicalId = "cascade-parent", Name = "Parent", Children = new[] { child } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { parent } };
+
+            // Whole subtree deleted in the scene.
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "cascade-parent", GlobalObjectId = "goid-cp", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "cascade-child",
+                        GlobalObjectId = "goid-cc",
+                        Kind = "GameObject",
+                        ParentLogicalId = "cascade-parent",
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            Assert.DoesNotContain(result.Conflicts, c => c.Kind == ConflictKind.ReferencedHandle);
+            // BOTH the object's own statement and the payload (child) statement are removed.
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "cascade-parent");
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "cascade-child");
+            Assert.Contains("cascade-parent", result.RemovedLogicalIds);
+            Assert.Contains("cascade-child", result.RemovedLogicalIds);
+        }
+
+        // §13 create-with-payload: a newly-created scene object carrying a component (payload M2b does not
+        // own) is appended as a GameObject AND its component is REPORTED (never silently dropped); the
+        // AddedEntry maps it so a second Reconcile of the unchanged scene converges (no re-append).
+        [Fact]
+        public void Reconcile_CreatedObjectWithPayload_ConvergesNoSilentDrop()
+        {
+            var model = new SceneModel { SchemaVersion = 1, Roots = System.Array.Empty<GameObjectNode>() };
+
+            var created = new SnapshotNode
+            {
+                GlobalObjectId = "goid-new",
+                Name = "NewThing",
+                Components = new[] { new ComponentData() },   // M3 fills this out; here it just marks payload
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { created } };
+            var map = new IdentityMap { Entries = System.Array.Empty<IdentityMapEntry>() };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            // Object appended (not dropped)...
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendStatement>());
+            Assert.Equal("NewThing", append.Name);
+            // ...component payload REPORTED, never silently dropped (§13)...
+            Assert.Contains(result.Conflicts, c => c.Kind == ConflictKind.UnrepresentedComponents);
+            // ...and an AddedEntry maps it so a second Reconcile converges (no re-append).
+            Assert.Single(result.AddedEntries, e => e.GlobalObjectId == "goid-new");
+
+            var map2 = new IdentityMap { Entries = result.AddedEntries };
+            var result2 = Reconciler.Reconcile(model, snapshot, map2);
+            Assert.DoesNotContain(result2.Patch.Edits, e => e is AppendStatement);
+        }
     }
 }
