@@ -66,9 +66,10 @@ namespace SceneBuilder.Core.Tests
             var result = Reconciler.Reconcile(model, snapshot, map);
 
             var patchArg = Assert.IsType<PatchArgument>(Assert.Single(result.Patch.Edits));
-            // Non-integer components MUST carry the 'f' suffix, else the generated (int,double,int)
-            // tuple won't convert to the (float,float,float) authoring API parameter (won't compile).
-            Assert.Equal("(0, 1.53f, 0)", patchArg.NewExpr);
+            // Every component carries the 'f' suffix — mandatory on non-integers (a bare 1.53 is a
+            // double and won't convert to the float authoring parameter) and applied to integral
+            // values too so the literal unambiguously reads as a float, never an int or double.
+            Assert.Equal("(0f, 1.53f, 0f)", patchArg.NewExpr);
         }
 
         [Fact]

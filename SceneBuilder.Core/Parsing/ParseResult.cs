@@ -26,5 +26,13 @@ namespace SceneBuilder.Core.Parsing
         // outer key = component LogicalId, inner key = field key -> the value argument's
         // SourceSpan (b3-t2). Feed-forward for b5's span-local field-argument patching.
         public IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> FieldArgumentSpans { get; init; } = new Dictionary<string, IReadOnlyDictionary<string, SourceSpan>>();
+
+        // b1-t1 stub: one entry per parsed node with an AUTHORED handle (a `var x = ...`
+        // declaration at the two ctx.Handles[handleName]=node registration spots), keyed by
+        // the node's FINAL LogicalId, mapping to its handle (var) name. Closure-parameter
+        // transient bindings (e.g. `m => ...`) must NOT appear here. Population is
+        // BuilderParser's job (BuildHandles/CollectHandles); this default (always empty) is
+        // a compile-only stub for the test-writer's RED tests.
+        public IReadOnlyDictionary<string, string> Handles { get; init; } = new Dictionary<string, string>();
     }
 }

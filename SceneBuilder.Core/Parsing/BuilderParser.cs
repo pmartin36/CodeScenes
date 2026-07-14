@@ -56,8 +56,9 @@ namespace SceneBuilder.Core.Parsing
             var componentAnchors = BuildComponentAnchors(ctx.Roots);
             var flagPresence = BuildFlagPresence(ctx.Roots);
             var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
+            var handles = BuildHandles(ctx.Roots);
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -174,6 +175,7 @@ namespace SceneBuilder.Core.Parsing
             if (handleName != null)
             {
                 ctx.Handles[handleName] = node;
+                node.Handle = handleName;
             }
         }
 
@@ -215,6 +217,7 @@ namespace SceneBuilder.Core.Parsing
             if (handleName != null)
             {
                 ctx.Handles[handleName] = node;
+                node.Handle = handleName;
             }
 
             if (addArgs.Count > 1)
@@ -659,6 +662,34 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
+        // Builds one LogicalId->handle(var) name entry per parsed node with an AUTHORED handle
+        // (NodeBuilder.Handle set only at the two ctx.Handles[handleName]=node registration
+        // spots), pre-order, keyed by each node's FINAL LogicalId — mirrors
+        // BuildAnchors/CollectAnchors, but OMITS nodes without an authored Handle.
+        private static IReadOnlyDictionary<string, string> BuildHandles(List<NodeBuilder> roots)
+        {
+            var handles = new Dictionary<string, string>();
+            foreach (var root in roots)
+            {
+                CollectHandles(root, handles);
+            }
+
+            return handles;
+        }
+
+        private static void CollectHandles(NodeBuilder node, Dictionary<string, string> handles)
+        {
+            if (node.Handle != null)
+            {
+                handles[node.LogicalId] = node.Handle;
+            }
+
+            foreach (var child in node.Children)
+            {
+                CollectHandles(child, handles);
+            }
+        }
+
         // Builds one component-LogicalId->SourceSpan entry per parsed component, pre-order,
         // kept SEPARATE from BuildAnchors/Anchors (GameObject-only).
         private static IReadOnlyDictionary<string, SourceSpan> BuildComponentAnchors(List<NodeBuilder> roots)
@@ -798,6 +829,7 @@ namespace SceneBuilder.Core.Parsing
             public Quat? Rotation;
             public Vec3? Scale;
             public SourceSpan AnchorSpan;
+            public string? Handle;
             public readonly List<NodeBuilder> Children = new();
             public readonly List<ComponentBuilder> Components = new();
         }

@@ -69,9 +69,18 @@ namespace SceneBuilder.Core.Reconcile
                     ?? throw Fail(ownerStatement, $"Anchor '{edit.Anchor}' has no owner handle to introduce.");
 
                 var declaration = BuildHandleDeclaration(ownerExprStatement, receiver);
-                var newStmt = ParseComponentStatement(edit, receiver, IndentOf(ownerStatement));
                 var annotation = new SyntaxAnnotation();
                 var annotatedDeclaration = declaration.WithAdditionalAnnotations(annotation);
+
+                var firstComponentAnnotation = new SyntaxAnnotation();
+                var newStmt = ParseComponentStatement(edit, receiver, IndentOf(ownerStatement))
+                    .WithAdditionalAnnotations(firstComponentAnnotation);
+
+                // Seed the same-batch dictionaries so any subsequent component for this owner
+                // (IntroduceOwnerHandle=false, same OwnerHandle/Anchor) is sequenced by the
+                // top-of-method same-batch branch (:29-55), mirroring §13.
+                appendAnnotations[edit.Anchor] = annotation;
+                lastSiblingByParent[edit.Anchor] = firstComponentAnnotation;
 
                 allTargets.Add(ownerStatement);
                 appliers.Add(currentRoot =>

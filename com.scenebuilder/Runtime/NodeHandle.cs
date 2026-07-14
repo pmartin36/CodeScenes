@@ -42,5 +42,15 @@ namespace SceneBuilder.Authoring
 
         /// <summary>Assign an explicit, stable logical id (otherwise one is derived).</summary>
         public NodeHandle Id(string id) => this;
+
+        /// <summary>Attach a component of type <typeparamref name="T"/> with no field overrides.</summary>
+        public NodeHandle Component<T>() => this;
+
+        /// <summary>
+        /// Attach a component of type <typeparamref name="T"/> and set its serialized fields in a
+        /// closure — <c>c.Set("m_Mass", 5f)</c> (serialized path) or <c>c.Set(r =&gt; r.mass, 5f)</c>
+        /// (typed member selector).
+        /// </summary>
+        public NodeHandle Component<T>(Action<ComponentHandle<T>> configure) => this;
     }
 }

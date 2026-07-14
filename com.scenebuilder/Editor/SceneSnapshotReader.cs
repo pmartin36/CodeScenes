@@ -37,6 +37,19 @@ namespace SceneBuilder.Editor
             var lr = t.localRotation;
             var ls = t.localScale;
 
+            // Read every component EXCEPT the GameObject's own transform (handled separately above,
+            // and excluded from Components[] by the Core model). Missing scripts (null) are skipped.
+            var components = new List<ComponentData>();
+            foreach (var component in go.GetComponents<Component>())
+            {
+                if (component == null || component == t)
+                {
+                    continue;
+                }
+
+                components.Add(SerializedFieldBridge.ReadComponent(component));
+            }
+
             return new SnapshotNode
             {
                 GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(go).ToString(),
@@ -52,6 +65,7 @@ namespace SceneBuilder.Editor
                     Rotation = new Quat(lr.x, lr.y, lr.z, lr.w),
                     Scale = new Vec3(ls.x, ls.y, ls.z),
                 },
+                Components = components.ToArray(),
                 Children = children.ToArray(),
             };
         }

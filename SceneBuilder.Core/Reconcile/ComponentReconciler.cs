@@ -22,6 +22,9 @@ namespace SceneBuilder.Core.Reconcile
             IdentityMap identityMap,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans,
+            IReadOnlyDictionary<string, string>? handles,
+            HashSet<string> reserved,
+            string ownerName,
             List<SourceEdit> edits,
             List<IdentityMapEntry> addedEntries,
             List<string> removedLogicalIds,
@@ -49,6 +52,9 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             // (1) ADD: snapshot component with no managed Component entry at its (type,ordinal).
+            var ownerHandleless = handles != null && !handles.ContainsKey(ownerLogicalId);
+            string? synthesizedOwnerHandle = null;
+
             for (var i = 0; i < snapshotComps.Length; i++)
             {
                 var key = snapshotKeys[i];
@@ -57,13 +63,35 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
+                if (!ownerHandleless)
+                {
+                    EmitComponentAppend(
+                        ownerLogicalId,
+                        key.TypeFullName,
+                        key.Ordinal,
+                        snapshotComps[i].Fields,
+                        null,
+                        false,
+                        edits,
+                        addedEntries);
+
+                    continue;
+                }
+
+                var introduceOwnerHandle = synthesizedOwnerHandle == null;
+                if (synthesizedOwnerHandle == null)
+                {
+                    synthesizedOwnerHandle = HandleNaming.Derive(ownerName, reserved);
+                    reserved.Add(synthesizedOwnerHandle);
+                }
+
                 EmitComponentAppend(
                     ownerLogicalId,
                     key.TypeFullName,
                     key.Ordinal,
                     snapshotComps[i].Fields,
-                    null,
-                    false,
+                    synthesizedOwnerHandle,
+                    introduceOwnerHandle,
                     edits,
                     addedEntries);
             }

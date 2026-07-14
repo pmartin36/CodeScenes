@@ -21,7 +21,8 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyCollection<string>? reservedIdentifiers = null,
             IReadOnlyDictionary<string, FlagPresence>? flagPresence = null,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors = null,
-            IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans = null)
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans = null,
+            IReadOnlyDictionary<string, string>? handles = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
@@ -201,34 +202,6 @@ namespace SceneBuilder.Core.Reconcile
             var nextIndexByParentKey = new Dictionary<string, int>();
             var introducedHandleByParent = new Dictionary<string, string>();
 
-            // Mapped-owner component pass (add/remove/reorder on GameObjects already present in
-            // the IdentityMap). Snapshot+map-driven; independent of DetectAppends, which only
-            // visits UNMAPPED nodes and `continue`s past mapped owners.
-            foreach (var (ownerLogicalId, goid) in logicalIdToGlobalObjectId)
-            {
-                if (!snapshotByGoid.TryGetValue(goid, out var snapshotEntry))
-                {
-                    continue;
-                }
-
-                var sourceComponents = modelByLogicalId.TryGetValue(ownerLogicalId, out var ownerModel)
-                    ? ownerModel.Components
-                    : System.Array.Empty<ComponentData>();
-
-                ComponentReconciler.ReconcileComponents(
-                    ownerLogicalId,
-                    sourceComponents,
-                    snapshotEntry.Node.Components,
-                    identityMap,
-                    componentAnchors,
-                    fieldArgumentSpans,
-                    edits,
-                    addedEntries,
-                    removedLogicalIds,
-                    conflicts,
-                    skippedFields);
-            }
-
             var reserved = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in identityMap.Entries)
             {
@@ -246,6 +219,47 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     reserved.Add(identifier);
                 }
+            }
+
+            if (handles != null)
+            {
+                foreach (var handle in handles.Values)
+                {
+                    reserved.Add(handle);
+                }
+            }
+
+            // Mapped-owner component pass (add/remove/reorder on GameObjects already present in
+            // the IdentityMap). Snapshot+map-driven; independent of DetectAppends, which only
+            // visits UNMAPPED nodes and `continue`s past mapped owners.
+            foreach (var (ownerLogicalId, goid) in logicalIdToGlobalObjectId)
+            {
+                if (!snapshotByGoid.TryGetValue(goid, out var snapshotEntry))
+                {
+                    continue;
+                }
+
+                var sourceComponents = modelByLogicalId.TryGetValue(ownerLogicalId, out var ownerModel)
+                    ? ownerModel.Components
+                    : System.Array.Empty<ComponentData>();
+
+                var ownerName = ownerModel?.Name ?? snapshotEntry.Node.Name;
+
+                ComponentReconciler.ReconcileComponents(
+                    ownerLogicalId,
+                    sourceComponents,
+                    snapshotEntry.Node.Components,
+                    identityMap,
+                    componentAnchors,
+                    fieldArgumentSpans,
+                    handles,
+                    reserved,
+                    ownerName,
+                    edits,
+                    addedEntries,
+                    removedLogicalIds,
+                    conflicts,
+                    skippedFields);
             }
 
             DetectAppends(

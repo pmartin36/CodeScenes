@@ -245,8 +245,8 @@ public class AppendRootScene : ISceneDefinition
             Assert.Contains("        // Existing root, untouched.\n        var existing = scene.Add(\"Existing\");", result);
 
             // New statement appended at end of Build body, own line, body indentation,
-            // non-integer floats f-suffixed, integer float (2) left bare.
-            Assert.Contains("        scene.Add(\"New\").Transform(pos: (1.5f, 2, 3.25f));\n", result);
+            // every float component f-suffixed (integral 2 -> 2f too, so it reads as a float).
+            Assert.Contains("        scene.Add(\"New\").Transform(pos: (1.5f, 2f, 3.25f));\n", result);
 
             // Re-parses cleanly and reads back with the intended name/transform.
             var reparsed = BuilderParser.Parse(result);

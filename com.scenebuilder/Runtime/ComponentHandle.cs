@@ -1,0 +1,22 @@
+using System;
+
+namespace SceneBuilder.Authoring
+{
+    /// <summary>
+    /// A handle to a component being authored on a GameObject (via <see cref="NodeHandle.Component{T}(Action{ComponentHandle{T}})"/>).
+    /// Set serialized fields either by serialized property path (<c>c.Set("m_Mass", 5f)</c>) or by a
+    /// typed member selector (<c>c.Set(r =&gt; r.mass, 5f)</c>).
+    /// </summary>
+    /// <remarks>
+    /// Compile-time scaffolding only — SceneBuilder parses the source text to build the scene, so
+    /// these methods return handles for chaining but perform no work at runtime.
+    /// </remarks>
+    public sealed class ComponentHandle<T>
+    {
+        /// <summary>Set a serialized field by its serialized property path (e.g. "m_Mass").</summary>
+        public ComponentHandle<T> Set(string serializedPath, object value) => this;
+
+        /// <summary>Set a field by typed member selector (e.g. <c>r =&gt; r.mass</c>).</summary>
+        public ComponentHandle<T> Set<TValue>(Func<T, TValue> selector, TValue value) => this;
+    }
+}

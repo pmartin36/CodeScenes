@@ -18,15 +18,16 @@ namespace SceneBuilder.Core.Reconcile
             "(" + Float(v.X) + ", " + Float(v.Y) + ", " + Float(v.Z) + ")";
 
         /// <summary>
-        /// A C# numeric literal, rounded to 4 dp. Non-integers get the `f` suffix (1.53f) so the
-        /// containing tuple is (float,float,float) — a bare `1.53` is a double and won't convert to the
-        /// authoring API's float parameter.
+        /// A C# float literal, rounded to 4 dp and ALWAYS `f`-suffixed (0f, 2f, 1.53f). The suffix is
+        /// mandatory on non-integers (a bare `1.53` is a double and won't convert to the authoring API's
+        /// float parameter) and applied on integral values too so the literal unambiguously reads as a
+        /// float — never mistaken for an int or a double.
         /// </summary>
         public static string Float(float value)
         {
             var rounded = Math.Round((double)value, 4, MidpointRounding.AwayFromZero);
             var text = rounded.ToString("0.####", CultureInfo.InvariantCulture);
-            return text.Contains(".") ? text + "f" : text;
+            return text + "f";
         }
 
         /// <summary>
