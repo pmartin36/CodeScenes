@@ -22,9 +22,11 @@ namespace SceneBuilder.Core.Reconcile
             IdentityMap identityMap,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans,
-            IReadOnlyDictionary<string, string>? handles,
-            HashSet<string> reserved,
-            string ownerName,
+            // Reconciler.ResolveOwnerHandle — the ONE handle-introduction path, shared with reparent
+            // and child-append emission. Deriving a handle locally here instead produced a SECOND
+            // name for an owner another edit had already named, and a second Introduce flag the
+            // applier rejects. Side-effecting: call it only when about to emit.
+            System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<IdentityMapEntry> addedEntries,
             List<string> removedLogicalIds,
@@ -62,8 +64,12 @@ namespace SceneBuilder.Core.Reconcile
             var sourceKeySet = new HashSet<(string TypeFullName, int Ordinal)>(sourceKeys);
 
             // (1) ADD: snapshot component with no managed Component entry at its (type,ordinal).
-            var ownerHandleless = handles != null && !handles.ContainsKey(ownerLogicalId);
-            string? synthesizedOwnerHandle = null;
+            // The owner handle is resolved LAZILY — on the first component actually being emitted —
+            // because resolving it registers an introduction, and an owner with nothing to add must
+            // not acquire a handle it never uses.
+            string? ownerHandle = null;
+            var introduceOwnerHandle = false;
+            var ownerHandleResolved = false;
 
             for (var i = 0; i < snapshotComps.Length; i++)
             {
@@ -75,39 +81,27 @@ namespace SceneBuilder.Core.Reconcile
 
                 var harvestSink = sourceKeySet.Contains(key) ? null : addedAssets;
 
-                if (!ownerHandleless)
+                if (!ownerHandleResolved)
                 {
-                    EmitComponentAppend(
-                        ownerLogicalId,
-                        key.TypeFullName,
-                        key.Ordinal,
-                        snapshotComps[i].Fields,
-                        null,
-                        false,
-                        edits,
-                        addedEntries,
-                        harvestSink);
-
-                    continue;
-                }
-
-                var introduceOwnerHandle = synthesizedOwnerHandle == null;
-                if (synthesizedOwnerHandle == null)
-                {
-                    synthesizedOwnerHandle = HandleNaming.Derive(ownerName, reserved);
-                    reserved.Add(synthesizedOwnerHandle);
+                    (ownerHandle, introduceOwnerHandle) = resolveOwnerHandle(ownerLogicalId);
+                    ownerHandleResolved = true;
                 }
 
                 EmitComponentAppend(
                     ownerLogicalId,
+                    ownerHandle ?? ownerLogicalId,
                     key.TypeFullName,
                     key.Ordinal,
+                    i,
                     snapshotComps[i].Fields,
-                    synthesizedOwnerHandle,
+                    ownerHandle,
                     introduceOwnerHandle,
                     edits,
                     addedEntries,
                     harvestSink);
+
+                // Only the FIRST component statement carries the introduction.
+                introduceOwnerHandle = false;
             }
 
             // (2) REMOVE: managed Component entry with no snapshot component at its (type,ordinal).
@@ -242,9 +236,18 @@ namespace SceneBuilder.Core.Reconcile
         // `{owner}/{Type}#{ordinal}` id scheme, same AppendComponentStatement + Component
         // AddedEntry shape as the mapped-owner ADD path above — kept in exactly one place.
         internal static void EmitComponentAppend(
-            string ownerLogicalId,
+            // The owner's id in the CURRENT source — what the applier resolves its statement by.
+            string ownerAnchor,
+            // The owner's id AFTER this batch. These diverge exactly when a handle is introduced for
+            // a handle-less owner: the rewrite makes the `var` name its LogicalId, so BuilderParser
+            // will key the new component "{handle}/{Type}#{ordinal}". Keying it off the ANCHOR instead
+            // strands the component on an id the re-parsed source no longer contains.
+            string ownerEffectiveId,
             string typeFullName,
             int ordinal,
+            // Index among the owner's representable components — where the statement must be PLACED.
+            // Distinct from `ordinal`, which counts only same-TYPED components and keys the id.
+            int siblingIndex,
             FieldMap fields,
             string? ownerHandle,
             bool introduceOwnerHandle,
@@ -252,13 +255,14 @@ namespace SceneBuilder.Core.Reconcile
             List<IdentityMapEntry> addedEntries,
             List<AssetEntry>? addedAssets)
         {
-            var componentLogicalId = $"{ownerLogicalId}/{typeFullName}#{ordinal}";
+            var componentLogicalId = $"{ownerEffectiveId}/{typeFullName}#{ordinal}";
 
             edits.Add(new AppendComponentStatement
             {
-                Anchor = ownerLogicalId,
+                Anchor = ownerAnchor,
                 ComponentLogicalId = componentLogicalId,
                 TypeFullName = typeFullName,
+                NewSiblingIndex = siblingIndex,
                 Fields = fields,
                 OwnerHandle = ownerHandle,
                 IntroduceOwnerHandle = introduceOwnerHandle,
@@ -270,7 +274,7 @@ namespace SceneBuilder.Core.Reconcile
                 GlobalObjectId = "",
                 Kind = "Component",
                 ComponentType = typeFullName,
-                ParentLogicalId = ownerLogicalId,
+                ParentLogicalId = ownerEffectiveId,
             });
 
             if (addedAssets != null)

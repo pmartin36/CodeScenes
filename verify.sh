@@ -57,22 +57,21 @@ failed="$(echo "$run_line" | grep -oE 'failed="[^"]*"' | head -1 | cut -d'"' -f2
 passed="$(echo "$run_line" | grep -oE 'passed="[^"]*"' | head -1 | cut -d'"' -f2)"
 skipped="$(echo "$run_line" | grep -oE 'skipped="[^"]*"' | head -1 | cut -d'"' -f2)"
 
-# Gate on FAILURES, not on the run-level result string: NUnit downgrades a whole run to
-# "Skipped:Ignored" if even one test is ignored, and ignoring a test is legitimate (an explicitly
-# quarantined known bug — see SyncFuzzTests.KnownBugs). A red test still fails the gate. What an
-# ignore must never do is hide: the roster below prints every skipped test on every run.
-if [[ "$ucode" -ne 0 || "${failed:-1}" != "0" ]]; then
-  echo "GATE FAIL: Unity EditMode red (unity_exit=$ucode result=$result failed=$failed)"
+# STRICT: the run-level result must be "Passed" AND failed must be 0 AND the XML must exist.
+# NUnit downgrades a whole run to "Skipped:Ignored" the moment ANY test is ignored, so requiring
+# result="Passed" is exactly what makes an ignored/quarantined test unable to pass this gate in
+# silence. That is the point: a skip is not a pass, and a green gate must mean every test RAN.
+# Do NOT relax this to `failed=0` alone to accommodate a quarantine — quarantine loudly in the test
+# file instead, and let the gate stay red until the bug is fixed.
+if [[ "$ucode" -ne 0 || "$result" != "Passed" || "${failed:-1}" != "0" ]]; then
+  echo "GATE FAIL: Unity EditMode red (unity_exit=$ucode result=$result failed=$failed skipped=${skipped:-0})"
+  if [[ "${skipped:-0}" != "0" ]]; then
+    echo "---- $skipped SKIPPED/IGNORED test(s) — these are NOT passes: ----"
+    grep -oE '<test-case[^>]*result="Skipped"[^>]*>' "$RESULTS" \
+      | grep -oE 'fullname="[^"]*"' | cut -d'"' -f2 | sed 's/^/     - /'
+    echo "   (reasons are in the <reason> nodes of $RESULTS)"
+  fi
   exit 1
-fi
-
-if [[ "${skipped:-0}" != "0" ]]; then
-  echo
-  echo "!! $skipped Unity test(s) SKIPPED/QUARANTINED — these are NOT passes. Triage them:"
-  grep -oE '<test-case[^>]*result="Skipped"[^>]*>' "$RESULTS" \
-    | grep -oE 'fullname="[^"]*"' | cut -d'"' -f2 | sed 's/^/     - /'
-  echo "   (reasons are in the <reason> nodes of $RESULTS)"
-  echo
 fi
 
 echo "GATE PASS: Core + Unity EditMode green (passed=$passed failed=$failed skipped=${skipped:-0})"

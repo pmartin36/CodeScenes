@@ -35,7 +35,7 @@ namespace SceneBuilder.Core.Reconcile
                 var receiver = edit.OwnerHandle
                     ?? throw Fail(root, $"AppendComponentStatement '{edit.ComponentLogicalId}' targets same-batch owner '{edit.Anchor}' but has no OwnerHandle.");
 
-                var anchorAnnotation = lastSiblingByParent.TryGetValue(edit.Anchor, out var siblingAnnotation)
+                var sameBatchAnchorAnnotation = lastSiblingByParent.TryGetValue(edit.Anchor, out var siblingAnnotation)
                     ? siblingAnnotation
                     : appendAnnotations[edit.Anchor];
 
@@ -48,7 +48,7 @@ namespace SceneBuilder.Core.Reconcile
 
                 appliers.Add(currentRoot =>
                 {
-                    var ownerNode = currentRoot.GetAnnotatedNodes(anchorAnnotation).Single();
+                    var ownerNode = currentRoot.GetAnnotatedNodes(sameBatchAnchorAnnotation).Single();
                     return currentRoot.InsertNodesAfter(ownerNode, new[] { newStmt });
                 });
                 return;
@@ -58,55 +58,31 @@ namespace SceneBuilder.Core.Reconcile
             var ownerStatement = invocation.FirstAncestorOrSelf<StatementSyntax>()
                 ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
 
-            if (edit.IntroduceOwnerHandle)
-            {
-                if (ownerStatement is not ExpressionStatementSyntax ownerExprStatement)
-                {
-                    throw Fail(ownerStatement, $"Anchor '{edit.Anchor}' already declares a handle; cannot introduce '{edit.OwnerHandle}' again.");
-                }
+            // The owner's receiver: an authored `var`, or the handle the handle-introduction pre-pass
+            // has already queued a rewrite for (so `ownerStatement` is still an ExpressionStatement
+            // HERE, in the original tree, but will be a declaration by the time this applier runs).
+            var existingReceiver = edit.OwnerHandle
+                ?? (ownerStatement is LocalDeclarationStatementSyntax ownerLocal && ownerLocal.Declaration.Variables.Count == 1
+                    ? ownerLocal.Declaration.Variables[0].Identifier.Text
+                    : throw Fail(ownerStatement, $"Anchor '{edit.Anchor}' has no handle variable; component attach is not expressible."));
 
-                var receiver = edit.OwnerHandle
-                    ?? throw Fail(ownerStatement, $"Anchor '{edit.Anchor}' has no owner handle to introduce.");
-
-                var declaration = BuildHandleDeclaration(ownerExprStatement, receiver);
-                var annotation = new SyntaxAnnotation();
-                var annotatedDeclaration = declaration.WithAdditionalAnnotations(annotation);
-
-                var firstComponentAnnotation = new SyntaxAnnotation();
-                var newStmt = ParseComponentStatement(edit, receiver, IndentOf(ownerStatement))
-                    .WithAdditionalAnnotations(firstComponentAnnotation);
-
-                // Seed the same-batch dictionaries so any subsequent component for this owner
-                // (IntroduceOwnerHandle=false, same OwnerHandle/Anchor) is sequenced by the
-                // top-of-method same-batch branch (:29-55), mirroring §13.
-                appendAnnotations[edit.Anchor] = annotation;
-                lastSiblingByParent[edit.Anchor] = firstComponentAnnotation;
-
-                allTargets.Add(ownerStatement);
-                appliers.Add(currentRoot =>
-                {
-                    var currentOwner = currentRoot.GetCurrentNode(ownerStatement)!;
-                    currentRoot = currentRoot.ReplaceNode(currentOwner, annotatedDeclaration);
-                    var declaredNode = currentRoot.GetAnnotatedNodes(annotation).Single();
-                    return currentRoot.InsertNodesAfter(declaredNode, new[] { newStmt });
-                });
-                return;
-            }
-
-            if (ownerStatement is not LocalDeclarationStatementSyntax ownerLocal || ownerLocal.Declaration.Variables.Count != 1)
-            {
-                throw Fail(ownerStatement, $"Anchor '{edit.Anchor}' has no handle variable; component attach is not expressible.");
-            }
-
-            var existingReceiver = ownerLocal.Declaration.Variables[0].Identifier.Text;
             var componentStmt = ParseComponentStatement(edit, existingReceiver, IndentOf(ownerStatement));
 
-            allTargets.Add(ownerStatement);
-            appliers.Add(currentRoot =>
-            {
-                var currentOwner = currentRoot.GetCurrentNode(ownerStatement)!;
-                return currentRoot.InsertNodesAfter(currentOwner, new[] { componentStmt });
-            });
+            // A component list is ORDERED, so this goes through the same placement path as every other
+            // append (see StatementPlacement.cs). Inserting it "right after the owner" instead put a
+            // new component ahead of the ones already attached, and the next sync silently re-Reordered
+            // it — the component-list instance of BUG B.
+            var ownerBlock = EnclosingBlock(ownerStatement)
+                ?? throw Fail(ownerStatement, $"Anchor '{edit.Anchor}' statement is not inside a block.");
+
+            allTargets.Add(ownerBlock);
+            appliers.Add(currentRoot => PlaceNewStatement(
+                currentRoot,
+                ownerBlock,
+                componentStmt,
+                existingReceiver,
+                PeerKind.Component,
+                edit.NewSiblingIndex));
         }
 
         private static StatementSyntax ParseComponentStatement(AppendComponentStatement edit, string receiver, string indent)

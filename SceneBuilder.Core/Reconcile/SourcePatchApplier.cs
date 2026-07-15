@@ -50,6 +50,11 @@ namespace SceneBuilder.Core.Reconcile
             // pos+rot+scale batch, each clobbering the last.
             var introducedTransformEdits = ResolveTransformIntroductions(root, anchors, patch, allTargets, appliers);
 
+            // Handle introductions are resolved HERE, before any edit that PLACES a statement, for
+            // two reasons that make a per-resolver introduction structurally unsafe — see
+            // ResolveHandleIntroductions.
+            ResolveHandleIntroductions(root, anchors, patch, allTargets, appliers);
+
             foreach (var edit in patch.Edits)
             {
                 switch (edit)
@@ -371,6 +376,105 @@ namespace SceneBuilder.Core.Reconcile
             return argList.WithArguments(newArguments);
         }
 
+        // ---- Handle introduction ----------------------------------------------------------------
+
+        /// <summary>
+        /// Rewrites every handle-less statement that ANY edit in this batch needs to NAME into a
+        /// `var &lt;handle&gt; = ...;` declaration — once per anchor, before any placement runs.
+        /// </summary>
+        /// <remarks>
+        /// Hoisted out of the individual resolvers because both properties it provides are invariants
+        /// no call site can be trusted to remember:
+        /// <list type="bullet">
+        /// <item>ONCE — a reparent onto Delta, a child appended under Delta and a component attached
+        /// to Delta can all land in ONE sync, and each needs Delta to have a handle. Introduced
+        /// per-resolver, the second rewrite finds a declaration already there and hard-fails.</item>
+        /// <item>FIRST — placement floors a statement at its receiver's declaration. If that
+        /// declaration is introduced by a LATER applier, the floor sees no declaration, reads 0, and
+        /// happily seats the statement above the `var` that is about to appear: CS0841.</item>
+        /// </list>
+        /// The Reconciler independently guarantees one NAME per parent (Reconciler.ResolveOwnerHandle);
+        /// this pass guarantees one REWRITE per parent. Conflicting names are a Reconciler bug and are
+        /// reported as such rather than silently picking one.
+        /// </remarks>
+        private static void ResolveHandleIntroductions(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            SourcePatch patch,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var requested = new List<(string Anchor, string Handle)>();
+            var requestedHandleByAnchor = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            void Request(string? anchor, string? handle, bool introduce)
+            {
+                if (!introduce || anchor == null || handle == null)
+                {
+                    return;
+                }
+
+                if (requestedHandleByAnchor.TryGetValue(anchor, out var existing))
+                {
+                    if (existing != handle)
+                    {
+                        throw Fail(root, $"Conflicting handle introductions for anchor '{anchor}': '{existing}' and '{handle}'.");
+                    }
+
+                    return;
+                }
+
+                requestedHandleByAnchor[anchor] = handle;
+                requested.Add((anchor, handle));
+            }
+
+            foreach (var edit in patch.Edits)
+            {
+                switch (edit)
+                {
+                    case AppendStatement append:
+                        Request(append.ParentAnchor, append.ParentHandle, append.IntroduceParentHandle);
+                        break;
+                    case MoveStatement move:
+                        Request(move.NewParentAnchor, move.NewParentHandle, move.IntroduceNewParentHandle);
+                        break;
+                    case AppendComponentStatement component:
+                        Request(component.Anchor, component.OwnerHandle, component.IntroduceOwnerHandle);
+                        break;
+                }
+            }
+
+            foreach (var (anchor, handle) in requested)
+            {
+                // A same-batch parent has no anchor in the ORIGINAL source: it is declared by its own
+                // AppendStatement, so there is nothing here to rewrite.
+                if (!anchors.ContainsKey(anchor))
+                {
+                    continue;
+                }
+
+                var invocation = FindAnchorInvocation(root, anchors, anchor);
+                var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
+                    ?? throw Fail(invocation, $"Anchor '{anchor}' is not inside a statement.");
+
+                if (statement is not ExpressionStatementSyntax)
+                {
+                    throw Fail(statement, $"Anchor '{anchor}' already declares a handle; cannot introduce '{handle}' again.");
+                }
+
+                allTargets.Add(statement);
+                appliers.Add(currentRoot =>
+                {
+                    // Built HERE, from the node as it exists in the tracked tree — not at resolve time.
+                    // A declaration built from the pre-tracking node would splice an un-annotated copy of
+                    // the expression back in, silently detaching every other edit that targets something
+                    // inside this statement.
+                    var current = (ExpressionStatementSyntax)currentRoot.GetCurrentNode(statement)!;
+                    return currentRoot.ReplaceNode(current, BuildHandleDeclaration(current, handle));
+                });
+            }
+        }
+
         // ---- MoveStatement --------------------------------------------------------------------
 
         private static void ResolveMoveStatement(
@@ -390,35 +494,37 @@ namespace SceneBuilder.Core.Reconcile
                 throw Fail(invocation, $"Cannot rewrite receiver for anchor '{edit.Anchor}'.");
             }
 
+            var (buildMethod, sceneParamName) = FindBuildMethod(root);
             string newHandleName;
-            StatementSyntax? parentStatement = null;
+            BlockSyntax targetBlock;
 
             if (edit.NewParentAnchor != null)
             {
                 var parentInvocation = FindAnchorInvocation(root, anchors, edit.NewParentAnchor);
-                parentStatement = parentInvocation.FirstAncestorOrSelf<StatementSyntax>()
+                var parentStatement = parentInvocation.FirstAncestorOrSelf<StatementSyntax>()
                     ?? throw Fail(parentInvocation, $"Anchor '{edit.NewParentAnchor}' is not inside a statement.");
 
-                if (parentStatement is not LocalDeclarationStatementSyntax parentLocal
-                    || parentLocal.Declaration.Variables.Count != 1)
-                {
-                    throw Fail(parentStatement, $"New parent anchor '{edit.NewParentAnchor}' has no handle variable; reparent is not expressible.");
-                }
+                // The new parent's handle: an authored `var`, or one the Reconciler asked to be
+                // introduced for exactly this purpose (the handle-introduction pre-pass has already
+                // queued the rewrite). A handle-less parent is no longer a dead end.
+                newHandleName = edit.NewParentHandle
+                    ?? (parentStatement is LocalDeclarationStatementSyntax parentLocal
+                        && parentLocal.Declaration.Variables.Count == 1
+                            ? parentLocal.Declaration.Variables[0].Identifier.Text
+                            : throw Fail(parentStatement, $"New parent anchor '{edit.NewParentAnchor}' has no handle variable; reparent is not expressible."));
 
-                newHandleName = parentLocal.Declaration.Variables[0].Identifier.Text;
+                targetBlock = EnclosingBlock(parentStatement)
+                    ?? throw Fail(parentStatement, $"Anchor '{edit.NewParentAnchor}' statement is not inside a block.");
             }
             else
             {
-                var (_, sceneParamName) = FindBuildMethod(root);
                 newHandleName = sceneParamName;
+                targetBlock = buildMethod.Body!;
             }
 
             allTargets.Add(movedStatement);
             allTargets.Add(receiverIdentifier);
-            if (parentStatement != null)
-            {
-                allTargets.Add(parentStatement);
-            }
+            allTargets.Add(targetBlock);
 
             appliers.Add(currentRoot =>
             {
@@ -426,23 +532,13 @@ namespace SceneBuilder.Core.Reconcile
                 var newReceiver = SyntaxFactory.IdentifierName(newHandleName).WithTriviaFrom(currentReceiver);
                 currentRoot = currentRoot.ReplaceNode(currentReceiver, newReceiver);
 
-                var currentMoved = currentRoot.GetCurrentNode(movedStatement)!;
-                currentRoot = currentRoot.RemoveNode(currentMoved, SyntaxRemoveOptions.KeepNoTrivia)!;
-
-                if (parentStatement != null)
-                {
-                    var currentParent = currentRoot.GetCurrentNode(parentStatement)!;
-                    currentRoot = currentRoot.InsertNodesAfter(currentParent, new[] { currentMoved });
-                }
-                else
-                {
-                    var (buildMethod, _) = FindBuildMethod(currentRoot);
-                    var body = buildMethod.Body!;
-                    var newBody = body.AddStatements(currentMoved);
-                    currentRoot = currentRoot.ReplaceNode(body, newBody);
-                }
-
-                return currentRoot;
+                return PlaceExistingStatement(
+                    currentRoot,
+                    targetBlock,
+                    movedStatement,
+                    newHandleName,
+                    PeerKind.Child,
+                    edit.NewSiblingIndex);
             });
         }
 
@@ -469,85 +565,25 @@ namespace SceneBuilder.Core.Reconcile
 
             appliers.Add(currentRoot =>
             {
-                var currentBlock = currentRoot.GetCurrentNode(block)!;
                 var currentStatement = currentRoot.GetCurrentNode(statement)!;
 
-                var index = currentBlock.Statements.IndexOf(currentStatement);
-                var withoutStatement = currentBlock.Statements.RemoveAt(index);
-                var newIndex = Math.Min(edit.NewSiblingIndex, withoutStatement.Count);
+                // The receiver is read at APPLY time: a MoveStatement earlier in this same batch may
+                // already have re-pointed this statement at a different parent, and the reorder must
+                // seat it among THAT parent's children.
+                var receiver = RootReceiverName(currentStatement);
+                if (receiver == null)
+                {
+                    return currentRoot;
+                }
 
-                // A sibling index is a SCENE-GRAPH position; a block index is a C# ordering with
-                // declaration rules. Re-seating a statement ahead of the declaration of the handle it
-                // calls emits `alpha.Add("Beta"); var alpha = ...;` — CS0841, use before declaration.
-                // Floor the target at the receiver's declaration so the reorder cannot outrun it.
-                newIndex = Math.Max(newIndex, MinIndexAfterReceiverDeclaration(withoutStatement, currentStatement));
-
-                var newStatements = withoutStatement.Insert(newIndex, currentStatement);
-                var newBlock = currentBlock.WithStatements(newStatements);
-
-                return currentRoot.ReplaceNode(currentBlock, newBlock);
+                return PlaceExistingStatement(
+                    currentRoot,
+                    block,
+                    statement,
+                    receiver,
+                    PeerKindOf(currentStatement),
+                    edit.NewSiblingIndex);
             });
-        }
-
-        /// <summary>
-        /// The earliest block index at which <paramref name="statement"/> may legally sit: one past the
-        /// local declaration of the handle it calls, when that handle is declared in this same block.
-        /// Returns 0 when the receiver is not a local declared here (a lambda parameter, the `scene`
-        /// root, or a handle from an enclosing scope) — nothing to outrun.
-        /// </summary>
-        private static int MinIndexAfterReceiverDeclaration(
-            SyntaxList<StatementSyntax> statements,
-            StatementSyntax statement)
-        {
-            var receiver = RootReceiverName(statement);
-            if (receiver == null)
-            {
-                return 0;
-            }
-
-            for (var i = 0; i < statements.Count; i++)
-            {
-                if (statements[i] is LocalDeclarationStatementSyntax local
-                    && local.Declaration.Variables.Any(v => v.Identifier.Text == receiver))
-                {
-                    return i + 1;
-                }
-            }
-
-            return 0;
-        }
-
-        /// <summary>
-        /// The leftmost identifier of a statement's fluent chain — the handle it is called on
-        /// (`alpha` in `alpha.Add("Beta").Transform(...)`). Null when the statement is not a chain
-        /// rooted in a plain identifier.
-        /// </summary>
-        private static string? RootReceiverName(StatementSyntax statement)
-        {
-            ExpressionSyntax? expression = statement switch
-            {
-                ExpressionStatementSyntax expressionStatement => expressionStatement.Expression,
-                LocalDeclarationStatementSyntax localDeclaration when localDeclaration.Declaration.Variables.Count == 1
-                    => localDeclaration.Declaration.Variables[0].Initializer?.Value,
-                _ => null,
-            };
-
-            while (true)
-            {
-                switch (expression)
-                {
-                    case InvocationExpressionSyntax invocation:
-                        expression = invocation.Expression;
-                        break;
-                    case MemberAccessExpressionSyntax memberAccess:
-                        expression = memberAccess.Expression;
-                        break;
-                    case IdentifierNameSyntax identifier:
-                        return identifier.Identifier.Text;
-                    default:
-                        return null;
-                }
-            }
         }
 
         // ---- RemoveStatement --------------------------------------------------------------------
@@ -593,12 +629,13 @@ namespace SceneBuilder.Core.Reconcile
                     .WithAdditionalAnnotations(ownAnnotation);
 
                 allTargets.Add(body);
-                appliers.Add(currentRoot =>
-                {
-                    var currentBody = (BlockSyntax)currentRoot.GetCurrentNode(body)!;
-                    var newBody = currentBody.AddStatements(newStmt);
-                    return currentRoot.ReplaceNode(currentBody, newBody);
-                });
+                appliers.Add(currentRoot => PlaceNewStatement(
+                    currentRoot,
+                    body,
+                    newStmt,
+                    sceneParamName,
+                    PeerKind.Child,
+                    edit.NewSiblingIndex));
             }
             else if (appendAnnotations.ContainsKey(edit.ParentAnchor))
             {
@@ -630,50 +667,52 @@ namespace SceneBuilder.Core.Reconcile
                 var parentStatement = parentInvocation.FirstAncestorOrSelf<StatementSyntax>()
                     ?? throw Fail(parentInvocation, $"Anchor '{edit.ParentAnchor}' is not inside a statement.");
 
+                // A handle-less parent is rewritten into a declaration by the handle-introduction
+                // pre-pass, which has already queued its applier — so by the time this one runs, the
+                // receiver is in scope and placement's floor can see its declaration.
                 var receiver = edit.ParentHandle
                     ?? throw Fail(parentStatement, $"Anchor '{edit.ParentAnchor}' has no parent handle to append under.");
 
-                if (edit.IntroduceParentHandle)
-                {
-                    if (parentStatement is not ExpressionStatementSyntax parentExprStatement)
-                    {
-                        throw Fail(parentStatement, $"Anchor '{edit.ParentAnchor}' already declares a handle; cannot introduce '{receiver}' again.");
-                    }
+                var newStmt = ParseAppendStatement(edit, receiver, IndentOf(parentStatement))
+                    .WithAdditionalAnnotations(ownAnnotation);
 
-                    var declaration = BuildHandleDeclaration(parentExprStatement, receiver);
-                    var newStmt = ParseAppendStatement(edit, receiver, IndentOf(parentStatement))
-                        .WithAdditionalAnnotations(ownAnnotation);
-                    var annotation = new SyntaxAnnotation();
-                    var annotatedDeclaration = declaration.WithAdditionalAnnotations(annotation);
+                var parentBlock = EnclosingBlock(parentStatement)
+                    ?? throw Fail(parentStatement, $"Anchor '{edit.ParentAnchor}' statement is not inside a block.");
 
-                    allTargets.Add(parentStatement);
-                    appliers.Add(currentRoot =>
-                    {
-                        var currentParent = currentRoot.GetCurrentNode(parentStatement)!;
-                        currentRoot = currentRoot.ReplaceNode(currentParent, annotatedDeclaration);
-                        var declaredNode = currentRoot.GetAnnotatedNodes(annotation).Single();
-                        return currentRoot.InsertNodesAfter(declaredNode, new[] { newStmt });
-                    });
-                }
-                else
-                {
-                    var newStmt = ParseAppendStatement(edit, receiver, IndentOf(parentStatement))
-                        .WithAdditionalAnnotations(ownAnnotation);
-
-                    allTargets.Add(parentStatement);
-                    appliers.Add(currentRoot =>
-                    {
-                        var currentParent = currentRoot.GetCurrentNode(parentStatement)!;
-                        return currentRoot.InsertNodesAfter(currentParent, new[] { newStmt });
-                    });
-                }
+                allTargets.Add(parentBlock);
+                appliers.Add(currentRoot => PlaceNewStatement(
+                    currentRoot,
+                    parentBlock,
+                    newStmt,
+                    receiver,
+                    PeerKind.Child,
+                    edit.NewSiblingIndex));
             }
         }
 
+        /// <summary>
+        /// Rewrites `expr;` into `var handle = expr;`, REUSING the original expression node rather than
+        /// re-parsing its text.
+        /// </summary>
+        /// <remarks>
+        /// Reuse is load-bearing, not an optimisation. Other edits in the same batch hold TRACKED nodes
+        /// INSIDE this statement — a transform argument, a flag argument on the very object being given
+        /// a handle. Re-parsing produces a structurally identical but DIFFERENT tree, whose nodes carry
+        /// none of those annotations, so their GetCurrentNode returns null and the apply dies with a
+        /// NullReferenceException. Keeping the node keeps every annotation hanging off it.
+        /// </remarks>
         private static StatementSyntax BuildHandleDeclaration(ExpressionStatementSyntax statement, string handle)
         {
-            var text = $"var {handle} = {statement.Expression.WithoutTrivia().ToFullString()};";
-            return SyntaxFactory.ParseStatement(text)
+            var declarator = SyntaxFactory
+                .VariableDeclarator(SyntaxFactory.Identifier(handle).WithTrailingTrivia(SyntaxFactory.Space))
+                .WithInitializer(SyntaxFactory.EqualsValueClause(
+                    SyntaxFactory.Token(SyntaxKind.EqualsToken).WithTrailingTrivia(SyntaxFactory.Space),
+                    statement.Expression.WithoutTrivia()));
+
+            return SyntaxFactory.LocalDeclarationStatement(
+                    SyntaxFactory.VariableDeclaration(
+                        SyntaxFactory.IdentifierName("var").WithTrailingTrivia(SyntaxFactory.Space),
+                        SyntaxFactory.SingletonSeparatedList(declarator)))
                 .WithLeadingTrivia(statement.GetLeadingTrivia())
                 .WithTrailingTrivia(statement.GetTrailingTrivia());
         }

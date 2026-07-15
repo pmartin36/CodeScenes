@@ -58,6 +58,135 @@ namespace SceneBuilder.Core.Reconcile
 
             var edits = new List<SourceEdit>();
 
+            var addedEntries = new List<IdentityMapEntry>();
+            var removedLogicalIds = new List<string>();
+            var skippedFields = new List<SceneBuilder.Core.Plan.SkippedField>();
+            var addedAssets = new List<AssetEntry>();
+            var nextIndexByParentKey = new Dictionary<string, int>();
+            var introducedHandleByParent = new Dictionary<string, string>();
+
+            var reserved = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in identityMap.Entries)
+            {
+                reserved.Add(entry.LogicalId);
+            }
+
+            foreach (var logicalId in modelByLogicalId.Keys)
+            {
+                reserved.Add(logicalId);
+            }
+
+            if (reservedIdentifiers != null)
+            {
+                foreach (var identifier in reservedIdentifiers)
+                {
+                    reserved.Add(identifier);
+                }
+            }
+
+            if (handles != null)
+            {
+                foreach (var handle in handles.Values)
+                {
+                    reserved.Add(handle);
+                }
+            }
+
+            // THE single place a handle-less object acquires a handle. A reparent ONTO it, a child
+            // appended UNDER it and a component attached TO it can all occur in one sync, and each
+            // must NAME it in the emitted source. Resolving through here guarantees they agree on one
+            // name and that exactly one of them carries the Introduce flag — two names, or two
+            // introductions, and the applier cannot emit the file at all.
+            //
+            // Returns the object's EFFECTIVE LogicalId as well as its receiver: they are the same
+            // string, because a statement's `var` name IS its LogicalId (LogicalIdResolver.Resolve
+            // gives the handle name top priority). Callers that need the post-rewrite id use this.
+            //
+            // SIDE-EFFECTING: the first call for a handle-less object registers the introduction and
+            // re-keys the sidecar. Call it only when about to emit an edit that depends on it.
+            // THE single re-key path. A LogicalId is DERIVED FROM THE SOURCE — it is the statement's
+            // `var` name, or the synthesized "{parent}/{name}/{index}" of a handle-less statement — so
+            // any rewrite that gives an object a handle, or moves it under a different parent, changes
+            // its id. Leaving the sidecar on the old id strands the GlobalObjectId, and the next sync
+            // reads the scene object as unmapped and CREATES IT AGAIN. Components come along because
+            // their ids embed their owner's.
+            void Rekey(string oldId, string newId, string? newParentLogicalId)
+            {
+                if (oldId == newId)
+                {
+                    return;
+                }
+
+                removedLogicalIds.Add(oldId);
+                addedEntries.Add(new IdentityMapEntry
+                {
+                    LogicalId = newId,
+                    GlobalObjectId = logicalIdToGlobalObjectId.GetValueOrDefault(oldId, string.Empty),
+                    Kind = "GameObject",
+                    ParentLogicalId = newParentLogicalId,
+                });
+
+                foreach (var component in identityMap.Entries)
+                {
+                    if (component.Kind != "Component"
+                        || component.ParentLogicalId != oldId
+                        || !component.LogicalId.StartsWith(oldId + "/", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    removedLogicalIds.Add(component.LogicalId);
+                    addedEntries.Add(component with
+                    {
+                        LogicalId = newId + component.LogicalId.Substring(oldId.Length),
+                        ParentLogicalId = newId,
+                    });
+                }
+            }
+
+            // Whether an object's statement authors an explicit `var` (so its LogicalId IS that name
+            // and no rewrite of its parent can change it).
+            bool HasAuthoredHandle(string logicalId)
+            {
+                if (handles != null)
+                {
+                    return handles.ContainsKey(logicalId);
+                }
+
+                var grandparentId = logicalIdToParentLogicalId.GetValueOrDefault(logicalId);
+                return !LogicalIdResolver.TryParseSynthesized(logicalId, grandparentId, out _, out _);
+            }
+
+            (string? Handle, bool Introduce) ResolveOwnerHandle(string? logicalId)
+            {
+                if (logicalId == null)
+                {
+                    return (null, false); // the scene root: the receiver is the Build parameter
+                }
+
+                if (HasAuthoredHandle(logicalId))
+                {
+                    // Its `var` name IS its LogicalId, so for a `handles` table the two agree, and for
+                    // the no-table fallback the id itself is the receiver.
+                    return (handles != null ? handles[logicalId] : logicalId, false);
+                }
+
+                if (introducedHandleByParent.TryGetValue(logicalId, out var already))
+                {
+                    return (already, false);
+                }
+
+                var objectName = modelByLogicalId.TryGetValue(logicalId, out var model) ? model.Name : logicalId;
+                var derived = HandleNaming.Derive(objectName, reserved);
+                reserved.Add(derived);
+                introducedHandleByParent[logicalId] = derived;
+
+                // The rewrite gives the object a `var`, which BuilderParser will read as its LogicalId.
+                Rekey(logicalId, derived, logicalIdToParentLogicalId.GetValueOrDefault(logicalId));
+
+                return (derived, true);
+            }
+
             foreach (var op in changeSet.Ops)
             {
                 if (!logicalIdToGlobalObjectId.TryGetValue(op.LogicalId, out var goid)
@@ -110,7 +239,31 @@ namespace SceneBuilder.Core.Reconcile
                                 ? parentLogicalId
                                 : null;
 
-                            edits.Add(new MoveStatement { Anchor = op.LogicalId, NewParentAnchor = newParentAnchor });
+                            // A reparent must NAME the new parent, so it needs a handle on it exactly
+                            // as a child append does — a handle-less new parent used to be a hard
+                            // "reparent is not expressible" failure.
+                            var (newParentHandle, introduceNewParentHandle) = ResolveOwnerHandle(newParentAnchor);
+
+                            edits.Add(new MoveStatement
+                            {
+                                Anchor = op.LogicalId,
+                                NewParentAnchor = newParentAnchor,
+                                NewParentHandle = newParentHandle,
+                                IntroduceNewParentHandle = introduceNewParentHandle,
+                                NewSiblingIndex = entry.SiblingIndex,
+                            });
+
+                            // A handle-less node's id embeds its PARENT's, so the move changes it.
+                            // Without the re-key the sidecar keeps the OLD id, its GlobalObjectId is
+                            // stranded, and the very next sync reads the moved object as unmapped and
+                            // appends it a SECOND time.
+                            if (!HasAuthoredHandle(op.LogicalId))
+                            {
+                                Rekey(
+                                    op.LogicalId,
+                                    LogicalIdResolver.Synthesize(newParentHandle, entry.Node.Name, entry.SiblingIndex),
+                                    newParentHandle);
+                            }
                         }
 
                         break;
@@ -196,40 +349,6 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
-            var addedEntries = new List<IdentityMapEntry>();
-            var removedLogicalIds = new List<string>();
-            var skippedFields = new List<SceneBuilder.Core.Plan.SkippedField>();
-            var addedAssets = new List<AssetEntry>();
-            var nextIndexByParentKey = new Dictionary<string, int>();
-            var introducedHandleByParent = new Dictionary<string, string>();
-
-            var reserved = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var entry in identityMap.Entries)
-            {
-                reserved.Add(entry.LogicalId);
-            }
-
-            foreach (var logicalId in modelByLogicalId.Keys)
-            {
-                reserved.Add(logicalId);
-            }
-
-            if (reservedIdentifiers != null)
-            {
-                foreach (var identifier in reservedIdentifiers)
-                {
-                    reserved.Add(identifier);
-                }
-            }
-
-            if (handles != null)
-            {
-                foreach (var handle in handles.Values)
-                {
-                    reserved.Add(handle);
-                }
-            }
-
             // Mapped-owner component pass (add/remove/reorder on GameObjects already present in
             // the IdentityMap). Snapshot+map-driven; independent of DetectAppends, which only
             // visits UNMAPPED nodes and `continue`s past mapped owners.
@@ -244,8 +363,6 @@ namespace SceneBuilder.Core.Reconcile
                     ? ownerModel.Components
                     : System.Array.Empty<ComponentData>();
 
-                var ownerName = ownerModel?.Name ?? snapshotEntry.Node.Name;
-
                 ComponentReconciler.ReconcileComponents(
                     ownerLogicalId,
                     sourceComponents,
@@ -253,9 +370,7 @@ namespace SceneBuilder.Core.Reconcile
                     identityMap,
                     componentAnchors,
                     fieldArgumentSpans,
-                    handles,
-                    reserved,
-                    ownerName,
+                    ResolveOwnerHandle,
                     edits,
                     addedEntries,
                     removedLogicalIds,
@@ -274,7 +389,7 @@ namespace SceneBuilder.Core.Reconcile
                 logicalIdToGlobalObjectId,
                 logicalIdToParentLogicalId,
                 reserved,
-                introducedHandleByParent,
+                ResolveOwnerHandle,
                 nextIndexByParentKey,
                 edits,
                 addedEntries,
@@ -327,7 +442,7 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, string> logicalIdToGlobalObjectId,
             IReadOnlyDictionary<string, string?> logicalIdToParentLogicalId,
             HashSet<string> reserved,
-            Dictionary<string, string> introducedHandleByParent,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             Dictionary<string, int> nextIndexByParentKey,
             List<SourceEdit> edits,
             List<IdentityMapEntry> addedEntries,
@@ -335,8 +450,11 @@ namespace SceneBuilder.Core.Reconcile
             List<Conflict> conflicts,
             List<AssetEntry> addedAssets)
         {
-            foreach (var node in nodes)
+            // The array position IS the scene sibling index (FlattenSnapshot keys SnapshotEntry off the
+            // same index), and it is what a created node's statement must be placed at.
+            for (var siblingIndex = 0; siblingIndex < nodes.Length; siblingIndex++)
             {
+                var node = nodes[siblingIndex];
                 string? mappedLogicalId = null;
                 var isMapped = !string.IsNullOrEmpty(node.GlobalObjectId)
                     && goidToLogicalId.TryGetValue(node.GlobalObjectId, out mappedLogicalId);
@@ -353,7 +471,7 @@ namespace SceneBuilder.Core.Reconcile
                         logicalIdToGlobalObjectId,
                         logicalIdToParentLogicalId,
                         reserved,
-                        introducedHandleByParent,
+                        resolveOwnerHandle,
                         nextIndexByParentKey,
                         edits,
                         addedEntries,
@@ -378,43 +496,12 @@ namespace SceneBuilder.Core.Reconcile
 
                     nextIndexByParentKey[parentKey] = index + 1;
 
-                    var grandparentLogicalId = parentLogicalId != null
-                        ? logicalIdToParentLogicalId.GetValueOrDefault(parentLogicalId)
-                        : null;
-                    var handleless = parentLogicalId != null
-                        && LogicalIdResolver.TryParseSynthesized(parentLogicalId, grandparentLogicalId, out _, out _);
-
-                    string? parentHandle;
-                    var introduceParentHandle = false;
-
-                    if (handleless)
-                    {
-                        if (!introducedHandleByParent.TryGetValue(parentLogicalId!, out var handle))
-                        {
-                            var parentName = modelByLogicalId.TryGetValue(parentLogicalId!, out var parentModelNode)
-                                ? parentModelNode.Name
-                                : parentLogicalId!;
-                            handle = HandleNaming.Derive(parentName, reserved);
-                            reserved.Add(handle);
-                            introducedHandleByParent[parentLogicalId!] = handle;
-                            removedLogicalIds.Add(parentLogicalId!);
-
-                            addedEntries.Add(new IdentityMapEntry
-                            {
-                                LogicalId = handle,
-                                GlobalObjectId = logicalIdToGlobalObjectId.GetValueOrDefault(parentLogicalId!, string.Empty),
-                                Kind = "GameObject",
-                                ParentLogicalId = grandparentLogicalId,
-                            });
-                        }
-
-                        parentHandle = handle;
-                        introduceParentHandle = true;
-                    }
-                    else
-                    {
-                        parentHandle = parentLogicalId;
-                    }
+                    // The parent's receiver, via the ONE handle-introduction path (shared with
+                    // reparent and component-attach emission, so one parent never gets two handles).
+                    // `parentHandle` doubles as the parent's EFFECTIVE LogicalId: a statement's `var`
+                    // name IS its LogicalId, so for a handled parent the two are already the same
+                    // string, and for a handle-less one the introduction makes them so.
+                    var (parentHandle, introduceParentHandle) = resolveOwnerHandle(parentLogicalId);
 
                     // b4-t1 §13: representable (non-Transform) components force the owner to head
                     // a handle too, so the same-batch component append (ComponentPatchApplier) has
@@ -439,13 +526,14 @@ namespace SceneBuilder.Core.Reconcile
                     }
                     else
                     {
-                        newLogicalId = LogicalIdResolver.Synthesize(handleless ? parentHandle : parentLogicalId, node.Name, index);
+                        newLogicalId = LogicalIdResolver.Synthesize(parentHandle, node.Name, index);
                     }
 
                     edits.Add(new AppendStatement
                     {
                         NewLogicalId = newLogicalId,
                         ParentAnchor = parentLogicalId,
+                        NewSiblingIndex = siblingIndex,
                         Name = node.Name,
                         Transform = node.Transform != new TransformData() ? node.Transform : null,
                         Active = node.Active != true ? node.Active : null,
@@ -477,8 +565,10 @@ namespace SceneBuilder.Core.Reconcile
                         {
                             ComponentReconciler.EmitComponentAppend(
                                 newLogicalId,
+                                newLogicalId,
                                 keys[i].TypeFullName,
                                 keys[i].Ordinal,
+                                i,
                                 representableComponents[i].Fields,
                                 ownHandle,
                                 false,
@@ -498,7 +588,7 @@ namespace SceneBuilder.Core.Reconcile
                         logicalIdToGlobalObjectId,
                         logicalIdToParentLogicalId,
                         reserved,
-                        introducedHandleByParent,
+                        resolveOwnerHandle,
                         nextIndexByParentKey,
                         edits,
                         addedEntries,
@@ -519,7 +609,7 @@ namespace SceneBuilder.Core.Reconcile
                     logicalIdToGlobalObjectId,
                     logicalIdToParentLogicalId,
                     reserved,
-                    introducedHandleByParent,
+                    resolveOwnerHandle,
                     nextIndexByParentKey,
                     edits,
                     addedEntries,

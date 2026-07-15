@@ -15,11 +15,28 @@ namespace SceneBuilder.Core.Reconcile
 
     public sealed record MoveStatement : SourceEdit
     {
+        // Parent LogicalId to move under; null => move to the scene root (receiver = scene param).
         public string? NewParentAnchor { get; init; }
+
+        // Scene sibling index the moved object occupies under its NEW parent. A move is a
+        // re-placement, so it owns its destination index for the same reason ReorderStatement does:
+        // emitting the right parent at the wrong index does not round-trip.
+        public int NewSiblingIndex { get; init; }
+
+        // Receiver variable of the new parent (an existing handle, or one introduced this batch).
+        // null => root move. Mirrors AppendStatement.ParentHandle.
+        public string? NewParentHandle { get; init; }
+
+        // true => the (currently handle-less) new-parent statement must be rewritten to declare
+        // NewParentHandle. Mirrors AppendStatement.IntroduceParentHandle; both are honoured by the
+        // applier's single handle-introduction pre-pass, so one parent never gets two handles.
+        public bool IntroduceNewParentHandle { get; init; }
     }
 
     public sealed record ReorderStatement : SourceEdit
     {
+        // Scene sibling index among the anchor's peers — its parent's children for a GameObject
+        // anchor, its owner's components for a Component anchor. NOT a C# block index.
         public int NewSiblingIndex { get; init; }
     }
 
@@ -32,6 +49,11 @@ namespace SceneBuilder.Core.Reconcile
 
         // Parent LogicalId to insert under; null => root append (receiver = scene param).
         public string? ParentAnchor { get; init; }
+
+        // Scene sibling index the created object occupies under its parent. The applier places the
+        // statement by this rather than "right after the parent"; ignoring it emits the object at
+        // sibling index 0 whatever the scene says, and the next sync re-Reorders it.
+        public int NewSiblingIndex { get; init; }
 
         public string Name { get; init; } = "";
 
@@ -94,6 +116,11 @@ namespace SceneBuilder.Core.Reconcile
 
         // Fully-qualified component type for `Component<TypeFullName>()`.
         public string TypeFullName { get; init; } = "";
+
+        // Index among the OWNER's representable components. Same role, and same reason, as
+        // AppendStatement.NewSiblingIndex: a component list is ordered, so an append that ignores the
+        // index emits the component ahead of ones already there and the next sync re-Reorders it.
+        public int NewSiblingIndex { get; init; }
 
         // Ordered raw-path field setters to render as `.Set("key", <ValueNodeLiteral>)`.
         // REUSE FieldMap (ordered, insertion-preserving, deep value-equality) — same type as

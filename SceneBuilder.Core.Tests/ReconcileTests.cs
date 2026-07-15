@@ -132,6 +132,46 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("b", move.NewParentAnchor);
         }
 
+        // A handle-less node's LogicalId embeds its parent's ("{parent}/{name}/{index}"), so a reparent
+        // CHANGES it. The sidecar has to follow, or the moved object's GlobalObjectId is stranded on an
+        // id the re-parsed source no longer contains — and the next sync reads the scene object as
+        // unmapped and appends it a SECOND time. (Fuzz seeds 1 and 3 emitted a duplicate `beta.Add("Delta")`.)
+        [Fact]
+        public void Reconcile_ReparentHandlelessNode_RekeysItOntoTheNewParent()
+        {
+            var delta = new GameObjectNode { LogicalId = "gamma/Delta/0", Name = "Delta" };
+            var gamma = new GameObjectNode { LogicalId = "gamma", Name = "Gamma", Children = new[] { delta } };
+            var beta = new GameObjectNode { LogicalId = "beta", Name = "Beta" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { gamma, beta } };
+
+            // Delta moves from Gamma to Beta in the scene.
+            var snapshotDelta = new SnapshotNode { GlobalObjectId = "goid-delta", Name = "Delta" };
+            var snapshotGamma = new SnapshotNode { GlobalObjectId = "goid-gamma", Name = "Gamma" };
+            var snapshotBeta = new SnapshotNode { GlobalObjectId = "goid-beta", Name = "Beta", Children = new[] { snapshotDelta } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotGamma, snapshotBeta } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "gamma", GlobalObjectId = "goid-gamma", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = "beta", GlobalObjectId = "goid-beta", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = "gamma/Delta/0", GlobalObjectId = "goid-delta", Kind = "GameObject", ParentLogicalId = "gamma" },
+                },
+            };
+
+            var handles = new Dictionary<string, string> { ["gamma"] = "gamma", ["beta"] = "beta" };
+
+            var result = Reconciler.Reconcile(model, snapshot, map, handles: handles);
+
+            // The old id is retired and the new one carries the GlobalObjectId forward, so the object
+            // stays mapped and is never re-created.
+            Assert.Contains("gamma/Delta/0", result.RemovedLogicalIds);
+            var rekeyed = Assert.Single(result.AddedEntries, e => e.GlobalObjectId == "goid-delta");
+            Assert.Equal("beta/Delta/0", rekeyed.LogicalId);
+            Assert.Equal("beta", rekeyed.ParentLogicalId);
+        }
+
         [Fact]
         public void Reconcile_Reorder_ProducesReorderStatement()
         {

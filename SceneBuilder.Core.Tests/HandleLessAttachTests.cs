@@ -99,7 +99,7 @@ public class MixedHandleScene : ISceneDefinition
         }
 
         // Owner LogicalId IS a key in `handles` (handle-full, e.g. `var weapon = scene.Add(...)`):
-        // no synthesis, today's OwnerHandle=null/IntroduceOwnerHandle=false shape is unchanged.
+        // no synthesis and no introduction — the edit carries the AUTHORED handle verbatim.
         [Fact]
         public void Reconcile_ComponentOnHandledOwner_OwnerPresentInHandles_NoSynthesize()
         {
@@ -128,7 +128,10 @@ public class MixedHandleScene : ISceneDefinition
             var result = Reconciler.Reconcile(model, snapshot, map, handles: handles);
 
             var append = Assert.Single(result.Patch.Edits.OfType<AppendComponentStatement>());
-            Assert.Null(append.OwnerHandle);
+
+            // The owner's OWN `var` name, not a handle derived from its display name — nothing was
+            // synthesized and nothing has to be introduced.
+            Assert.Equal("weapon", append.OwnerHandle);
             Assert.False(append.IntroduceOwnerHandle);
         }
 
