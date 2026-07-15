@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using SceneBuilder.Core.Identity;
@@ -30,40 +31,99 @@ namespace SceneBuilder.Editor
     public static class AssetReferenceResolver
     {
         /// <summary>
-        /// Core lowering delegate: <c>displayPath → (guid, fileId, typeHint)</c>. A path that resolves
-        /// to a real asset returns its authoritative identity; a NON-EMPTY authored path that maps to no
-        /// asset throws a loud error rather than returning null (which Core would treat as an empty-GUID
-        /// clear). Only called by Core for populated refs — <c>Asset(null)</c> never reaches here.
+        /// A Build-time lowering resolver bound to the sidecar <c>Assets[]</c> cache — the
+        /// GUID-authoritative boundary that makes an authored <c>Asset("path")</c> survive the asset
+        /// being moved/renamed (§"Move/rename stability"). It maps <c>displayPath → (guid, fileId,
+        /// typeHint)</c> and:
+        /// <list type="bullet">
+        /// <item>resolves the authored path to a GUID directly when it still points at a live asset;</item>
+        /// <item>when the authored path no longer resolves (asset moved/renamed), RECOVERS the GUID from
+        /// the <c>Assets[]</c> cache entry whose <c>LastKnownPath</c> equals the authored path, then
+        /// re-derives the asset's CURRENT path from that GUID — the reference survives;</item>
+        /// <item>keeps MOVED (GUID alive at a new path) DISTINCT from MISSING: only when the resolved
+        /// GUID maps to NOTHING (asset truly deleted) is it a loud, located error;</item>
+        /// <item>records every resolved GUID at its CURRENT path into <see cref="Harvested"/> so Build can
+        /// refresh <c>Assets[]</c> (spec: "ensure every referenced GUID has an Assets[] entry with its
+        /// current path").</item>
+        /// </list>
+        /// Only called by Core for populated refs — <c>Asset(null)</c> never reaches here.
         /// </summary>
-        public static (string guid, long fileId, string typeHint)? LoweringResolver(string displayPath)
+        public sealed class LoweringResolver
         {
-            if (string.IsNullOrEmpty(displayPath))
+            private readonly IReadOnlyList<AssetEntry> _cache;
+            private readonly List<AssetEntry> _harvested = new();
+
+            public LoweringResolver(IEnumerable<AssetEntry>? cachedAssets)
             {
-                return null;
+                _cache = cachedAssets != null ? new List<AssetEntry>(cachedAssets) : new List<AssetEntry>();
             }
 
-            var guid = AssetDatabase.AssetPathToGUID(displayPath);
-            if (string.IsNullOrEmpty(guid))
-            {
-                throw new InvalidOperationException(
-                    $"[SceneBuilder] Asset not found at path '{displayPath}' (referenced via Asset(\"{displayPath}\")). " +
-                    "The asset is missing or not imported — fix the path or restore the asset.");
-            }
+            /// <summary>
+            /// Every GUID resolved during lowering, paired with its CURRENT path — Build merges these
+            /// into the sidecar <c>Assets[]</c> so the cache stays a valid move-recovery source.
+            /// </summary>
+            public IReadOnlyList<AssetEntry> Harvested => _harvested;
 
-            var main = AssetDatabase.LoadMainAssetAtPath(displayPath);
-            long fileId = 0;
-            string typeHint = "";
-            if (main != null)
+            /// <summary>The Core lowering delegate. See <see cref="LoweringResolver"/>.</summary>
+            public (string guid, long fileId, string typeHint)? Resolve(string displayPath)
             {
+                if (string.IsNullOrEmpty(displayPath))
+                {
+                    return null;
+                }
+
+                // Prefer the live path→GUID mapping; when the authored path is stale (moved/renamed),
+                // recover the GUID from the sidecar cache. A path unknown to BOTH is genuinely missing.
+                var guid = AssetDatabase.AssetPathToGUID(displayPath);
+                if (string.IsNullOrEmpty(guid))
+                {
+                    guid = RecoverGuidFromCache(displayPath);
+                    if (string.IsNullOrEmpty(guid))
+                    {
+                        throw new InvalidOperationException(
+                            $"[SceneBuilder] Asset not found at path '{displayPath}' (referenced via Asset(\"{displayPath}\")). " +
+                            "The asset is missing or not imported — fix the path or restore the asset.");
+                    }
+                }
+
+                // GUID is the authority: re-derive the CURRENT path from it, then LOAD the asset. Load
+                // (not GUIDToAssetPath emptiness) is the deletion authority — Unity retains recently
+                // deleted GUID→path entries within a session, so a stale path can still come back; only a
+                // GUID whose asset cannot be loaded is truly MISSING (distinct from a mere move/rename).
+                var currentPath = AssetDatabase.GUIDToAssetPath(guid);
+                var main = string.IsNullOrEmpty(currentPath) ? null : AssetDatabase.LoadMainAssetAtPath(currentPath);
+                if (main == null)
+                {
+                    throw new InvalidOperationException(
+                        $"[SceneBuilder] Asset {guid} (was '{displayPath}') not found — the asset was deleted. " +
+                        "Restore it or remove the reference.");
+                }
+
+                long fileId = 0;
                 if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(main, out _, out var localId))
                 {
                     fileId = localId;
                 }
 
-                typeHint = main.GetType().Name;
+                var typeHint = main.GetType().Name;
+
+                _harvested.Add(new AssetEntry { Guid = guid, LastKnownPath = currentPath, TypeHint = typeHint });
+                return (guid, fileId, typeHint);
             }
 
-            return (guid, fileId, typeHint);
+            private string RecoverGuidFromCache(string authoredPath)
+            {
+                foreach (var entry in _cache)
+                {
+                    if (string.Equals(entry.LastKnownPath, authoredPath, StringComparison.Ordinal)
+                        && !string.IsNullOrEmpty(entry.Guid))
+                    {
+                        return entry.Guid;
+                    }
+                }
+
+                return "";
+            }
         }
 
         /// <summary>
