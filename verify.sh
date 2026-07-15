@@ -39,7 +39,12 @@ RESULTS="$GATE/results.xml"
 if [[ ! -x "$UNITY" ]]; then echo "GATE FAIL: Unity editor not found at $UNITY (set UNITY_EDITOR)"; exit 1; fi
 
 rm -f "$RESULTS"
-pkill -f 'Unity.Licensing.Client' 2>/dev/null || true   # clear a stale licensing daemon
+# Do NOT pkill Unity.Licensing.Client here. That daemon is SHARED per-user across every Unity
+# instance, so killing it yanks the license out from under an interactive editor mid-session
+# ("The connection with the Unity Licensing Client has been lost") and races a replacement daemon
+# into existence, producing 505 "Unsupported protocol version" handshake rejections. Batchmode
+# needs no such cleanup: the first-attempt `LicenseClient-<user>` handshake warning self-recovers
+# on the versioned `LicenseClient-<user>-<version>` channel.
 timeout 1200 "$UNITY" -runTests -batchmode -nographics \
   -projectPath "$GATE" -testPlatform EditMode \
   -testResults "$RESULTS" -logFile "$GATE/editor.log"
