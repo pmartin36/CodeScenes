@@ -101,6 +101,10 @@ namespace SceneBuilder.Core.Reconcile
             ValueNode.Unsupported unsupported => unsupported.RawToken,
 
             ValueNode.AssetRef(null) => "Asset(null)",
+            ValueNode.AssetRef(AssetRef { IsBuiltin: true, TypeHint: "" } assetRef) =>
+                "Builtin(" + StringLiteral(assetRef.DisplayPath) + ")",
+            ValueNode.AssetRef(AssetRef { IsBuiltin: true } assetRef) =>
+                "Builtin(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.TypeHint) + ")",
             ValueNode.AssetRef(var assetRef) => "Asset(" + StringLiteral(assetRef.DisplayPath) + ")",
 
             _ => throw new NotSupportedException($"SourceExpr.ValueNodeLiteral: unsupported ValueNode kind {node.GetType().Name}"),

@@ -15,20 +15,21 @@ namespace SceneBuilder.Core.Reconcile
         private const string AssetRefsTypeName = "SceneBuilder.Authoring.AssetRefs";
 
         /// <summary>
-        /// Guarantees the compilation unit imports the <c>Asset(...)</c> factory whenever the patched
-        /// source calls it in the SHORT form. Emission keeps the short, readable `Asset("path")` call —
-        /// readability is the product's point — so the file must carry
-        /// <c>using static SceneBuilder.Authoring.AssetRefs;</c> or it fails with CS0103. Idempotent:
-        /// a file that already imports it (however it got there) is returned untouched.
+        /// Guarantees the compilation unit imports the <c>Asset(...)</c>/<c>Builtin(...)</c> factories
+        /// whenever the patched source calls either of them in the SHORT form. Both factories live on
+        /// the same <c>AssetRefs</c> static class, so a single directive covers both. Emission keeps the
+        /// short, readable `Asset("path")` / `Builtin("Cube")` call — readability is the product's point —
+        /// so the file must carry <c>using static SceneBuilder.Authoring.AssetRefs;</c> or it fails with
+        /// CS0103. Idempotent: a file that already imports it (however it got there) is returned untouched.
         /// </summary>
         private static CompilationUnitSyntax EnsureAssetRefsUsing(CompilationUnitSyntax root)
         {
-            var callsShortAssetFactory = root.DescendantNodes()
+            var callsShortAssetRefsFactory = root.DescendantNodes()
                 .OfType<InvocationExpressionSyntax>()
                 .Any(inv => inv.Expression is IdentifierNameSyntax identifier
-                    && identifier.Identifier.Text == "Asset");
+                    && (identifier.Identifier.Text == "Asset" || identifier.Identifier.Text == "Builtin"));
 
-            if (!callsShortAssetFactory)
+            if (!callsShortAssetRefsFactory)
             {
                 return root;
             }

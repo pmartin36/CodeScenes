@@ -45,6 +45,26 @@ public class NoAssetUsingScene : ISceneDefinition
             },
         };
 
+        // b1-t4: both `Asset(...)` and `Builtin(...)` are factories on the SAME `AssetRefs` static
+        // class, so the SAME single using directive must cover a patch that only introduces `Builtin(...)`.
+        private static SourcePatch BuiltinFieldPatch(string componentAnchor) => new SourcePatch
+        {
+            Edits = new SourceEdit[]
+            {
+                new IntroduceComponentField
+                {
+                    Anchor = componentAnchor,
+                    FieldKey = "m_Mesh",
+                    Value = new ValueNode.AssetRef(new AssetRef
+                    {
+                        IsBuiltin = true,
+                        DisplayPath = "Cube",
+                        TypeHint = "",
+                    }),
+                },
+            },
+        };
+
         [Fact]
         public void Apply_IntroducingAssetCall_AddsStaticAssetRefsUsing()
         {
@@ -108,6 +128,43 @@ public class NoAssetUsingScene : ISceneDefinition
             var result = SourcePatchApplier.Apply(NoAssetUsingFixture, patch, MergeAnchors(parsed));
 
             Assert.DoesNotContain("AssetRefs", result);
+        }
+
+        // b1-t4: the FIRST `Builtin(...)` in a file with neither an `Asset(...)` call nor the using
+        // must gain the SAME single directive — `Builtin` is not a second factory to guard separately.
+        [Fact]
+        public void Apply_IntroducingBuiltinCall_AddsStaticAssetRefsUsing()
+        {
+            var parsed = BuilderParser.Parse(NoAssetUsingFixture);
+            var compId = Assert.Single(parsed.ComponentAnchors.Keys);
+
+            var result = SourcePatchApplier.Apply(NoAssetUsingFixture, BuiltinFieldPatch(compId), MergeAnchors(parsed));
+
+            Assert.Contains("Builtin(\"Cube\")", result);
+            Assert.Contains("using static SceneBuilder.Authoring.AssetRefs;", result);
+            Assert.DoesNotContain("usingstatic", result);
+            Assert.True(
+                result.IndexOf("using static SceneBuilder.Authoring.AssetRefs;", StringComparison.Ordinal)
+                    < result.IndexOf("public class NoAssetUsingScene", StringComparison.Ordinal),
+                "The using directive must precede the type declaration.");
+            Assert.Contains("using SceneBuilder.Authoring;", result);
+        }
+
+        // A file already importing the factory (however it got there) must not collect a second copy
+        // when the NEW call introduced by the patch is `Builtin(...)` rather than `Asset(...)`.
+        [Fact]
+        public void Apply_BuiltinCallWhenUsingAlreadyPresent_DoesNotDuplicateIt()
+        {
+            var source = NoAssetUsingFixture.Replace(
+                "using SceneBuilder.Authoring;",
+                "using SceneBuilder.Authoring;\nusing static SceneBuilder.Authoring.AssetRefs;");
+            var parsed = BuilderParser.Parse(source);
+            var compId = Assert.Single(parsed.ComponentAnchors.Keys);
+
+            var result = SourcePatchApplier.Apply(source, BuiltinFieldPatch(compId), MergeAnchors(parsed));
+
+            var occurrences = result.Split(new[] { "using static SceneBuilder.Authoring.AssetRefs;" }, StringSplitOptions.None).Length - 1;
+            Assert.Equal(1, occurrences);
         }
     }
 }

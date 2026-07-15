@@ -34,6 +34,10 @@ namespace SceneBuilder.Core.Parsing
                     when invocation.Expression is IdentifierNameSyntax id && id.Identifier.Text == "Asset":
                     return ParseAsset(invocation);
 
+                case InvocationExpressionSyntax invocation
+                    when invocation.Expression is IdentifierNameSyntax id && id.Identifier.Text == "Builtin":
+                    return ParseBuiltin(invocation);
+
                 case MemberAccessExpressionSyntax member
                     when member.Expression.ToString() == "Asset" && member.Name.Identifier.Text == "None":
                     return new ValueNode.AssetRef(null);
@@ -276,14 +280,33 @@ namespace SceneBuilder.Core.Parsing
             var args = invocation.ArgumentList.Arguments;
             if (args.Count != 1) return Unsupported(invocation);
             var arg = args[0].Expression;
-            if (arg is LiteralExpressionSyntax lit)
-            {
-                if (lit.IsKind(SyntaxKind.StringLiteralExpression))
-                    return new ValueNode.AssetRef(new AssetRef { DisplayPath = lit.Token.ValueText });
-                if (lit.IsKind(SyntaxKind.NullLiteralExpression))
-                    return new ValueNode.AssetRef(null);
-            }
+            if (TryStringLiteral(arg, out var path))
+                return new ValueNode.AssetRef(new AssetRef { DisplayPath = path });
+            if (arg is LiteralExpressionSyntax lit && lit.IsKind(SyntaxKind.NullLiteralExpression))
+                return new ValueNode.AssetRef(null);
             return Unsupported(invocation);
+        }
+
+        private static ValueNode ParseBuiltin(InvocationExpressionSyntax invocation)
+        {
+            var args = invocation.ArgumentList.Arguments;
+            if (args.Count is not (1 or 2)) return Unsupported(invocation);
+            if (!TryStringLiteral(args[0].Expression, out var name)) return Unsupported(invocation);
+            var typeHint = "";
+            if (args.Count == 2 && !TryStringLiteral(args[1].Expression, out typeHint)) return Unsupported(invocation);
+            return new ValueNode.AssetRef(new AssetRef { DisplayPath = name, IsBuiltin = true, TypeHint = typeHint });
+        }
+
+        private static bool TryStringLiteral(ExpressionSyntax expr, out string value)
+        {
+            if (expr is LiteralExpressionSyntax lit && lit.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                value = lit.Token.ValueText;
+                return true;
+            }
+
+            value = "";
+            return false;
         }
 
         private static ValueNode.Unsupported Unsupported(ExpressionSyntax expr) => new(expr.ToString());
