@@ -58,7 +58,11 @@ namespace SceneBuilder.Core.Parsing
             var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
             var handles = BuildHandles(ctx.Roots);
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles };
+            // Unconditional: every parse reports which sibling groups are distinguishable only by
+            // position. Both directions come through here, so neither can skip the check.
+            var ambiguities = ConflictDetector.DuplicateNameConflicts(model, anchors);
+
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities };
         }
 
         // ---- Build-method discovery -------------------------------------------------

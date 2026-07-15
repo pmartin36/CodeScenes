@@ -35,6 +35,14 @@ using GateFixtures;
 //   4. CONVERGENCE: an immediately-following Sync with NO scene change applies ZERO edits. This is
 //      the strongest invariant — any emission that does not round-trip fails it, whatever the cause.
 //   5. No unexpected conflicts in the SyncResult.
+//   6. IDENTITY PRESERVATION: Sync-then-Build destroys NOTHING that the operation itself left alive.
+//      Invariants 1-5 are all structurally BLIND to the worst bug this harness has ever had to find:
+//      when two same-named siblings swap identity, the emitted source still parses, still compiles,
+//      and still converges — because it faithfully describes a wrong-but-self-consistent scene. The
+//      damage only becomes visible when the code is built BACK into the scene and a real object is
+//      destroyed and recreated in the wrong place. So this invariant closes the loop: it Builds, and
+//      it checks that every live object/component that survived the operation is still the SAME
+//      object (identity, not shape) afterwards.
 //
 // On ANY failure the harness prints a MINIMAL REPRO: the seed, the exact ordered operation sequence
 // truncated at the failing step, and the offending emitted source. That repro is the deliverable.
@@ -203,7 +211,7 @@ public class FuzzScene : ISceneDefinition
 
         // The initial build itself must leave a converged, compiling file — check before step 1 so a
         // failure here is never misattributed to a generated operation.
-        AssertInvariants(seed, log, "<initial build>");
+        AssertInvariants(seed, log, "<initial build>", LiveIdentities());
 
         for (var step = 0; step < steps; step++)
         {
@@ -214,12 +222,52 @@ public class FuzzScene : ISceneDefinition
             }
 
             log.Add($"step {step}: {description}");
-            AssertInvariants(seed, log, description);
+
+            // Snapshot identity AFTER the operation: whatever the operation itself destroyed (a
+            // delete, a component removal) is legitimately gone, and everything still standing is
+            // what Sync-then-Build must not touch. Taking it here rather than before the operation
+            // means invariant 6 needs no per-op knowledge of what was "supposed" to die.
+            AssertInvariants(seed, log, description, LiveIdentities());
         }
     }
 
-    // Asserts all five invariants against the CURRENT scene, reporting a minimal repro on failure.
-    private void AssertInvariants(int seed, List<string> log, string lastOp)
+    // Every live GameObject and Component, keyed by its Unity entity id — the identity that survives
+    // a rename/reorder/reparent and does NOT survive a destroy+recreate. That distinction is the
+    // whole point: a wrong-but-self-consistent scene looks identical by NAME and by SHAPE, and
+    // differs only here.
+    //
+    // Keyed by UnityEngine.EntityId ITSELF (it is IEquatable + IComparable, so it is a valid key).
+    // Not by int: GetInstanceID() no longer exists in 6000.5.3f1, and EntityId's implicit int
+    // conversion is [Obsolete]-as-error here because an EntityId will not fit an int in future
+    // versions.
+    private static Dictionary<EntityId, string> LiveIdentities()
+    {
+        var result = new Dictionary<EntityId, string>();
+        foreach (var go in AllObjects())
+        {
+            if (go == null)
+            {
+                continue;
+            }
+
+            var path = PathOf(go);
+            result[go.GetEntityId()] = $"GameObject \"{path}\"";
+
+            foreach (var component in go.GetComponents<Component>())
+            {
+                if (component != null)
+                {
+                    result[component.GetEntityId()] = $"{component.GetType().Name} on \"{path}\"";
+                }
+            }
+        }
+
+        return result;
+    }
+
+    // Asserts every invariant against the CURRENT scene, reporting a minimal repro on failure.
+    // `survivedOp` is the identity snapshot taken right after the generated operation.
+    private void AssertInvariants(int seed, List<string> log, string lastOp, Dictionary<EntityId, string> survivedOp)
     {
         var scene = EditorSceneManager.GetActiveScene();
 
@@ -375,6 +423,45 @@ public class FuzzScene : ISceneDefinition
                 "INVARIANT 5 VIOLATED — the convergence re-sync reported conflict(s):\n" +
                 FormatConflicts(second.Conflicts),
                 emitted));
+            return;
+        }
+
+        // INVARIANT 6: IDENTITY PRESERVATION.
+        //
+        // Everything above this line is satisfied by a scene that is WRONG but self-consistent —
+        // which is exactly what a duplicate-name identity swap produces. Closing the loop is the only
+        // way to see it: build the emitted code BACK into the scene and check that every object and
+        // component the operation left alive is still the SAME instance. Build is
+        // reconcile-into-existing (§5), and the code was just synced FROM this scene, so a correct
+        // round-trip destroys nothing at all — any lost entity id is a real object that the tool
+        // destroyed and (usually) recreated somewhere else, which is the user's data.
+        try
+        {
+            SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        }
+        catch (Exception e)
+        {
+            Assert.Fail(Repro(seed, log, lastOp,
+                "INVARIANT 6 VIOLATED — Build (code->scene) of the just-synced source THREW.\n" + e,
+                emitted));
+            return;
+        }
+
+        var afterBuild = LiveIdentities();
+        var destroyed = survivedOp.Where(kv => !afterBuild.ContainsKey(kv.Key)).ToList();
+        if (destroyed.Count > 0)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(
+                $"INVARIANT 6 VIOLATED — Sync-then-Build DESTROYED {destroyed.Count} live object(s)/component(s) " +
+                "that the operation itself left alive. The emitted source parses, compiles and converges — it " +
+                "just describes the WRONG objects, so the round-trip silently destroyed the user's data:");
+            foreach (var (entityId, description) in destroyed)
+            {
+                sb.AppendLine($"    LOST [{entityId}] {description}");
+            }
+
+            Assert.Fail(Repro(seed, log, lastOp, sb.ToString(), emitted));
         }
     }
 
@@ -432,11 +519,11 @@ public class FuzzScene : ISceneDefinition
     private string ApplyRandomOperation(System.Random rng, ref int nameCounter)
     {
         var all = AllObjects();
-        var op = rng.Next(11);
+        var op = rng.Next(12);
 
         switch (op)
         {
-            case 0: return CreateRoot(ref nameCounter);
+            case 0: return CreateRoot(rng, ref nameCounter);
             case 1: return CreateChild(rng, all, ref nameCounter);
             case 2: return DeleteObject(rng, all);
             case 3: return RenameObject(rng, all, ref nameCounter);
@@ -447,8 +534,79 @@ public class FuzzScene : ISceneDefinition
             case 8: return RemoveComponent(rng, all);
             case 9: return SetComponentField(rng, all);
             case 10: return MaterialOp(rng, all);
+            case 11: return ReorderSibling(rng, all);
             default: return null;
         }
+    }
+
+    // Names of the objects that would be SIBLINGS of something parented to `parent` (null = scene
+    // root). The source of duplicate-name collisions.
+    private static List<string> SiblingNames(Transform parent)
+    {
+        if (parent == null)
+        {
+            return EditorSceneManager.GetActiveScene().GetRootGameObjects().Select(go => go.name).ToList();
+        }
+
+        var names = new List<string>();
+        for (var i = 0; i < parent.childCount; i++)
+        {
+            names.Add(parent.GetChild(i).name);
+        }
+
+        return names;
+    }
+
+    // THE name generator. Roughly 1 in 4, reuse an EXISTING sibling's name instead of minting a
+    // fresh one.
+    //
+    // Why this exists: every name used to come from a monotonic `nameCounter` ("Fuzz"+n), so two
+    // siblings could NEVER share a name — the duplicate-sibling-name hazard was impossible BY
+    // CONSTRUCTION, and this harness ran 30 seeds x 14 steps of green over a defect that silently
+    // destroys real components. A fuzzer that cannot generate a state cannot find its bugs.
+    private static string NameFor(System.Random rng, Transform parent, ref int nameCounter)
+    {
+        if (rng.Next(4) == 0)
+        {
+            var siblings = SiblingNames(parent);
+            if (siblings.Count > 0)
+            {
+                return Pick(rng, siblings);
+            }
+        }
+
+        return "Fuzz" + nameCounter++;
+    }
+
+    // Sibling count of the level `go` lives on (its parent's children, or the scene's roots).
+    private static int SiblingCount(GameObject go) =>
+        go.transform.parent == null
+            ? EditorSceneManager.GetActiveScene().rootCount
+            : go.transform.parent.childCount;
+
+    // PURE REORDER — the operation that turns the duplicate-name defect from latent into
+    // destructive, and which this harness could not perform AT ALL: there was no reorder op
+    // (`rng.Next(11)`), SetSiblingIndex was never called, and Reparent explicitly skips same-parent
+    // moves. A reorder creates and destroys nothing, so ANY object it loses is a bug.
+    private string ReorderSibling(System.Random rng, List<GameObject> all)
+    {
+        var candidates = all.Where(go => go != null && SiblingCount(go) > 1).ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var go = Pick(rng, candidates);
+        var path = PathOf(go);
+        var oldIndex = go.transform.GetSiblingIndex();
+        var newIndex = rng.Next(SiblingCount(go));
+        if (newIndex == oldIndex)
+        {
+            return null;
+        }
+
+        go.transform.SetSiblingIndex(newIndex);
+        return $"reorder \"{path}\" sibling index {oldIndex} -> {newIndex}";
     }
 
     private static List<GameObject> AllObjects()
@@ -482,9 +640,9 @@ public class FuzzScene : ISceneDefinition
         return min + rng.Next(steps + 1) / 4f;
     }
 
-    private string CreateRoot(ref int nameCounter)
+    private string CreateRoot(System.Random rng, ref int nameCounter)
     {
-        var name = "Fuzz" + nameCounter++;
+        var name = NameFor(rng, null, ref nameCounter);
         var go = new GameObject(name);
         go.transform.SetParent(null);
         return $"create root GameObject \"{name}\"";
@@ -495,10 +653,10 @@ public class FuzzScene : ISceneDefinition
         var parent = Pick(rng, all);
         if (parent == null)
         {
-            return CreateRoot(ref nameCounter);
+            return CreateRoot(rng, ref nameCounter);
         }
 
-        var name = "Fuzz" + nameCounter++;
+        var name = NameFor(rng, parent.transform, ref nameCounter);
         var go = new GameObject(name);
         go.transform.SetParent(parent.transform);
         return $"create GameObject \"{name}\" as child of \"{PathOf(parent)}\"";
@@ -527,7 +685,19 @@ public class FuzzScene : ISceneDefinition
         }
 
         var old = PathOf(go);
+
+        // ~1 in 4, rename ONTO a sibling's name — a rename into a collision creates the ambiguous
+        // pair with no create involved at all, so a fix that only guards the append path misses it.
         var name = "Ren" + nameCounter++;
+        if (rng.Next(4) == 0)
+        {
+            var siblings = SiblingNames(go.transform.parent).Where(n => n != go.name).ToList();
+            if (siblings.Count > 0)
+            {
+                name = Pick(rng, siblings);
+            }
+        }
+
         go.name = name;
         return $"rename \"{old}\" -> \"{name}\"";
     }

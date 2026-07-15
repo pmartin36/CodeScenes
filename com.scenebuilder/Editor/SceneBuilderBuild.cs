@@ -87,6 +87,17 @@ namespace SceneBuilder.Editor
             var parse = loaded.Parse;
             var desired = loaded.Desired;
 
+            // REFUSE, never guess (§4/§7). Sibling statements that only their POSITION tells apart
+            // cannot be matched to scene objects: Build would silently pick one, and picking wrong
+            // destroys a real object and repurposes another — with a self-consistent end state, so
+            // nothing surfaces. Sync injects `.Id(...)` to prevent the pair ever forming; a pair a
+            // human/LLM hand-authored has no correct answer available, so it is an error the user
+            // resolves. Thrown BEFORE Materialize/Execute: the scene is not touched.
+            if (parse.Ambiguities.Count > 0)
+            {
+                throw new ParseException(FormatAmbiguities(parse.Ambiguities, source, builderPath), 0, 0);
+            }
+
             // Structurally remap the freshly-parsed model against the PRIOR sidecar so a renamed
             // or reordered handle-less object inherits its prior GlobalObjectId (no dup-create),
             // and a removed object survives as an orphan for the removal path to destroy. First
@@ -137,6 +148,52 @@ namespace SceneBuilder.Editor
                 ObjectCount = execution.GameObjectsByLogicalId.Count,
                 PlanOpCount = plan.Ops.Length,
             };
+        }
+
+        /// <summary>
+        /// Renders parse ambiguities as a located, actionable error (§7: fail loud, located — name the
+        /// object and the source location, never a silent drop). Each conflict's SourceSpan is resolved
+        /// to a file:line:column against the builder source so the user can click straight to it.
+        /// </summary>
+        private static string FormatAmbiguities(
+            IReadOnlyList<SceneBuilder.Core.Reconcile.Conflict> ambiguities, string source, string builderPath)
+        {
+            var message = new System.Text.StringBuilder();
+            message.AppendLine(
+                $"[SceneBuilder] Build REFUSED: {ambiguities.Count} ambiguous duplicate sibling name(s) in {builderPath}.");
+            message.AppendLine(
+                "Building would have to GUESS which statement is which scene object, and guessing wrong " +
+                "silently destroys a real object and repurposes another. Add `.Id(\"...\")` to disambiguate:");
+
+            foreach (var conflict in ambiguities)
+            {
+                var location = conflict.Location == null
+                    ? builderPath
+                    : $"{builderPath}({LineOf(source, conflict.Location.Value.Start)},{ColumnOf(source, conflict.Location.Value.Start)})";
+                message.AppendLine($"  {location}: {conflict.Reason}");
+            }
+
+            return message.ToString();
+        }
+
+        private static int LineOf(string source, int offset)
+        {
+            var line = 1;
+            for (var i = 0; i < offset && i < source.Length; i++)
+            {
+                if (source[i] == '\n')
+                {
+                    line++;
+                }
+            }
+
+            return line;
+        }
+
+        private static int ColumnOf(string source, int offset)
+        {
+            var lineStart = source.LastIndexOf('\n', System.Math.Min(offset, source.Length - 1));
+            return offset - lineStart;
         }
 
         private static IdentityMap WithGlobalObjectIds(IdentityMap map, PlanExecutor.ExecutionResult execution)

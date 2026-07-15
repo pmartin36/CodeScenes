@@ -34,5 +34,16 @@ namespace SceneBuilder.Core.Parsing
         // BuilderParser's job (BuildHandles/CollectHandles); this default (always empty) is
         // a compile-only stub for the test-writer's RED tests.
         public IReadOnlyDictionary<string, string> Handles { get; init; } = new Dictionary<string, string>();
+
+        // Sibling groups this file CANNOT distinguish: >= 2 same-named siblings under one parent with
+        // neither a handle nor an explicit `.Id(...)`, so only their position tells them apart (§4).
+        // Located per §7.
+        //
+        // Populated on EVERY Parse — there is no opt-in flag a caller can forget, because
+        // BuilderParser.Parse is the ONE call both directions reach and this hazard is silent and
+        // destructive in both. Parse does NOT throw on these: Sync must be able to parse an ambiguous
+        // file in order to heal it by injecting `.Id(...)`. Detection lives here; the POLICY is the
+        // consumer's — Build REFUSES (never guesses), Sync HEALS.
+        public IReadOnlyList<Conflict> Ambiguities { get; init; } = new List<Conflict>();
     }
 }

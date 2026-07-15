@@ -69,6 +69,12 @@ namespace SceneBuilder.Core.Reconcile
         // When set, Handle == NewLogicalId.
         public string? Handle { get; init; }
 
+        // Explicit `.Id("<value>")` to render into the emitted chain. Set ONLY when this append would
+        // otherwise land a second positional statement with the same Name under the same parent —
+        // i.e. the moment the write path would itself create an object distinguishable only by
+        // position. When set, NewLogicalId == ExplicitId (§4 priority 2).
+        public string? ExplicitId { get; init; }
+
         // Receiver variable for a CHILD append (the parent's handle, existing or newly
         // introduced). null for a root append.
         public string? ParentHandle { get; init; }
@@ -81,6 +87,17 @@ namespace SceneBuilder.Core.Reconcile
     public sealed record RemoveStatement : SourceEdit
     {
         // Uses inherited SourceEdit.Anchor = the LogicalId of the statement to delete.
+    }
+
+    // Injects `.Id("<NewId>")` into an EXISTING statement whose id is otherwise positional, to
+    // disambiguate a duplicate-name sibling group before a later statement move can silently
+    // re-point identity (§4). Emitted by the Reconciler; the anchor's LogicalId becomes NewId, so
+    // it is ALWAYS paired with a Rekey so the sidecar's GlobalObjectId follows the id.
+    public sealed record IntroduceIdCall : SourceEdit
+    {
+        // Inherited Anchor = the LogicalId of the statement to disambiguate (its id BEFORE the
+        // rekey, which is what `anchors` is still keyed by).
+        public string NewId { get; init; } = "";
     }
 
     public enum FlagKind { Tag, Layer, Active, Static }

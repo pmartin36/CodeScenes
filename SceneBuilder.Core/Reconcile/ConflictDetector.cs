@@ -6,12 +6,94 @@ using SceneBuilder.Core.Parsing;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    // Detects reconcile-time conflicts that cannot be resolved into a SourceEdit: ambiguous
-    // reorders among synthesized-id siblings (their source statements are only distinguishable
-    // by position, and a reorder is exactly what changes position). Reused by Reconciler
-    // (b2-t4) when `anchors` is supplied.
+    // Detects conflicts that cannot be resolved into a SourceEdit, and owns the ONE definition of
+    // the hazard behind most of them: sibling statements distinguishable only by their POSITION.
+    //
+    // Its consumers deliberately apply DIFFERENT policies to the same detection, which is why the
+    // detection lives here rather than in any one of them:
+    //   * BuilderParser.ParseCore  -> reports it on every parse (ParseResult.Ambiguities). The one
+    //                                 call both directions reach, so neither can skip the check.
+    //   * SceneBuilderBuild        -> REFUSES. Code->scene has no way to guess correctly.
+    //   * Reconciler               -> HEALS, by injecting `.Id(...)` (scene->code writes the file).
+    //   * DetectAmbiguousReorders  -> surfaces the one case an id cannot rescue: the positional
+    //                                 mapping is already scrambled, so there is nothing sound to pin.
     internal static class ConflictDetector
     {
+        // THE definition of "this node is distinguishable only by POSITION": its LogicalId encodes
+        // its own name + sibling index, i.e. it has neither an authored handle (`var x = ...`, which
+        // makes the id the var name) nor an explicit `.Id("...")` (which makes the id that literal).
+        // Both of those live IN the statement; a sibling index is only IMPLIED BY the statement's
+        // position, which is exactly why a positional id does not survive a statement move.
+        //
+        // ONE definition, shared by every consumer — the parser's ambiguity report
+        // (BuilderParser.ParseCore), the reorder conflict below, and the Reconciler's `.Id(...)`
+        // injection — so all three agree on what is ambiguous BY CONSTRUCTION rather than by three
+        // hand-kept-in-sync copies of the same shape check.
+        internal static bool IsPositional(GameObjectNode node, string? parentLogicalId) =>
+            LogicalIdResolver.TryParseSynthesized(node.LogicalId, parentLogicalId, out var parsedName, out _)
+            && parsedName == node.Name;
+
+        // Every sibling group that CANNOT be told apart: >= 2 siblings sharing a name whose ids are
+        // all positional. Yielded per parent level, pre-order.
+        //
+        // NOTE the threshold is ">= 2 POSITIONAL members", not "all members are positional". Three
+        // siblings named "Enemy" of which one carries an explicit `.Id(...)` still leave TWO that are
+        // only distinguishable by position — an `All(...)` test scores that group unambiguous and
+        // walks straight past a live instance of the very defect it exists to catch.
+        internal static IEnumerable<(string? ParentLogicalId, string Name, GameObjectNode[] PositionalMembers)>
+            AmbiguousGroups(SceneModel model)
+        {
+            var results = new List<(string?, string, GameObjectNode[])>();
+            Walk(model.Roots, null);
+            return results;
+
+            void Walk(GameObjectNode[] siblings, string? parentLogicalId)
+            {
+                foreach (var group in siblings.GroupBy(n => n.Name))
+                {
+                    var positional = group.Where(n => IsPositional(n, parentLogicalId)).ToArray();
+                    if (positional.Length >= 2)
+                    {
+                        results.Add((parentLogicalId, group.Key, positional));
+                    }
+                }
+
+                foreach (var node in siblings)
+                {
+                    Walk(node.Children, node.LogicalId);
+                }
+            }
+        }
+
+        // The parse-time report (§7: fail loud, located). Computed on EVERY BuilderParser.Parse — the
+        // one call both directions reach — so no caller can route around the detection. Parse does
+        // NOT throw on these: Sync must be able to parse an ambiguous file in order to HEAL it by
+        // injecting `.Id(...)`. The policy is the consumer's: Build refuses, Sync heals.
+        internal static IReadOnlyList<Conflict> DuplicateNameConflicts(
+            SceneModel model,
+            IReadOnlyDictionary<string, SourceSpan> anchors)
+        {
+            var conflicts = new List<Conflict>();
+
+            foreach (var (_, name, members) in AmbiguousGroups(model))
+            {
+                var idList = string.Join("', '", members.Select(n => n.LogicalId));
+                conflicts.Add(new Conflict
+                {
+                    Kind = ConflictKind.AmbiguousAnchor,
+                    LogicalId = members[0].LogicalId,
+                    Reason =
+                        $"Ambiguous duplicate sibling name: {members.Length} siblings named '{name}' ('{idList}') have " +
+                        "neither a handle nor an explicit `.Id(\"...\")`, so they are distinguishable only by their " +
+                        "position in the file. Any edit that moves a statement would silently re-point identity at a " +
+                        "different object. Add `.Id(\"...\")` to each to disambiguate them.",
+                    Location = anchors.TryGetValue(members[0].LogicalId, out var span) ? span : null,
+                });
+            }
+
+            return conflicts;
+        }
+
         public static (IReadOnlyList<Conflict> Conflicts, ISet<string> Suppressed) DetectAmbiguousReorders(
             SceneModel model,
             ChangeSet changeSet,
@@ -22,47 +104,35 @@ namespace SceneBuilder.Core.Reconcile
             var conflicts = new List<Conflict>();
             var suppressed = new HashSet<string>();
 
-            Walk(model.Roots, null);
-
-            return (conflicts, suppressed);
-
-            void Walk(GameObjectNode[] siblings, string? parentLogicalId)
+            foreach (var (_, name, members) in AmbiguousGroups(model))
             {
-                foreach (var group in siblings.GroupBy(n => n.Name))
+                if (!members.Any(n => reorderedIds.Contains(n.LogicalId)))
                 {
-                    var members = group.ToArray();
-                    var allSynthesized = members.Length >= 2
-                        && members.All(n => LogicalIdResolver.TryParseSynthesized(n.LogicalId, parentLogicalId, out var parsedName, out _) && parsedName == n.Name);
-
-                    if (allSynthesized && members.Any(n => reorderedIds.Contains(n.LogicalId)))
-                    {
-                        var reorderedMember = members.First(n => reorderedIds.Contains(n.LogicalId));
-                        var idList = string.Join("', '", members.Select(n => n.LogicalId));
-
-                        conflicts.Add(new Conflict
-                        {
-                            Kind = ConflictKind.AmbiguousAnchor,
-                            LogicalId = reorderedMember.LogicalId,
-                            GlobalObjectId = logicalIdToGlobalObjectId != null
-                                && logicalIdToGlobalObjectId.TryGetValue(reorderedMember.LogicalId, out var goid)
-                                ? goid
-                                : null,
-                            Reason = $"Ambiguous reorder: siblings '{idList}' share name '{group.Key}' with synthesized ids; positional anchor cannot be localized.",
-                            Location = anchors.TryGetValue(reorderedMember.LogicalId, out var span) ? span : null,
-                        });
-
-                        foreach (var member in members)
-                        {
-                            suppressed.Add(member.LogicalId);
-                        }
-                    }
+                    continue;
                 }
 
-                foreach (var node in siblings)
+                var reorderedMember = members.First(n => reorderedIds.Contains(n.LogicalId));
+                var idList = string.Join("', '", members.Select(n => n.LogicalId));
+
+                conflicts.Add(new Conflict
                 {
-                    Walk(node.Children, node.LogicalId);
+                    Kind = ConflictKind.AmbiguousAnchor,
+                    LogicalId = reorderedMember.LogicalId,
+                    GlobalObjectId = logicalIdToGlobalObjectId != null
+                        && logicalIdToGlobalObjectId.TryGetValue(reorderedMember.LogicalId, out var goid)
+                        ? goid
+                        : null,
+                    Reason = $"Ambiguous reorder: siblings '{idList}' share name '{name}' with synthesized ids; positional anchor cannot be localized.",
+                    Location = anchors.TryGetValue(reorderedMember.LogicalId, out var span) ? span : null,
+                });
+
+                foreach (var member in members)
+                {
+                    suppressed.Add(member.LogicalId);
                 }
             }
+
+            return (conflicts, suppressed);
         }
 
         public static Conflict MissingAnchor(string logicalId, string? globalObjectId) =>

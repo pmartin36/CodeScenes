@@ -117,6 +117,38 @@ namespace SceneBuilder.Core.Reconcile
                     return;
                 }
 
+                // CHAIN-AWARE. Two rekeys can hit one object in a single sync: a reparent moves it
+                // (re-keying its id to the new parent's), and then the duplicate-name pass injects an
+                // `.Id(...)` on it. Emitting both as independent add/remove pairs leaves the
+                // INTERMEDIATE id in the sidecar forever: UpdateSidecar subtracts RemovedLogicalIds
+                // from the ON-DISK entries only and then concats AddedEntries wholesale, so removing
+                // an id that this same batch added is a silent no-op. Rewrite the pending entry
+                // instead — the sidecar only ever sees the final id.
+                var pending = addedEntries.FindIndex(e => e.LogicalId == oldId);
+                if (pending >= 0)
+                {
+                    for (var i = 0; i < addedEntries.Count; i++)
+                    {
+                        var entry = addedEntries[i];
+                        if (entry.LogicalId == oldId)
+                        {
+                            addedEntries[i] = entry with { LogicalId = newId, ParentLogicalId = newParentLogicalId };
+                        }
+                        else if (entry.Kind == "Component"
+                            && entry.ParentLogicalId == oldId
+                            && entry.LogicalId.StartsWith(oldId + "/", StringComparison.Ordinal))
+                        {
+                            addedEntries[i] = entry with
+                            {
+                                LogicalId = newId + entry.LogicalId.Substring(oldId.Length),
+                                ParentLogicalId = newId,
+                            };
+                        }
+                    }
+
+                    return;
+                }
+
                 removedLogicalIds.Add(oldId);
                 addedEntries.Add(new IdentityMapEntry
                 {
@@ -397,7 +429,152 @@ namespace SceneBuilder.Core.Reconcile
                 conflicts,
                 addedAssets);
 
+            // THE write-path chokepoint for duplicate sibling names.
+            //
+            // Sync is the ONLY path that writes builder source, so this is the one place that can
+            // guarantee the file never CONTAINS a pair of statements distinguishable only by their
+            // position. It runs over the SNAPSHOT — the post-sync truth — which is why it covers every
+            // way a duplicate arises with ONE rule instead of three call-site patches:
+            //   * an APPEND of an object whose name already exists under that parent,
+            //   * a RENAME of an existing object ONTO a sibling's name (no append involved at all),
+            //   * a group the user/LLM hand-authored ambiguously (healed while the positional mapping
+            //     is still trustworthy, i.e. before a reorder can scramble it).
+            // A fix at any one of those call sites would leave the other two silently destroying data.
+            EnsureNoAmbiguousDuplicateNames(actual.Roots);
+
             DetectRemovals(identityMap, anchors, componentAnchors, snapshotByGoid, edits, removedLogicalIds, conflicts);
+
+            // Walks the scene tree; for every sibling group of >= 2 same-named objects whose statements
+            // would ALL be positional, injects `.Id(...)` into every member but the first. One
+            // positional member per group is enough: the claim queue LogicalIdResolver builds is keyed
+            // (parent, name), so a group with a single positional statement has a single claimable id
+            // and that statement claims it wherever it sits in the file. That is the whole point —
+            // `.Id(...)` lives IN the statement, a sibling index is only IMPLIED BY its position.
+            void EnsureNoAmbiguousDuplicateNames(SnapshotNode[] siblings)
+            {
+                foreach (var group in siblings.GroupBy(n => n.Name))
+                {
+                    var positional = group.Where(IsPositionalInSource).ToList();
+                    if (positional.Count < 2)
+                    {
+                        continue;
+                    }
+
+                    // A group whose members are ALREADY scrambled by a pending reorder is the one case
+                    // an id cannot rescue: the mapping from statement to object is exactly what the
+                    // reorder destroyed, so injecting would PIN A GUESS — permanently, and silently,
+                    // in the file. DetectAmbiguousReorders has already surfaced that as a conflict for
+                    // the user to resolve with an explicit `.Id(...)`; healing is only sound while the
+                    // positional mapping is still trustworthy.
+                    if (positional.Any(m => globalObjectIdToLogicalId.TryGetValue(m.GlobalObjectId, out var id)
+                        && suppressed.Contains(id)))
+                    {
+                        continue;
+                    }
+
+                    foreach (var member in positional.Skip(1))
+                    {
+                        InjectExplicitId(member);
+                    }
+                }
+
+                foreach (var node in siblings)
+                {
+                    EnsureNoAmbiguousDuplicateNames(node.Children);
+                }
+            }
+
+            // Whether the statement this scene object will be described by has neither a handle nor an
+            // explicit `.Id(...)`. Mapped objects are judged on their PARSED statement (positional-ness
+            // is a property of the statement, which a rename/reparent does not change); objects being
+            // appended this batch are judged on the AppendStatement about to be emitted.
+            bool IsPositionalInSource(SnapshotNode node)
+            {
+                if (string.IsNullOrEmpty(node.GlobalObjectId))
+                {
+                    return false;
+                }
+
+                if (globalObjectIdToLogicalId.TryGetValue(node.GlobalObjectId, out var originalId))
+                {
+                    return modelByLogicalId.TryGetValue(originalId, out var modelNode)
+                        && ConflictDetector.IsPositional(modelNode, logicalIdToParentLogicalId.GetValueOrDefault(originalId));
+                }
+
+                var append = FindAppend(node.GlobalObjectId);
+                return append != null && append.Handle == null && append.ExplicitId == null;
+            }
+
+            AppendStatement? FindAppend(string globalObjectId)
+            {
+                var entry = addedEntries.LastOrDefault(e => e.Kind == "GameObject" && e.GlobalObjectId == globalObjectId);
+                return entry == null
+                    ? null
+                    : edits.OfType<AppendStatement>().FirstOrDefault(a => a.NewLogicalId == entry.LogicalId);
+            }
+
+            void InjectExplicitId(SnapshotNode node)
+            {
+                var goid = node.GlobalObjectId;
+
+                // The object's id RIGHT NOW in this batch: an append's predicted id, or a mapped id
+                // possibly already re-keyed by a reparent earlier in this same reconcile.
+                var pending = addedEntries.LastOrDefault(e => e.Kind == "GameObject" && e.GlobalObjectId == goid);
+                var mapped = globalObjectIdToLogicalId.TryGetValue(goid, out var originalId);
+                var currentId = pending?.LogicalId ?? originalId;
+                if (currentId == null)
+                {
+                    return;
+                }
+
+                var newId = MintId(node.Name);
+
+                if (!mapped)
+                {
+                    // Appended this batch: rewrite the pending AppendStatement so the statement is
+                    // emitted WITH its `.Id(...)` — the file never exists in an ambiguous state, not
+                    // even for one sync. A positional append heads no handle, which (see DetectAppends'
+                    // `headsHandle`) means it has no representable components and no create-candidate
+                    // children, so nothing else embeds its id.
+                    var append = edits.OfType<AppendStatement>().FirstOrDefault(a => a.NewLogicalId == currentId);
+                    if (append == null)
+                    {
+                        return;
+                    }
+
+                    edits[edits.IndexOf(append)] = append with { NewLogicalId = newId, ExplicitId = newId };
+                    Rekey(currentId, newId, append.ParentHandle);
+                    return;
+                }
+
+                // Already in the file: patch its statement in place. The anchor is the id the source
+                // was PARSED under (what `anchors` is keyed by), which is not necessarily `currentId`
+                // once a reparent has re-keyed it this batch.
+                if (anchors != null && !anchors.ContainsKey(originalId!))
+                {
+                    return;
+                }
+
+                edits.Add(new IntroduceIdCall { Anchor = originalId!, NewId = newId });
+                Rekey(currentId, newId, logicalIdToParentLogicalId.GetValueOrDefault(currentId));
+            }
+
+            // Deterministic and SEMANTIC: `Enemy-2`, `Enemy-3`, ... — derived from the object's own
+            // name, never a random GUID. The builder file gets rewritten by an LLM (CLAUDE.md); an
+            // opaque GUID does not survive that, whereas a name-derived id reads as meaningful and is
+            // reproduced verbatim. `reserved` already holds every known LogicalId and handle, so the
+            // first free suffix is collision-checked against the whole file.
+            string MintId(string name)
+            {
+                for (var n = 2; ; n++)
+                {
+                    var candidate = name + "-" + n.ToString(CultureInfo.InvariantCulture);
+                    if (reserved.Add(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
 
             return new ReconcileResult
             {

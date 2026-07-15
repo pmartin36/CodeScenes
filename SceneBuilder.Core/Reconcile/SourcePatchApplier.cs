@@ -92,6 +92,9 @@ namespace SceneBuilder.Core.Reconcile
                     case RemoveFlagCall removeFlagCall:
                         ResolveRemoveFlagCall(root, anchors, removeFlagCall, allTargets, appliers);
                         break;
+                    case IntroduceIdCall introduceIdCall:
+                        ResolveIntroduceIdCall(root, anchors, introduceIdCall, allTargets, appliers);
+                        break;
                     case PatchComponentField patchComponentField:
                         ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers);
                         break;
@@ -748,6 +751,14 @@ namespace SceneBuilder.Core.Reconcile
             var nameLiteral = SyntaxFactory.Literal(edit.Name).ToString();
             var chain = $"{receiver}.Add({nameLiteral})";
 
+            // Directly after `.Add(name)`, so the id reads as part of the object's declaration rather
+            // than trailing a long fluent chain — and so a human/LLM rewriting the statement's data
+            // calls keeps it.
+            if (edit.ExplicitId != null)
+            {
+                chain += $".Id({SourceExpr.StringLiteral(edit.ExplicitId)})";
+            }
+
             if (edit.Transform != null)
             {
                 var transform = edit.Transform;
@@ -864,6 +875,44 @@ namespace SceneBuilder.Core.Reconcile
                             current.WithoutTrailingTrivia(),
                             SyntaxFactory.IdentifierName(flagName)),
                         argList)
+                    .WithTrailingTrivia(current.GetTrailingTrivia());
+
+                return currentRoot.ReplaceNode(current, newCall);
+            });
+        }
+
+        // ---- IntroduceIdCall --------------------------------------------------------------------
+
+        // Appends `.Id("<NewId>")` to the anchor statement's chain. Chain position is irrelevant to
+        // the parser (ApplyChainedCalls reads `.Id` anywhere in the chain), so this reuses the
+        // established end-of-chain introduction shape rather than splicing mid-chain.
+        private static void ResolveIntroduceIdCall(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            IntroduceIdCall edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
+                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+
+            var chainExpr = GetChainExpression(statement);
+
+            allTargets.Add(chainExpr);
+            appliers.Add(currentRoot =>
+            {
+                var current = currentRoot.GetCurrentNode(chainExpr)!;
+
+                var newCall = SyntaxFactory.InvocationExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            current.WithoutTrailingTrivia(),
+                            SyntaxFactory.IdentifierName("Id")),
+                        SyntaxFactory.ArgumentList(
+                            SyntaxFactory.SingletonSeparatedList(
+                                SyntaxFactory.Argument(
+                                    SyntaxFactory.ParseExpression(SourceExpr.StringLiteral(edit.NewId))))))
                     .WithTrailingTrivia(current.GetTrailingTrivia());
 
                 return currentRoot.ReplaceNode(current, newCall);
