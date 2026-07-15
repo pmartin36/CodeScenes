@@ -224,6 +224,88 @@ using SceneBuilder.Authoring;
             "Builder source did not use the None form Asset(null) for the cleared material slot.\n" + rewritten);
     }
 
+    // 6. built-in resources (round-trip): a Unity primitive's MeshFilter.m_Mesh and MeshRenderer
+    //    material point at Library/unity default resources / Resources/unity_builtin_extra — BUILT-IN
+    //    objects, not project assets. They have real GUIDs (0000...e000... / 0000...f000...) that
+    //    AssetDatabase.LoadAssetAtPath CANNOT load, so the M4 resolver concluded "the asset was
+    //    deleted" and threw — breaking Build for a plain Cube, the most common object anyone creates.
+    //    A built-in must never be misclassified as deleted: Build must not throw, and the primitive's
+    //    own built-in mesh/material must be left untouched in the scene.
+    [Test]
+    public void RoundTrip_ScenePrimitive_BuiltinResourcesDoNotBreakBuild()
+    {
+        File.WriteAllText(_builderPath, Source("        scene.Add(\"Anchor\");"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        // The exact user repro: GameObject > 3D Object > Cube.
+        var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cube.name = "Cube";
+
+        var builtinMesh = cube.GetComponent<MeshFilter>().sharedMesh;
+        Assert.IsNotNull(builtinMesh, "CreatePrimitive(Cube) produced no mesh — test premise invalid");
+        Assert.IsTrue(
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(builtinMesh, out var meshGuid, out _)
+            && meshGuid == "0000000000000000e000000000000000",
+            "Cube mesh is not the well-known built-in resource — test premise invalid (guid was " + meshGuid + ")");
+
+        // Scene->code: sync the primitive into the builder source.
+        EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        // Code->scene: Build must NOT throw. A built-in reference is not a deleted asset.
+        Assert.DoesNotThrow(
+            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene()),
+            "Build threw on a scene containing a Unity primitive — a built-in resource was misclassified as a deleted asset.");
+
+        // The primitive's built-in mesh must survive Build untouched (never cleared to None).
+        var rebuiltCube = FindRoot(EditorSceneManager.GetActiveScene(), "Cube");
+        Assert.IsNotNull(rebuiltCube, "Cube disappeared from the scene after Build");
+        var mf = rebuiltCube.GetComponent<MeshFilter>();
+        Assert.IsNotNull(mf, "Cube lost its MeshFilter after Build");
+        Assert.AreEqual(builtinMesh, mf.sharedMesh,
+            "Build cleared/changed the primitive's built-in mesh — the scene's own value must be left untouched");
+    }
+
+    // 7. authored built-in ref (code->scene): a builder file that ALREADY carries an
+    //    Asset("Library/unity default resources") — exactly what an earlier sync wrote into the
+    //    reporting user's file — must not throw on Build. A built-in is not a deleted asset. It is
+    //    also not a clear: the live field must be left untouched, never nulled.
+    [Test]
+    public void CodeToScene_AuthoredBuiltinRef_DoesNotThrowAndDoesNotClear()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var cube = scene.Add(\"Cube\");\n" +
+            "        cube.Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Asset(\"Library/unity default resources\")));"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+
+        Assert.DoesNotThrow(
+            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene),
+            "Build threw on an authored built-in resource reference — a built-in is not a deleted asset.");
+
+        // Give the object a real built-in mesh, then rebuild: the authored built-in ref must LEAVE IT
+        // ALONE rather than resolve-to-nothing and clear the slot.
+        var cube = FindRoot(EditorSceneManager.GetActiveScene(), "Cube");
+        Assert.IsNotNull(cube, "Cube was not created by SceneBuilderBuild.Run");
+        var mf = cube.GetComponent<MeshFilter>();
+        Assert.IsNotNull(mf, "Authored MeshFilter was not materialized on Cube");
+
+        // Source a real built-in mesh from a throwaway primitive (the same object a user's Cube holds).
+        var donor = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        var builtinMesh = donor.GetComponent<MeshFilter>().sharedMesh;
+        Object.DestroyImmediate(donor);
+        Assert.IsNotNull(builtinMesh, "Could not obtain a built-in mesh — test premise invalid");
+        mf.sharedMesh = builtinMesh;
+
+        Assert.DoesNotThrow(
+            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene()),
+            "Rebuild threw on an authored built-in resource reference.");
+
+        Assert.AreEqual(builtinMesh, cube.GetComponent<MeshFilter>().sharedMesh,
+            "An authored built-in ref CLEARED the live mesh — it must leave the scene's own value untouched.");
+    }
+
     // 5. author None -> scene (code->scene): authoring Asset(null) over a previously-assigned material
     //    clears the live renderer's slot (SetAssetRef with a null GUID => objectReferenceValue = null).
     [Test]

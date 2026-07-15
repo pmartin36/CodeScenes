@@ -30,6 +30,33 @@ namespace SceneBuilder.Editor
     /// </summary>
     public static class AssetReferenceResolver
     {
+        // Unity's two BUILT-IN resource containers. Their objects (primitive meshes Cube/Sphere/
+        // Capsule/Cylinder/Plane/Quad, Default-Material, Sprites-Default, the UI shaders) are NOT
+        // project assets: they carry real, well-known GUIDs but live inside the editor installation,
+        // so AssetDatabase.LoadMainAssetAtPath returns null for them. That null is what made the
+        // resolver conclude "the asset was deleted" and throw — breaking Build for any scene holding
+        // a primitive. A built-in is NOT a deleted asset and must never be reported as one.
+        private const string BuiltinResourcesPath = "Library/unity default resources";
+        private const string BuiltinExtraPath = "Resources/unity_builtin_extra";
+        private const string BuiltinResourcesGuid = "0000000000000000e000000000000000";
+        private const string BuiltinExtraGuid = "0000000000000000f000000000000000";
+
+        /// <summary>
+        /// True for a GUID belonging to one of Unity's built-in resource containers. GUID is the
+        /// identity authority on both the read and write sides, so both directions agree.
+        /// </summary>
+        public static bool IsBuiltinGuid(string? guid) =>
+            guid == BuiltinResourcesGuid || guid == BuiltinExtraGuid;
+
+        /// <summary>True for an authored path naming a built-in resource container.</summary>
+        public static bool IsBuiltinPath(string? path) =>
+            path == BuiltinResourcesPath || path == BuiltinExtraPath;
+
+        // The well-known GUID of the built-in container at the given path. Only called for a path
+        // IsBuiltinPath already accepted.
+        private static string BuiltinGuidFor(string path) =>
+            path == BuiltinExtraPath ? BuiltinExtraGuid : BuiltinResourcesGuid;
+
         /// <summary>
         /// A Build-time lowering resolver bound to the sidecar <c>Assets[]</c> cache — the
         /// GUID-authoritative boundary that makes an authored <c>Asset("path")</c> survive the asset
@@ -70,6 +97,21 @@ namespace SceneBuilder.Editor
                 if (string.IsNullOrEmpty(displayPath))
                 {
                     return null;
+                }
+
+                // A BUILT-IN container is checked FIRST, by path: it ships with the editor, so it is
+                // neither "missing at path" nor "deleted" — it must reach neither throw below. It also
+                // never LOADS via LoadMainAssetAtPath, which is exactly what made the deletion check
+                // misfire and break Build for any scene holding a primitive. Hand the well-known GUID
+                // back so the write side recognises it and LEAVES THE LIVE VALUE ALONE; never harvest
+                // it into Assets[] (a built-in has no project path to track).
+                if (IsBuiltinPath(displayPath))
+                {
+                    Debug.LogWarning(
+                        $"[SceneBuilder] Asset(\"{displayPath}\") names a Unity BUILT-IN resource. Built-in " +
+                        "references are not supported (the path is shared by every built-in object and so " +
+                        "cannot identify one); the field is left untouched in the scene.");
+                    return (BuiltinGuidFor(displayPath), 0, "Object");
                 }
 
                 // Prefer the live path→GUID mapping; when the authored path is stale (moved/renamed),
@@ -151,6 +193,19 @@ namespace SceneBuilder.Editor
             if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(obj, out var guid, out var fileId)
                 && !string.IsNullOrEmpty(guid))
             {
+                // A BUILT-IN resource (primitive mesh, Default-Material, ...) is not representable as
+                // an Asset("path") ref: every built-in mesh SHARES the container path
+                // 'Library/unity default resources' and is distinguished only by fileId, so the
+                // authored path form is ambiguous and cannot round-trip back to a specific object.
+                // Emitting one produced a ref that Build could not resolve. Treat it as UNSUPPORTED —
+                // the bridge skips the field whole and the Materializer records it in Plan.Skipped, so
+                // it is FLAGGED, never silently dropped, and the scene's own value is left untouched.
+                // Authoring a built-in from code needs a distinct form (e.g. Builtin("Cube")) — unbuilt.
+                if (IsBuiltinGuid(guid))
+                {
+                    return new ValueNode.Unsupported("BuiltinResource");
+                }
+
                 return new ValueNode.AssetRef(new CoreAssetRef
                 {
                     Guid = guid,
@@ -184,6 +239,19 @@ namespace SceneBuilder.Editor
             {
                 // None / clear form.
                 prop.objectReferenceValue = null;
+                return;
+            }
+
+            // A BUILT-IN resource cannot be resolved from (guid, fileId=0) — the container holds many
+            // objects and the authored path names none of them specifically. It is NOT deleted, so it
+            // must not throw; and it must NOT be cleared to null either. Leave the live value exactly
+            // as the scene has it (a primitive keeps its mesh/material) and flag it in the console.
+            if (IsBuiltinGuid(guid))
+            {
+                Debug.LogWarning(
+                    $"[SceneBuilder] {(owner != null && owner.gameObject != null ? owner.gameObject.name : "<unknown>")} > " +
+                    $"{(owner != null ? owner.GetType().Name : "<unknown>")}.{FieldNameOf(path)}: built-in resource " +
+                    "reference is not supported and was left untouched.");
                 return;
             }
 
