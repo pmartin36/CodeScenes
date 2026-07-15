@@ -139,11 +139,17 @@ namespace SceneBuilder.Core.Tests
             Assert.Empty(result.AddedAssets);
         }
 
-        // Regression guard: identity-only equality (Guid,FileId) must keep flowing through
-        // reconcile once the sidecar harvest is wired in — a display-path-only drift with the
-        // SAME identity is a no-op (no patch, no AddedAssets entry).
+        // §"Move/rename stability": asset moved/renamed -> GUID unchanged -> the ref still resolves,
+        // and "a Reconcile MAY update the literal in source for readability, but identity never
+        // depended on it". So a display-path-only drift is NOT a no-op: the authored path in the source
+        // text is now stale and must be re-derived to the asset's current path, and Assets[] must learn
+        // the new LastKnownPath (it is the move-recovery cache — a stale entry rots it).
+        //
+        // Identity is still (Guid, FileId) ONLY and that is unchanged here: this is a TEXT refresh, not
+        // a swap. It converges in exactly one pass — once the literal says the current path, the next
+        // reconcile sees matching text and emits nothing.
         [Fact]
-        public void Reconcile_AssetRefSameGuidDifferentDisplayPath_NoPatchNoAssetEntry()
+        public void Reconcile_AssetRefSameGuidDifferentDisplayPath_RefreshesPathLiteralAndCache()
         {
             var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "abc123", FileId = 0, DisplayPath = "Assets/Old.png" });
             var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
@@ -154,6 +160,52 @@ namespace SceneBuilder.Core.Tests
             var result = Reconciler.Reconcile(
                 model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
 
+            var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Equal("Asset(\"Assets/Renamed.png\")", patch.NewExpr);
+
+            var addedAsset = Assert.Single(result.AddedAssets);
+            Assert.Equal("abc123", addedAsset.Guid);
+            Assert.Equal("Assets/Renamed.png", addedAsset.LastKnownPath);
+        }
+
+        // The other half of the same rule, and the reason the drift check is an ADDITIONAL condition on
+        // top of Equals rather than a replacement for it: identical authored TEXT does not imply
+        // identical identity. Two sub-objects of one asset share a path and differ only by FileId — a
+        // swap between them must still patch, even though the emitted literal is byte-identical.
+        [Fact]
+        public void Reconcile_AssetRefSameDisplayPathDifferentFileId_StillPatches()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "abc123", FileId = 111, DisplayPath = "Assets/Sheet.png" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "abc123", FileId = 222, DisplayPath = "Assets/Sheet.png" });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
+        }
+
+        // CONVERGENCE (the defect this whole path had): an UNCHANGED, already-lowered asset ref must
+        // produce NOTHING — no patch, no harvest. This is the Core-level statement of "a sync with no
+        // scene change is a no-op"; the adapter's half is that Sync must LOWER the source ref at all,
+        // since an unlowered ref carries Guid="" and can never be identity-equal to the snapshot's.
+        [Fact]
+        public void Reconcile_AssetRefIdenticalIdentityAndPath_ProducesNoEdit()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "abc123", FileId = 7, DisplayPath = "Assets/Red.mat", TypeHint = "Material" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "abc123", FileId = 7, DisplayPath = "Assets/Red.mat", TypeHint = "Material" });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            // Scoped to PatchComponentField like every sibling test here: the shared fixture maps the
+            // OWNER but not the component, so an AppendComponentStatement for the unmapped component is
+            // always present and is not what this asserts.
             Assert.Empty(result.Patch.Edits.OfType<PatchComponentField>());
             Assert.Empty(result.AddedAssets);
         }

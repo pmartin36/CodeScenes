@@ -33,6 +33,16 @@ namespace SceneBuilder.Editor
             /// <summary>Number of source edits applied to the builder file.</summary>
             public int EditsApplied { get; set; }
 
+            /// <summary>
+            /// Number of edits the reconcile PRODUCED, before applying them — i.e. how many changes it
+            /// believed the source needed. Distinct from <see cref="EditsApplied"/>, which counts only
+            /// edits whose applied text actually DIFFERED from the source: a patch that re-emits
+            /// byte-identical text scores zero there while still meaning the reconcile wrongly decided
+            /// the source was out of date. On a no-op re-sync this must be 0; a non-zero value is a
+            /// convergence defect even when the text happens to match.
+            /// </summary>
+            public int PatchEdits { get; set; }
+
             /// <summary>Reconcile conflicts surfaced (transform/name/parent/flags/components).</summary>
             public Conflict[] Conflicts { get; set; } = System.Array.Empty<Conflict>();
 
@@ -42,7 +52,11 @@ namespace SceneBuilder.Editor
             /// <summary>Sidecar entries removed by this sync (structural deletes).</summary>
             public int RemovedEntries { get; set; }
 
-            /// <summary>True when the builder source or the sidecar changed.</summary>
+            /// <summary>
+            /// True when this sync actually WROTE — i.e. the builder source or the sidecar differs on
+            /// disk from what was there before. A sync that reconciled to the same bytes is not a
+            /// change and reports false, so a watcher can trust this bit to decide whether to react.
+            /// </summary>
             public bool Changed { get; set; }
 
             /// <summary>
@@ -84,11 +98,16 @@ namespace SceneBuilder.Editor
         {
             var source = File.ReadAllText(builderPath);
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
-            var parse = BuilderParser.Parse(source, map);
 
-            // §M3: resolve transient member:<name> field keys to serialized paths BEFORE reconcile,
-            // remapping the field-argument spans in lockstep so span-local field patches still match.
-            var (desired, fieldArgumentSpans) = AuthoredPathResolver.Resolve(parse.Model, parse.FieldArgumentSpans);
+            // THE shared source->desired seam (parse -> resolve authored paths -> lower asset refs).
+            // Build goes through the exact same call. Sync used to open-code the first two stages and
+            // silently omit the third, which is precisely why it never converged: an unlowered source
+            // ref carries Guid="", AssetRef.Equals keys on (Guid, FileId) ONLY, so it could never equal
+            // the snapshot's populated ref and every sync re-patched every asset ref forever.
+            var loaded = DesiredModelLoader.Load(source, map);
+            var parse = loaded.Parse;
+            var desired = loaded.Desired;
+            var fieldArgumentSpans = loaded.FieldArgumentSpans;
 
             var snapshot = SceneSnapshotReader.Read(scene);
 
@@ -115,14 +134,25 @@ namespace SceneBuilder.Editor
 
             var hasSourceEdits = result.Patch.Edits.Length > 0;
             var hasMapDelta = result.AddedEntries.Length > 0 || result.RemovedLogicalIds.Length > 0;
+
             // §M4: a scene edit that introduces a new asset GUID must persist it into the sidecar
-            // Assets[] cache even when nothing structural changed.
-            var hasAssetDelta = result.AddedAssets.Length > 0;
+            // Assets[] cache even when nothing structural changed. The gate is the REAL delta — entries
+            // actually added, or whose LastKnownPath/TypeHint actually moved — NOT the count of refs
+            // the reconcile harvested. AddedAssets is a harvest: a scene that merely CONTAINS a
+            // material yields one every single pass, so gating on its length made "nothing to sync"
+            // unreachable and rewrote the sidecar forever.
+            var assetMerge = AssetCacheMerge.Merge(map.Assets, result.AddedAssets);
+            var hasAssetDelta = assetMerge.ChangedCount > 0;
 
             if (!hasSourceEdits && !hasMapDelta && !hasAssetDelta)
             {
                 Debug.Log("[SceneBuilder] Scene already matches code — nothing to sync.");
-                return new SyncResult { Conflicts = result.Conflicts, Changed = false };
+                return new SyncResult
+                {
+                    Conflicts = result.Conflicts,
+                    Changed = false,
+                    PatchEdits = result.Patch.Edits.Length,
+                };
             }
 
             var editsApplied = 0;
@@ -133,10 +163,9 @@ namespace SceneBuilder.Editor
                 // Component edits anchor on component LogicalIds — merge those anchors in.
                 var anchors = MergeAnchors(parse.Anchors, parse.ComponentAnchors);
                 var newSource = SourcePatchApplier.Apply(source, result.Patch, anchors);
-                if (newSource != source)
+                if (SceneBuilderPaths.WriteIfChanged(builderPath, newSource))
                 {
                     currentSource = newSource;
-                    File.WriteAllText(builderPath, newSource);
                     editsApplied = result.Patch.Edits.Length;
                     Debug.Log($"[SceneBuilder] Synced {result.Patch.Edits.Length} edit(s) back into {builderPath}.");
 
@@ -155,9 +184,10 @@ namespace SceneBuilder.Editor
             // at LogicalIds the source no longer contains, and the NEXT sync mis-reconciled: a
             // renamed object surfaced as a MissingSourceAnchor conflict, and a re-synced object was
             // re-created as a DUPLICATE statement. Persist whenever the source actually changed.
+            var sidecarWritten = false;
             if (editsApplied > 0 || hasMapDelta || hasAssetDelta)
             {
-                UpdateSidecar(map, result, currentSource, sidecarPath);
+                sidecarWritten = UpdateSidecar(map, result, currentSource, sidecarPath, assetMerge);
             }
 
             // No AssetDatabase.Refresh(): the only things this method writes are the builder .cs and the
@@ -167,10 +197,14 @@ namespace SceneBuilder.Editor
             return new SyncResult
             {
                 EditsApplied = editsApplied,
+                PatchEdits = result.Patch.Edits.Length,
                 Conflicts = result.Conflicts,
                 AddedEntries = result.AddedEntries.Length,
                 RemovedEntries = result.RemovedLogicalIds.Length,
-                Changed = editsApplied > 0 || hasMapDelta || hasAssetDelta,
+                // Changed means BYTES CHANGED ON DISK, and nothing else. Deriving it from intent
+                // (`hasAssetDelta` etc.) is what let it report true on a sync that wrote nothing; both
+                // writes below route through WriteIfChanged, so this is now an observation, not a claim.
+                Changed = editsApplied > 0 || sidecarWritten,
                 CompileErrors = compileErrors,
             };
         }
@@ -199,7 +233,13 @@ namespace SceneBuilder.Editor
         // IdentityRemapper can match by name/sibling — so we RE-PARSE the patched source (whose
         // ParseResult.IdentityMap already populates Name+SiblingIndex) and carry the GlobalObjectIds
         // over via the merged (survivor + reconcile-added) map.
-        private static void UpdateSidecar(IdentityMap map, ReconcileResult result, string currentSource, string sidecarPath)
+        /// <summary>Returns true when the sidecar on disk actually changed.</summary>
+        private static bool UpdateSidecar(
+            IdentityMap map,
+            ReconcileResult result,
+            string currentSource,
+            string sidecarPath,
+            AssetCacheMerge.Result assetMerge)
         {
             var removed = new HashSet<string>(result.RemovedLogicalIds);
             var mergedEntries = map.Entries
@@ -251,34 +291,20 @@ namespace SceneBuilder.Editor
                             ? e with { GlobalObjectId = carried }
                             : e)
                     .ToArray(),
-                Assets = MergeAssets(map.Assets, result.AddedAssets),
+                Assets = assetMerge.Merged,
             };
-            File.WriteAllText(sidecarPath, IdentityMapJson.Serialize(updated));
-            Debug.Log($"[SceneBuilder] Sidecar updated: +{result.AddedEntries.Length} / -{result.RemovedLogicalIds.Length} entr(ies), " +
-                      $"+{result.AddedAssets.Length} asset(s).");
-        }
 
-        // Merge harvested asset entries into the existing Assets[] cache, keyed by GUID; a harvested
-        // entry wins (its LastKnownPath reflects the current scene) over a stale cached one.
-        private static AssetEntry[] MergeAssets(AssetEntry[] existing, AssetEntry[] added)
-        {
-            if (added.Length == 0)
+            var wrote = SceneBuilderPaths.WriteIfChanged(sidecarPath, IdentityMapJson.Serialize(updated));
+            if (wrote)
             {
-                return existing;
+                // The asset count is the REAL delta (added / path-or-type changed), not the number of
+                // refs harvested — reporting the harvest meant every sync of a scene holding one
+                // material claimed "+1 asset(s)" while adding nothing.
+                Debug.Log($"[SceneBuilder] Sidecar updated: +{result.AddedEntries.Length} / -{result.RemovedLogicalIds.Length} entr(ies), " +
+                          $"+{assetMerge.ChangedCount} asset(s).");
             }
 
-            var byGuid = new Dictionary<string, AssetEntry>();
-            foreach (var entry in existing)
-            {
-                byGuid[entry.Guid] = entry;
-            }
-
-            foreach (var entry in added)
-            {
-                byGuid[entry.Guid] = entry;
-            }
-
-            return byGuid.Values.ToArray();
+            return wrote;
         }
     }
 }

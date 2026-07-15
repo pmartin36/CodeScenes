@@ -306,6 +306,56 @@ using SceneBuilder.Authoring;
             "An authored built-in ref CLEARED the live mesh — it must leave the scene's own value untouched.");
     }
 
+    // 8. CONVERGENCE (scene->code): a Sync immediately after a Sync, with NO scene change in between,
+    //    must be a NO-OP. Build lowers authored Asset("path") refs to their (guid, fileId); Sync did
+    //    not — so the source-side ref carried Guid="" while the snapshot's carried the real GUID, and
+    //    AssetRef.Equals keys on (Guid, FileId) ONLY. A source ref could therefore NEVER equal a
+    //    populated snapshot ref: the reconcile emitted a PatchComponentField + harvested the asset on
+    //    EVERY sync, forever. It was masked only because the patch re-emitted text identical to the
+    //    user's, so EditsApplied stayed 0 — one formatting divergence turns it into a perpetual source
+    //    rewrite. `Changed` is the bit that lies, and sidecar BYTE-equality does not catch this (the
+    //    bytes are already identical); the sidecar is rewritten unconditionally regardless.
+    //
+    //    This matters because code->scene is driven by the plugin's OWN file watcher: a sync that
+    //    always writes is a watcher that always fires — a feedback loop aimed at the core feature.
+    [Test]
+    public void SceneToCode_ResyncWithNoSceneChange_IsANoOp()
+    {
+        // Phase 1: build the object alone so it is mapped.
+        File.WriteAllText(_builderPath, Source("        var surface = scene.Add(\"Surface\");"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        // Phase 2: author the renderer WITH Red.mat and rebuild, so the scene and the code agree.
+        File.WriteAllText(_builderPath, Source(
+            "        var surface = scene.Add(\"Surface\");\n" +
+            "        surface.Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Asset(\"" + RedPath + "\") }));"));
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        var surface = FindRoot(EditorSceneManager.GetActiveScene(), "Surface");
+        var mr = surface.GetComponent<MeshRenderer>();
+        Assert.IsNotNull(mr, "MeshRenderer was not materialized on Surface");
+        Assert.AreEqual(LoadMaterial(RedPath), mr.sharedMaterial, "Phase-2 build did not assign Red.mat");
+
+        // Sync once. The scene already matches the code, so this should already be a no-op.
+        EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        // Sync AGAIN with NO scene change whatsoever. This MUST be a no-op.
+        var second = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        Assert.IsFalse(second.Changed,
+            "NOT CONVERGED: a Sync immediately after a Sync, with NO scene change, reported Changed=true. " +
+            "The material asset-ref is re-harvested and re-patched on every sync because the source-side " +
+            "ref was never lowered to its GUID.");
+        Assert.AreEqual(0, second.PatchEdits,
+            "NOT CONVERGED: the no-op re-sync's reconcile produced " + second.PatchEdits + " patch edit(s). " +
+            "The reconcile must not produce an edit at all, independent of whether the emitted text " +
+            "happened to match the existing source byte-for-byte.");
+        Assert.AreEqual(0, second.AddedEntries, "No-op re-sync added sidecar entries");
+        Assert.AreEqual(0, second.RemovedEntries, "No-op re-sync removed sidecar entries");
+    }
+
     // 5. author None -> scene (code->scene): authoring Asset(null) over a previously-assigned material
     //    clears the live renderer's slot (SetAssetRef with a null GUID => objectReferenceValue = null).
     [Test]

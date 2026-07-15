@@ -269,7 +269,17 @@ public class FuzzScene : ISceneDefinition
             return;
         }
 
-        // INVARIANT 4: CONVERGENCE. Re-syncing with NO scene change must apply ZERO edits.
+        // INVARIANT 4: CONVERGENCE. A re-sync with NO scene change must be a TOTAL no-op.
+        //
+        // This used to assert ONLY on EditsApplied, which is set exclusively inside `if (newSource !=
+        // source)` — so a reconcile that wrongly decided the source needed patching, but happened to
+        // re-emit byte-identical text, scored zero and sailed through. That is exactly how the
+        // unlowered-asset-ref bug hid here for so long while this fuzzer ran green every seed. The
+        // assertions below name the defect at its source instead of at its (lucky) symptom.
+        var sidecarBefore = File.ReadAllBytes(_sidecarPath);
+        var sourceStampBefore = File.GetLastWriteTimeUtc(_builderPath);
+        var sidecarStampBefore = File.GetLastWriteTimeUtc(_sidecarPath);
+
         SceneBuilderSync.SyncResult second;
         try
         {
@@ -283,12 +293,78 @@ public class FuzzScene : ISceneDefinition
             return;
         }
 
+        // 4a. The reconcile must not have produced an edit AT ALL. Independent of whether the emitted
+        //     text happened to match, a no-op re-sync that produces edits has not converged.
+        if (second.PatchEdits != 0)
+        {
+            Assert.Fail(Repro(seed, log, lastOp,
+                $"INVARIANT 4 VIOLATED — NOT CONVERGED: a re-sync with NO scene change produced " +
+                $"{second.PatchEdits} patch edit(s) (EditsApplied={second.EditsApplied}). The reconcile " +
+                "believes the source is out of date when it is not — even if the re-emitted text happens " +
+                "to match byte-for-byte, one formatting divergence turns this into a perpetual rewrite.\n" +
+                "---- source AFTER the convergence re-sync ----\n" + File.ReadAllText(_builderPath),
+                emitted));
+            return;
+        }
+
+        // 4b. No edits may be APPLIED.
         if (second.EditsApplied != 0)
         {
             Assert.Fail(Repro(seed, log, lastOp,
                 $"INVARIANT 4 VIOLATED — NOT CONVERGED: a re-sync with NO scene change applied " +
                 $"{second.EditsApplied} edit(s). The first sync's emission does not round-trip.\n" +
                 "---- source AFTER the convergence re-sync ----\n" + File.ReadAllText(_builderPath),
+                emitted));
+            return;
+        }
+
+        // 4c. The sync must REPORT no change. Code->scene is driven by the plugin's own file watcher,
+        //     so this bit is load-bearing: a sync that always claims Changed is a watcher that always
+        //     fires.
+        if (second.Changed)
+        {
+            Assert.Fail(Repro(seed, log, lastOp,
+                "INVARIANT 4 VIOLATED — NOT CONVERGED: a re-sync with NO scene change reported " +
+                "Changed=true despite applying zero edits.",
+                emitted));
+            return;
+        }
+
+        // 4d. No sidecar entry churn.
+        if (second.AddedEntries != 0 || second.RemovedEntries != 0)
+        {
+            Assert.Fail(Repro(seed, log, lastOp,
+                $"INVARIANT 4 VIOLATED — NOT CONVERGED: a re-sync with NO scene change churned the " +
+                $"sidecar (+{second.AddedEntries} / -{second.RemovedEntries} entr(ies)).",
+                emitted));
+            return;
+        }
+
+        // 4e. ZERO WRITES actually occurred. Byte-equality alone is satisfied by a CHURNING write —
+        //     the sidecar was rewritten with identical content on every single sync and no byte check
+        //     could ever have noticed. The mtime is what catches it, so both are asserted.
+        if (File.GetLastWriteTimeUtc(_builderPath) != sourceStampBefore)
+        {
+            Assert.Fail(Repro(seed, log, lastOp,
+                "INVARIANT 4 VIOLATED — a re-sync with NO scene change WROTE the builder source " +
+                "(mtime moved) despite applying zero edits.",
+                emitted));
+            return;
+        }
+
+        if (File.GetLastWriteTimeUtc(_sidecarPath) != sidecarStampBefore)
+        {
+            Assert.Fail(Repro(seed, log, lastOp,
+                "INVARIANT 4 VIOLATED — a re-sync with NO scene change WROTE the sidecar (mtime moved). " +
+                "Identical bytes are not enough: the write itself fires the file watcher.",
+                emitted));
+            return;
+        }
+
+        if (!File.ReadAllBytes(_sidecarPath).SequenceEqual(sidecarBefore))
+        {
+            Assert.Fail(Repro(seed, log, lastOp,
+                "INVARIANT 4 VIOLATED — a re-sync with NO scene change altered the sidecar CONTENT.",
                 emitted));
             return;
         }

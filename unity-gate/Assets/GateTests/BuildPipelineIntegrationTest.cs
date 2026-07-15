@@ -29,11 +29,13 @@ public class GateScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
 
-        var parse = BuilderParser.Parse(Source);
-        var desired = AuthoredPathResolver.Resolve(parse.Model);
+        // Through the SAME source->desired seam the product uses, never a hand-wired subset of it: a
+        // test that assembles its own pipeline can silently omit a stage (that is exactly how sync
+        // came to skip asset-ref lowering) and would then be proving a pipeline nobody ships.
+        var loaded = DesiredModelLoader.Load(Source, null);
         var snapshot = SceneSnapshotReader.Read(scene);
-        var remapped = IdentityRemapper.Remap(parse.Model, new IdentityMap());
-        var plan = Materializer.Materialize(desired, snapshot, remapped);
+        var remapped = IdentityRemapper.Remap(loaded.Parse.Model, new IdentityMap());
+        var plan = Materializer.Materialize(loaded.Desired, snapshot, remapped);
         PlanExecutor.Execute(plan, remapped, scene);
 
         var go = GameObject.Find("GateCube");

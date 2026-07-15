@@ -718,26 +718,43 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
+        // A transform argument is patched IFF its CANONICAL EMITTED FORM would actually change.
+        //
+        // Comparing the raw values instead is a convergence bug. A rotation is authored, and can only
+        // ever be authored, as an Euler triple: the source's `rot:` literal is parsed via EulerToQuat
+        // (Core's double math, cast to float) while the scene's quaternion comes from Unity's own float
+        // math, so the two quats differ in their last bits for the SAME rotation. Exact `!=` therefore
+        // fired on every single sync, forever, emitting a `rot:` patch whose text — Float() rounds to
+        // 4dp — was byte-identical to what was already there. It stayed invisible only because
+        // EditsApplied counts applied text changes, so a patch that rewrites a line to itself scores
+        // zero. That is a latent perpetual rewrite, and with the file watcher driving code->scene it is
+        // a feedback loop; it is also exactly the defect the asset-ref path had.
+        //
+        // The canonical literal IS the authored representation here: if it does not change, the source
+        // cannot change, so there is nothing to patch. Comparing it keeps the project's stated rule —
+        // equality is exact on CANONICAL FORM, no float tolerance — while making the reconcile unable
+        // to emit an edit that provably rewrites text to itself.
         private static IEnumerable<SourceEdit> TransformEdits(string logicalId, TransformData model, TransformData snapshot)
         {
-            if (model.Position != snapshot.Position)
+            var modelPos = SourceExpr.Vec3Literal(model.Position);
+            var snapshotPos = SourceExpr.Vec3Literal(snapshot.Position);
+            if (!string.Equals(modelPos, snapshotPos, StringComparison.Ordinal))
             {
-                yield return new PatchArgument { Anchor = logicalId, ArgName = "pos", NewExpr = SourceExpr.Vec3Literal(snapshot.Position) };
+                yield return new PatchArgument { Anchor = logicalId, ArgName = "pos", NewExpr = snapshotPos };
             }
 
-            if (model.Rotation != snapshot.Rotation)
+            var modelRot = SourceExpr.Vec3Literal(Rotation.QuatToEuler(model.Rotation));
+            var snapshotRot = SourceExpr.Vec3Literal(Rotation.QuatToEuler(snapshot.Rotation));
+            if (!string.Equals(modelRot, snapshotRot, StringComparison.Ordinal))
             {
-                yield return new PatchArgument
-                {
-                    Anchor = logicalId,
-                    ArgName = "rot",
-                    NewExpr = SourceExpr.Vec3Literal(Rotation.QuatToEuler(snapshot.Rotation)),
-                };
+                yield return new PatchArgument { Anchor = logicalId, ArgName = "rot", NewExpr = snapshotRot };
             }
 
-            if (model.Scale != snapshot.Scale)
+            var modelScale = SourceExpr.Vec3Literal(model.Scale);
+            var snapshotScale = SourceExpr.Vec3Literal(snapshot.Scale);
+            if (!string.Equals(modelScale, snapshotScale, StringComparison.Ordinal))
             {
-                yield return new PatchArgument { Anchor = logicalId, ArgName = "scale", NewExpr = SourceExpr.Vec3Literal(snapshot.Scale) };
+                yield return new PatchArgument { Anchor = logicalId, ArgName = "scale", NewExpr = snapshotScale };
             }
         }
 

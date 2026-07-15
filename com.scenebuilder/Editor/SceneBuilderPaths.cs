@@ -45,5 +45,28 @@ namespace SceneBuilder.Editor
             Directory.CreateDirectory(BuildersDirectory);
             return BuildersDirectory;
         }
+
+        /// <summary>
+        /// THE write path for builder sources and sidecars: writes <paramref name="contents"/> to
+        /// <paramref name="path"/> ONLY when it differs from what is already on disk. Returns true when
+        /// a write actually happened — an honest "did anything change?" for callers to report.
+        /// </summary>
+        /// <remarks>
+        /// Every writer routes through here rather than calling <see cref="File.WriteAllText(string,string)"/>
+        /// directly, so idempotence is inherited by default and cannot be forgotten by a future one.
+        /// It matters more than it looks: code-&gt;scene is driven by the plugin's OWN file watcher, so a
+        /// write with identical content is not free — it bumps the mtime, fires the watcher, and kicks
+        /// off a build for nothing. A sync that always writes is a watcher that always fires.
+        /// </remarks>
+        public static bool WriteIfChanged(string path, string contents)
+        {
+            if (File.Exists(path) && string.Equals(File.ReadAllText(path), contents, System.StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            File.WriteAllText(path, contents);
+            return true;
+        }
     }
 }

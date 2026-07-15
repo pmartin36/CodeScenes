@@ -188,7 +188,7 @@ namespace SceneBuilder.Core.Reconcile
 
                     if (sourceComp.Fields.TryGetValue(fieldKey, out var srcVal))
                     {
-                        if (Equals(srcVal, snapVal))
+                        if (Equals(srcVal, snapVal) && AuthoredTextIsCurrent(srcVal, snapVal))
                         {
                             continue;
                         }
@@ -283,6 +283,62 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     CollectAssetEntries(value, addedAssets);
                 }
+            }
+        }
+
+        // Asked ONLY of two values that already compare EQUAL: does the source's authored TEXT still
+        // reflect the snapshot, or is it stale and in need of re-emission?
+        //
+        // It exists for exactly one case, by design. AssetRef identity is (Guid, FileId) ONLY —
+        // DisplayPath is deliberately non-authoritative — so a MOVED/RENAMED asset is identity-EQUAL to
+        // its source ref while the authored path in the source text now points somewhere that no longer
+        // exists. Equality alone would skip it and the stale path would never be rewritten. Every other
+        // ValueNode kind determines its own emission, so equality there already implies identical text
+        // and this returns true.
+        //
+        // The inverse case — text equal but identity different (same path, different sub-object fileId)
+        // — is why this is an ADDITIONAL condition on top of Equals and never a replacement for it.
+        private static bool AuthoredTextIsCurrent(ValueNode source, ValueNode snapshot)
+        {
+            switch (source, snapshot)
+            {
+                case (ValueNode.AssetRef(var a), ValueNode.AssetRef(var b)):
+                    if (a is null || b is null)
+                    {
+                        return (a is null) == (b is null);
+                    }
+
+                    return string.Equals(a.DisplayPath, b.DisplayPath, System.StringComparison.Ordinal);
+
+                case (ValueNode.List la, ValueNode.List lb):
+                    if (la.Items.Count != lb.Items.Count)
+                    {
+                        return false;
+                    }
+
+                    for (var i = 0; i < la.Items.Count; i++)
+                    {
+                        if (!AuthoredTextIsCurrent(la.Items[i], lb.Items[i]))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+
+                case (ValueNode.Nested na, ValueNode.Nested nb):
+                    foreach (var (key, value) in na.Fields)
+                    {
+                        if (!nb.Fields.TryGetValue(key, out var other) || !AuthoredTextIsCurrent(value, other))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+
+                default:
+                    return true;
             }
         }
 

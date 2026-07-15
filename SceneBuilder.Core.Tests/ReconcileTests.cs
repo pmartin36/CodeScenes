@@ -321,6 +321,68 @@ namespace SceneBuilder.Core.Tests
             Assert.Contains("90", patchArg.NewExpr);
         }
 
+        // CONVERGENCE: a quaternion that differs from the source's ONLY below the emitted precision is
+        // not a change — the `rot:` literal is rounded to 4dp, so re-emitting it would rewrite the line
+        // to itself. The reconcile must produce NO edit at all.
+        //
+        // This is real, not hypothetical: a rotation can only be authored as an Euler triple, and the
+        // source's triple goes through Core's EulerToQuat while the scene's quaternion comes from
+        // Unity's own float math. For the SAME rotation the two quats differ in their last bits, so an
+        // exact `!=` fired on every sync forever. It was invisible because the emitted text matched, so
+        // nothing was written and EditsApplied stayed 0 — a perpetual rewrite one formatting change
+        // away from firing the code->scene file watcher in a loop.
+        [Fact]
+        public void Reconcile_RotationDifferingBelowEmittedPrecision_ProducesNoEdit()
+        {
+            var authored = Rotation.EulerToQuat(4.5f, 33f, 61f);
+
+            // The same rotation, perturbed far below the 4dp the `rot:` literal can express.
+            var scene = new Quat(
+                authored.X + 1e-7f,
+                authored.Y - 1e-7f,
+                authored.Z + 1e-7f,
+                authored.W - 1e-7f);
+
+            Assert.NotEqual(authored, scene); // premise: the raw quats really are different values
+
+            var model = new SceneModel
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new GameObjectNode
+                    {
+                        LogicalId = "root-1",
+                        Name = "Root",
+                        Transform = new TransformData { Rotation = authored },
+                    },
+                },
+            };
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-root",
+                        Name = "Root",
+                        Transform = new TransformData { Rotation = scene },
+                    },
+                },
+            };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            Assert.Empty(result.Patch.Edits);
+        }
+
         [Fact]
         public void Reconcile_NewRootObject_AppendsStatement_AndMapEntry()
         {

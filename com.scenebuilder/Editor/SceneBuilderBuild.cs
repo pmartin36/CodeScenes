@@ -81,19 +81,11 @@ namespace SceneBuilder.Editor
                 ? IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath))
                 : null;
 
-            var parse = BuilderParser.Parse(source, existingMap);
-
-            // §M3: rewrite transient member:<name> field keys to real serialized paths BEFORE diff.
-            var desired = AuthoredPathResolver.Resolve(parse.Model);
-
-            // §M4: lower authored Asset("path") refs to their AssetDatabase (guid, fileId, typeHint)
-            // BEFORE diff/materialize, so Core stores the authoritative GUID and the write side can
-            // resolve the object. GUID-authoritative: a path stale from a move/rename recovers its GUID
-            // from the sidecar Assets[] cache (ref survives); only a GUID that maps to NOTHING (asset
-            // truly deleted) fails loud. The resolver harvests every referenced GUID at its current
-            // path so Build can refresh Assets[] below.
-            var assetResolver = new AssetReferenceResolver.LoweringResolver(existingMap?.Assets);
-            desired = SceneBuilder.Core.Lowering.AssetRefLowering.Lower(desired, assetResolver.Resolve);
+            // THE shared source->desired seam (parse -> resolve authored paths -> lower asset refs).
+            // Sync goes through the exact same call, so neither direction can skip a stage.
+            var loaded = DesiredModelLoader.Load(source, existingMap);
+            var parse = loaded.Parse;
+            var desired = loaded.Desired;
 
             // Structurally remap the freshly-parsed model against the PRIOR sidecar so a renamed
             // or reordered handle-less object inherits its prior GlobalObjectId (no dup-create),
@@ -123,11 +115,14 @@ namespace SceneBuilder.Editor
                 // §M4: ensure every referenced GUID has an Assets[] entry with its CURRENT path so the
                 // cache stays a valid move-recovery source and future syncs re-derive correctly. A
                 // re-referenced GUID refreshes its LastKnownPath (e.g. after a move).
-                Assets = MergeAssets(parse.IdentityMap.Assets, assetResolver.Harvested),
+                Assets = AssetCacheMerge.Merge(parse.IdentityMap.Assets, loaded.HarvestedAssets).Merged,
                 Entries = remapped.Entries.Where(e => currentLogicalIds.Contains(e.LogicalId)).ToArray(),
             };
             var map = WithGlobalObjectIds(currentStructure, execution);
-            File.WriteAllText(sidecarPath, IdentityMapJson.Serialize(map));
+
+            // Write-if-changed: a rebuild that produces an identical sidecar must not bump its mtime —
+            // the file watcher driving code->scene would fire on it for nothing.
+            SceneBuilderPaths.WriteIfChanged(sidecarPath, IdentityMapJson.Serialize(map));
 
             // No AssetDatabase.Refresh(): the sidecar lives outside Assets/ (nothing to import), and the
             // scene was already registered with the AssetDatabase by EditorSceneManager.SaveScene above.
@@ -142,30 +137,6 @@ namespace SceneBuilder.Editor
                 ObjectCount = execution.GameObjectsByLogicalId.Count,
                 PlanOpCount = plan.Ops.Length,
             };
-        }
-
-        // Fold every harvested asset entry (GUID at its current path) into the existing Assets[] cache,
-        // keyed by GUID; a harvested entry wins (its LastKnownPath reflects the current project layout)
-        // over a stale cached one, so a moved/renamed asset's LastKnownPath is refreshed.
-        private static AssetEntry[] MergeAssets(AssetEntry[] existing, IReadOnlyList<AssetEntry> harvested)
-        {
-            if (harvested.Count == 0)
-            {
-                return existing;
-            }
-
-            var byGuid = new Dictionary<string, AssetEntry>();
-            foreach (var entry in existing)
-            {
-                byGuid[entry.Guid] = entry;
-            }
-
-            foreach (var entry in harvested)
-            {
-                byGuid[entry.Guid] = entry;
-            }
-
-            return byGuid.Values.ToArray();
         }
 
         private static IdentityMap WithGlobalObjectIds(IdentityMap map, PlanExecutor.ExecutionResult execution)

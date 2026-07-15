@@ -20,12 +20,17 @@ namespace SceneBuilder.Editor
     {
         private const string MemberSigil = "member:";
 
-        public static SceneModel Resolve(SceneModel model) => ResolveModel(model).Model;
-
         /// <summary>
         /// Resolves member keys in the model AND remaps the parse's field-argument spans (keyed by the
         /// same member key) in lockstep, so Reconcile's span-local field patching keeps matching.
         /// </summary>
+        /// <remarks>
+        /// Call this through <see cref="DesiredModelLoader.Load"/>, which is the only product caller —
+        /// resolution is one stage of source→desired and a model that has been resolved but NOT
+        /// asset-ref-lowered is not safe to diff. The bare <c>Resolve(SceneModel)</c> overload that used
+        /// to exist here was exactly that trap and is deliberately gone: Build used it and, by pairing
+        /// it with a lowering call Sync forgot, produced the two directions' silent divergence.
+        /// </remarks>
         public static (SceneModel Model, IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> Spans) Resolve(
             SceneModel model,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> fieldArgumentSpans)
