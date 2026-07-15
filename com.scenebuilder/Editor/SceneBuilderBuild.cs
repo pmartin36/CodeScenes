@@ -21,9 +21,15 @@ namespace SceneBuilder.Editor
     /// </summary>
     public static class SceneBuilderBuild
     {
-        private const string BuilderPath = "Assets/SceneBuilder/DemoScene.cs";
+        private const string BuilderName = "DemoScene";
+
+        // The SCENE stays under Assets/ — it is a real Unity asset and EditorSceneManager.SaveScene
+        // takes a project-relative path. Only the builder .cs and its sidecar move out to
+        // <ProjectRoot>/SceneBuilders/, where writing them cannot trigger a domain reload.
         private const string ScenePath = "Assets/SceneBuilder/DemoScene.unity";
-        private const string SidecarPath = "Assets/SceneBuilder/DemoScene.sbmap.json";
+
+        private static string BuilderPath => SceneBuilderPaths.Builder(BuilderName);
+        private static string SidecarPath => SceneBuilderPaths.Sidecar(BuilderName);
 
         /// <summary>Summary of a <see cref="Run"/> build for callers/tests.</summary>
         public sealed class BuildResult
@@ -43,6 +49,8 @@ namespace SceneBuilder.Editor
         {
             try
             {
+                SceneBuilderPaths.EnsureBuildersDirectory();
+
                 if (!File.Exists(BuilderPath))
                 {
                     Debug.LogError($"[SceneBuilder] Builder file not found: {BuilderPath}");
@@ -120,7 +128,10 @@ namespace SceneBuilder.Editor
             };
             var map = WithGlobalObjectIds(currentStructure, execution);
             File.WriteAllText(sidecarPath, IdentityMapJson.Serialize(map));
-            AssetDatabase.Refresh();
+
+            // No AssetDatabase.Refresh(): the sidecar lives outside Assets/ (nothing to import), and the
+            // scene was already registered with the AssetDatabase by EditorSceneManager.SaveScene above.
+            // A Refresh here would cost a domain reload for no gain.
 
             Debug.Log($"[SceneBuilder] Built in place: {execution.GameObjectsByLogicalId.Count} object(s), " +
                       $"{plan.Ops.Length} plan op(s) into {scenePath}. Sidecar: {sidecarPath}");

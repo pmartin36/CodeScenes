@@ -19,8 +19,13 @@ namespace SceneBuilder.Editor
     /// </summary>
     public static class SceneBuilderSync
     {
-        private const string BuilderPath = "Assets/SceneBuilder/DemoScene.cs";
-        private const string SidecarPath = "Assets/SceneBuilder/DemoScene.sbmap.json";
+        private const string BuilderName = "DemoScene";
+
+        // <ProjectRoot>/SceneBuilders/ — outside Assets/, so writing the builder never triggers a
+        // domain reload. Resolved per call (not a const) since the project root is only known at
+        // runtime; see SceneBuilderPaths.
+        private static string BuilderPath => SceneBuilderPaths.Builder(BuilderName);
+        private static string SidecarPath => SceneBuilderPaths.Sidecar(BuilderName);
 
         /// <summary>Summary of a <see cref="Run"/> sync for callers/tests.</summary>
         public sealed class SyncResult
@@ -39,6 +44,12 @@ namespace SceneBuilder.Editor
 
             /// <summary>True when the builder source or the sidecar changed.</summary>
             public bool Changed { get; set; }
+
+            /// <summary>
+            /// Compile errors in the builder source this sync wrote (empty when it compiles, or when
+            /// no source was written). Already reported to the Console by <see cref="Run"/>.
+            /// </summary>
+            public BuilderDiagnostic[] CompileErrors { get; set; } = System.Array.Empty<BuilderDiagnostic>();
         }
 
         [MenuItem("SceneBuilder/Sync DemoScene (scene -> code)")]
@@ -46,6 +57,8 @@ namespace SceneBuilder.Editor
         {
             try
             {
+                SceneBuilderPaths.EnsureBuildersDirectory();
+
                 if (!File.Exists(BuilderPath) || !File.Exists(SidecarPath))
                 {
                     Debug.LogError($"[SceneBuilder] Build first — missing {BuilderPath} or {SidecarPath}.");
@@ -114,6 +127,7 @@ namespace SceneBuilder.Editor
 
             var editsApplied = 0;
             var currentSource = source;
+            var compileErrors = System.Array.Empty<BuilderDiagnostic>();
             if (hasSourceEdits)
             {
                 // Component edits anchor on component LogicalIds — merge those anchors in.
@@ -125,6 +139,12 @@ namespace SceneBuilder.Editor
                     File.WriteAllText(builderPath, newSource);
                     editsApplied = result.Patch.Edits.Length;
                     Debug.Log($"[SceneBuilder] Synced {result.Patch.Edits.Length} edit(s) back into {builderPath}.");
+
+                    // The builder lives outside Assets/, so Unity's compiler no longer vets what we
+                    // just wrote. Check it ourselves, immediately, so a bad emission surfaces in the
+                    // Console at the moment it is written instead of silently breaking the next build.
+                    compileErrors = BuilderCompileCheck.CheckAndReport(
+                        newSource, $"Sync wrote {Path.GetFileName(builderPath)}");
                 }
             }
 
@@ -133,7 +153,9 @@ namespace SceneBuilder.Editor
                 UpdateSidecar(map, result, currentSource, sidecarPath);
             }
 
-            AssetDatabase.Refresh();
+            // No AssetDatabase.Refresh(): the only things this method writes are the builder .cs and the
+            // sidecar .json, both under <ProjectRoot>/SceneBuilders/ — outside the roots Unity scans, so
+            // there is nothing to import. Refreshing here would trigger a domain reload on every sync.
 
             return new SyncResult
             {
@@ -142,6 +164,7 @@ namespace SceneBuilder.Editor
                 AddedEntries = result.AddedEntries.Length,
                 RemovedEntries = result.RemovedLogicalIds.Length,
                 Changed = editsApplied > 0 || hasMapDelta || hasAssetDelta,
+                CompileErrors = compileErrors,
             };
         }
 
