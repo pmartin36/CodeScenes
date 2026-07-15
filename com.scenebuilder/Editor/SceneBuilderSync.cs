@@ -102,8 +102,11 @@ namespace SceneBuilder.Editor
 
             var hasSourceEdits = result.Patch.Edits.Length > 0;
             var hasMapDelta = result.AddedEntries.Length > 0 || result.RemovedLogicalIds.Length > 0;
+            // §M4: a scene edit that introduces a new asset GUID must persist it into the sidecar
+            // Assets[] cache even when nothing structural changed.
+            var hasAssetDelta = result.AddedAssets.Length > 0;
 
-            if (!hasSourceEdits && !hasMapDelta)
+            if (!hasSourceEdits && !hasMapDelta && !hasAssetDelta)
             {
                 Debug.Log("[SceneBuilder] Scene already matches code — nothing to sync.");
                 return new SyncResult { Conflicts = result.Conflicts, Changed = false };
@@ -125,7 +128,7 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            if (hasMapDelta)
+            if (hasMapDelta || hasAssetDelta)
             {
                 UpdateSidecar(map, result, currentSource, sidecarPath);
             }
@@ -138,7 +141,7 @@ namespace SceneBuilder.Editor
                 Conflicts = result.Conflicts,
                 AddedEntries = result.AddedEntries.Length,
                 RemovedEntries = result.RemovedLogicalIds.Length,
-                Changed = editsApplied > 0 || hasMapDelta,
+                Changed = editsApplied > 0 || hasMapDelta || hasAssetDelta,
             };
         }
 
@@ -179,9 +182,40 @@ namespace SceneBuilder.Editor
             // LogicalId while populating Name+SiblingIndex from the parsed structure.
             var reparsed = BuilderParser.Parse(currentSource, mergedMap);
 
-            var updated = map with { Entries = reparsed.IdentityMap.Entries };
+            // §M4: fold every asset GUID the reconcile harvested (AddedAssets) into the Assets[] cache
+            // so a newly-referenced asset's { Guid, LastKnownPath, TypeHint } persists; a re-referenced
+            // GUID refreshes its LastKnownPath.
+            var updated = map with
+            {
+                Entries = reparsed.IdentityMap.Entries,
+                Assets = MergeAssets(map.Assets, result.AddedAssets),
+            };
             File.WriteAllText(sidecarPath, IdentityMapJson.Serialize(updated));
-            Debug.Log($"[SceneBuilder] Sidecar updated: +{result.AddedEntries.Length} / -{result.RemovedLogicalIds.Length} entr(ies).");
+            Debug.Log($"[SceneBuilder] Sidecar updated: +{result.AddedEntries.Length} / -{result.RemovedLogicalIds.Length} entr(ies), " +
+                      $"+{result.AddedAssets.Length} asset(s).");
+        }
+
+        // Merge harvested asset entries into the existing Assets[] cache, keyed by GUID; a harvested
+        // entry wins (its LastKnownPath reflects the current scene) over a stale cached one.
+        private static AssetEntry[] MergeAssets(AssetEntry[] existing, AssetEntry[] added)
+        {
+            if (added.Length == 0)
+            {
+                return existing;
+            }
+
+            var byGuid = new Dictionary<string, AssetEntry>();
+            foreach (var entry in existing)
+            {
+                byGuid[entry.Guid] = entry;
+            }
+
+            foreach (var entry in added)
+            {
+                byGuid[entry.Guid] = entry;
+            }
+
+            return byGuid.Values.ToArray();
         }
     }
 }

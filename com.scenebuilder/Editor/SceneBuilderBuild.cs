@@ -78,6 +78,12 @@ namespace SceneBuilder.Editor
             // §M3: rewrite transient member:<name> field keys to real serialized paths BEFORE diff.
             var desired = AuthoredPathResolver.Resolve(parse.Model);
 
+            // §M4: lower authored Asset("path") refs to their AssetDatabase (guid, fileId, typeHint)
+            // BEFORE diff/materialize, so Core stores the authoritative GUID and the write side can
+            // resolve the object. A non-empty authored path that resolves to no asset fails loud.
+            desired = SceneBuilder.Core.Lowering.AssetRefLowering.Lower(
+                desired, AssetReferenceResolver.LoweringResolver);
+
             // Structurally remap the freshly-parsed model against the PRIOR sidecar so a renamed
             // or reordered handle-less object inherits its prior GlobalObjectId (no dup-create),
             // and a removed object survives as an orphan for the removal path to destroy. First

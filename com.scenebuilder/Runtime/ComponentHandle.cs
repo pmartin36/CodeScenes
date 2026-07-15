@@ -18,5 +18,12 @@ namespace SceneBuilder.Authoring
 
         /// <summary>Set a field by typed member selector (e.g. <c>r =&gt; r.mass</c>).</summary>
         public ComponentHandle<T> Set<TValue>(Func<T, TValue> selector, TValue value) => this;
+
+        /// <summary>
+        /// Set an asset-reference field by typed member selector, e.g.
+        /// <c>c.Set(r =&gt; r.sharedMaterial, Asset("Assets/Materials/Red.mat"))</c>. The selector's
+        /// return type is the asset type; the value is the <see cref="AssetReference"/> factory result.
+        /// </summary>
+        public ComponentHandle<T> Set<TValue>(Func<T, TValue> selector, AssetReference asset) => this;
     }
 }

@@ -206,6 +206,12 @@ namespace SceneBuilder.Editor
                 }
                 case SerializedPropertyType.Generic:
                     return p.isArray ? ReadList(p) : ReadNested(p);
+                case SerializedPropertyType.ObjectReference:
+                    // M4: an object-reference field pointing at a project asset becomes a
+                    // ValueNode.AssetRef (populated), a null asset field becomes AssetRef(null) (None),
+                    // and a scene-object reference stays Unsupported (M5). Replaces the old blanket
+                    // "object refs are unsupported" skip for asset-pointing refs.
+                    return AssetReferenceResolver.ReadObjectReference(p);
                 default:
                     return new ValueNode.Unsupported(p.propertyType.ToString());
             }
