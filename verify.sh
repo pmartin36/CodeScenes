@@ -15,16 +15,28 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
 export PATH="$HOME/.dotnet:$PATH"
 
+# ---- Decide whether Layer 2 is required ----
+# This MUST be computed BEFORE `dotnet build` below. A Core post-build target restages
+# com.scenebuilder/Plugins/SceneBuilder.Core.dll, which is git-tracked — so building first makes
+# the gate's own build dirty a path matching the trigger, and EVERY Core change then drags in the
+# multi-minute editor suite.
+#
+# The staged Core DLL is also excluded from the trigger outright: it is a BUILD ARTIFACT of a Core
+# change, never a source change, so it can never imply Unity-facing work. The exclusion is what
+# holds when the ordering alone is not enough — a DLL left dirty by an earlier build, or a
+# "refresh staged Core DLL" commit landing in the HEAD~1..HEAD diff. Both guards are required.
+# Adding a NEW plugin still triggers Layer 2 via its .meta, which is not excluded.
+changed="$(git diff --name-only HEAD; git diff --name-only HEAD~1 HEAD 2>/dev/null)"
+need_unity=0
+[[ "${GATE_FORCE_UNITY:-0}" == "1" ]] && need_unity=1
+echo "$changed" \
+  | grep -vE '^com\.scenebuilder/Plugins/SceneBuilder\.Core\.dll$' \
+  | grep -qE '^(com\.scenebuilder|unity-gate)/' && need_unity=1
+
 # ---- Layer 1: Core (always) ----
 echo "== Core gate: dotnet build + test =="
 if ! dotnet build SceneBuilder.sln; then echo "GATE FAIL: dotnet build"; exit 1; fi
 if ! dotnet test  SceneBuilder.sln; then echo "GATE FAIL: dotnet test";  exit 1; fi
-
-# ---- Decide whether Layer 2 is required ----
-changed="$(git diff --name-only HEAD; git diff --name-only HEAD~1 HEAD 2>/dev/null)"
-need_unity=0
-[[ "${GATE_FORCE_UNITY:-0}" == "1" ]] && need_unity=1
-echo "$changed" | grep -qE '^(com\.scenebuilder|unity-gate)/' && need_unity=1
 
 if [[ "$need_unity" -eq 0 ]]; then
   echo "GATE PASS: Core green (Unity EditMode gate skipped — no com.scenebuilder/ or unity-gate/ changes)"
