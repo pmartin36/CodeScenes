@@ -151,7 +151,7 @@ namespace SceneBuilder.Core.Reconcile
 
         // true => owner statement is currently handle-less (expression statement) and must be rewritten to
         // declare OwnerHandle before the component is attached. Mirrors AppendStatement.IntroduceParentHandle
-        // and reuses BuildHandleDeclaration (SourcePatchApplier.cs:427).
+        // and reuses BuildHandleDeclaration (StatementText.cs).
         public bool IntroduceOwnerHandle { get; init; }
     }
 
