@@ -78,7 +78,7 @@ namespace SceneBuilder.Editor
                 return component;
             }
 
-            var so = GetProbe(component.Type.FullName, soByType, probes);
+            var so = GetProbe(component.Type, soByType, probes);
             var rewritten = new List<KeyValuePair<string, ValueNode>>(component.Fields.Count);
             var perComponent = new Dictionary<string, string>();
 
@@ -104,9 +104,10 @@ namespace SceneBuilder.Editor
             return component with { Fields = new FieldMap(rewritten) };
         }
 
-        private static SerializedObject GetProbe(string typeFullName, Dictionary<Type, SerializedObject> soByType, List<GameObject> probes)
+        private static SerializedObject GetProbe(TypeRef typeRef, Dictionary<Type, SerializedObject> soByType, List<GameObject> probes)
         {
-            var type = ComponentTypeResolver.Resolve(typeFullName)
+            var typeFullName = typeRef.FullName;
+            var type = ComponentTypeResolver.Resolve(typeRef)
                 ?? throw new InvalidOperationException($"[SceneBuilder] Cannot resolve component type '{typeFullName}' to resolve authored member paths.");
 
             if (soByType.TryGetValue(type, out var existing))

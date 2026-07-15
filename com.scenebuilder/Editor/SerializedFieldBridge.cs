@@ -63,9 +63,36 @@ namespace SceneBuilder.Editor
 
             return new ComponentData
             {
-                Type = new TypeRef(component.GetType().FullName),
+                Type = BuildTypeRef(component),
                 Fields = new FieldMap(kept),
             };
+        }
+
+        // A user MonoBehaviour's identity is anchored to its MonoScript asset GUID, so it resolves
+        // even if the assembly/namespace later changes. Built-in native components have no MonoScript
+        // asset — they keep the plain full-name TypeRef unchanged.
+        private static TypeRef BuildTypeRef(Component component)
+        {
+            var fullName = component.GetType().FullName;
+
+            if (component is MonoBehaviour monoBehaviour)
+            {
+                var monoScript = MonoScript.FromMonoBehaviour(monoBehaviour);
+                if (monoScript != null)
+                {
+                    var path = AssetDatabase.GetAssetPath(monoScript);
+                    if (!string.IsNullOrEmpty(path))
+                    {
+                        var guid = AssetDatabase.AssetPathToGUID(path);
+                        if (!string.IsNullOrEmpty(guid))
+                        {
+                            return new TypeRef(fullName, null, guid);
+                        }
+                    }
+                }
+            }
+
+            return new TypeRef(fullName);
         }
 
         // Collects the supported, non-bookkeeping top-level serialized fields of a component as
