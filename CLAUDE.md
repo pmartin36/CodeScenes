@@ -1,5 +1,32 @@
 # SceneBuilder — operating contract for all agents
 
+## The product IS seamless, non-user-driven sync — this is the key value prop
+
+Invisible bidirectional sync: the user edits the scene and the code updates; they edit the code and
+the scene updates. **They never think about it and they never press a button.** This is the product,
+not a milestone and not a toggle. Every design decision is subordinate to it.
+
+Constraints that follow (they are constraints, not preferences — do not re-litigate them):
+- **Sync fires on EVERY change, so it must be effectively instant.** A ~2s domain reload per sync
+  means: drag a transform value → freeze → drag another → freeze. That is fatal, not a tradeoff.
+- **The builder file MUST NOT live in Unity's compiled asset pipeline.** Any code under `Assets/`
+  (a `.cs`, or even a prebuilt `.dll`) triggers a domain reload; Unity cannot reload individual
+  assemblies, and `LockReloadAssemblies` / `DisallowAutoRefresh` only defer it. The builder lives
+  outside `Assets/` with its own `.csproj` (referencing `SceneBuilder.Authoring` + the Unity managed
+  DLLs) so the IDE still provides IntelliSense and type-checking. Unity's own Rider/VS packages do
+  exactly this — generated `.csproj`/`.sln` at the project root, no `Refresh()`, no reload.
+- **The `Build` / `Sync` menu items are debug scaffolding, not the product.** The happy path has no
+  buttons. Never design a feature that depends on the user invoking a menu item.
+- **Sync performance is a first-class constraint** — it runs continuously, not on a click. A
+  full-scene walk calling `GlobalObjectId.GetGlobalObjectIdSlow` per object is acceptable per
+  button-press and fatal per keystroke. Auto-sync requires debouncing + incremental/cached identity.
+- **M-Auto is the driver, not a downstream milestone.** Scene→code hooks `ObjectChangeEvents`;
+  code→scene needs the plugin's own file watcher (Unity does not watch a builder outside `Assets/`).
+  `specs/14-m-auto-live-sync.md` specs it as opt-in toggles + a drift indicator — that shape is wrong
+  and must be re-specified as seamless-by-default.
+- **Generated C# must compile.** Emitted code is validated by a Roslyn compile assertion in the gate;
+  a write path that can emit non-compiling source is a bug, not a style issue.
+
 ## The gate is `./verify.sh` — nothing ships without it
 
 `./verify.sh` is THE validation gate. The tdd-pipeline MUST use it as its gate command; a task
