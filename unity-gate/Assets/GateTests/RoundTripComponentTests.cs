@@ -276,6 +276,51 @@ public class RoundTripScene : ISceneDefinition
             "Builder source dumped a bare LayerMask value token (unsupported field not skipped).\n" + rewritten);
     }
 
+    // 7b. DELETE CASCADE (scene->code) — REGRESSION. Deleting a GameObject that CARRIES components must
+    //     remove its `var box = scene.Add(...)` statement AND every `box.Component<...>(...)` statement
+    //     authored on that handle. Keeping the component calls while dropping the handle declaration
+    //     emits `box.Component<...>()` with no `box` in scope — CS0103, a file the user cannot compile.
+    //     Routed through SyncAndAssertCompiles, so the orphan is caught as a compile error, not just a
+    //     string mismatch.
+    [Test]
+    public void SceneToCode_RemovedObjectWithComponents_RemovesAddAndComponentStatements()
+    {
+        // Phase 1: build the object alone so it is mapped in the sidecar.
+        File.WriteAllText(_builderPath, Source("        var box = scene.Add(\"Box\");"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        // Phase 2: author components onto the existing object and rebuild (maps the components).
+        File.WriteAllText(_builderPath, Source(
+            "        var box = scene.Add(\"Box\");\n" +
+            "        box.Component<UnityEngine.Rigidbody>(c => c.Set(r => r.mass, 5f));\n" +
+            "        box.Component<UnityEngine.BoxCollider>();"));
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        var box = FindRoot(EditorSceneManager.GetActiveScene(), "Box");
+        Assert.IsNotNull(box, "Box was not created by SceneBuilderBuild.Run");
+        Assert.IsNotNull(box.GetComponent<Rigidbody>(), "Authored Rigidbody was not materialized on Box");
+        Assert.IsNotNull(box.GetComponent<BoxCollider>(), "Authored BoxCollider was not materialized on Box");
+
+        // The user deletes the whole object in the scene.
+        Object.DestroyImmediate(box);
+
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsTrue(result.Changed, "Sync reported no change despite a deleted GameObject");
+
+        var rewritten = File.ReadAllText(_builderPath);
+        StringAssert.DoesNotContain("scene.Add(\"Box\")", rewritten,
+            "Builder source still declares the deleted Box.\n" + rewritten);
+        // The orphans: component statements bound to the handle that no longer exists.
+        StringAssert.DoesNotContain(".Component<UnityEngine.Rigidbody>", rewritten,
+            "Builder source kept the deleted object's Rigidbody statement (orphaned handle reference).\n" + rewritten);
+        StringAssert.DoesNotContain(".Component<UnityEngine.BoxCollider>", rewritten,
+            "Builder source kept the deleted object's BoxCollider statement (orphaned handle reference).\n" + rewritten);
+        StringAssert.DoesNotContain("box", rewritten,
+            "Builder source still references the removed `box` handle.\n" + rewritten);
+    }
+
     // 8. Component + field (code->scene): authoring a typed setter materializes the real component with
     //    the field value applied (member selector `r => r.mass` resolved to the serialized path m_Mass by
     //    the adapter's AuthoredPathResolver). Two-phase build: the object is built first, then the

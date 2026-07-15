@@ -248,6 +248,167 @@ namespace SceneBuilder.Core.Tests
             Assert.Contains("cascade-child", result.RemovedLogicalIds);
         }
 
+        // §13 rule 4 (delete cascade), COMPONENT payload: components are handle-bound statements
+        // (`cube.Component<T>(...)`) that cannot outlive the handle they are authored on. Deleting the
+        // owner in the scene must remove its component statements TOO — leaving them behind orphans a
+        // reference to a `var` that no longer exists (CS0103: the file will not compile).
+        [Fact]
+        public void Reconcile_DeleteCascade_RemovesComponentStatementsOfRemovedOwner()
+        {
+            const string componentLogicalId = "cascade-owner/UnityEngine.Rigidbody#0";
+
+            var owner = new GameObjectNode
+            {
+                LogicalId = "cascade-owner",
+                Name = "Cube",
+                Components = new[]
+                {
+                    new ComponentData { LogicalId = componentLogicalId, Type = new TypeRef("UnityEngine.Rigidbody") },
+                },
+            };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { owner } };
+
+            // Owner deleted in the scene — the component goes with it.
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "cascade-owner", GlobalObjectId = "goid-owner", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = componentLogicalId,
+                        GlobalObjectId = "goid-owner-rb",
+                        Kind = "Component",
+                        ComponentType = "UnityEngine.Rigidbody",
+                        ParentLogicalId = "cascade-owner",
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            // Components die WITH their owner: a cascade, not a ReferencedHandle conflict.
+            Assert.DoesNotContain(result.Conflicts, c => c.Kind == ConflictKind.ReferencedHandle);
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "cascade-owner");
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == componentLogicalId);
+            Assert.Contains("cascade-owner", result.RemovedLogicalIds);
+            Assert.Contains(componentLogicalId, result.RemovedLogicalIds);
+        }
+
+        // Cascade reaches components of a removed CHILD too: the whole deleted subtree's handle-bound
+        // component statements go, not just the top-level object's.
+        [Fact]
+        public void Reconcile_DeleteCascade_RemovesComponentStatementsOfRemovedChild()
+        {
+            const string childComponentLogicalId = "cascade-child/UnityEngine.BoxCollider#0";
+
+            var child = new GameObjectNode
+            {
+                LogicalId = "cascade-child",
+                Name = "Child",
+                Components = new[]
+                {
+                    new ComponentData { LogicalId = childComponentLogicalId, Type = new TypeRef("UnityEngine.BoxCollider") },
+                },
+            };
+            var parent = new GameObjectNode { LogicalId = "cascade-parent", Name = "Parent", Children = new[] { child } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { parent } };
+
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "cascade-parent", GlobalObjectId = "goid-cp", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "cascade-child",
+                        GlobalObjectId = "goid-cc",
+                        Kind = "GameObject",
+                        ParentLogicalId = "cascade-parent",
+                    },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = childComponentLogicalId,
+                        GlobalObjectId = "goid-cc-box",
+                        Kind = "Component",
+                        ComponentType = "UnityEngine.BoxCollider",
+                        ParentLogicalId = "cascade-child",
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "cascade-parent");
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "cascade-child");
+            Assert.Contains(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == childComponentLogicalId);
+            Assert.Contains(childComponentLogicalId, result.RemovedLogicalIds);
+        }
+
+        // The inverse of the cascade: an owner whose handle IS still referenced by a SURVIVING child
+        // statement is not removed (ReferencedHandle conflict) — so its component statements, which
+        // hang off that still-present handle, must be left alone too.
+        [Fact]
+        public void Reconcile_DeleteWithReferencedHandle_KeepsOwnerComponentStatements()
+        {
+            const string componentLogicalId = "ref-owner/UnityEngine.Rigidbody#0";
+
+            var child = new GameObjectNode { LogicalId = "ref-child", Name = "Child" };
+            var owner = new GameObjectNode
+            {
+                LogicalId = "ref-owner",
+                Name = "Owner",
+                Components = new[]
+                {
+                    new ComponentData { LogicalId = componentLogicalId, Type = new TypeRef("UnityEngine.Rigidbody") },
+                },
+                Children = new[] { child },
+            };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { owner } };
+
+            // The owner is gone from the scene but its child SURVIVES (reparented to the root).
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[] { new SnapshotNode { GlobalObjectId = "goid-ref-child", Name = "Child" } },
+            };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "ref-owner", GlobalObjectId = "goid-ref-owner", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "ref-child",
+                        GlobalObjectId = "goid-ref-child",
+                        Kind = "GameObject",
+                        ParentLogicalId = "ref-owner",
+                    },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = componentLogicalId,
+                        GlobalObjectId = "goid-ref-owner-rb",
+                        Kind = "Component",
+                        ComponentType = "UnityEngine.Rigidbody",
+                        ParentLogicalId = "ref-owner",
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            // The handle survives, so neither it nor the statements bound to it are removed.
+            Assert.Contains(result.Conflicts, c => c.Kind == ConflictKind.ReferencedHandle && c.LogicalId == "ref-owner");
+            Assert.DoesNotContain(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == "ref-owner");
+            Assert.DoesNotContain(result.Patch.Edits, e => e is RemoveStatement rs && rs.Anchor == componentLogicalId);
+            Assert.DoesNotContain(componentLogicalId, result.RemovedLogicalIds);
+        }
+
         // §13 create-with-payload: a newly-created scene object carrying a component (payload M2b does not
         // own) is appended as a GameObject AND its component is REPORTED (never silently dropped); the
         // AddedEntry maps it so a second Reconcile of the unchanged scene converges (no re-append).

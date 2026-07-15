@@ -282,7 +282,7 @@ namespace SceneBuilder.Core.Reconcile
                 conflicts,
                 addedAssets);
 
-            DetectRemovals(identityMap, anchors, snapshotByGoid, edits, removedLogicalIds, conflicts);
+            DetectRemovals(identityMap, anchors, componentAnchors, snapshotByGoid, edits, removedLogicalIds, conflicts);
 
             return new ReconcileResult
             {
@@ -538,16 +538,29 @@ namespace SceneBuilder.Core.Reconcile
         // GameObject child whose own GlobalObjectId is still present in the snapshot) cannot
         // be removed - doing so would break the surviving child's statement. Such entries
         // surface a ReferencedHandle conflict instead and are skipped entirely.
+        //
+        // Dependents of a removed owner are handle-bound statements: a child's `scene.Add(..., parent)`
+        // and a component's `owner.Component<T>(...)` both name the owner's handle. The two kinds are
+        // NOT symmetric:
+        //   - a child GameObject CAN outlive its owner (reparented in the scene, so its own
+        //     GlobalObjectId survives) -> the owner's handle is still referenced -> ReferencedHandle.
+        //   - a component CANNOT outlive its owner: destroying a GameObject destroys its components,
+        //     and components are not snapshot nodes, so a surviving component does not exist.
+        //     Component statements therefore CASCADE with the owner. Leaving them behind emits
+        //     `box.Component<T>(...)` with no `box` in scope - CS0103, source that will not compile.
+        // Components of a SURVIVING owner are not this function's business: ReconcileComponents
+        // handles those (it runs per snapshot-present owner), so the two paths never overlap.
         private static void DetectRemovals(
             IdentityMap identityMap,
             IReadOnlyDictionary<string, SourceSpan>? anchors,
+            IReadOnlyDictionary<string, SourceSpan>? componentAnchors,
             IReadOnlyDictionary<string, SnapshotEntry> snapshotByGoid,
             List<SourceEdit> edits,
             List<string> removedLogicalIds,
             List<Conflict> conflicts)
         {
-            var childrenByParent = identityMap.Entries
-                .Where(e => e.Kind == "GameObject" && e.ParentLogicalId != null)
+            var dependentsByOwner = identityMap.Entries
+                .Where(e => (e.Kind == "GameObject" || e.Kind == "Component") && e.ParentLogicalId != null)
                 .GroupBy(e => e.ParentLogicalId!)
                 .ToDictionary(g => g.Key, g => g.ToArray());
 
@@ -563,8 +576,15 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var hasSurvivingChild = childrenByParent.TryGetValue(entry.LogicalId, out var children)
-                    && children.Any(c => !string.IsNullOrEmpty(c.GlobalObjectId) && snapshotByGoid.ContainsKey(c.GlobalObjectId));
+                var dependents = dependentsByOwner.TryGetValue(entry.LogicalId, out var found)
+                    ? found
+                    : Array.Empty<IdentityMapEntry>();
+
+                // Only a GameObject dependent can survive its owner (components are never snapshot nodes).
+                var hasSurvivingChild = dependents.Any(d =>
+                    d.Kind == "GameObject"
+                    && !string.IsNullOrEmpty(d.GlobalObjectId)
+                    && snapshotByGoid.ContainsKey(d.GlobalObjectId));
 
                 if (hasSurvivingChild)
                 {
@@ -587,6 +607,24 @@ namespace SceneBuilder.Core.Reconcile
 
                 edits.Add(new RemoveStatement { Anchor = entry.LogicalId });
                 removedLogicalIds.Add(entry.LogicalId);
+
+                // Cascade: the owner's handle is gone, so every component statement bound to it goes too.
+                foreach (var component in dependents)
+                {
+                    if (component.Kind != "Component")
+                    {
+                        continue;
+                    }
+
+                    if (componentAnchors != null && !componentAnchors.ContainsKey(component.LogicalId))
+                    {
+                        conflicts.Add(ConflictDetector.UnanchorableComponentEdit(component.LogicalId, "remove"));
+                        continue;
+                    }
+
+                    edits.Add(new RemoveStatement { Anchor = component.LogicalId });
+                    removedLogicalIds.Add(component.LogicalId);
+                }
             }
         }
 
