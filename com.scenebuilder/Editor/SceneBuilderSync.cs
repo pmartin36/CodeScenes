@@ -148,7 +148,14 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            if (hasMapDelta || hasAssetDelta)
+            // The sidecar is keyed by LogicalId, and a LogicalId is DERIVED from the source (name +
+            // sibling index + parent path). So ANY source rewrite can re-key it — a rename, reparent
+            // or reorder changes the LogicalId of the node, its components and its whole subtree.
+            // Skipping the sidecar write whenever there was no map delta therefore left it pointing
+            // at LogicalIds the source no longer contains, and the NEXT sync mis-reconciled: a
+            // renamed object surfaced as a MissingSourceAnchor conflict, and a re-synced object was
+            // re-created as a DUPLICATE statement. Persist whenever the source actually changed.
+            if (editsApplied > 0 || hasMapDelta || hasAssetDelta)
             {
                 UpdateSidecar(map, result, currentSource, sidecarPath);
             }
@@ -201,16 +208,49 @@ namespace SceneBuilder.Editor
                 .ToArray();
             var mergedMap = map with { Entries = mergedEntries };
 
-            // BuilderParser.Parse carries each node's GlobalObjectId over from `mergedMap` by
-            // LogicalId while populating Name+SiblingIndex from the parsed structure.
+            // BuilderParser.Parse populates Name+SiblingIndex from the parsed structure, but it only
+            // carries a GlobalObjectId over when the LogicalId is UNCHANGED. That loses the id for
+            // exactly the edits sync exists to make: a rename/reparent/reorder rewrites the source,
+            // which re-derives the LogicalId, which orphans the entry — and the next Build/Sync then
+            // sees a mapped object with no id and emits a spurious create.
+            //
+            // IdentityRemapper is the project's existing answer to that (LogicalId, then Name, then
+            // SiblingIndex, parent-by-parent) — the same structural matching the Build path relies on.
+            // Run it over the re-parsed model so ids survive the rewrite.
             var reparsed = BuilderParser.Parse(currentSource, mergedMap);
+            var remapped = IdentityRemapper.Remap(reparsed.Model, mergedMap);
+
+            // Split of authority, and it matters: the patched SOURCE decides WHICH entries exist and
+            // in what order; the remap only supplies the GlobalObjectId each one carries. Taking
+            // Remap's entry list wholesale would be wrong on both counts — it appends prior entries it
+            // could not pair (correct when Build merges, but here a stale leftover), and a reparent
+            // makes it emit the moved node TWICE (once unmatched with no id, once as the unconsumed
+            // prior), which is a duplicate LogicalId that throws the very next parse.
+            var carriedGlobalObjectIds = new Dictionary<string, string>();
+            foreach (var entry in remapped.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.GlobalObjectId) || carriedGlobalObjectIds.ContainsKey(entry.LogicalId))
+                {
+                    continue;
+                }
+
+                carriedGlobalObjectIds[entry.LogicalId] = entry.GlobalObjectId;
+            }
 
             // §M4: fold every asset GUID the reconcile harvested (AddedAssets) into the Assets[] cache
             // so a newly-referenced asset's { Guid, LastKnownPath, TypeHint } persists; a re-referenced
             // GUID refreshes its LastKnownPath.
             var updated = map with
             {
-                Entries = reparsed.IdentityMap.Entries,
+                // BuilderParser already carried ids over for the LogicalIds the rewrite left alone;
+                // the remap fills in ONLY the ones it re-keyed (a rename/reparent/reorder), so a
+                // confident exact-LogicalId match is never overwritten by a structural guess.
+                Entries = reparsed.IdentityMap.Entries
+                    .Select(e => string.IsNullOrEmpty(e.GlobalObjectId)
+                        && carriedGlobalObjectIds.TryGetValue(e.LogicalId, out var carried)
+                            ? e with { GlobalObjectId = carried }
+                            : e)
+                    .ToArray(),
                 Assets = MergeAssets(map.Assets, result.AddedAssets),
             };
             File.WriteAllText(sidecarPath, IdentityMapJson.Serialize(updated));

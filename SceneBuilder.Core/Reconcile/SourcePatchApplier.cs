@@ -41,11 +41,26 @@ namespace SceneBuilder.Core.Reconcile
             // multiple children appended under one new-subtree parent preserve emission order.
             var lastSiblingByParent = new Dictionary<string, SyntaxAnnotation>();
 
+            // A pos/rot/scale PatchArgument needs a `.Transform(...)` call to patch. When the
+            // authored statement has NONE — the everyday case: the user drags an object authored as
+            // a plain `scene.Add("X")` — the call must be INTRODUCED, exactly as an absent flag call
+            // is (IntroduceFlagCall). Resolved HERE, once, before the main loop, because all of one
+            // anchor's transform args must become a SINGLE `.Transform(pos: ..., rot: ...)` call; a
+            // per-edit introduction would chain three separate `.Transform(...)` calls for a
+            // pos+rot+scale batch, each clobbering the last.
+            var introducedTransformEdits = ResolveTransformIntroductions(root, anchors, patch, allTargets, appliers);
+
             foreach (var edit in patch.Edits)
             {
                 switch (edit)
                 {
                     case PatchArgument patchArgument:
+                        // Already folded into an introduced `.Transform(...)` call above.
+                        if (introducedTransformEdits.Contains(patchArgument))
+                        {
+                            break;
+                        }
+
                         ResolvePatchArgument(root, anchors, patchArgument, allTargets, appliers);
                         break;
                     case MoveStatement moveStatement:
@@ -147,6 +162,107 @@ namespace SceneBuilder.Core.Reconcile
         }
 
         // ---- PatchArgument ------------------------------------------------------------------
+
+        // ---- IntroduceTransformCall -------------------------------------------------------------
+
+        /// <summary>
+        /// Finds every transform <see cref="PatchArgument"/> whose target statement carries NO
+        /// <c>.Transform(...)</c> call and introduces one per anchor, folding all of that anchor's
+        /// pos/rot/scale args into a single call. Returns the edits it consumed so the main loop
+        /// skips them.
+        /// </summary>
+        /// <remarks>
+        /// Absent a Transform call the applier used to THROW ("No .Transform(...) call found"),
+        /// which made the most ordinary edit in the product — nudging an object that was authored
+        /// without an explicit transform — a hard sync failure. Introducing the call is the same
+        /// treatment an absent flag call already gets.
+        /// </remarks>
+        private static HashSet<PatchArgument> ResolveTransformIntroductions(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            SourcePatch patch,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var consumed = new HashSet<PatchArgument>();
+            var byAnchor = new Dictionary<string, List<PatchArgument>>();
+
+            foreach (var edit in patch.Edits.OfType<PatchArgument>())
+            {
+                // `name` patches the Add("...") argument, not the transform chain. Anything outside
+                // pos/rot/scale is left to ResolvePatchArgument so it reports the precise failure.
+                if (Array.IndexOf(TransformPositionalArgs, edit.ArgName) < 0)
+                {
+                    continue;
+                }
+
+                var statement = FindAnchorInvocation(root, anchors, edit.Anchor).FirstAncestorOrSelf<StatementSyntax>();
+                if (statement == null || FindTransformInvocation(statement) != null)
+                {
+                    continue;
+                }
+
+                if (!byAnchor.TryGetValue(edit.Anchor, out var group))
+                {
+                    group = new List<PatchArgument>();
+                    byAnchor[edit.Anchor] = group;
+                }
+
+                group.Add(edit);
+                consumed.Add(edit);
+            }
+
+            foreach (var (anchor, group) in byAnchor)
+            {
+                ResolveIntroduceTransformCall(root, anchors, anchor, group, allTargets, appliers);
+            }
+
+            return consumed;
+        }
+
+        private static void ResolveIntroduceTransformCall(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            string anchor,
+            List<PatchArgument> args,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var invocation = FindAnchorInvocation(root, anchors, anchor);
+            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
+                ?? throw Fail(invocation, $"Anchor '{anchor}' is not inside a statement.");
+
+            var chainExpr = GetChainExpression(statement);
+
+            // Canonical pos/rot/scale order with named arguments, so the emission is indistinguishable
+            // from hand-authored `.Transform(pos: (...), scale: (...))` — including when only the
+            // later args are present, where positional syntax would be wrong.
+            var ordered = TransformPositionalArgs
+                .Select(name => args.FirstOrDefault(a => a.ArgName == name))
+                .Where(a => a != null)
+                .ToList();
+
+            allTargets.Add(chainExpr);
+            appliers.Add(currentRoot =>
+            {
+                var current = currentRoot.GetCurrentNode(chainExpr)!;
+
+                var argList = SyntaxFactory.ArgumentList(
+                    SyntaxFactory.SeparatedList(ordered.Select(a =>
+                        SyntaxFactory.Argument(SyntaxFactory.ParseExpression(a!.NewExpr))
+                            .WithNameColon(SyntaxFactory.NameColon(SyntaxFactory.IdentifierName(a.ArgName))))));
+
+                var newCall = SyntaxFactory.InvocationExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            current.WithoutTrailingTrivia(),
+                            SyntaxFactory.IdentifierName("Transform")),
+                        argList)
+                    .WithTrailingTrivia(current.GetTrailingTrivia());
+
+                return currentRoot.ReplaceNode(current, newCall);
+            });
+        }
 
         private static void ResolvePatchArgument(
             CompilationUnitSyntax root,

@@ -199,6 +199,73 @@ public class RoundTripScene : ISceneDefinition
             "Builder source still carries the old name.\n" + rewritten);
     }
 
+    // 5b. RENAME CONVERGENCE (scene->code) — REGRESSION. A LogicalId is DERIVED from the source
+    //     (name + sibling index + parent path), and the sidecar is KEYED by LogicalId. So a rename
+    //     re-keys the sidecar — but sync only persisted the sidecar when there was a map delta
+    //     (added/removed entries), and a rename has none. The sidecar was therefore left pointing at
+    //     the OLD LogicalId, and the very next sync mis-reconciled: the renamed object surfaced as a
+    //     MissingSourceAnchor conflict AND was re-emitted as a DUPLICATE statement. Found by
+    //     SyncFuzzTests (seed 5, step 0). The invariant: sync CONVERGES — a re-sync with no scene
+    //     change is a no-op, with no conflicts and no duplicate.
+    [Test]
+    public void SceneToCode_RenamedObject_ResyncConvergesWithNoConflictOrDuplicate()
+    {
+        File.WriteAllText(_builderPath, Source("        scene.Add(\"Beta\");"));
+
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        var go = FindRoot(EditorSceneManager.GetActiveScene(), "Beta");
+        Assert.IsNotNull(go, "Beta was not created by SceneBuilderBuild.Run");
+        go.name = "Renamed";
+
+        EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        // The re-sync is the assertion: nothing changed in the scene, so nothing may change in code.
+        var second = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.AreEqual(0, second.EditsApplied,
+            "Rename did not converge — a re-sync with NO scene change edited the source again.\n"
+            + File.ReadAllText(_builderPath));
+        Assert.IsEmpty(second.Conflicts,
+            "Re-sync after a rename reported conflicts — the sidecar still holds the pre-rename LogicalId.");
+
+        var rewritten = File.ReadAllText(_builderPath);
+        Assert.AreEqual(1, System.Text.RegularExpressions.Regex.Matches(rewritten, "Add\\(\"Renamed\"\\)").Count,
+            "Renamed object was emitted more than once — the stale sidecar caused a duplicate create.\n" + rewritten);
+    }
+
+    // 5c. REPARENT CONVERGENCE (scene->code) — REGRESSION. Reparenting under a HANDLED parent re-keys
+    //     the moved node's LogicalId, and the sidecar rewrite must not emit the node twice (once
+    //     unmatched, once as the carried-over prior entry). A duplicate LogicalId in the sidecar
+    //     throws `ArgumentException: An item with the same key has already been added` out of the
+    //     very next BuilderParser.Parse. Found by SyncFuzzTests (seed 13, step 0).
+    [Test]
+    public void SceneToCode_ReparentedObject_ResyncDoesNotThrowOnDuplicateSidecarKey()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var alpha = scene.Add(\"Alpha\");\n" +
+            "        var gamma = scene.Add(\"Gamma\");"));
+
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        var live = EditorSceneManager.GetActiveScene();
+        var alpha = FindRoot(live, "Alpha");
+        var gamma = FindRoot(live, "Gamma");
+        Assert.IsNotNull(alpha, "Alpha was not created by SceneBuilderBuild.Run");
+        Assert.IsNotNull(gamma, "Gamma was not created by SceneBuilderBuild.Run");
+
+        gamma.transform.SetParent(alpha.transform);
+
+        EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        Assert.DoesNotThrow(
+            () => SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene()),
+            "Re-sync after a reparent THREW — the sidecar carries a duplicate LogicalId for the moved node.");
+    }
+
     // 6. Flags (scene->code): setting tag / layer / active / static on the real GameObject introduces
     //    the corresponding .Tag/.Layer/.Active/.Static calls onto its statement.
     [Test]
