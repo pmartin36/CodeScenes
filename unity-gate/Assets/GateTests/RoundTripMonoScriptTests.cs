@@ -121,7 +121,7 @@ public class RoundTripScene : ISceneDefinition
         Assert.AreEqual(7, System.Convert.ToInt32(((ValueNode.Primitive)component.Fields["Health"]).Value),
             "Health=7 did not survive into the snapshot");
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite an added custom MonoBehaviour");
 
         var rewritten = File.ReadAllText(_builderPath);

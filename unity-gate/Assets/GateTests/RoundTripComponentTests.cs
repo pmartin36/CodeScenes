@@ -79,7 +79,7 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsNotNull(box, "Box was not created by SceneBuilderBuild.Run");
         box.AddComponent<Rigidbody>();
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite an added component");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -104,7 +104,7 @@ public class RoundTripScene : ISceneDefinition
 
         SceneBuilderSync.SyncResult result = null;
         Assert.DoesNotThrow(
-            () => result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene()),
+            () => result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene()),
             "Sync threw when attaching a component to a handle-less object.");
         Assert.IsTrue(result.Changed, "Sync reported no change despite an added component");
 
@@ -133,7 +133,7 @@ public class RoundTripScene : ISceneDefinition
 
         SceneBuilderSync.SyncResult result = null;
         Assert.DoesNotThrow(
-            () => result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene()),
+            () => result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene()),
             "Sync threw when attaching multiple components to a handle-less object.");
         Assert.IsTrue(result.Changed, "Sync reported no change despite two added components");
 
@@ -172,7 +172,7 @@ public class RoundTripScene : ISceneDefinition
 
         rb.mass = 5f;
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite an edited field value");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -206,7 +206,7 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsNotNull(rb, "Authored Rigidbody was not materialized on Box");
         Object.DestroyImmediate(rb);
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a removed component");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -229,7 +229,7 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsNotNull(box, "Box was not created by SceneBuilderBuild.Run");
         box.AddComponent<Rigidbody>();
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite an added component");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -263,7 +263,7 @@ public class RoundTripScene : ISceneDefinition
         // shape that produced `.Set("m_Materials", new[] { ObjectReference })` garbage before the skip.
         mr.sharedMaterial = new Material(Shader.Find("Standard"));
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite an added component");
 
         var rewritten = File.ReadAllText(_builderPath);

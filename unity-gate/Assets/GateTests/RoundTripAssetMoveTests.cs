@@ -25,15 +25,24 @@ public class RoundTripAssetMoveTests
     private string _builderPath;
     private string _sidecarPath;
 
-    private static string Source(string body) => $@"
+    // Mirrors a REAL user's file: the static AssetRefs using appears exactly when the authored body
+    // itself calls Asset(...) — see RoundTripAssetRefTests.Source.
+    private static string Source(string body)
+    {
+        var assetRefsUsing = body.Contains("Asset(")
+            ? "using static SceneBuilder.Authoring.AssetRefs;\n"
+            : "";
+
+        return $@"
 using SceneBuilder.Authoring;
-public class RoundTripAssetMoveScene : ISceneDefinition
+{assetRefsUsing}public class RoundTripAssetMoveScene : ISceneDefinition
 {{
     public void Build(SceneRoot scene)
     {{
 {body}
     }}
 }}";
+    }
 
     private static GameObject FindRoot(Scene scene, string name)
     {
@@ -152,7 +161,7 @@ public class RoundTripAssetMoveScene : ISceneDefinition
         Assert.IsEmpty(moveError, "MoveAsset failed: " + moveError);
         AssetDatabase.Refresh();
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite the moved asset path");
 
         var rewritten = File.ReadAllText(_builderPath);

@@ -26,15 +26,26 @@ public class RoundTripAssetRefTests
     private string _sidecarPath;
 
     // Wrap a Build-body fragment in a minimal ISceneDefinition the Core Roslyn parser understands.
-    private static string Source(string body) => $@"
+    // Mirrors a REAL user's file: `using SceneBuilder.Authoring;` always, plus the static AssetRefs
+    // using exactly when the authored body itself calls Asset(...). A user who never hand-wrote an
+    // Asset(...) call has no reason to carry that using — and that is precisely the file sync must
+    // leave COMPILING when it introduces an Asset(...) of its own.
+    private static string Source(string body)
+    {
+        var assetRefsUsing = body.Contains("Asset(")
+            ? "using static SceneBuilder.Authoring.AssetRefs;\n"
+            : "";
+
+        return $@"
 using SceneBuilder.Authoring;
-public class RoundTripAssetScene : ISceneDefinition
+{assetRefsUsing}public class RoundTripAssetScene : ISceneDefinition
 {{
     public void Build(SceneRoot scene)
     {{
 {body}
     }}
 }}";
+    }
 
     private static GameObject FindRoot(Scene scene, string name)
     {
@@ -135,7 +146,7 @@ public class RoundTripAssetScene : ISceneDefinition
         // Assign the real Red.mat asset in the scene.
         mr.sharedMaterial = LoadMaterial(RedPath);
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite an assigned material");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -168,7 +179,7 @@ public class RoundTripAssetScene : ISceneDefinition
         // Swap to Blue.mat in the scene.
         mr.sharedMaterial = LoadMaterial(BluePath);
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a swapped material");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -205,7 +216,7 @@ public class RoundTripAssetScene : ISceneDefinition
         var red = LoadMaterial(RedPath);
         mr.sharedMaterials = new Material[] { null, red };
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a cleared material slot");
 
         var rewritten = File.ReadAllText(_builderPath);

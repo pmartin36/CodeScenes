@@ -81,7 +81,7 @@ public class RoundTripScene : ISceneDefinition
         var scope = new GameObject("Scope");
         scope.transform.SetParent(weapon.transform);
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a newly-created GameObject");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -106,7 +106,7 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsNotNull(goner, "Goner was not created by SceneBuilderBuild.Run");
         Object.DestroyImmediate(goner);
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a destroyed GameObject");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -138,7 +138,7 @@ public class RoundTripScene : ISceneDefinition
 
         beta.transform.SetParent(alpha.transform);
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a reparent");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -189,7 +189,7 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsNotNull(go, "Original was not created by SceneBuilderBuild.Run");
         go.name = "Renamed";
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a rename");
 
         var rewritten = File.ReadAllText(_builderPath);
@@ -218,7 +218,7 @@ public class RoundTripScene : ISceneDefinition
         go.SetActive(false);
         go.isStatic = true;
 
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite four flag edits");
 
         var rewritten = File.ReadAllText(_builderPath);

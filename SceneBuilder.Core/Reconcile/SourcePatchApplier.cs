@@ -90,7 +90,60 @@ namespace SceneBuilder.Core.Reconcile
                 currentRoot = apply(currentRoot);
             }
 
+            // Self-consistency pass over the FINAL root, so every edit kind inherits it by default:
+            // the patched file must not merely parse, it must COMPILE — it lives in Assets/ and Unity
+            // builds it. Any edit that emitted a short `Asset(...)` call needs its using directive.
+            if (currentRoot is CompilationUnitSyntax patchedUnit)
+            {
+                currentRoot = EnsureAssetRefsUsing(patchedUnit);
+            }
+
             return currentRoot.ToFullString();
+        }
+
+        // ---- Emitted-code self-consistency ------------------------------------------------------
+
+        private const string AssetRefsTypeName = "SceneBuilder.Authoring.AssetRefs";
+
+        /// <summary>
+        /// Guarantees the compilation unit imports the <c>Asset(...)</c> factory whenever the patched
+        /// source calls it in the SHORT form. Emission keeps the short, readable `Asset("path")` call —
+        /// readability is the product's point — so the file must carry
+        /// <c>using static SceneBuilder.Authoring.AssetRefs;</c> or it fails with CS0103. Idempotent:
+        /// a file that already imports it (however it got there) is returned untouched.
+        /// </summary>
+        private static CompilationUnitSyntax EnsureAssetRefsUsing(CompilationUnitSyntax root)
+        {
+            var callsShortAssetFactory = root.DescendantNodes()
+                .OfType<InvocationExpressionSyntax>()
+                .Any(inv => inv.Expression is IdentifierNameSyntax identifier
+                    && identifier.Identifier.Text == "Asset");
+
+            if (!callsShortAssetFactory)
+            {
+                return root;
+            }
+
+            // Guard against duplicates anywhere in the file (compilation-unit OR namespace scope).
+            var alreadyImported = root.DescendantNodes()
+                .OfType<UsingDirectiveSyntax>()
+                .Any(u => u.StaticKeyword.IsKind(SyntaxKind.StaticKeyword)
+                    && u.Name?.ToString() == AssetRefsTypeName);
+
+            if (alreadyImported)
+            {
+                return root;
+            }
+
+            // Spacing is explicit: bare SyntaxFactory tokens carry no trivia, which renders the
+            // directive as `usingstaticSceneBuilder.Authoring.AssetRefs;` — itself uncompilable.
+            var directive = SyntaxFactory
+                .UsingDirective(SyntaxFactory.ParseName(AssetRefsTypeName))
+                .WithUsingKeyword(SyntaxFactory.Token(SyntaxKind.UsingKeyword).WithTrailingTrivia(SyntaxFactory.Space))
+                .WithStaticKeyword(SyntaxFactory.Token(SyntaxKind.StaticKeyword).WithTrailingTrivia(SyntaxFactory.Space))
+                .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
+
+            return root.AddUsings(directive);
         }
 
         // ---- PatchArgument ------------------------------------------------------------------
@@ -306,11 +359,79 @@ namespace SceneBuilder.Core.Reconcile
                 var index = currentBlock.Statements.IndexOf(currentStatement);
                 var withoutStatement = currentBlock.Statements.RemoveAt(index);
                 var newIndex = Math.Min(edit.NewSiblingIndex, withoutStatement.Count);
+
+                // A sibling index is a SCENE-GRAPH position; a block index is a C# ordering with
+                // declaration rules. Re-seating a statement ahead of the declaration of the handle it
+                // calls emits `alpha.Add("Beta"); var alpha = ...;` — CS0841, use before declaration.
+                // Floor the target at the receiver's declaration so the reorder cannot outrun it.
+                newIndex = Math.Max(newIndex, MinIndexAfterReceiverDeclaration(withoutStatement, currentStatement));
+
                 var newStatements = withoutStatement.Insert(newIndex, currentStatement);
                 var newBlock = currentBlock.WithStatements(newStatements);
 
                 return currentRoot.ReplaceNode(currentBlock, newBlock);
             });
+        }
+
+        /// <summary>
+        /// The earliest block index at which <paramref name="statement"/> may legally sit: one past the
+        /// local declaration of the handle it calls, when that handle is declared in this same block.
+        /// Returns 0 when the receiver is not a local declared here (a lambda parameter, the `scene`
+        /// root, or a handle from an enclosing scope) — nothing to outrun.
+        /// </summary>
+        private static int MinIndexAfterReceiverDeclaration(
+            SyntaxList<StatementSyntax> statements,
+            StatementSyntax statement)
+        {
+            var receiver = RootReceiverName(statement);
+            if (receiver == null)
+            {
+                return 0;
+            }
+
+            for (var i = 0; i < statements.Count; i++)
+            {
+                if (statements[i] is LocalDeclarationStatementSyntax local
+                    && local.Declaration.Variables.Any(v => v.Identifier.Text == receiver))
+                {
+                    return i + 1;
+                }
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// The leftmost identifier of a statement's fluent chain — the handle it is called on
+        /// (`alpha` in `alpha.Add("Beta").Transform(...)`). Null when the statement is not a chain
+        /// rooted in a plain identifier.
+        /// </summary>
+        private static string? RootReceiverName(StatementSyntax statement)
+        {
+            ExpressionSyntax? expression = statement switch
+            {
+                ExpressionStatementSyntax expressionStatement => expressionStatement.Expression,
+                LocalDeclarationStatementSyntax localDeclaration when localDeclaration.Declaration.Variables.Count == 1
+                    => localDeclaration.Declaration.Variables[0].Initializer?.Value,
+                _ => null,
+            };
+
+            while (true)
+            {
+                switch (expression)
+                {
+                    case InvocationExpressionSyntax invocation:
+                        expression = invocation.Expression;
+                        break;
+                    case MemberAccessExpressionSyntax memberAccess:
+                        expression = memberAccess.Expression;
+                        break;
+                    case IdentifierNameSyntax identifier:
+                        return identifier.Identifier.Text;
+                    default:
+                        return null;
+                }
+            }
         }
 
         // ---- RemoveStatement --------------------------------------------------------------------

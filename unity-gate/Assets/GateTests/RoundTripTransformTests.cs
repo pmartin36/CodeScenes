@@ -87,7 +87,7 @@ public class RoundTripScene : ISceneDefinition
         go.transform.position = new Vector3(0f, 5f, 0f);
 
         // Sync the moved scene back into the builder source.
-        var result = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Sync reported no change despite a moved transform");
 
         var rewritten = File.ReadAllText(_builderPath);

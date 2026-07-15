@@ -16,7 +16,9 @@
     "overrideReferences": true,
     "precompiledReferences": [
         "nunit.framework.dll",
-        "SceneBuilder.Core.dll"
+        "SceneBuilder.Core.dll",
+        "Microsoft.CodeAnalysis.dll",
+        "Microsoft.CodeAnalysis.CSharp.dll"
     ],
     "autoReferenced": false,
     "defineConstraints": [
