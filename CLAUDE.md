@@ -41,6 +41,20 @@ It has two layers:
    never "probably fine". A pure-Core change skips layer 2 and says so; a skip never counts as a
    Unity pass.
 
+### Reading the gate's verdict — the ONLY reliable check is the `GATE PASS` line
+
+`./verify.sh` prints exactly one verdict line: `GATE PASS: ...` or `GATE FAIL: ...`. Read THAT.
+**A wrapper's exit code is not the gate's exit code** and has already fooled three separate agents:
+backgrounding the gate as `( ./verify.sh > log 2>&1; echo "EXIT=$?" >> log ) &` makes the subshell
+exit with the status of the final `echo` — always 0 — so a FAILED gate is reported as "exit code 0".
+If you background it, propagate the status explicitly and still read the verdict line:
+
+```bash
+( ./verify.sh > "$LOG" 2>&1; code=$?; echo "REALEXIT=$code" >> "$LOG"; exit $code ) &
+# then: grep -aE 'GATE PASS|GATE FAIL|REALEXIT' "$LOG"
+```
+Never report a gate as green on an exit code alone. Quote the `GATE PASS` line or you did not verify it.
+
 ## Hard requirement: Unity-facing changes need EditMode coverage
 
 Any change to `com.scenebuilder/` (the Unity adapter/runtime) or to Unity-observable behavior is
@@ -51,12 +65,20 @@ Unity boundary — that boundary is where bugs escape, so it must be covered by 
 runs Unity. The pipeline decomposition MUST include such a test for adapter work, and `./verify.sh`
 enforces it.
 
-## Everything is built and validated THROUGH the tdd-pipeline
+## How work is built: feature work goes through the tdd-pipeline; everything is gated
 
-Core AND adapter both go through the tdd-pipeline with `./verify.sh` as the gate. Do NOT hand-wire
-adapter code or ship "compile-only" adapter changes outside the pipeline — the split that skipped
-real Unity validation is exactly what leaked bugs. If the adapter isn't structured to be testable in
-EditMode, refactor it (through the pipeline) so it is.
+- **Feature work — anything with a spec in `specs/` (a milestone, or a new capability) — MUST go
+  through the tdd-pipeline**, Core AND adapter alike. Do NOT hand-wire a feature or ship
+  "compile-only" adapter changes: the split that skipped real Unity validation is exactly what
+  leaked bugs. If the adapter isn't structured to be testable in EditMode, refactor it (through the
+  pipeline) so it is.
+- **Bug fixes, investigations, and infrastructure may be done by a subagent** working RED-first
+  against the same gate. This is the practical path when the pipeline's `Workflow` tool isn't in a
+  subagent's toolset.
+- **Non-negotiable either way: `./verify.sh` is the gate.** The orchestrator may vary; the gate never
+  does. Nothing ships without a quoted `GATE PASS`, and a fix is not done until it ships with a
+  regression test. A bug found without a spec is still a bug — write the spec if the fix defines new
+  behavior (see `specs/16-duplicate-sibling-identity.md`).
 
 ## Layout
 
