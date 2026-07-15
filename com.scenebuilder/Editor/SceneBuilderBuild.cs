@@ -5,6 +5,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Materialize;
 using SceneBuilder.Core.Parsing;
@@ -24,6 +25,19 @@ namespace SceneBuilder.Editor
         private const string ScenePath = "Assets/SceneBuilder/DemoScene.unity";
         private const string SidecarPath = "Assets/SceneBuilder/DemoScene.sbmap.json";
 
+        /// <summary>Summary of a <see cref="Run"/> build for callers/tests.</summary>
+        public sealed class BuildResult
+        {
+            /// <summary>The IdentityMap written to the sidecar (with post-save GlobalObjectIds).</summary>
+            public IdentityMap Map { get; set; } = new();
+
+            /// <summary>Number of GameObjects resolved or created by the execution.</summary>
+            public int ObjectCount { get; set; }
+
+            /// <summary>Number of plan ops executed against the scene.</summary>
+            public int PlanOpCount { get; set; }
+        }
+
         [MenuItem("SceneBuilder/Build DemoScene (code -> scene)")]
         public static void BuildDemo()
         {
@@ -35,58 +49,76 @@ namespace SceneBuilder.Editor
                     return;
                 }
 
-                var source = File.ReadAllText(BuilderPath);
-
-                // Carry over existing GlobalObjectIds so rebuilds reconcile in place (no id churn).
-                IdentityMap? existingMap = File.Exists(SidecarPath)
-                    ? IdentityMapJson.Deserialize(File.ReadAllText(SidecarPath))
-                    : null;
-
-                var parse = BuilderParser.Parse(source, existingMap);
-
-                // §M3: rewrite transient member:<name> field keys to real serialized paths BEFORE diff.
-                var desired = AuthoredPathResolver.Resolve(parse.Model);
-
-                // Structurally remap the freshly-parsed model against the PRIOR sidecar so a renamed
-                // or reordered handle-less object inherits its prior GlobalObjectId (no dup-create),
-                // and a removed object survives as an orphan for the removal path to destroy. First
-                // build (no sidecar) => empty prior => all-new, which is correct.
-                var priorSidecar = existingMap ?? new IdentityMap();
-                var remapped = IdentityRemapper.Remap(parse.Model, priorSidecar);
-
-                // Read the CURRENT open scene as `actual` — never NewScene / wipe.
-                var scene = EditorSceneManager.GetActiveScene();
-                var snapshot = SceneSnapshotReader.Read(scene);
-
-                var plan = Materializer.Materialize(desired, snapshot, remapped);
-
-                var execution = PlanExecutor.Execute(plan, remapped, scene);
-
-                EditorSceneManager.MarkSceneDirty(scene);
-                EditorSceneManager.SaveScene(scene, ScenePath);
-
-                // Persist the CURRENT code structure only (drop destroyed orphans), carrying the
-                // remapped fingerprint (Name+SiblingIndex) and inherited GlobalObjectIds, then stamp
-                // the post-save GlobalObjectIds for objects the execution created/touched.
-                var currentLogicalIds = new HashSet<string>(parse.IdentityMap.Entries.Select(e => e.LogicalId));
-                var currentStructure = new IdentityMap
-                {
-                    SchemaVersion = parse.IdentityMap.SchemaVersion,
-                    Scene = ScenePath,
-                    Assets = parse.IdentityMap.Assets,
-                    Entries = remapped.Entries.Where(e => currentLogicalIds.Contains(e.LogicalId)).ToArray(),
-                };
-                var map = WithGlobalObjectIds(currentStructure, execution);
-                File.WriteAllText(SidecarPath, IdentityMapJson.Serialize(map));
-                AssetDatabase.Refresh();
-
-                Debug.Log($"[SceneBuilder] Built in place: {execution.GameObjectsByLogicalId.Count} object(s), " +
-                          $"{plan.Ops.Length} plan op(s) into {ScenePath}. Sidecar: {SidecarPath}");
+                Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene());
             }
             catch (System.Exception e)
             {
                 Debug.LogError("[SceneBuilder] Build failed:\n" + e);
             }
+        }
+
+        /// <summary>
+        /// Build (code-&gt;scene) against a PASSED scene + paths: parse the builder file at
+        /// <paramref name="builderPath"/>, materialize a Plan against <paramref name="scene"/> and the
+        /// sidecar at <paramref name="sidecarPath"/>, execute it IN PLACE, save the scene to
+        /// <paramref name="scenePath"/>, and rewrite the sidecar. The testable seam behind
+        /// <see cref="BuildDemo"/>. Throws on failure (no swallowing) so callers/tests observe errors.
+        /// </summary>
+        public static BuildResult Run(string builderPath, string scenePath, string sidecarPath, Scene scene)
+        {
+            var source = File.ReadAllText(builderPath);
+
+            // Carry over existing GlobalObjectIds so rebuilds reconcile in place (no id churn).
+            IdentityMap? existingMap = File.Exists(sidecarPath)
+                ? IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath))
+                : null;
+
+            var parse = BuilderParser.Parse(source, existingMap);
+
+            // §M3: rewrite transient member:<name> field keys to real serialized paths BEFORE diff.
+            var desired = AuthoredPathResolver.Resolve(parse.Model);
+
+            // Structurally remap the freshly-parsed model against the PRIOR sidecar so a renamed
+            // or reordered handle-less object inherits its prior GlobalObjectId (no dup-create),
+            // and a removed object survives as an orphan for the removal path to destroy. First
+            // build (no sidecar) => empty prior => all-new, which is correct.
+            var priorSidecar = existingMap ?? new IdentityMap();
+            var remapped = IdentityRemapper.Remap(parse.Model, priorSidecar);
+
+            // Read the PASSED scene as `actual` — never NewScene / wipe.
+            var snapshot = SceneSnapshotReader.Read(scene);
+
+            var plan = Materializer.Materialize(desired, snapshot, remapped);
+
+            var execution = PlanExecutor.Execute(plan, remapped, scene);
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene, scenePath);
+
+            // Persist the CURRENT code structure only (drop destroyed orphans), carrying the
+            // remapped fingerprint (Name+SiblingIndex) and inherited GlobalObjectIds, then stamp
+            // the post-save GlobalObjectIds for objects the execution created/touched.
+            var currentLogicalIds = new HashSet<string>(parse.IdentityMap.Entries.Select(e => e.LogicalId));
+            var currentStructure = new IdentityMap
+            {
+                SchemaVersion = parse.IdentityMap.SchemaVersion,
+                Scene = scenePath,
+                Assets = parse.IdentityMap.Assets,
+                Entries = remapped.Entries.Where(e => currentLogicalIds.Contains(e.LogicalId)).ToArray(),
+            };
+            var map = WithGlobalObjectIds(currentStructure, execution);
+            File.WriteAllText(sidecarPath, IdentityMapJson.Serialize(map));
+            AssetDatabase.Refresh();
+
+            Debug.Log($"[SceneBuilder] Built in place: {execution.GameObjectsByLogicalId.Count} object(s), " +
+                      $"{plan.Ops.Length} plan op(s) into {scenePath}. Sidecar: {sidecarPath}");
+
+            return new BuildResult
+            {
+                Map = map,
+                ObjectCount = execution.GameObjectsByLogicalId.Count,
+                PlanOpCount = plan.Ops.Length,
+            };
         }
 
         private static IdentityMap WithGlobalObjectIds(IdentityMap map, PlanExecutor.ExecutionResult execution)
