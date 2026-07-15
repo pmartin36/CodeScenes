@@ -199,6 +199,7 @@ namespace SceneBuilder.Core.Reconcile
             var addedEntries = new List<IdentityMapEntry>();
             var removedLogicalIds = new List<string>();
             var skippedFields = new List<SceneBuilder.Core.Plan.SkippedField>();
+            var addedAssets = new List<AssetEntry>();
             var nextIndexByParentKey = new Dictionary<string, int>();
             var introducedHandleByParent = new Dictionary<string, string>();
 
@@ -259,7 +260,8 @@ namespace SceneBuilder.Core.Reconcile
                     addedEntries,
                     removedLogicalIds,
                     conflicts,
-                    skippedFields);
+                    skippedFields,
+                    addedAssets);
             }
 
             DetectAppends(
@@ -277,7 +279,8 @@ namespace SceneBuilder.Core.Reconcile
                 edits,
                 addedEntries,
                 removedLogicalIds,
-                conflicts);
+                conflicts,
+                addedAssets);
 
             DetectRemovals(identityMap, anchors, snapshotByGoid, edits, removedLogicalIds, conflicts);
 
@@ -288,7 +291,24 @@ namespace SceneBuilder.Core.Reconcile
                 AddedEntries = addedEntries.ToArray(),
                 RemovedLogicalIds = removedLogicalIds.ToArray(),
                 Skipped = skippedFields.ToArray(),
+                AddedAssets = DedupAssetsByGuid(addedAssets),
             };
+        }
+
+        // netstandard2.1 has no DistinctBy; dedup manually, keeping first occurrence per Guid.
+        private static AssetEntry[] DedupAssetsByGuid(List<AssetEntry> addedAssets)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var result = new List<AssetEntry>(addedAssets.Count);
+            foreach (var entry in addedAssets)
+            {
+                if (seen.Add(entry.Guid))
+                {
+                    result.Add(entry);
+                }
+            }
+
+            return result.ToArray();
         }
 
         // Snapshot-driven create-detection: walks the ACTUAL (scene) tree depth-first looking
@@ -312,7 +332,8 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<IdentityMapEntry> addedEntries,
             List<string> removedLogicalIds,
-            List<Conflict> conflicts)
+            List<Conflict> conflicts,
+            List<AssetEntry> addedAssets)
         {
             foreach (var node in nodes)
             {
@@ -337,7 +358,8 @@ namespace SceneBuilder.Core.Reconcile
                         edits,
                         addedEntries,
                         removedLogicalIds,
-                        conflicts);
+                        conflicts,
+                        addedAssets);
 
                     continue;
                 }
@@ -461,7 +483,8 @@ namespace SceneBuilder.Core.Reconcile
                                 ownHandle,
                                 false,
                                 edits,
-                                addedEntries);
+                                addedEntries,
+                                addedAssets);
                         }
                     }
 
@@ -480,7 +503,8 @@ namespace SceneBuilder.Core.Reconcile
                         edits,
                         addedEntries,
                         removedLogicalIds,
-                        conflicts);
+                        conflicts,
+                        addedAssets);
 
                     continue;
                 }
@@ -500,7 +524,8 @@ namespace SceneBuilder.Core.Reconcile
                     edits,
                     addedEntries,
                     removedLogicalIds,
-                    conflicts);
+                    conflicts,
+                    addedAssets);
             }
         }
 

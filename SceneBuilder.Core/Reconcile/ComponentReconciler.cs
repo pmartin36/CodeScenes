@@ -29,7 +29,8 @@ namespace SceneBuilder.Core.Reconcile
             List<IdentityMapEntry> addedEntries,
             List<string> removedLogicalIds,
             List<Conflict> conflicts,
-            List<SkippedField> skippedFields)
+            List<SkippedField> skippedFields,
+            List<AssetEntry> addedAssets)
         {
             var snapshotComps = ExcludeTransform(snapshotComponents);
             var snapshotKeys = ComputeComponentKeys(snapshotComps);
@@ -51,6 +52,15 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
+            // A snapshot component key that ALSO has a source-model counterpart at the same
+            // (type,ordinal) is handled precisely by the (4) FIELD-VALUE DIFF pass below (which
+            // harvests only fields that actually changed). Guards the (1) ADD harvest below from
+            // double-counting/leaking identity-equal asset refs when the IdentityMap simply
+            // hasn't recorded this component's entry yet (edit emission is unaffected).
+            var sourceComps = ExcludeTransform(sourceComponents);
+            var sourceKeys = ComputeComponentKeys(sourceComps);
+            var sourceKeySet = new HashSet<(string TypeFullName, int Ordinal)>(sourceKeys);
+
             // (1) ADD: snapshot component with no managed Component entry at its (type,ordinal).
             var ownerHandleless = handles != null && !handles.ContainsKey(ownerLogicalId);
             string? synthesizedOwnerHandle = null;
@@ -63,6 +73,8 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
+                var harvestSink = sourceKeySet.Contains(key) ? null : addedAssets;
+
                 if (!ownerHandleless)
                 {
                     EmitComponentAppend(
@@ -73,7 +85,8 @@ namespace SceneBuilder.Core.Reconcile
                         null,
                         false,
                         edits,
-                        addedEntries);
+                        addedEntries,
+                        harvestSink);
 
                     continue;
                 }
@@ -93,7 +106,8 @@ namespace SceneBuilder.Core.Reconcile
                     synthesizedOwnerHandle,
                     introduceOwnerHandle,
                     edits,
-                    addedEntries);
+                    addedEntries,
+                    harvestSink);
             }
 
             // (2) REMOVE: managed Component entry with no snapshot component at its (type,ordinal).
@@ -121,8 +135,6 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             // (3) REORDER: only when the represented set is unchanged (no add/remove above).
-            var sourceComps = ExcludeTransform(sourceComponents);
-            var sourceKeys = ComputeComponentKeys(sourceComps);
             if (managedKeySet.SetEquals(snapshotKeySet))
             {
                 var sourceIndexByKey = new Dictionary<(string TypeFullName, int Ordinal), int>();
@@ -197,6 +209,8 @@ namespace SceneBuilder.Core.Reconcile
                                 ValueSpan = valueSpan,
                                 NewExpr = SourceExpr.ValueNodeLiteral(snapVal),
                             });
+
+                            CollectAssetEntries(snapVal, addedAssets);
                         }
                         else if (fieldArgumentSpans != null)
                         {
@@ -217,6 +231,8 @@ namespace SceneBuilder.Core.Reconcile
                             FieldKey = fieldKey,
                             Value = snapVal,
                         });
+
+                        CollectAssetEntries(snapVal, addedAssets);
                     }
                 }
             }
@@ -233,7 +249,8 @@ namespace SceneBuilder.Core.Reconcile
             string? ownerHandle,
             bool introduceOwnerHandle,
             List<SourceEdit> edits,
-            List<IdentityMapEntry> addedEntries)
+            List<IdentityMapEntry> addedEntries,
+            List<AssetEntry>? addedAssets)
         {
             var componentLogicalId = $"{ownerLogicalId}/{typeFullName}#{ordinal}";
 
@@ -255,6 +272,44 @@ namespace SceneBuilder.Core.Reconcile
                 ComponentType = typeFullName,
                 ParentLogicalId = ownerLogicalId,
             });
+
+            if (addedAssets != null)
+            {
+                foreach (var (_, value) in fields)
+                {
+                    CollectAssetEntries(value, addedAssets);
+                }
+            }
+        }
+
+        // b4-t1: single choke-point harvest of every populated AssetRef reachable from a
+        // snapshot ValueNode flowing into an emitted source edit. Cleared (AssetRef(null))
+        // and empty-Guid refs contribute nothing. Recurses into List/Nested so no caller has
+        // to special-case container shapes.
+        internal static void CollectAssetEntries(ValueNode node, List<AssetEntry> sink)
+        {
+            switch (node)
+            {
+                case ValueNode.AssetRef(var r) when r != null && !string.IsNullOrEmpty(r.Guid):
+                    sink.Add(new AssetEntry { Guid = r.Guid, LastKnownPath = r.DisplayPath, TypeHint = r.TypeHint });
+                    break;
+
+                case ValueNode.List l:
+                    foreach (var item in l.Items)
+                    {
+                        CollectAssetEntries(item, sink);
+                    }
+
+                    break;
+
+                case ValueNode.Nested n:
+                    foreach (var (_, value) in n.Fields)
+                    {
+                        CollectAssetEntries(value, sink);
+                    }
+
+                    break;
+            }
         }
 
         internal static ComponentData[] ExcludeTransform(ComponentData[] components) =>
