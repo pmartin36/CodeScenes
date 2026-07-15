@@ -409,5 +409,62 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("comp-1", skipped.LogicalId);
             Assert.Equal("weirdField", skipped.Path);
         }
+
+        [Fact]
+        public void Materialize_NewRootWithComponent_EmitsAddComponentAndSetField()
+        {
+            var component = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Rigidbody#0",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(5f)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { component } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+            var map = new IdentityMap { Scene = "Assets/Scenes/Demo.unity" };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var add = Assert.Single(plan.Ops.OfType<AddComponent>());
+            Assert.Equal("root-1/UnityEngine.Rigidbody#0", add.LogicalId);
+            Assert.Equal("UnityEngine.Rigidbody", add.Type.FullName);
+
+            var setField = Assert.Single(plan.Ops.OfType<SetField>(), op => op.LogicalId == "root-1/UnityEngine.Rigidbody#0");
+            Assert.Equal("m_Mass", setField.Path);
+            Assert.Equal(ValueNode.Primitive.Float(5f), setField.Value);
+        }
+
+        [Fact]
+        public void Materialize_NewChildOfNewParentWithComponent_EmitsAddComponentAndSetField()
+        {
+            var component = new ComponentData
+            {
+                LogicalId = "child-1/UnityEngine.Rigidbody#0",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(7f)),
+                }),
+            };
+            var child = new GameObjectNode { LogicalId = "child-1", Name = "Child", Components = new[] { component } };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Children = new[] { child } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+            var map = new IdentityMap { Scene = "Assets/Scenes/Demo.unity" };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var add = Assert.Single(plan.Ops.OfType<AddComponent>());
+            Assert.Equal("child-1/UnityEngine.Rigidbody#0", add.LogicalId);
+            Assert.Equal("UnityEngine.Rigidbody", add.Type.FullName);
+
+            var setField = Assert.Single(plan.Ops.OfType<SetField>(), op => op.LogicalId == "child-1/UnityEngine.Rigidbody#0");
+            Assert.Equal("m_Mass", setField.Path);
+            Assert.Equal(ValueNode.Primitive.Float(7f), setField.Value);
+        }
     }
 }

@@ -80,7 +80,7 @@ namespace SceneBuilder.Core.Diff
                 }
                 else
                 {
-                    EmitCreate(node, parentLogicalId, ops);
+                    EmitCreate(node, parentLogicalId, identityMap, ops);
                 }
 
                 WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops);
@@ -269,7 +269,7 @@ namespace SceneBuilder.Core.Diff
             return keys;
         }
 
-        private static void EmitCreate(GameObjectNode node, string? parentLogicalId, List<ChangeOp> ops)
+        private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, List<ChangeOp> ops)
         {
             ops.Add(new AddNode { LogicalId = node.LogicalId, Name = node.Name, ParentLogicalId = parentLogicalId });
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
@@ -293,6 +293,11 @@ namespace SceneBuilder.Core.Diff
             {
                 ops.Add(new SetStatic { LogicalId = node.LogicalId, IsStatic = node.IsStatic });
             }
+
+            // A newly-created node has no snapshot; diffing its components against an empty
+            // snapshot emits an AddComponent (carrying each field) for every authored component,
+            // matching the mapped path's emission. Children are handled by WalkDesired's recursion.
+            EmitComponentEdits(node, new SnapshotNode(), identityMap, ops);
         }
     }
 }

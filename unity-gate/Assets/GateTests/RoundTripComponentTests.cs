@@ -301,4 +301,25 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsNotNull(rb, "Authored Rigidbody was not materialized on Box");
         Assert.AreEqual(5f, rb.mass, "Authored typed-setter mass=5 did not materialize on the real Rigidbody");
     }
+
+    // 9. One-pass create-with-component (code->scene) — REGRESSION for the EmitCreate component gap.
+    //    A brand-new object that carries a component + typed field, built in a SINGLE build onto a fresh
+    //    scene (NOT the two-phase workaround of #8), must materialize the real component with its value.
+    [Test]
+    public void CodeToScene_NewObjectWithComponent_OnePass_MaterializesWithValue()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var box = scene.Add(\"Box\");\n" +
+            "        box.Component<UnityEngine.Rigidbody>(c => c.Set(r => r.mass, 5f));"));
+
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        var box = FindRoot(EditorSceneManager.GetActiveScene(), "Box");
+        Assert.IsNotNull(box, "Box was not created by SceneBuilderBuild.Run");
+        var rb = box.GetComponent<Rigidbody>();
+        Assert.IsNotNull(rb, "Component on a brand-new object was not materialized in a one-pass build");
+        Assert.AreEqual(5f, rb.mass, "Authored mass=5 did not materialize on the one-pass-created Rigidbody");
+    }
 }
