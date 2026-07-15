@@ -31,6 +31,12 @@ obj/
 *.mdb
 *.unitypackage
 
+# ---- unity-gate: Unity-generated project files + gate run artifacts ----
+unity-gate/results.xml
+unity-gate/editor.log
+unity-gate/*.csproj
+unity-gate/*.sln
+
 # ---- OS ----
 .DS_Store
 Thumbs.db
