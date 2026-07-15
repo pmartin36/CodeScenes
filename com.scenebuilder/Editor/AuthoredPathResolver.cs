@@ -116,7 +116,23 @@ namespace SceneBuilder.Editor
 
             var probe = new GameObject("__SceneBuilderProbe") { hideFlags = HideFlags.HideAndDontSave };
             probes.Add(probe);
-            var component = probe.GetComponent(type) ?? probe.AddComponent(type);
+
+            // GameObject.GetComponent(Type) can return a Unity FAKE-NULL (a live C# reference wrapping a
+            // null native pointer) when the component is absent — the C# `??` operator does NOT treat that
+            // as null, so it must be checked with Unity's overloaded `== null` or AddComponent is skipped
+            // and `new SerializedObject(fake-null)` throws "Object at index 0 is null".
+            var component = probe.GetComponent(type);
+            if (component == null)
+            {
+                component = probe.AddComponent(type);
+            }
+
+            if (component == null)
+            {
+                throw new InvalidOperationException(
+                    $"[SceneBuilder] Could not instantiate a probe of '{typeFullName}' to resolve authored member paths.");
+            }
+
             var so = new SerializedObject(component);
             soByType[type] = so;
             return so;

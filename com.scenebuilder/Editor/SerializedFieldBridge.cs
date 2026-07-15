@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
@@ -89,8 +90,11 @@ namespace SceneBuilder.Editor
                 // Field types M3 cannot represent — object/asset references (mesh, material, physics
                 // material) and LayerMask are M4+ — are SKIPPED, never written. Emitting them would
                 // produce uncompilable tokens (a bare `ObjectReference` / `LayerMask` identifier).
+                // This covers a bare Unsupported value AND any List/Nested that carries an Unsupported
+                // leaf (e.g. a MeshRenderer's m_Materials object-reference array — the cube-dump bug):
+                // rendering `new[] { ObjectReference }` is just as uncompilable as a bare token.
                 // Spec 04: an Unsupported field is not written to source, only flagged.
-                if (value is ValueNode.Unsupported)
+                if (ContainsUnsupported(value))
                 {
                     continue;
                 }
@@ -100,6 +104,17 @@ namespace SceneBuilder.Editor
 
             return fields;
         }
+
+        // A field is unrepresentable in M3 if its value is Unsupported OR it is a List/Nested whose
+        // recursion bottoms out in any Unsupported leaf (an object-reference array/struct). Such a
+        // field must be skipped whole — partially rendering it emits uncompilable value tokens.
+        private static bool ContainsUnsupported(ValueNode value) => value switch
+        {
+            ValueNode.Unsupported => true,
+            ValueNode.List list => list.Items.Any(ContainsUnsupported),
+            ValueNode.Nested nested => nested.Fields.Any(kv => ContainsUnsupported(kv.Value)),
+            _ => false,
+        };
 
         // Builds (and caches) the default-value reference map for a component type by adding a
         // throwaway instance to a hidden GameObject. Returns null (cached) when the type cannot be
