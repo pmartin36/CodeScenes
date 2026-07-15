@@ -75,4 +75,18 @@ namespace SceneBuilder.Core.Plan
         [JsonPropertyOrder(3)]
         public int ToIndex { get; init; }
     }
+
+    public sealed record SetAssetRef : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public string Path { get; init; } = "";
+
+        // null/empty => None/clear form
+        [JsonPropertyOrder(2)]
+        public string? Guid { get; init; }
+
+        // 0 = main asset
+        [JsonPropertyOrder(3)]
+        public long FileId { get; init; }
+    }
 }

@@ -88,27 +88,12 @@ namespace SceneBuilder.Core.Materialize
                         });
                         foreach (var (path, value) in addComponent.Component.Fields)
                         {
-                            if (value is ValueNode.Unsupported)
-                            {
-                                skipped.Add(new SkippedField { LogicalId = addComponent.Component.LogicalId, Path = path });
-                            }
-                            else
-                            {
-                                passB.Add(new SetField { LogicalId = addComponent.Component.LogicalId, Path = path, Value = value });
-                            }
+                            EmitFieldOp(addComponent.Component.LogicalId, path, value, passB, skipped);
                         }
 
                         break;
                     case Change.SetField setField:
-                        if (setField.Value is ValueNode.Unsupported)
-                        {
-                            skipped.Add(new SkippedField { LogicalId = setField.ComponentLogicalId, Path = setField.Path });
-                        }
-                        else
-                        {
-                            passB.Add(new SetField { LogicalId = setField.ComponentLogicalId, Path = setField.Path, Value = setField.Value });
-                        }
-
+                        EmitFieldOp(setField.ComponentLogicalId, setField.Path, setField.Value, passB, skipped);
                         break;
                     case Change.RemoveComponent removeComponent:
                         passB.Add(new RemoveComponent { LogicalId = removeComponent.ComponentLogicalId });
@@ -132,6 +117,44 @@ namespace SceneBuilder.Core.Materialize
                 Ops = passA.Concat(passB).ToArray(),
                 Skipped = skipped.ToArray(),
             };
+        }
+
+        private static void EmitFieldOp(
+            string logicalId, string path, ValueNode value,
+            List<PlanOp> passB, List<SkippedField> skipped)
+        {
+            if (value is ValueNode.AssetRef assetRef)
+            {
+                passB.Add(new SetAssetRef
+                {
+                    LogicalId = logicalId,
+                    Path = path,
+                    Guid = assetRef.Ref?.Guid,
+                    FileId = assetRef.Ref?.FileId ?? 0,
+                });
+            }
+            else if (value is ValueNode.List list && list.Items.Count > 0 && list.Items.All(item => item is ValueNode.AssetRef))
+            {
+                for (var i = 0; i < list.Items.Count; i++)
+                {
+                    var element = (ValueNode.AssetRef)list.Items[i];
+                    passB.Add(new SetAssetRef
+                    {
+                        LogicalId = logicalId,
+                        Path = $"{path}[{i}]",
+                        Guid = element.Ref?.Guid,
+                        FileId = element.Ref?.FileId ?? 0,
+                    });
+                }
+            }
+            else if (value is ValueNode.Unsupported)
+            {
+                skipped.Add(new SkippedField { LogicalId = logicalId, Path = path });
+            }
+            else
+            {
+                passB.Add(new SetField { LogicalId = logicalId, Path = path, Value = value });
+            }
         }
     }
 }
