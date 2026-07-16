@@ -6,7 +6,8 @@
         "UnityEditor.TestRunner",
         "SceneBuilder.Editor",
         "SceneBuilder.Authoring",
-        "GateFixtures"
+        "GateFixtures",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [
         "Editor"

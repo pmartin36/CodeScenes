@@ -91,12 +91,21 @@ namespace SceneBuilder.Editor
             // remapping the field-argument spans in lockstep so span-local field patches still match.
             var (resolved, spans) = AuthoredPathResolver.Resolve(parse.Model, parse.FieldArgumentSpans);
 
+            // A LOCATED pre-pass, over the desired-but-unlowered model (serialized paths already
+            // resolved above, so the thrown message names 'm_Mesh', not 'member:mesh'): throws on the
+            // first unresolvable Builtin(...) or authored built-in-container path, naming the object,
+            // component and field. Must run BEFORE lowering — Core's AssetRefLowering never throws, and
+            // the lowering-side builtinResolver below only ever receives (name, typeHint), so it cannot
+            // locate an error itself.
+            BuiltinRefValidator.Validate(resolved);
+
             // §M4: lower authored Asset("path") refs to their AssetDatabase (guid, fileId, typeHint)
             // BEFORE any diff, so Core compares on the authoritative GUID identity. GUID-authoritative:
             // a path stale from a move/rename recovers its GUID from the sidecar Assets[] cache; only a
-            // GUID that maps to NOTHING (asset truly deleted) fails loud.
+            // GUID that maps to NOTHING (asset truly deleted) fails loud. Built-in refs route through
+            // ResolveBuiltin — the always-on unlocated backstop the pre-pass above enriches.
             var assetResolver = new AssetReferenceResolver.LoweringResolver(existingMap?.Assets);
-            var desired = AssetRefLowering.Lower(resolved, assetResolver.Resolve);
+            var desired = AssetRefLowering.Lower(resolved, assetResolver.Resolve, assetResolver.ResolveBuiltin);
 
             return new Loaded(desired, parse, spans, assetResolver.Harvested);
         }
