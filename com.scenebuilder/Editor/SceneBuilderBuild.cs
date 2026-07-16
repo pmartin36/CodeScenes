@@ -160,10 +160,7 @@ namespace SceneBuilder.Editor
         {
             var message = new System.Text.StringBuilder();
             message.AppendLine(
-                $"[SceneBuilder] Build REFUSED: {ambiguities.Count} ambiguous duplicate sibling name(s) in {builderPath}.");
-            message.AppendLine(
-                "Building would have to GUESS which statement is which scene object, and guessing wrong " +
-                "silently destroys a real object and repurposes another. Add `.Id(\"...\")` to disambiguate:");
+                $"[SceneBuilder] Build REFUSED: {ambiguities.Count} identity conflict(s) in {builderPath}.");
 
             foreach (var conflict in ambiguities)
             {

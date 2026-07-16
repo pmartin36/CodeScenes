@@ -105,6 +105,20 @@ namespace SceneBuilder.Editor
             // ref carries Guid="", AssetRef.Equals keys on (Guid, FileId) ONLY, so it could never equal
             // the snapshot's populated ref and every sync re-patched every asset ref forever.
             var loaded = DesiredModelLoader.Load(source, map);
+
+            // A colliding LogicalId is a property of the SOURCE alone; FlattenModel drops one node
+            // (last-write-wins), so heal BEFORE reconcile. Gate on DuplicateLogicalId only — an
+            // AmbiguousAnchor group is healed by the Reconciler's own duplicate-name pass.
+            if (loaded.Parse.Ambiguities.Any(c => c.Kind == ConflictKind.DuplicateLogicalId))
+            {
+                var healed = IdCollisionHealer.Heal(source, loaded.Parse);
+                if (SceneBuilderPaths.WriteIfChanged(builderPath, healed))
+                {
+                    source = healed;
+                    loaded = DesiredModelLoader.Load(healed, map);
+                }
+            }
+
             var parse = loaded.Parse;
             var desired = loaded.Desired;
             var fieldArgumentSpans = loaded.FieldArgumentSpans;
