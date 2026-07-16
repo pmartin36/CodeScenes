@@ -277,5 +277,75 @@ public class ShortComponentTypeScene : ISceneDefinition
     }
 }
 ";
+
+        // b2-t1 (PlanningValidator walk): one component with a top-level Asset(...) field,
+        // no ambiguity — isolates SB2101 (bad asset path) from type/ambiguity diagnostics.
+        public const string ComponentWithAssetField = @"
+public class ComponentAssetFieldScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<UnityEngine.MeshRenderer>(mr => mr.Set(""sharedMaterial"", Asset(""Assets/Materials/Rd.mat"")));
+    }
+}
+";
+
+        // b2-t1: a top-level Builtin(...) field, no ambiguity — for the Deferred-is-not-an-error case.
+        public const string ComponentWithBuiltinField = @"
+public class ComponentBuiltinFieldScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Cube"").Component<UnityEngine.MeshFilter>(mf => mf.Set(""m_Mesh"", Builtin(""Cube"")));
+    }
+}
+";
+
+        // b2-t1: two positional same-named siblings, no components/asset fields — isolates
+        // the structural AmbiguousAnchor (SB2201) path, resolver NOT consulted.
+        public const string TwoPositionalSameNamedSiblings = @"
+public class DupSiblingsPlanningScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Enemy"");
+        scene.Add(""Enemy"");
+    }
+}
+";
+
+        // b2-t1: bad type (via stub) is not exercised here structurally — the type comes from
+        // the resolver stub, not the source — plus a bad asset field, plus a positional
+        // duplicate-sibling pair, for Validate_MultipleErrors_AllReportedInOnePass (exactly 3
+        // diagnostics: SB2201 + SB2001 + SB2101).
+        public const string PlanningWalkMultiErrorScene = @"
+public class PlanningWalkMultiErrorScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<UnityEngine.MeshRenderer>(mr => mr.Set(""sharedMaterial"", Asset(""Assets/Materials/Rd.mat"")));
+        scene.Add(""Enemy"");
+        scene.Add(""Enemy"");
+    }
+}
+";
+
+        // b2-t1: exercises ALL FOUR resolver call sites in one parse (type, project asset,
+        // builtin asset, plus a structural ambiguity) for Validate_NeverThrows_OnAnyProviderOutcome.
+        public const string PlanningWalkAllVariantsScene = @"
+public class PlanningWalkAllVariantsScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<UnityEngine.MeshRenderer>(mr =>
+        {
+            mr.Set(""sharedMaterial"", Asset(""Assets/Materials/Rd.mat""));
+            mr.Set(""m_Mesh"", Builtin(""Cube""));
+        });
+        scene.Add(""Enemy"");
+        scene.Add(""Enemy"");
+    }
+}
+";
     }
 }
