@@ -7,9 +7,10 @@ using Xunit;
 
 namespace SceneBuilder.Core.Tests
 {
-    // b3-t2: Diff compares asset-ref fields on (Guid,FileId) only, incl. None semantics.
-    // No new production code is expected — this rides on AssetRef.Equals (b1-t1) flowing
-    // through Differ.EmitComponentEdits' `actualValue != field.Value` comparison.
+    // b2-t3: Diff compares asset-ref fields on (Guid,FileId,IsBuiltin) only, incl. None
+    // semantics and built-in refs. No new production code is expected — this rides on
+    // AssetRef.Equals (b1-t1) flowing through Differ.EmitComponentEdits' `actualValue !=
+    // field.Value` comparison.
     public class AssetRefDiffTests
     {
         private const string FieldKey = "sharedMaterial";
@@ -105,6 +106,57 @@ namespace SceneBuilder.Core.Tests
             Assert.NotEqual(populated, none);
             var noneAgain = new ValueNode.AssetRef(null);
             Assert.Equal(none, noneAgain);
+        }
+
+        // b2-t3: Diff needs no built-in-specific awareness — it rides on AssetRef.Equals
+        // (b1-t1's three-part key) exactly as the non-built-in cases above already prove.
+        // These three pin that from the built-in angle specifically. No production change
+        // is expected; if any of these fail, Diff DOES need built-in awareness — do not
+        // patch Differ.cs to force it green, surface it as a spec deviation instead.
+        private const string DefaultResourcesGuid = "0000000000000000e000000000000000";
+        private const long CubeFileId = 10202;
+        private const long SphereFileId = 10207;
+
+        [Fact]
+        public void Diff_BuiltinAssetRefSameGuidFileIdDifferentTypeHint_NoChange()
+        {
+            var desired = new ValueNode.AssetRef(new AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube", TypeHint = "" });
+            var actual = new ValueNode.AssetRef(new AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube", TypeHint = "Mesh" });
+            var (model, snapshot, map) = BuildScene(desired, actual);
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.Empty(changeSet.Ops.OfType<SetField>());
+        }
+
+        [Fact]
+        public void Diff_BuiltinAssetRefDifferentFileId_ReportsChange()
+        {
+            var desired = new ValueNode.AssetRef(new AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube" });
+            var actual = new ValueNode.AssetRef(new AssetRef { Guid = DefaultResourcesGuid, FileId = SphereFileId, IsBuiltin = true, DisplayPath = "Sphere" });
+            var (model, snapshot, map) = BuildScene(desired, actual);
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("root-1", setField.LogicalId);
+            Assert.Equal(FieldKey, setField.Path);
+            Assert.Equal(desired, setField.Value);
+        }
+
+        [Fact]
+        public void Diff_BuiltinAssetRefVsAssetAssetRef_DifferentGuid_ReportsChange()
+        {
+            var desired = new ValueNode.AssetRef(new AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube" });
+            var actual = new ValueNode.AssetRef(new AssetRef { Guid = "proj-guid-abc", FileId = 0, IsBuiltin = false, DisplayPath = "Assets/M/Cube.fbx" });
+            var (model, snapshot, map) = BuildScene(desired, actual);
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("root-1", setField.LogicalId);
+            Assert.Equal(FieldKey, setField.Path);
+            Assert.Equal(desired, setField.Value);
         }
     }
 }

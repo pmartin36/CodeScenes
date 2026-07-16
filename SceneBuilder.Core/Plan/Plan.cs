@@ -18,7 +18,9 @@ namespace SceneBuilder.Core.Plan
         public SkippedField[] Skipped { get; init; } = Array.Empty<SkippedField>();
     }
 
-    // A field whose ValueNode is Unsupported — no SetField is emitted; surfaced here for preview.
+    // A field the plan does NOT write, surfaced for preview: Reason "Unsupported" (the ValueNode
+    // could not be parsed) or "Unresolved" (an asset ref named a target that did not resolve —
+    // skipped rather than written as a null-GUID clear, which would destroy the live value).
     public sealed record SkippedField
     {
         [JsonPropertyOrder(0)]

@@ -18,11 +18,13 @@ namespace SceneBuilder.Editor
     /// a loud failure (never a silent empty-GUID / clear).</item>
     /// <item><see cref="WriteAssetRef"/> — executes a <c>SetAssetRef</c> op: resolves
     /// <c>(guid, fileId) → UnityEngine.Object</c> and assigns <c>objectReferenceValue</c> (sub-object via
-    /// <c>fileId</c>); a null/empty GUID clears the field; a GUID that maps to nothing is a located
-    /// error (§7), never a silent null.</item>
-    /// <item><see cref="ReadObjectReference"/> — an object-reference field pointing at an asset →
-    /// <c>ValueNode.AssetRef</c> with the re-derived <c>DisplayPath</c>; a null asset field → the None
-    /// inhabitant <c>AssetRef(null)</c>; a scene-object reference stays Unsupported (M5).</item>
+    /// <c>fileId</c>) — built-ins and project assets both resolve through the same
+    /// <c>ResolveAssetObject</c> call; a null/empty GUID clears the field; a GUID that maps to nothing
+    /// is a located error (§7), never a silent null.</item>
+    /// <item><see cref="ReadObjectReference"/> — an object-reference field pointing at a project asset
+    /// → <c>ValueNode.AssetRef</c> with the re-derived <c>DisplayPath</c>; a built-in resource →
+    /// <see cref="ReadBuiltinRef"/>; a null asset field → the None inhabitant <c>AssetRef(null)</c>; a
+    /// scene-object reference stays Unsupported (M5).</item>
     /// </list>
     /// FileId is taken from <see cref="AssetDatabase.TryGetGUIDAndLocalFileIdentifier(UnityEngine.Object, out string, out long)"/>
     /// on BOTH the write (via the main asset) and read sides, so the two directions agree on identity
@@ -30,32 +32,12 @@ namespace SceneBuilder.Editor
     /// </summary>
     public static class AssetReferenceResolver
     {
-        // Unity's two BUILT-IN resource containers. Their objects (primitive meshes Cube/Sphere/
-        // Capsule/Cylinder/Plane/Quad, Default-Material, Sprites-Default, the UI shaders) are NOT
-        // project assets: they carry real, well-known GUIDs but live inside the editor installation,
-        // so AssetDatabase.LoadMainAssetAtPath returns null for them. That null is what made the
-        // resolver conclude "the asset was deleted" and throw — breaking Build for any scene holding
-        // a primitive. A built-in is NOT a deleted asset and must never be reported as one.
-        private const string BuiltinResourcesPath = "Library/unity default resources";
-        private const string BuiltinExtraPath = "Resources/unity_builtin_extra";
-        private const string BuiltinResourcesGuid = "0000000000000000e000000000000000";
-        private const string BuiltinExtraGuid = "0000000000000000f000000000000000";
-
         /// <summary>
         /// True for a GUID belonging to one of Unity's built-in resource containers. GUID is the
         /// identity authority on both the read and write sides, so both directions agree.
         /// </summary>
         public static bool IsBuiltinGuid(string? guid) =>
-            guid == BuiltinResourcesGuid || guid == BuiltinExtraGuid;
-
-        /// <summary>True for an authored path naming a built-in resource container.</summary>
-        public static bool IsBuiltinPath(string? path) =>
-            path == BuiltinResourcesPath || path == BuiltinExtraPath;
-
-        // The well-known GUID of the built-in container at the given path. Only called for a path
-        // IsBuiltinPath already accepted.
-        private static string BuiltinGuidFor(string path) =>
-            path == BuiltinExtraPath ? BuiltinExtraGuid : BuiltinResourcesGuid;
+            guid == BuiltinCatalog.BuiltinResourcesGuid || guid == BuiltinCatalog.BuiltinExtraGuid;
 
         /// <summary>
         /// A Build-time lowering resolver bound to the sidecar <c>Assets[]</c> cache — the
@@ -99,19 +81,13 @@ namespace SceneBuilder.Editor
                     return null;
                 }
 
-                // A BUILT-IN container is checked FIRST, by path: it ships with the editor, so it is
-                // neither "missing at path" nor "deleted" — it must reach neither throw below. It also
-                // never LOADS via LoadMainAssetAtPath, which is exactly what made the deletion check
-                // misfire and break Build for any scene holding a primitive. Hand the well-known GUID
-                // back so the write side recognises it and LEAVES THE LIVE VALUE ALONE; never harvest
-                // it into Assets[] (a built-in has no project path to track).
-                if (IsBuiltinPath(displayPath))
+                // An authored path naming a BUILT-IN container (e.g. 'Library/unity default resources')
+                // never identifies a specific object — it is a located, loud refusal pointing at
+                // Builtin(...) as the fix, not a warn-and-continue. This is the backstop any direct
+                // caller of Resolve inherits, even one that skipped DesiredModelLoader's located pre-pass.
+                if (BuiltinCatalog.IsContainerPath(displayPath))
                 {
-                    Debug.LogWarning(
-                        $"[SceneBuilder] Asset(\"{displayPath}\") names a Unity BUILT-IN resource. Built-in " +
-                        "references are not supported (the path is shared by every built-in object and so " +
-                        "cannot identify one); the field is left untouched in the scene.");
-                    return (BuiltinGuidFor(displayPath), 0, "Object");
+                    BuiltinRefValidator.ThrowContainerPath(displayPath, location: null);
                 }
 
                 // Prefer the live path→GUID mapping; when the authored path is stale (moved/renamed),
@@ -153,6 +129,18 @@ namespace SceneBuilder.Editor
                 return (guid, fileId, typeHint);
             }
 
+            /// <summary>
+            /// The Core lowering delegate for <c>Builtin(name[, typeHint])</c> refs — Core's
+            /// <c>AssetRefLowering.Lower</c> 3rd argument. Resolves via <see cref="BuiltinCatalog"/> and
+            /// NEVER harvests (a built-in has no project path to track in <see cref="Harvested"/> / the
+            /// sidecar <c>Assets[]</c>). Always throws (never returns null) on a miss or an unqualifiable
+            /// ambiguity — the always-on, UNLOCATED backstop; <see cref="BuiltinRefValidator.Validate"/>
+            /// (run earlier, over the desired-but-unlowered model) is what gives the author a LOCATED
+            /// error before lowering ever reaches this method.
+            /// </summary>
+            public (string guid, long fileId, string typeHint)? ResolveBuiltin(string name, string? typeHint)
+                => BuiltinRefValidator.ResolveOrThrow(name, typeHint, location: null);
+
             private string RecoverGuidFromCache(string authoredPath)
             {
                 foreach (var entry in _cache)
@@ -193,17 +181,12 @@ namespace SceneBuilder.Editor
             if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(obj, out var guid, out var fileId)
                 && !string.IsNullOrEmpty(guid))
             {
-                // A BUILT-IN resource (primitive mesh, Default-Material, ...) is not representable as
-                // an Asset("path") ref: every built-in mesh SHARES the container path
-                // 'Library/unity default resources' and is distinguished only by fileId, so the
-                // authored path form is ambiguous and cannot round-trip back to a specific object.
-                // Emitting one produced a ref that Build could not resolve. Treat it as UNSUPPORTED —
-                // the bridge skips the field whole and the Materializer records it in Plan.Skipped, so
-                // it is FLAGGED, never silently dropped, and the scene's own value is left untouched.
-                // Authoring a built-in from code needs a distinct form (e.g. Builtin("Cube")) — unbuilt.
+                // A BUILT-IN resource (primitive mesh, Default-Material, ...) reads back as a populated
+                // Builtin(...) ref via ReadBuiltinRef — its own catalog-name lookup, not the ordinary
+                // path-based branch below.
                 if (IsBuiltinGuid(guid))
                 {
-                    return new ValueNode.Unsupported("BuiltinResource");
+                    return ReadBuiltinRef(guid, fileId, p);
                 }
 
                 return new ValueNode.AssetRef(new CoreAssetRef
@@ -216,6 +199,32 @@ namespace SceneBuilder.Editor
             }
 
             return new ValueNode.Unsupported("ObjectReference");
+        }
+
+        /// <summary>
+        /// Directly-callable built-in read seam: resolves a built-in <c>(guid, fileId)</c> to its
+        /// catalog name via <see cref="BuiltinCatalog.TryDeriveName"/> and returns the populated
+        /// <c>ValueNode.AssetRef</c> (qualifier stamped into <c>TypeHint</c> only when the bare name is
+        /// ambiguous — anti-churn). A pair the catalog cannot derive (e.g. removed in this editor
+        /// version) throws the located <see cref="BuiltinRefValidator.ThrowUnknownBuiltinId"/> error
+        /// naming the object/component/field from <paramref name="p"/> — never returns
+        /// <c>Unsupported</c>, never returns a node at all.
+        /// </summary>
+        internal static ValueNode ReadBuiltinRef(string guid, long fileId, SerializedProperty? p)
+        {
+            if (!BuiltinCatalog.TryDeriveName(guid, fileId, out var name, out var typeName, out var nameIsAmbiguous))
+            {
+                BuiltinRefValidator.ThrowUnknownBuiltinId(guid, fileId, LocationOf(p));
+            }
+
+            return new ValueNode.AssetRef(new CoreAssetRef
+            {
+                Guid = guid,
+                FileId = fileId,
+                IsBuiltin = true,
+                DisplayPath = name,
+                TypeHint = nameIsAmbiguous ? typeName : "",   // anti-churn: qualifier ONLY when required
+            });
         }
 
         /// <summary>
@@ -239,19 +248,6 @@ namespace SceneBuilder.Editor
             {
                 // None / clear form.
                 prop.objectReferenceValue = null;
-                return;
-            }
-
-            // A BUILT-IN resource cannot be resolved from (guid, fileId=0) — the container holds many
-            // objects and the authored path names none of them specifically. It is NOT deleted, so it
-            // must not throw; and it must NOT be cleared to null either. Leave the live value exactly
-            // as the scene has it (a primitive keeps its mesh/material) and flag it in the console.
-            if (IsBuiltinGuid(guid))
-            {
-                Debug.LogWarning(
-                    $"[SceneBuilder] {(owner != null && owner.gameObject != null ? owner.gameObject.name : "<unknown>")} > " +
-                    $"{(owner != null ? owner.GetType().Name : "<unknown>")}.{FieldNameOf(path)}: built-in resource " +
-                    "reference is not supported and was left untouched.");
                 return;
             }
 
@@ -362,6 +358,22 @@ namespace SceneBuilder.Editor
         {
             var bracket = path.LastIndexOf('[');
             return bracket < 0 ? path : path.Substring(0, bracket);
+        }
+
+        // Same "<object> > <ComponentType>.<field>" shape BuiltinRefValidator.ValidateAssetRef builds
+        // for the located pre-lowering pass — derived here from a LIVE SerializedProperty instead of the
+        // desired model. Unity-null-safe: a destroyed/absent target falls back to "<unknown>".
+        private static string LocationOf(SerializedProperty? p)
+        {
+            var target = p?.serializedObject?.targetObject;
+            if (target == null)
+            {
+                return "<unknown>";
+            }
+
+            var owner = target as Component;
+            var objectName = owner != null && owner.gameObject != null ? owner.gameObject.name : target.name;
+            return $"{objectName} > {target.GetType().Name}.{p!.propertyPath}";
         }
     }
 }

@@ -289,12 +289,15 @@ namespace SceneBuilder.Core.Reconcile
         // Asked ONLY of two values that already compare EQUAL: does the source's authored TEXT still
         // reflect the snapshot, or is it stale and in need of re-emission?
         //
-        // It exists for exactly one case, by design. AssetRef identity is (Guid, FileId) ONLY —
-        // DisplayPath is deliberately non-authoritative — so a MOVED/RENAMED asset is identity-EQUAL to
-        // its source ref while the authored path in the source text now points somewhere that no longer
-        // exists. Equality alone would skip it and the stale path would never be rewritten. Every other
-        // ValueNode kind determines its own emission, so equality there already implies identical text
-        // and this returns true.
+        // It exists for exactly one case, by design. AssetRef identity is (Guid, FileId, IsBuiltin) —
+        // DisplayPath and TypeHint are deliberately non-authoritative — so a MOVED/RENAMED asset (or a
+        // built-in whose live-derived name/qualifier changed) is identity-EQUAL to its source ref while
+        // the authored text in the source no longer reflects it. Equality alone would skip it and the
+        // stale text would never be rewritten. Every other ValueNode kind determines its own emission,
+        // so equality there already implies identical text and this returns true.
+        //
+        // The emitted text is a function of (DisplayPath, IsBuiltin, TypeHint): a built-in renders as
+        // `Builtin("name")` / `Builtin("name", "Qualifier")` (SourceExpr.ValueNodeLiteral).
         //
         // The inverse case — text equal but identity different (same path, different sub-object fileId)
         // — is why this is an ADDITIONAL condition on top of Equals and never a replacement for it.
@@ -308,7 +311,9 @@ namespace SceneBuilder.Core.Reconcile
                         return (a is null) == (b is null);
                     }
 
-                    return string.Equals(a.DisplayPath, b.DisplayPath, System.StringComparison.Ordinal);
+                    return string.Equals(a.DisplayPath, b.DisplayPath, System.StringComparison.Ordinal)
+                        && a.IsBuiltin == b.IsBuiltin
+                        && string.Equals(a.TypeHint, b.TypeHint, System.StringComparison.Ordinal);
 
                 case (ValueNode.List la, ValueNode.List lb):
                     if (la.Items.Count != lb.Items.Count)
@@ -343,14 +348,16 @@ namespace SceneBuilder.Core.Reconcile
         }
 
         // b4-t1: single choke-point harvest of every populated AssetRef reachable from a
-        // snapshot ValueNode flowing into an emitted source edit. Cleared (AssetRef(null))
-        // and empty-Guid refs contribute nothing. Recurses into List/Nested so no caller has
-        // to special-case container shapes.
+        // snapshot ValueNode flowing into an emitted source edit. Cleared (AssetRef(null)),
+        // empty-Guid, and built-in refs contribute nothing — a built-in's DisplayPath is a
+        // live-derived object name, never a project path, and has no place in the asset
+        // sidecar cache. Recurses into List/Nested so no caller has to special-case container
+        // shapes.
         internal static void CollectAssetEntries(ValueNode node, List<AssetEntry> sink)
         {
             switch (node)
             {
-                case ValueNode.AssetRef(var r) when r != null && !string.IsNullOrEmpty(r.Guid):
+                case ValueNode.AssetRef(var r) when r != null && !r.IsBuiltin && !string.IsNullOrEmpty(r.Guid):
                     sink.Add(new AssetEntry { Guid = r.Guid, LastKnownPath = r.DisplayPath, TypeHint = r.TypeHint });
                     break;
 

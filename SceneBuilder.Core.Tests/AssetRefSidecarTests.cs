@@ -91,5 +91,55 @@ namespace SceneBuilder.Core.Tests
             Assert.Null(result.DisplayPath);
             Assert.Null(result.Error);
         }
+
+        // b2-t4 change (3), ONLY guard: a built-in's DisplayPath is a live-derived name, never a
+        // project path, so it is deliberately absent from the sidecar Assets[] cache and must
+        // never be reported missing. Mirrors MissingGuid_ProducesLocatedError's call shape — the
+        // exact shape a built-in must NOT produce.
+        [Fact]
+        public void Resolve_BuiltinRef_IsAlreadyResolvedAndNeverMissing()
+        {
+            var assets = System.Array.Empty<AssetEntry>();
+            var builtinRef = new AssetRef
+            {
+                IsBuiltin = true,
+                Guid = "0000000000000000e000000000000000",
+                FileId = 10202,
+                DisplayPath = "Cube",
+            };
+
+            var result = AssetRefResolver.Resolve(
+                "Player", "MeshRenderer", "sharedMaterial", builtinRef, assets, _ => null);
+
+            Assert.True(result.IsResolved);
+            Assert.Null(result.Error);
+        }
+
+        // The independent, load-bearing half: a built-in short-circuits AHEAD of ReDerive. The
+        // cache deliberately contains a decoy entry under the same container Guid, and the
+        // guidResolver throws if invoked — proving the built-in is never re-derived from the
+        // cache, only from its own authored DisplayPath.
+        [Fact]
+        public void Resolve_BuiltinRef_ShortCircuitsAheadOfReDerive()
+        {
+            const string builtinGuid = "0000000000000000e000000000000000";
+            var assets = new[]
+            {
+                new AssetEntry { Guid = builtinGuid, LastKnownPath = "Assets/Decoy.mat" },
+            };
+            var builtinRef = new AssetRef
+            {
+                IsBuiltin = true,
+                Guid = builtinGuid,
+                FileId = 10202,
+                DisplayPath = "Cube",
+            };
+
+            var result = AssetRefResolver.Resolve(
+                "Player", "MeshRenderer", "sharedMaterial", builtinRef, assets,
+                _ => throw new Xunit.Sdk.XunitException("guidResolver must never fire for a built-in"));
+
+            Assert.Equal("Cube", result.DisplayPath);
+        }
     }
 }
