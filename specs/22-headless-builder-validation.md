@@ -273,11 +273,12 @@ Unity-specific itself.
   call `ResolveAssetPath`/`ResolveBuiltin` → located diagnostic on `Unresolved`/`Ambiguous`, keyed by
   `parse.FieldArgumentSpans`. **Never throws**; every failure is a collected diagnostic. `Deferred`
   results are not errors.
-- **`ParseResult.Usings`** — required by step (2); this is **§20's** deliverable
-  (`20-unqualified-type-names.md`). Because §22 ships **first**, §22 introduces `ParseResult.Usings`
-  capture in `BuilderParser` (the small, Unity-free capture-only change §20 already specifies), and §20
-  then consumes it for the adapter normalization. If §22 lands first, this capture is §22's; §20's
-  Core deliverable becomes "already present." (Sequencing note, §"Placement".)
+- **`ParseResult.Usings`** — required by step (2). **ALREADY SHIPPED by §20**
+  (`20-unqualified-type-names.md`, landed ahead of §22): `BuilderParser` already captures file-scope
+  `using` imports into `ParseResult.Usings`, and `UsingCaptureTests.cs` already covers it. §22 therefore
+  **consumes** this field as pre-existing and adds **no** parser change for it — the walk reads
+  `parse.Usings` directly. (This spec's original text assumed §22 shipped first; the queue put §20
+  first, so this deliverable is done — do not re-introduce it.)
 - **No `SceneModel`, `ValueNode`, `PlanOp`, `CanonicalJson`, `Differ`, `Materializer`, `Reconciler`
   change.** The validator is a **reader** of the parsed model; it produces diagnostics, not a Plan.
 
@@ -357,8 +358,8 @@ no disk). New file `SceneBuilder.Core.Tests/PlanningValidatorTests.cs`, xUnit, s
 10. `Validate_NeverThrows_OnAnyProviderOutcome` — property-style: for `Resolved`/`Unresolved`/
     `Ambiguous`/`Deferred` in every position, `Validate` returns a result and **never throws**.
 
-(`ParseResult.Usings` capture is tested by §20's `UsingCaptureTests.cs`; if §22 lands first, those
-capture tests move here.)
+(`ParseResult.Usings` capture is already shipped and tested by §20's `UsingCaptureTests.cs` — §20
+landed first; §22 adds no capture test, only the `PlanningValidator` walk tests above.)
 
 ## Unity confirmation checklist → EditMode tests
 
@@ -443,11 +444,10 @@ low-risk and self-contained: it adds a **reader** of the existing pipeline plus 
 Build's three throw-on-first sites into one collect-all shared walk; it introduces no new authoring
 surface and no `SceneModel`/`Plan` change.
 
-Sequencing note with §20: §22 needs `ParseResult.Usings` for headless type resolution, which is also
-§20's Core deliverable. §22 ships the small, Unity-free `Usings` **capture** in `BuilderParser`; §20
-(now downstream) consumes it for the adapter's `ComponentTypeNormalizer`. Landing §22 first means §20's
-Core half is already done and §20 reduces to its adapter normalization. This is a merge, not a
-conflict.
+Sequencing note with §20 (RESOLVED — §20 shipped first): §22 needs `ParseResult.Usings` for headless
+type resolution. §20 **already landed** it (both the `BuilderParser` capture and the adapter
+`ComponentTypeNormalizer`), so §22 simply **reads** `parse.Usings` and adds no parser change. The
+"merge, not conflict" outcome held: §22's Core Usings half is already done.
 
 ## Risks / notes
 
