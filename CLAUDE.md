@@ -22,8 +22,10 @@ Constraints that follow (they are constraints, not preferences — do not re-lit
   button-press and fatal per keystroke. Auto-sync requires debouncing + incremental/cached identity.
 - **M-Auto is the driver, not a downstream milestone.** Scene→code hooks `ObjectChangeEvents`;
   code→scene needs the plugin's own file watcher (Unity does not watch a builder outside `Assets/`).
-  `specs/14-m-auto-live-sync.md` specs it as opt-in toggles + a drift indicator — that shape is wrong
-  and must be re-specified as seamless-by-default.
+  `specs/14-m-auto-live-sync.md` specs it seamless-by-default: auto is **ON**, no buttons on the happy
+  path. A single **persisted master toggle** (one switch governing both directions) exists only as a
+  testing/power-user affordance — to disable auto and drive sync by hand while validating other
+  milestones — and the Build/Sync menu items are retained as those manual/debug tools. Default is ON.
 - **Generated C# must compile.** Emitted code is validated by a Roslyn compile assertion in the gate;
   a write path that can emit non-compiling source is a bug, not a style issue.
 
