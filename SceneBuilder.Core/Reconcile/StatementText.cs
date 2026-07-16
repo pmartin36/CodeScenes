@@ -23,7 +23,7 @@ namespace SceneBuilder.Core.Reconcile
         /// none of those annotations, so their GetCurrentNode returns null and the apply dies with a
         /// NullReferenceException. Keeping the node keeps every annotation hanging off it.
         /// </remarks>
-        private static StatementSyntax BuildHandleDeclaration(ExpressionStatementSyntax statement, string handle)
+        internal static StatementSyntax BuildHandleDeclaration(ExpressionStatementSyntax statement, string handle)
         {
             var declarator = SyntaxFactory
                 .VariableDeclarator(SyntaxFactory.Identifier(handle).WithTrailingTrivia(SyntaxFactory.Space))

@@ -743,10 +743,20 @@ namespace SceneBuilder.Core.Reconcile
             appliers.Add(currentRoot =>
             {
                 var current = currentRoot.GetCurrentNode(flagInvocation)!;
-                var member = (MemberAccessExpressionSyntax)current.Expression;
-                var replacement = member.Expression.WithTrailingTrivia(current.GetTrailingTrivia());
-                return currentRoot.ReplaceNode(current, replacement);
+                return RemoveTrailingInvocation(currentRoot, current);
             });
+        }
+
+        /// <summary>
+        /// Drops a trailing `.Name(args)` invocation from a chain, keeping the receiver expression
+        /// and the call's trailing trivia. Shared by ResolveRemoveFlagCall and IdCollisionHealer
+        /// (splicing out a dead `.Id(...)` call) — the chained-call-removal shape is identical.
+        /// </summary>
+        internal static SyntaxNode RemoveTrailingInvocation(SyntaxNode root, InvocationExpressionSyntax call)
+        {
+            var member = (MemberAccessExpressionSyntax)call.Expression;
+            var replacement = member.Expression.WithTrailingTrivia(call.GetTrailingTrivia());
+            return root.ReplaceNode(call, replacement);
         }
 
         // ---- Flag helpers -----------------------------------------------------------------------
