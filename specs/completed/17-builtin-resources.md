@@ -43,7 +43,7 @@ editor syncs back as `Builtin("Cube")` in source.
 pointing into Unity's **built-in resource containers**, not the project. Both directions currently
 refuse them, by explicit code:
 
-- **Read** — `com.scenebuilder/Editor/AssetReferenceResolver.cs:204` returns
+- **Read** — `com.codescenes/Editor/AssetReferenceResolver.cs:204` returns
   `ValueNode.Unsupported("BuiltinResource")` for either built-in GUID. The field never reaches the
   builder; `Materializer.EmitFieldOp` records it in `Plan.Skipped` and a Console warning fires.
 - **Write** — `AssetReferenceResolver.WriteAssetRef:249` short-circuits on `IsBuiltinGuid` and leaves
@@ -259,7 +259,7 @@ Functions/behaviors (each a testable contract):
 
 ## Editor adapter deliverables
 
-All in `com.scenebuilder/Editor/AssetReferenceResolver.cs` unless noted.
+All in `com.codescenes/Editor/AssetReferenceResolver.cs` unless noted.
 
 - **`BuiltinCatalog` (new, adapter-side)** — the single place that knows the two containers:
   ```csharp
@@ -307,7 +307,7 @@ All in `com.scenebuilder/Editor/AssetReferenceResolver.cs` unless noted.
 ## Authoring API added
 
 `Builtin(name)` / `Builtin(name, typeHint)` — an Editor-side fluent factory on the existing
-`SceneBuilder.Authoring.AssetRefs` static class (`com.scenebuilder/Runtime/AssetReference.cs`),
+`SceneBuilder.Authoring.AssetRefs` static class (`com.codescenes/Runtime/AssetReference.cs`),
 returning the same inert `AssetReference` handle `Asset(...)` returns. Like `Asset`, it is
 compile-time scaffolding: SceneBuilder parses the source text and never executes the builder.
 

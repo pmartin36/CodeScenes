@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# SceneBuilder verification gate. THIS is the pipeline's gate command.
+# CodeScenes verification gate. THIS is the pipeline's gate command.
 #
 #   Layer 1 (always): the fast headless Core suite — dotnet build + test. Seconds.
 #   Layer 2 (conditional): the Unity EditMode suite — real editor behavior. Minutes.
-#     Runs ONLY when the change touches Unity-facing code (com.scenebuilder/ or unity-gate/),
+#     Runs ONLY when the change touches Unity-facing code (com.codescenes/ or unity-gate/),
 #     or when forced (GATE_FORCE_UNITY=1 — used by the pipeline's final cross-bucket pass).
 #
 # A Unity-touching change CANNOT pass without a green Unity result: a missing/failed
@@ -17,7 +17,7 @@ export PATH="$HOME/.dotnet:$PATH"
 
 # ---- Decide whether Layer 2 is required ----
 # This MUST be computed BEFORE `dotnet build` below. A Core post-build target restages
-# com.scenebuilder/Plugins/SceneBuilder.Core.dll, which is git-tracked — so building first makes
+# com.codescenes/Plugins/SceneBuilder.Core.dll, which is git-tracked — so building first makes
 # the gate's own build dirty a path matching the trigger, and EVERY Core change then drags in the
 # multi-minute editor suite.
 #
@@ -30,8 +30,8 @@ changed="$(git diff --name-only HEAD; git diff --name-only HEAD~1 HEAD 2>/dev/nu
 need_unity=0
 [[ "${GATE_FORCE_UNITY:-0}" == "1" ]] && need_unity=1
 echo "$changed" \
-  | grep -vE '^com\.scenebuilder/Plugins/SceneBuilder\.Core\.dll$' \
-  | grep -qE '^(com\.scenebuilder|unity-gate)/' && need_unity=1
+  | grep -vE '^com\.codescenes/Plugins/SceneBuilder\.Core\.dll$' \
+  | grep -qE '^(com\.codescenes|unity-gate)/' && need_unity=1
 
 # ---- Layer 1: Core (always) ----
 echo "== Core gate: dotnet build + test =="
@@ -39,7 +39,7 @@ if ! dotnet build SceneBuilder.sln; then echo "GATE FAIL: dotnet build"; exit 1;
 if ! dotnet test  SceneBuilder.sln; then echo "GATE FAIL: dotnet test";  exit 1; fi
 
 if [[ "$need_unity" -eq 0 ]]; then
-  echo "GATE PASS: Core green (Unity EditMode gate skipped — no com.scenebuilder/ or unity-gate/ changes)"
+  echo "GATE PASS: Core green (Unity EditMode gate skipped — no com.codescenes/ or unity-gate/ changes)"
   exit 0
 fi
 

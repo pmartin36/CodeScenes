@@ -38,7 +38,7 @@ hand — that toggle exists for testing and power-users, not because auto is opt
 
 The Build (code→scene) and Sync (scene→code) paths exist and converge, but **nothing fires them
 without a menu click.** There is no scene-edit trigger, no file watcher, no debounce, no
-echo-suppression, and no incremental identity anywhere in `com.scenebuilder/` — verified: a repo-wide
+echo-suppression, and no incremental identity anywhere in `com.codescenes/` — verified: a repo-wide
 grep for `ObjectChangeEvents`, `InitializeOnLoad`, `FileSystemWatcher`, `changesPublished`,
 `sceneSaved`, and `GetGlobalObjectIdsSlow` returns **zero** matches. M-Auto builds that machinery. The
 four blockers below are the real obstacles a naive "just call Sync on every event" would hit; each is
@@ -48,7 +48,7 @@ grounded in the code and each has a specified solution.
 
 ### 1. The obvious code→scene trigger is dead by construction
 
-`SceneBuilderPaths` (`com.scenebuilder/Editor/SceneBuilderPaths.cs`) documents and enforces that
+`SceneBuilderPaths` (`com.codescenes/Editor/SceneBuilderPaths.cs`) documents and enforces that
 builders live at `<ProjectRoot>/SceneBuilders/`, **outside** `Assets/` and `Packages/` — the only
 roots Unity's asset refresh scans. Its own remarks state code→scene "is driven by the plugin's OWN
 file watcher." Therefore `AssetPostprocessor.OnPostprocessAllAssets` — the trigger the naive design
@@ -71,7 +71,7 @@ watcher (see blocker 5).
 
 ### 2. "Empty patch ⇒ in sync" deadlocks on a spurious patch
 
-`SceneBuilderSync.SyncResult` (`com.scenebuilder/Editor/SceneBuilderSync.cs`) documents a real
+`SceneBuilderSync.SyncResult` (`com.codescenes/Editor/SceneBuilderSync.cs`) documents a real
 convergence hazard: a reconcile can **produce** a non-zero patch (`PatchEdits > 0`) whose **applied**
 text is byte-identical to the source (`EditsApplied == 0`, `Changed == false`). The doc-comment names
 it outright: "a non-zero value is a convergence defect even when the text happens to match." A drift
@@ -96,7 +96,7 @@ and never syncs again.
 
 ### 3. There is no incremental identity — the reader is a full-scene walk
 
-`SceneSnapshotReader.Read` (`com.scenebuilder/Editor/SceneSnapshotReader.cs`) walks **every** root and
+`SceneSnapshotReader.Read` (`com.codescenes/Editor/SceneSnapshotReader.cs`) walks **every** root and
 every child, calling `GlobalObjectId.GetGlobalObjectIdSlow(go)` **once per GameObject** (line 55), and
 `SerializedFieldBridge.ReadComponent` constructs a fresh `SerializedObject` and iterates
 `NextVisible` over **every component** (`SerializedFieldBridge.cs:45,107`). That is `O(scene)` per
@@ -281,7 +281,7 @@ Behaviors (headless-testable, Core fixtures):
 
 ## Editor adapter deliverables (pipeline-built, EditMode-gated per §8)
 
-All under `com.scenebuilder/Editor/` unless noted.
+All under `com.codescenes/Editor/` unless noted.
 
 - **`SceneBuilderAutoSync` bootstrap** (`[InitializeOnLoad]`): reads the master toggle, and when ON
   subscribes `ObjectChangeEvents.changesPublished` + `EditorSceneManager.sceneSaved`, starts the

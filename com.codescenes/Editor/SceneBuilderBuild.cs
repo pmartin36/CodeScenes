@@ -44,7 +44,7 @@ namespace SceneBuilder.Editor
             public int PlanOpCount { get; set; }
         }
 
-        [MenuItem("SceneBuilder/Build DemoScene (code -> scene)")]
+        [MenuItem("CodeScenes/Build DemoScene (code -> scene)")]
         public static void BuildDemo()
         {
             try

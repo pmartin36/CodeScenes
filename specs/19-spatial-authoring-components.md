@@ -208,9 +208,9 @@ existing parse/emit/diff/reconcile files.
 
 ## Editor adapter deliverables
 
-The geometry lives in the **runtime** assembly (`com.scenebuilder/Runtime`, `SceneBuilder.Authoring` —
+The geometry lives in the **runtime** assembly (`com.codescenes/Runtime`, `SceneBuilder.Authoring` —
 `autoReferenced`, no `includePlatforms`, so it ships to players); the build-strip and the SceneBuilder
-sync wiring live in the **Editor** assembly (`com.scenebuilder/Editor`, `SceneBuilder.Editor`,
+sync wiring live in the **Editor** assembly (`com.codescenes/Editor`, `SceneBuilder.Editor`,
 `includePlatforms:["Editor"]`). The runtime component's geometry uses **only runtime APIs** (no
 `UnityEditor` reference, so no `#if UNITY_EDITOR` guard is needed around the math).
 
@@ -266,7 +266,7 @@ sync wiring live in the **Editor** assembly (`com.scenebuilder/Editor`, `SceneBu
 
 ## Authoring API
 
-Inert fluent stubs on `NodeHandle` (`com.scenebuilder/Runtime/NodeHandle.cs`), siblings of the existing
+Inert fluent stubs on `NodeHandle` (`com.codescenes/Runtime/NodeHandle.cs`), siblings of the existing
 `.Transform(…)` / `.Component<T>(…)` — compile-time scaffolding that SceneBuilder parses from source and
 never executes (identical treatment to `.Transform`, which is already an inert `=> this` stub).
 
@@ -418,7 +418,7 @@ geometry**, not labels.
   `IdentityMap` `LogicalId↔GlobalObjectId`, and the `.Transform(…)` authoring pattern these mirror.
   `DrivenChannels` is added to `TransformData`; the transform writer/reader are the suppression seam.
 - **M3** (`specs/completed/04-m3-components-fields.md`) — **verified present**: `.Component<T>(c =>
-  c.Set(...))` (`com.scenebuilder/Runtime/ComponentHandle.cs`, `NodeHandle.cs`), and scene→code field
+  c.Set(...))` (`com.codescenes/Runtime/ComponentHandle.cs`, `NodeHandle.cs`), and scene→code field
   reconcile (`SceneBuilder.Core/Reconcile/ComponentReconciler.cs` + `ComponentPatchApplier.cs`). Sizer
   and Snapper **are** M3 components — authored, materialized and reconciled through this machinery; only
   their *dedicated source form* and *driven-channel* behavior are new.

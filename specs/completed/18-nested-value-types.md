@@ -228,7 +228,7 @@ Functions/behaviors (each a testable contract):
 
 ## Editor adapter deliverables
 
-All in `com.scenebuilder/Editor/SerializedFieldBridge.cs`.
+All in `com.codescenes/Editor/SerializedFieldBridge.cs`.
 
 - **`ReadNested` — recover and stamp the concrete type** (`:290-307`). Resolve the type via
   `ResolveFieldType(p.serializedObject.targetObject, p.propertyPath)` (already present, already
@@ -355,7 +355,7 @@ emitted `new GateFixtures.Damage { … }` resolves — this is why the emit must
 - **M1** — `FieldMap`, which continues to back `Nested.Fields`.
 - **M2** — Reconcile + Roslyn `SourcePatch` argument rewriting (the emit path being fixed).
 - The gate's Roslyn compile assertion (`unity-gate/Assets/GateTests/EmittedCodeCompiles.cs`,
-  `com.scenebuilder/Editor/BuilderCompileCheck.cs`) — the enforcement surface for "emitted C# compiles."
+  `com.codescenes/Editor/BuilderCompileCheck.cs`) — the enforcement surface for "emitted C# compiles."
 
 ## Risks / notes
 

@@ -127,8 +127,8 @@ UnitySceneBuilder/
   SceneBuilder.Core.Tests/
     SceneBuilder.Core.Tests.csproj         # net8.0, xUnit; ProjectReference → Core.csproj
   SceneBuilder.Editor.CompileCheck/        # compiles the adapter against Unity DLLs for `dotnet build`
-  com.scenebuilder/                        # the Unity package (embedded via a relative package ref)
-    package.json                           # Unity package manifest: com.scenebuilder
+  com.codescenes/                        # the Unity package (embedded via a relative package ref)
+    package.json                           # Unity package manifest: com.codescenes
     Runtime/
       SceneBuilder.Authoring.asmdef        # the authoring surface (ISceneDefinition/SceneRoot)
     Editor/
@@ -137,18 +137,18 @@ UnitySceneBuilder/
       PlanExecutor.cs
     Plugins/
       SceneBuilder.Core.dll                # prebuilt Core, auto-staged by a Core post-build target
-  unity-gate/                              # the Unity project the gate runs; embeds com.scenebuilder
+  unity-gate/                              # the Unity project the gate runs; embeds com.codescenes
     Assets/GateTests/                      # EditMode tests (the Unity confirmation checklists)
     ProjectSettings/ProjectVersion.txt     # 6000.x
 ```
 **Core ships into Unity as a prebuilt DLL (§2 "How Core ships into Unity"):** `SceneBuilder.Core/` is a
 plain `dotnet` project (compiled by `SceneBuilder.Core.csproj` for TDD/CI); a Core post-build target
-stages the built `SceneBuilder.Core.dll` into `com.scenebuilder/Plugins/`, so Unity consumes the binary
+stages the built `SceneBuilder.Core.dll` into `com.codescenes/Plugins/`, so Unity consumes the binary
 — no Core `.cs` lives under `Assets/`, where a source file (or even a `.dll`) would trigger a domain
 reload. One source tree; TDD runs against the `dotnet` build per §8.
 
 ## Risks/notes
-- Core ships into Unity as a precompiled `SceneBuilder.Core.dll` (staged into `com.scenebuilder/Plugins/`
+- Core ships into Unity as a precompiled `SceneBuilder.Core.dll` (staged into `com.codescenes/Plugins/`
   by a `dotnet build` post-build target), NOT as source under `Assets/`: Unity compiles the binary, and
   no Core `.cs` sits in the asset pipeline where it could trigger a domain reload.
 - `GlobalObjectId` does not exist until first save (§4); M0 deliberately persists `""` and defers real

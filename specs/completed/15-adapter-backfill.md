@@ -1,10 +1,10 @@
 # Adapter Backfill — Unity Editor adapters (M1b / M2b / M2c / M3)
 
 **Status: COMPLETE (2026-07-16).** The Unity Editor adapter backfill for these milestones is shipped:
-the `com.scenebuilder/Editor/` adapter exercises the Core capabilities in the live editor — non-destructive
+the `com.codescenes/Editor/` adapter exercises the Core capabilities in the live editor — non-destructive
 in-place Build, structural sync-back, flags sync-back, and the component/serialized-field layer.
 
-Shipped adapter code lives in `com.scenebuilder/Editor/`, including `SerializedFieldBridge.cs`,
+Shipped adapter code lives in `com.codescenes/Editor/`, including `SerializedFieldBridge.cs`,
 `AssetReferenceResolver.cs`, and `ComponentTypeResolver.cs`, alongside the build/sync seams.
 
 The original planning guidance in this spec is **superseded** — do not follow it:

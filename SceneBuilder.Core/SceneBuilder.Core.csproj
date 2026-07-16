@@ -17,7 +17,7 @@
        This makes staleness impossible: any `dotnet build` re-stages what Unity loads. -->
   <Target Name="StageCoreDllToUnityPlugins" AfterTargets="Build">
     <Copy SourceFiles="$(TargetPath)"
-          DestinationFiles="$(MSBuildProjectDirectory)/../com.scenebuilder/Plugins/SceneBuilder.Core.dll"
+          DestinationFiles="$(MSBuildProjectDirectory)/../com.codescenes/Plugins/SceneBuilder.Core.dll"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" />
   </Target>
 

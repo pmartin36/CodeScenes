@@ -66,7 +66,7 @@ namespace SceneBuilder.Editor
             public BuilderDiagnostic[] CompileErrors { get; set; } = System.Array.Empty<BuilderDiagnostic>();
         }
 
-        [MenuItem("SceneBuilder/Sync DemoScene (scene -> code)")]
+        [MenuItem("CodeScenes/Sync DemoScene (scene -> code)")]
         public static void SyncDemo()
         {
             try

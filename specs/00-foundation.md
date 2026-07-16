@@ -1,4 +1,4 @@
-# SceneBuilder — Foundation Spec (the contract)
+# CodeScenes — Foundation Spec (the contract)
 
 This is the authoritative contract. Every milestone spec (M0–M11, plus M1b/M2b/M2c/M-UI) binds to the
 types, identity model, seam, and conventions defined here. Milestone specs MUST use these type names verbatim and
@@ -9,7 +9,7 @@ top of its doc as an addition to this contract.
 
 ## 1. Product framing (one paragraph, for grounding)
 
-SceneBuilder makes a Unity scene a **code-native artifact** an LLM (or human) can author, read, and
+CodeScenes makes a Unity scene a **code-native artifact** an LLM (or human) can author, read, and
 validate as a flat C# builder, while a **bidirectional sync** keeps that code and the live Unity
 scene in agreement. The wedge is code-native authoring (LLMs work in their native substrate; a whole
 scene fits in context). The moat is the sync layer (identity + reconciliation), which nobody has
@@ -37,7 +37,7 @@ Owns:
 - The **IdentityMap** read/write (§4).
 
 ### `SceneBuilder.Authoring` — the user-facing fluent API (zero Unity dependency)
-The third assembly, living in `com.scenebuilder/Runtime/` with `"references": []` and **no
+The third assembly, living in `com.codescenes/Runtime/` with `"references": []` and **no
 `UnityEngine` types** — the fluent `ISceneDefinition` / `SceneRoot` / `NodeHandle` / `ComponentHandle`
 surface the author writes against. Transforms and vectors are authored as plain float tuples
 (`pos: (0,0,0)`), not `UnityEngine.Vector3`. The methods are compile-time scaffolding only: SceneBuilder
@@ -70,7 +70,7 @@ use. (Owned by `SceneBuilderPaths` + `BuilderProjectInjector`; §12.)
 ### How Core ships into Unity
 Core is compiled once as the standalone `dotnet` project (with xUnit tests for TDD/CI), and a Core
 post-build target **stages the prebuilt `SceneBuilder.Core.dll`** (plus its 9 Roslyn/System dependency
-DLLs) into `com.scenebuilder/Plugins/`. Unity consumes that prebuilt DLL — it never compiles Core from
+DLLs) into `com.codescenes/Plugins/`. Unity consumes that prebuilt DLL — it never compiles Core from
 source. TDD happens against the `dotnet` project with `dotnet test` — fully headless, real behavior.
 
 ---
@@ -291,10 +291,10 @@ The gate is **`./verify.sh`** and it has two layers.
 - **Layer 2 — Unity EditMode (required whenever Unity-facing code changes):** the real editor suite in
   `unity-gate/` (`unity -runTests -batchmode -testPlatform EditMode`, minutes), exercising live
   `GameObject`/`SerializedProperty`/`GlobalObjectId`/`AssetDatabase` behavior. It runs — and MUST pass —
-  whenever the change touches `com.scenebuilder/` or `unity-gate/` (or `GATE_FORCE_UNITY=1` forces it).
+  whenever the change touches `com.codescenes/` or `unity-gate/` (or `GATE_FORCE_UNITY=1` forces it).
   It gates on BOTH the process exit code AND the results XML: a missing or failed `results.xml` is a
   **FAILURE**, never "probably fine", and a skipped/ignored test is never a pass. A pure-Core change
-  skips Layer 2 and says so — a skip never counts as a Unity pass. Any change to `com.scenebuilder/` or
+  skips Layer 2 and says so — a skip never counts as a Unity pass. Any change to `com.codescenes/` or
   to Unity-observable behavior is **not complete** without an EditMode test in
   `unity-gate/Assets/GateTests/` that runs the real behavior.
 - The Unity Authoring + Editor adapter is a **first-class `tdd-pipeline` deliverable** — written
@@ -401,7 +401,7 @@ the authoritative index so the additions stay coherent. Each is defined in the o
 | `Plan`, `PlanOp` (base) + `CreateObject` | ordered-op container from Materialize; op vocabulary in §5 | M0 |
 | `IdentityMap`/`IdentityMapEntry`/`AssetEntry` | POCO typing of the §4 sidecar JSON | M0 |
 | `IdentityMapEntry.Name` / `.SiblingIndex` | structural fingerprint feeding `IdentityRemapper` matching (§4) | M2b |
-| On-disk layout | Core builds once as the `dotnet` project; its prebuilt `SceneBuilder.Core.dll` (+9 dep DLLs) is staged into `com.scenebuilder/Plugins/` by a post-build target — Unity consumes the DLL, not the source | M0 |
+| On-disk layout | Core builds once as the `dotnet` project; its prebuilt `SceneBuilder.Core.dll` (+9 dep DLLs) is staged into `com.codescenes/Plugins/` by a post-build target — Unity consumes the DLL, not the source | M0 |
 | `FieldMap` | ordered, immutable `string`→`ValueNode` map; backs `ComponentData.Fields` + `ValueNode.Nested.Fields` | M1 |
 | `ChangeSet`/`ChangeOp` | differ output consumed by Materialize/Reconcile | M1 |
 | `ParseResult { Model; Anchors: LogicalId->SourceSpan }` | Roslyn parse result; `Anchors` added in M2 | M1/M2 |
@@ -440,12 +440,12 @@ sharing** — shared `rid` objects / reference cycles — is genuinely open and 
 
 ## 12. Packaging & sample
 
-The plugin ships as ONE UPM package, `com.scenebuilder`, developed in this repo. The repo's own Unity
+The plugin ships as ONE UPM package, `com.codescenes`, developed in this repo. The repo's own Unity
 consumer — where the gate runs — is `unity-gate/`, which embeds the package via a relative package ref.
 Layout:
 
 ```
-com.scenebuilder/
+com.codescenes/
   package.json
   Runtime/                # SceneBuilder.Authoring — the fluent ISceneDefinition/SceneRoot API; refs: [] (no UnityEngine)
   Editor/                 # SceneBuilder.Editor — adapter: menu, PlanExecutor, snapshot reader, ObjectChangeEvents,
@@ -455,7 +455,7 @@ com.scenebuilder/
 ```
 
 - **Core enters Unity as a prebuilt DLL, not source.** The `SceneBuilder.Core.csproj` post-build target
-  copies `SceneBuilder.Core.dll` (and 9 dependency DLLs) into `com.scenebuilder/Plugins/`. This keeps
+  copies `SceneBuilder.Core.dll` (and 9 dependency DLLs) into `com.codescenes/Plugins/`. This keeps
   Core Unity-free while giving the adapter a reference to link against.
 - **User-authored builder files live at `<ProjectRoot>/SceneBuilders/`, OUTSIDE `Assets/`** (see §2),
   each alongside its `*.sbmap.json` sidecar. They are read and written with plain `File` IO — never

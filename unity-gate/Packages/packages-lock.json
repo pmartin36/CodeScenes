@@ -1,7 +1,7 @@
 {
   "dependencies": {
-    "com.scenebuilder": {
-      "version": "file:../../com.scenebuilder",
+    "com.codescenes": {
+      "version": "file:../../com.codescenes",
       "depth": 0,
       "source": "local",
       "dependencies": {}

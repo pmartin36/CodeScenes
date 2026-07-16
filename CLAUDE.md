@@ -1,4 +1,4 @@
-# SceneBuilder — operating contract for all agents
+# CodeScenes — operating contract for all agents
 
 ## The product IS seamless, non-user-driven sync — this is the key value prop
 
@@ -38,7 +38,7 @@ It has two layers:
 1. **Core (always):** `dotnet build SceneBuilder.sln && dotnet test SceneBuilder.sln` — the fast
    headless suite (seconds). This is the inner loop for pure-Core work.
 2. **Unity EditMode (conditional):** the real editor suite in `unity-gate/` (minutes), run whenever
-   the change touches `com.scenebuilder/` or `unity-gate/` (or `GATE_FORCE_UNITY=1`). It gates on
+   the change touches `com.codescenes/` or `unity-gate/` (or `GATE_FORCE_UNITY=1`). It gates on
    BOTH the process exit code AND the results XML — a missing/failed `results.xml` is a FAILURE,
    never "probably fine". A pure-Core change skips layer 2 and says so; a skip never counts as a
    Unity pass.
@@ -59,7 +59,7 @@ Never report a gate as green on an exit code alone. Quote the `GATE PASS` line o
 
 ## Hard requirement: Unity-facing changes need EditMode coverage
 
-Any change to `com.scenebuilder/` (the Unity adapter/runtime) or to Unity-observable behavior is
+Any change to `com.codescenes/` (the Unity adapter/runtime) or to Unity-observable behavior is
 **not complete** without an EditMode test in `unity-gate/Assets/GateTests/` that exercises the real
 behavior against a live editor scene (real `GameObject`/`SerializedProperty`/`GlobalObjectId`/
 `AssetDatabase`). The headless Core tests operate on POCO fixtures and are structurally blind to the
@@ -85,10 +85,10 @@ enforces it.
 ## Layout
 
 - `SceneBuilder.Core/` + `SceneBuilder.Core.Tests/` — Unity-free Core, `dotnet test`. `SceneBuilder.sln` at root.
-- `com.scenebuilder/` — the Unity package (Runtime + Editor adapter + `Plugins/SceneBuilder.Core.dll`,
+- `com.codescenes/` — the Unity package (Runtime + Editor adapter + `Plugins/SceneBuilder.Core.dll`,
   auto-staged by a Core post-build target — never hand-copy it).
 - `SceneBuilder.Editor.CompileCheck/` — compiles the adapter against Unity DLLs for the `dotnet` build.
-- `unity-gate/` — the dedicated Unity project the gate runs. Embeds `com.scenebuilder` via a relative
+- `unity-gate/` — the dedicated Unity project the gate runs. Embeds `com.codescenes` via a relative
   package ref; EditMode tests live in `unity-gate/Assets/GateTests/`. Do NOT open this project in an
   interactive editor while the gate runs (Unity single-instance lock).
 - `specs/` — authoritative milestone specs. Each spec's "Unity confirmation checklist" should become
