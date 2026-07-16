@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using SceneBuilder.Core.Model;
@@ -18,6 +19,7 @@ namespace SceneBuilder.Editor
     {
         private static readonly Dictionary<string, Type?> Cache = new();
         private static readonly Dictionary<string, Type?> GuidCache = new();
+        private static readonly Dictionary<string, Type?> PrefixCache = new();
 
         /// <summary>
         /// GUID-anchored resolve: when <paramref name="typeRef"/> carries a MonoScript GUID, resolve
@@ -43,6 +45,110 @@ namespace SceneBuilder.Editor
             }
 
             return Resolve(typeRef.FullName);
+        }
+
+        /// <summary>
+        /// Usings-aware resolve: tries <paramref name="typeRef"/> as-is first (GUID-anchored user
+        /// scripts and fully-qualified names, unchanged); on a miss with a dot-free
+        /// <see cref="TypeRef.FullName"/>, probes each namespace in <paramref name="usings"/> in
+        /// document order as a <c>&lt;ns&gt;.&lt;name&gt;</c> prefix, the way C# resolves a short type
+        /// name against file-scope <c>using</c> directives. Exactly one distinct match resolves;
+        /// zero matches resolves to <c>null</c>; two or more DISTINCT matches are reported via
+        /// <paramref name="ambiguousCandidates"/> (and the method returns <c>null</c>) rather than
+        /// guessed. This overload never logs and never writes a bare (unqualified) name into the
+        /// shared full-name <see cref="Cache"/> — see <see cref="LookupType"/>.
+        /// </summary>
+        public static Type? Resolve(TypeRef? typeRef, IReadOnlyList<string> usings, out IReadOnlyList<Type> ambiguousCandidates)
+        {
+            ambiguousCandidates = Array.Empty<Type>();
+
+            if (typeRef is null)
+            {
+                return null;
+            }
+
+            var guid = typeRef.MonoScriptGuid;
+            if (!string.IsNullOrEmpty(guid))
+            {
+                var viaGuid = ResolveByGuid(guid!);
+                if (viaGuid != null)
+                {
+                    return viaGuid;
+                }
+            }
+
+            var fullName = typeRef.FullName;
+            if (string.IsNullOrEmpty(fullName))
+            {
+                return null;
+            }
+
+            var isQualified = fullName.Contains('.');
+
+            // As-is try: reuse the shared full-name Cache for a QUALIFIED name (the lookup is
+            // usings-independent, so sharing it with Resolve(string) is safe and keeps the
+            // perf win); a dot-free BARE name never touches the shared Cache, warning-free either
+            // way — see LookupType.
+            Type? asIs;
+            if (isQualified)
+            {
+                if (!Cache.TryGetValue(fullName, out asIs))
+                {
+                    asIs = LookupType(fullName);
+                    Cache[fullName] = asIs;
+                }
+            }
+            else
+            {
+                asIs = LookupType(fullName);
+            }
+
+            if (asIs != null)
+            {
+                return asIs;
+            }
+
+            if (isQualified)
+            {
+                // Dotted (qualified) name that still misses is not eligible for prefix probing.
+                return null;
+            }
+
+            var cacheKey = fullName + " " + string.Join(",", usings);
+            if (PrefixCache.TryGetValue(cacheKey, out var cached))
+            {
+                return cached;
+            }
+
+            HashSet<Type>? candidates = null;
+            foreach (var ns in usings)
+            {
+                var candidate = LookupType(ns + "." + fullName);
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                candidates ??= new HashSet<Type>();
+                candidates.Add(candidate);
+            }
+
+            if (candidates is null || candidates.Count == 0)
+            {
+                PrefixCache[cacheKey] = null;
+                return null;
+            }
+
+            if (candidates.Count == 1)
+            {
+                var resolved = candidates.Single();
+                PrefixCache[cacheKey] = resolved;
+                return resolved;
+            }
+
+            // Ambiguous: do not cache, do not guess.
+            ambiguousCandidates = new List<Type>(candidates);
+            return null;
         }
 
         private static Type? ResolveByGuid(string guid)
@@ -79,6 +185,25 @@ namespace SceneBuilder.Editor
                 return cached;
             }
 
+            var resolved = LookupType(fullName);
+
+            Cache[fullName] = resolved;
+            if (resolved == null)
+            {
+                Debug.LogWarning($"[SceneBuilder] Could not resolve component type '{fullName}'.");
+            }
+
+            return resolved;
+        }
+
+        /// <summary>
+        /// Pure type lookup by full name: the TypeCache-derived-from-Component scan plus the
+        /// AppDomain reflection fallback, with NO cache write and NO warning. Shared by
+        /// <see cref="Resolve(string)"/> (which wraps it with the shared full-name cache + warning)
+        /// and the usings-aware overload (which must not trigger either side effect on a probe).
+        /// </summary>
+        private static Type? LookupType(string fullName)
+        {
             Type? resolved = null;
 
             // TypeCache is the fast, Unity-aware index over all loaded assemblies.
@@ -102,12 +227,6 @@ namespace SceneBuilder.Editor
                         break;
                     }
                 }
-            }
-
-            Cache[fullName] = resolved;
-            if (resolved == null)
-            {
-                Debug.LogWarning($"[SceneBuilder] Could not resolve component type '{fullName}'.");
             }
 
             return resolved;

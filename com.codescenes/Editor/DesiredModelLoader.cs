@@ -85,7 +85,7 @@ namespace SceneBuilder.Editor
         /// </summary>
         public static Loaded Load(string source, IdentityMap? existingMap)
         {
-            var parse = BuilderParser.Parse(source, existingMap);
+            var parse = ComponentTypeNormalizer.ParseAndNormalize(source, existingMap);
 
             // §M3: resolve transient member:<name> field keys to serialized paths BEFORE any diff,
             // remapping the field-argument spans in lockstep so span-local field patches still match.

@@ -271,7 +271,7 @@ namespace SceneBuilder.Editor
             // IdentityRemapper is the project's existing answer to that (LogicalId, then Name, then
             // SiblingIndex, parent-by-parent) — the same structural matching the Build path relies on.
             // Run it over the re-parsed model so ids survive the rewrite.
-            var reparsed = BuilderParser.Parse(currentSource, mergedMap);
+            var reparsed = ComponentTypeNormalizer.ParseAndNormalize(currentSource, mergedMap);
             var remapped = IdentityRemapper.Remap(reparsed.Model, mergedMap);
 
             // Split of authority, and it matters: the patched SOURCE decides WHICH entries exist and
