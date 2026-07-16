@@ -18,8 +18,18 @@ namespace SceneBuilder.Core.Tests
     {
         private const string ComponentTypeFullName = "UnityEngine.MeshRenderer";
         private const string FieldKey = "sharedMaterial";
+        private const string OtherFieldKey = "otherMaterial";
 
-        private static (SceneModel Model, IdentityMap Map, string ComponentLogicalId) MappedRootWithAssetField(ValueNode sourceValue)
+        // b2-t4 fixture constants — test-side literals only, per research.md CLEANLINESS
+        // ("do not teach Core the container GUIDs"). Mirrors AssetRefDiffTests.cs:116-118.
+        private const string DefaultResourcesGuid = "0000000000000000e000000000000000";
+        private const long CubeFileId = 10202;
+        private const long SphereFileId = 10207;
+        private const string DefaultMaterialGuid = "0000000000000000f000000000000000";
+        private const long DefaultMaterialFileId = 10303;
+
+        private static (SceneModel Model, IdentityMap Map, string ComponentLogicalId) MappedRootWithAssetFields(
+            IEnumerable<KeyValuePair<string, ValueNode>> sourceFields)
         {
             const string ownerLogicalId = "root-1";
             var componentLogicalId = $"{ownerLogicalId}/{ComponentTypeFullName}#0";
@@ -39,7 +49,7 @@ namespace SceneBuilder.Core.Tests
                             {
                                 LogicalId = componentLogicalId,
                                 Type = new TypeRef(ComponentTypeFullName),
-                                Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(FieldKey, sourceValue) }),
+                                Fields = new FieldMap(sourceFields),
                             },
                         },
                     },
@@ -57,7 +67,10 @@ namespace SceneBuilder.Core.Tests
             return (model, map, componentLogicalId);
         }
 
-        private static SceneSnapshot SnapshotWithAssetField(ValueNode snapshotValue) => new SceneSnapshot
+        private static (SceneModel Model, IdentityMap Map, string ComponentLogicalId) MappedRootWithAssetField(ValueNode sourceValue) =>
+            MappedRootWithAssetFields(new[] { new KeyValuePair<string, ValueNode>(FieldKey, sourceValue) });
+
+        private static SceneSnapshot SnapshotWithAssetFields(IEnumerable<KeyValuePair<string, ValueNode>> snapshotFields) => new SceneSnapshot
         {
             SchemaVersion = 1,
             Roots = new[]
@@ -72,18 +85,24 @@ namespace SceneBuilder.Core.Tests
                         {
                             LogicalId = "unused",
                             Type = new TypeRef(ComponentTypeFullName),
-                            Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(FieldKey, snapshotValue) }),
+                            Fields = new FieldMap(snapshotFields),
                         },
                     },
                 },
             },
         };
 
-        private static Dictionary<string, IReadOnlyDictionary<string, SourceSpan>> FieldSpans(string componentLogicalId) =>
+        private static SceneSnapshot SnapshotWithAssetField(ValueNode snapshotValue) =>
+            SnapshotWithAssetFields(new[] { new KeyValuePair<string, ValueNode>(FieldKey, snapshotValue) });
+
+        private static Dictionary<string, IReadOnlyDictionary<string, SourceSpan>> FieldSpans(string componentLogicalId, params string[] fieldKeys) =>
             new()
             {
-                [componentLogicalId] = new Dictionary<string, SourceSpan> { [FieldKey] = new SourceSpan(0, 10) },
+                [componentLogicalId] = fieldKeys.ToDictionary(k => k, _ => new SourceSpan(0, 10)),
             };
+
+        private static Dictionary<string, IReadOnlyDictionary<string, SourceSpan>> FieldSpans(string componentLogicalId) =>
+            FieldSpans(componentLogicalId, FieldKey);
 
         // spec test 6: source Guid "" (parsed Asset("...") literal never carries a resolved
         // Guid) differs from the snapshot's resolved Guid -> one PatchComponentField rewriting
@@ -322,6 +341,228 @@ public class AssetRefNewObjectScene : ISceneDefinition
             var plan = Materializer.Materialize(lowered, snapshot, reparsedMap);
 
             Assert.Empty(plan.Ops);
+        }
+
+        // spec #24: a non-builtin source ref replaced by a built-in snapshot ref -> patches to
+        // the Builtin(...) form. Passes via the !Equals path (different Guid) — a
+        // characterization pin on b1-t3's emit reaching Reconcile, NOT a pin on change (1).
+        [Fact]
+        public void Reconcile_SnapshotBuiltinAgainstAssetSource_PatchesToBuiltinForm()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "", FileId = 0, DisplayPath = "Assets/Materials/Red.mat" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef
+            {
+                Guid = DefaultMaterialGuid,
+                FileId = DefaultMaterialFileId,
+                IsBuiltin = true,
+                DisplayPath = "Default-Material",
+                TypeHint = "",
+            });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Equal("Builtin(\"Default-Material\")", patch.NewExpr);
+        }
+
+        // spec #25: two built-in refs sharing a container Guid but differing FileId/name (a
+        // primitive swap) -> patches to the new name. Also !Equals (different FileId) —
+        // characterization.
+        [Fact]
+        public void Reconcile_SnapshotBuiltinChanged_PatchesName()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = SphereFileId, IsBuiltin = true, DisplayPath = "Sphere" });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Equal("Builtin(\"Sphere\")", patch.NewExpr);
+        }
+
+        // spec #26 — THE pin for change (1). Identity-equal (Guid, FileId, IsBuiltin) pair whose
+        // TypeHint differs (an ambiguity that gained a qualifier): Equals is true and DisplayPath
+        // is unchanged, so unpatched code's AuthoredTextIsCurrent (DisplayPath-only) reports
+        // "current" and nothing is emitted. Must still patch, since the emitted text is a function
+        // of (DisplayPath, IsBuiltin, TypeHint).
+        [Fact]
+        public void Reconcile_BuiltinTypeHintChanged_PatchesEvenWhenIdentityEqual()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube", TypeHint = "" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube", TypeHint = "Mesh" });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Equal("Builtin(\"Cube\", \"Mesh\")", patch.NewExpr);
+        }
+
+        // spec #27: a component with TWO changed fields, one built-in and one non-builtin
+        // Asset(...). AddedAssets must contain exactly the non-builtin's entry — the built-in
+        // contributes nothing, but the sibling change proves the harvest still runs at all (an
+        // implementation that skipped the whole harvest would also pass an Assert.Empty alone).
+        [Fact]
+        public void Reconcile_BuiltinRef_AddsNoAssetEntries()
+        {
+            var sourceFields = new[]
+            {
+                new KeyValuePair<string, ValueNode>(FieldKey, new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube" })),
+                new KeyValuePair<string, ValueNode>(OtherFieldKey, new ValueNode.AssetRef(new Model.AssetRef { Guid = "", FileId = 0, DisplayPath = "Assets/Old.png" })),
+            };
+            var (model, map, componentLogicalId) = MappedRootWithAssetFields(sourceFields);
+
+            var snapshotFields = new[]
+            {
+                new KeyValuePair<string, ValueNode>(FieldKey, new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = SphereFileId, IsBuiltin = true, DisplayPath = "Sphere" })),
+                new KeyValuePair<string, ValueNode>(OtherFieldKey, new ValueNode.AssetRef(new Model.AssetRef { Guid = "abc123", FileId = 0, DisplayPath = "Assets/New.png", TypeHint = "Material" })),
+            };
+            var snapshot = SnapshotWithAssetFields(snapshotFields);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId, FieldKey, OtherFieldKey));
+
+            Assert.Equal(2, result.Patch.Edits.OfType<PatchComponentField>().Count());
+
+            var addedAsset = Assert.Single(result.AddedAssets);
+            Assert.Equal("abc123", addedAsset.Guid);
+            Assert.Equal("Assets/New.png", addedAsset.LastKnownPath);
+        }
+
+        // spec #28 / §13 create-with-payload: a newly editor-created object carrying a built-in
+        // ref converges in one Reconcile pass (owner mapped, appended onto the just-created
+        // component statement), and a second Sync of the applied + reparsed + lowered source
+        // against the unchanged snapshot is a no-op. Mirrors Reconcile_AssetRefOnNewObject_Converges,
+        // swapping the payload for a built-in and using AssetRefLowering's 3-arg builtinResolver
+        // overload for pass 2.
+        [Fact]
+        public void Reconcile_BuiltinRefOnNewObject_Converges()
+        {
+            var parsed = BuilderParser.Parse(NewObjectUnderMappedRootScene);
+            var rootLogicalId = Assert.Single(parsed.Model.Roots).LogicalId;
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = rootLogicalId, GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var builtinRef = new ValueNode.AssetRef(new Model.AssetRef
+            {
+                Guid = DefaultResourcesGuid,
+                FileId = CubeFileId,
+                IsBuiltin = true,
+                DisplayPath = "Cube",
+            });
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-root",
+                        Name = "Root",
+                        Children = new[]
+                        {
+                            new SnapshotNode
+                            {
+                                GlobalObjectId = "goid-sprite",
+                                Name = "Sprite",
+                                Components = new[]
+                                {
+                                    new ComponentData
+                                    {
+                                        LogicalId = "unused",
+                                        Type = new TypeRef(ComponentTypeFullName),
+                                        Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(FieldKey, builtinRef) }),
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            };
+
+            // ---- pass 1: append the new object + component in ONE Reconcile call ----
+            var recon = Reconciler.Reconcile(parsed.Model, snapshot, map, parsed.Anchors, handles: parsed.Handles);
+
+            Assert.Empty(recon.Conflicts);
+
+            var append = Assert.Single(recon.Patch.Edits.OfType<AppendStatement>());
+            var componentAppend = Assert.Single(recon.Patch.Edits.OfType<AppendComponentStatement>());
+            Assert.NotNull(append.Handle);
+            Assert.Equal(append.Handle, componentAppend.OwnerHandle);
+
+            Assert.Empty(recon.AddedAssets);
+
+            var patched = SourcePatchApplier.Apply(NewObjectUnderMappedRootScene, recon.Patch, parsed.Anchors);
+
+            Assert.Contains($".Set(\"{FieldKey}\", Builtin(\"Cube\"))", patched);
+
+            // ---- pass 2: reparse + lower (name->guid via builtinResolver, the real adapter
+            // pipeline) + converge ----
+            var reparsed = BuilderParser.Parse(patched);
+            var spriteLogicalId = append.Handle!;
+
+            var reparsedMap = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = rootLogicalId, GlobalObjectId = "goid-root", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = spriteLogicalId, GlobalObjectId = "goid-sprite", Kind = "GameObject", ParentLogicalId = rootLogicalId },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = $"{spriteLogicalId}/{ComponentTypeFullName}#0",
+                        GlobalObjectId = "",
+                        Kind = "Component",
+                        ComponentType = ComponentTypeFullName,
+                        ParentLogicalId = spriteLogicalId,
+                    },
+                },
+            };
+
+            var lowered = AssetRefLowering.Lower(
+                reparsed.Model,
+                path => null,
+                (name, hint) => name == "Cube" && hint is null ? (DefaultResourcesGuid, CubeFileId, "Mesh") : null);
+
+            var plan = Materializer.Materialize(lowered, snapshot, reparsedMap);
+
+            Assert.Empty(plan.Ops);
+        }
+
+        // spec #29: an unchanged built-in ref re-synced against an identical snapshot (including
+        // TypeHint) is a no-op — no patch, no churn. This is what would catch change (1) being
+        // over-applied.
+        [Fact]
+        public void Reconcile_ResyncUnchangedBuiltin_IsANoOp()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube", TypeHint = "" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube", TypeHint = "" });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            Assert.Empty(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Empty(result.AddedAssets);
         }
     }
 }

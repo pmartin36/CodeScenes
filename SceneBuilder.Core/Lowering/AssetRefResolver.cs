@@ -48,6 +48,15 @@ namespace SceneBuilder.Core.Lowering
             IReadOnlyList<AssetEntry> assets,
             Func<string, string?>? guidResolver = null)
         {
+            if (assetRef.IsBuiltin)
+            {
+                // A built-in's DisplayPath is the live-derived object NAME, never a project path: it is
+                // already resolved, is deliberately absent from the sidecar Assets[] cache, and must never
+                // be reported missing. Precedes the None check so it holds whether or not lowering has
+                // stamped the container Guid.
+                return new AssetRefResolution(assetRef.DisplayPath, null);
+            }
+
             if (string.IsNullOrEmpty(assetRef.Guid))
             {
                 return new AssetRefResolution(null, null);

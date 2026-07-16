@@ -125,19 +125,32 @@ namespace SceneBuilder.Core.Materialize
         {
             if (value is ValueNode.AssetRef assetRef)
             {
-                passB.Add(new SetAssetRef
+                if (IsUnresolved(assetRef.Ref))
                 {
-                    LogicalId = logicalId,
-                    Path = path,
-                    Guid = assetRef.Ref?.Guid,
-                    FileId = assetRef.Ref?.FileId ?? 0,
-                });
+                    skipped.Add(new SkippedField { LogicalId = logicalId, Path = path, Reason = "Unresolved" });
+                }
+                else
+                {
+                    passB.Add(new SetAssetRef
+                    {
+                        LogicalId = logicalId,
+                        Path = path,
+                        Guid = assetRef.Ref?.Guid,
+                        FileId = assetRef.Ref?.FileId ?? 0,
+                    });
+                }
             }
             else if (value is ValueNode.List list && list.Items.Count > 0 && list.Items.All(item => item is ValueNode.AssetRef))
             {
                 for (var i = 0; i < list.Items.Count; i++)
                 {
                     var element = (ValueNode.AssetRef)list.Items[i];
+                    if (IsUnresolved(element.Ref))
+                    {
+                        skipped.Add(new SkippedField { LogicalId = logicalId, Path = $"{path}[{i}]", Reason = "Unresolved" });
+                        continue;
+                    }
+
                     passB.Add(new SetAssetRef
                     {
                         LogicalId = logicalId,
@@ -156,5 +169,12 @@ namespace SceneBuilder.Core.Materialize
                 passB.Add(new SetField { LogicalId = logicalId, Path = path, Value = value });
             }
         }
+
+        // A ref that EXISTS but carries no resolved GUID named something the resolver could not find.
+        // Emitting it as SetAssetRef(guid: "") makes the adapter CLEAR the live field
+        // (AssetReferenceResolver.cs:239-244) — silent data loss. Skip instead.
+        // Ref == null is the genuine None/clear form and is NOT this — callers test it first.
+        private static bool IsUnresolved(global::SceneBuilder.Core.Model.AssetRef? reference) =>
+            reference is not null && string.IsNullOrEmpty(reference.Guid);
     }
 }
