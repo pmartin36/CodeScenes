@@ -9,7 +9,7 @@ that lowers to `ValueNode.AssetRef`; it is not a Core type.
 The **None / cleared** case is likewise not a new type: it is the `ref == null` inhabitant of the
 existing `ValueNode.AssetRef(ref: AssetRef?)` (§3, symmetric with `ObjectRef`'s null). Clearing is
 carried by the existing `SetAssetRef(path, guid, fileId)` op with a **null/empty `guid`** (the None
-form) — no new Plan op. Its authoring sugar — `Asset(null)` / `Asset.None` — is Editor-side, like
+form) — no new Plan op. Its authoring sugar — `Asset(null)` — is Editor-side, like
 `Asset("...")`, and lowers to `ValueNode.AssetRef(null)`.
 
 ## Goal
@@ -30,8 +30,8 @@ directions: code sets asset-ref fields in the scene; scene edits to asset-ref fi
 - **DisplayPath is derived, never authoritative.** On every read it is re-derived from the GUID via
   the sidecar `Assets[]` cache / AssetDatabase. It exists only for human readability in source.
 - **MonoBehaviour script identity via MonoScript GUID.** Completes the M3 note: a component's
-  `TypeRef` for a `[SerializeField]` MonoBehaviour is anchored to its `MonoScript` asset GUID
-  (`TypeHint = "MonoScript"`), so the type resolves independent of assembly/namespace churn.
+  `TypeRef` for a `[SerializeField]` MonoBehaviour is anchored to its `MonoScript` asset GUID in the
+  dedicated `TypeRef.MonoScriptGuid` field, so the type resolves independent of assembly/namespace churn.
 - **Materialize (code→scene):** emit `SetAssetRef(path, guid, fileId)` ops; adapter sets the
   serialized field's `objectReferenceValue` to the resolved asset (sub-object via `fileId`).
 - **Reconcile (scene→code):** detect an asset-ref field whose GUID/FileId changed in the snapshot;
@@ -39,13 +39,13 @@ directions: code sets asset-ref fields in the scene; scene edits to asset-ref fi
   sidecar `Assets[]` cache.
 - **Set an asset field to None / clear it — both directions**, modeled as `ValueNode.AssetRef(null)`
   per §3 (the parallel of M5's `ObjectRef` null case):
-  - **Materialize (code→scene):** authoring a null/None asset field (`Asset(null)` / `Asset.None`)
+  - **Materialize (code→scene):** authoring a null/None asset field (`Asset(null)`)
     lowers to `ValueNode.AssetRef(null)` and materializes as **clearing** the field — the adapter
     sets `SerializedProperty.objectReferenceValue = null`. Emitted as `SetAssetRef(path, guid=null,
     fileId=0)` (the None form of the existing op).
   - **Reconcile (scene→code):** an asset field the user set to **None** in Unity (snapshot holds
     `AssetRef(null)` where the source assigned an asset) → patch the source argument to the None
-    form (`Asset(null)` / `Asset.None`); no `Assets[]` entry is required for a cleared field.
+    form (`Asset(null)`); no `Assets[]` entry is required for a cleared field.
   - Clearing is distinct from **missing/unresolvable** (a stale GUID with no owning asset stays a
     loud, located error §7); an explicit None is a legitimate authored value, never an error.
 - **Move/rename stability:** asset moved or renamed → GUID unchanged → ref still resolves;
@@ -95,15 +95,17 @@ Functions/behaviors (each a testable contract):
   `DisplayPath` and Diff reports **no** identity change.
 - **Missing GUID:** a `Guid` that the resolver cannot map produces a located error naming the object,
   component, field, and last-known path (`Player > MeshRenderer.sharedMaterial: asset
-  {guid} (was 'Assets/Materials/Red.mat') not found`); it is never dropped or coerced to null.
+  {guid} (was 'Assets/Materials/Red.mat') not found`); it is never dropped or coerced to null. The
+  runtime throw ships in the adapter's `AssetReferenceResolver` — Core receives GUIDs and never touches
+  the AssetDatabase, so a missing GUID can only surface at that boundary.
 - **Sidecar cache round-trip:** `Assets[]` reads and writes `{ Guid, LastKnownPath, TypeHint }`;
   `DisplayPath` for a known GUID is served from this cache without an AssetDatabase hit when possible.
 - **None / clear:** a field holding `ValueNode.AssetRef(null)` materializes to `SetAssetRef(path,
   guid=null, fileId=0)` (the field is cleared, not skipped); Diff treats `AssetRef(null)` vs a
   non-null `AssetRef` as a change (both directions), and `AssetRef(null)` vs `AssetRef(null)` as no
   change. Reconcile of a snapshot field that is `AssetRef(null)` against a source that assigned an
-  asset produces a `SourcePatch` rewriting the argument to the None form (`Asset(null)` /
-  `Asset.None`). Canonical serialization of `AssetRef(null)` is a deterministic None token, distinct
+  asset produces a `SourcePatch` rewriting the argument to the None form (`Asset(null)`).
+  Canonical serialization of `AssetRef(null)` is a deterministic None token, distinct
   from any populated `AssetRef`.
 
 ## Editor adapter deliverables
@@ -119,11 +121,13 @@ Functions/behaviors (each a testable contract):
   emit `TryGetGUIDAndLocalFileIdentifier(objectReferenceValue)` → `AssetRef { Guid, FileId,
   TypeHint }`, plus the re-derived `DisplayPath`. An asset field whose `objectReferenceValue` is
   `null` reads as `ValueNode.AssetRef(null)` (None), not as an error.
-- **MonoScript resolution:** for MonoBehaviours, resolve the `MonoScript` and its GUID via
-  `MonoScript.FromMonoBehaviour(...).GetInstanceID()` / `AssetDatabase` and stamp the component's
-  `TypeRef.AssemblyHint`/`AssetRef(TypeHint="MonoScript")`.
-- **Missing asset:** when a GUID resolves to no asset, surface the located error up to Core's error
-  channel; do not assign null silently.
+- **MonoScript resolution:** for MonoBehaviours, resolve the component's `MonoScript` and its asset GUID
+  (via `AssetDatabase`) and stamp it into the component's `TypeRef.MonoScriptGuid`. `ComponentTypeResolver`
+  then resolves the type GUID→path→`MonoScript`→class FIRST (surviving assembly/namespace churn), falling
+  back to `TypeRef.FullName`.
+- **Missing asset:** when a GUID resolves to no asset, the adapter's `AssetReferenceResolver` throws the
+  located error directly (an `InvalidOperationException` naming the object/field/GUID/last-known path);
+  it never assigns null silently.
 
 ## Authoring API added
 `Asset(displayPath)` — an Editor-side fluent factory returning an asset-ref value that lowers to
@@ -176,14 +180,14 @@ paths itself. RED tests:
    `SetAssetRef(path, guid, fileId)` carrying the non-zero `FileId`.
 10. **Sidecar `Assets[]` read/write:** write cache → read back `{ Guid, LastKnownPath, TypeHint }`
     intact; re-derivation of `DisplayPath` uses the cache.
-11. **MonoScript identity:** a MonoBehaviour `TypeRef` anchored to a MonoScript GUID round-trips and
+11. **MonoScript identity:** a MonoBehaviour `TypeRef` whose `MonoScriptGuid` is set round-trips and
     resolves the same type when the assembly hint differs.
 12. **`Materialize_NullAssetRef_ClearsField`:** a field holding `ValueNode.AssetRef(null)` →
     `Plan` contains `SetAssetRef(path, guid=null, fileId=0)` (clear), not a skip and not a populated
     op.
 13. **`Reconcile_AssetRefClearedToNone_PatchesSourceToNull`:** source assigns
     `Asset("Assets/Materials/Red.mat")`, snapshot field is `AssetRef(null)` → `SourcePatch` rewrites
-    the argument to the None form (`Asset(null)` / `Asset.None`); no `Assets[]` entry required.
+    the argument to the None form (`Asset(null)`); no `Assets[]` entry required.
 14a. **`Reconcile_AssetRefOnNewObject_Converges`** (§13 create-with-payload). A newly editor-created
     object carrying an asset-ref field in one edit → the `Asset("…")` argument is appended onto that
     object's just-created statement in the same pass (owner mapped via M2b's `AddedEntry`), or reported
@@ -208,8 +212,8 @@ paths itself. RED tests:
    (sub-object `FileId` correct for an FBX with multiple meshes).
 6. **Clear a field to None in Unity.** With `MeshRenderer.sharedMaterial` assigned, set the material
    slot to **None** in the Inspector; trigger Reconcile. **Expected:** the source updates to the
-   None form (`Asset(null)` / `Asset.None`); the field is not treated as a missing-asset error.
-7. **Author None → scene.** Write the field as `Asset(null)` / `Asset.None` in source; run
+   None form (`Asset(null)`); the field is not treated as a missing-asset error.
+7. **Author None → scene.** Write the field as `Asset(null)` in source; run
    Materialize. **Expected:** the corresponding slot in the Inspector is **empty** (cleared), not
    left at its prior asset.
 

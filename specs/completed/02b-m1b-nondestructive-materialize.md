@@ -94,10 +94,10 @@ across rebuilds.
   drives `Materialize` directly (no special flag) with an unmapped actual and asserts no destroy op.
 
 ## Editor adapter deliverables
-> **Built by the pipeline, gated by the Unity-DLL compile-check** (`SceneBuilder.Editor.CompileCheck`, §8) —
-> NOT hand-wired. The current Core-only pass excludes it (`dotnet test` can't run Unity APIs); a follow-on
-> adapter pass builds it end-to-end, gated by `dotnet build SceneBuilder.sln` compiling the adapter against
-> the real Unity 6000.5 DLLs. Only runtime behavior is confirmed by the user's checklist below.
+> **Built by the pipeline, gated by `./verify.sh`** (§8) — its Core layer (`dotnet build` + `dotnet test`)
+> plus, because this touches the Unity adapter, its mandatory Unity EditMode layer (the `unity-gate/`
+> editor suite run against a live scene). Adapter behavior is confirmed by an actual editor run, not a
+> compile-check alone.
 
 - **`PlanExecutor` applies the `Plan` onto the currently-open scene, in place** (§5 step 5): it does NOT
   call `EditorSceneManager.NewScene` or otherwise wipe/replace the scene before applying. It resolves
@@ -160,5 +160,3 @@ unchanged.
 - Identity churn is the failure mode to avoid: any accidental `RemoveNode`+`AddNode` on a drifted object
   would mint a new `GlobalObjectId` and silently break M2 sync-back — the "updated in place, GlobalObjectId
   preserved" test guards this.
-- **Sample seed (§12):** the hand-add-then-rebuild survival demo is part of the shipped `RoundTripDemo`
-  script — it shows the moat (a Build that respects the user's own edits), not just construction.

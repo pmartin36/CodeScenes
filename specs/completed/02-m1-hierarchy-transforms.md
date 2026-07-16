@@ -171,6 +171,3 @@ public class FooScene : ISceneDefinition {
   write-back can emit Euler deterministically.
 - Keep the adapter logic-light (§2): matching, `SerializedObject` writes, and id capture only; all
   diff/ordering decisions stay in Core.
-- **Sample seed (§12):** the `FooScene` example authored for M1's confirmation (code→scene build) is
-  the code→scene half of the shipped `Samples~/RoundTripDemo`; it is authored in the test project's
-  `Assets` now and promoted verbatim into the package sample once the round-trip (through M2) is proven.

@@ -42,8 +42,10 @@ its statement. The sidecar updates to match, and anything not representable is s
 - Coexists with M2's move/rename/reparent/reorder edits in the same Reconcile.
 
 ## Out of scope
-- **Components** on created objects (M3) — created objects sync GameObject + transform + flags only;
-  a created object that carries components is appended without them and the components are **reported**.
+- **Components** on created objects are authored by M3 (M2b owns only the GameObject + transform + flags
+  of the append). They are NOT dropped: a created object that carries components is appended AND its
+  components attach onto that same just-appended statement in the SAME Reconcile pass (§13 rule 1),
+  never deferred behind a conflict.
 - Asset/cross-object references on created objects (M4/M5).
 - Fine-grained sibling-order placement of appended statements beyond "root → end of Build body; child →
   after the parent statement (or its handle)".
@@ -58,8 +60,9 @@ its statement. The sidecar updates to match, and anything not representable is s
   - Unmapped subtree (parent + child new) → append parent (handle) + child; both `AddedEntries`.
   - Mapped entry with `GlobalObjectId` absent from snapshot → `RemoveStatement(anchor)` + `RemovedLogicalId`.
   - Delete whose handle is referenced by a surviving statement → `Conflict`, no `RemoveStatement`.
-  - A created object carrying components → append it and emit a `Conflict`/report note for the components
-    (fail-loud, not silent).
+  - A created object carrying components → append it AND attach its components onto that same
+    just-appended statement in one pass (§13 rule 1); the components are never dropped and never
+    deferred behind a conflict.
   - **Create-with-payload composition (§13).** M2b is the STRUCTURAL owner of the create-with-payload
     seam. When M2b appends a newly-created object, its payload (components/refs/events owned by
     M3/M4/M5/M8) is composed per §13 rule 1 — single-pass, dependency-ordered: the object statement is
@@ -84,10 +87,10 @@ its statement. The sidecar updates to match, and anything not representable is s
   with `AddedEntries` written to the map, a second Sync of an unchanged scene is a no-op.
 
 ## Editor adapter deliverables
-> **Built by the pipeline, gated by the Unity-DLL compile-check** (`SceneBuilder.Editor.CompileCheck`) —
-> NOT hand-wired. The CURRENT Core-only pass excludes it (it can't run under `dotnet test` alone); a
-> follow-on adapter pass builds it end-to-end, gated by `dotnet build SceneBuilder.sln` compiling the
-> adapter against the real Unity DLLs. Only runtime behavior is confirmed by the user's checklist below.
+> **Built by the pipeline, gated by `./verify.sh`** — its Core layer (`dotnet build` + `dotnet test`)
+> plus, because this touches the Unity adapter, its mandatory Unity EditMode layer (the `unity-gate/`
+> editor suite exercising the real behavior against a live scene). Adapter behavior is confirmed by an
+> actual editor run, not a compile-check alone.
 
 - `SceneBuilderSync`: after `Reconcile`, apply the `SourcePatch`, then update the sidecar — add
   `AddedEntries`, drop `RemovedLogicalIds` — and write it back. Log a one-line summary AND every
@@ -115,8 +118,8 @@ its statement. The sidecar updates to match, and anything not representable is s
    and a **second Sync is a no-op**.
 2. Add a **root** GameObject → Sync → a new `scene.Add(…)` statement appears.
 3. **Delete** an object in the scene → Sync → its statement is removed.
-4. Add a component to a new object → Sync → the object appears and the Console **reports** the component
-   as not-yet-represented (not silently dropped).
+4. Add a component to a new object → Sync → the object appears WITH its `.Component<T>(…)` attached in
+   the same Sync (§13 rule 1) — not dropped, not deferred.
 
 ## Dependencies
 M2 (SourceEdit/SourcePatch/Reconcile/anchors + the float f-suffix emitter), M1 (parser + LogicalId

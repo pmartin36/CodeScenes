@@ -17,9 +17,9 @@ built. Construction is commodity; the value is the durable, living code↔scene 
 
 ---
 
-## 2. Architecture — the Core / Editor seam
+## 2. Architecture — the Core / Authoring / Editor seam
 
-Two components, split along the **testability seam**:
+Three assemblies, split along the **testability seam**:
 
 ### `SceneBuilder.Core` — zero Unity dependency
 A standalone .NET class library (`netstandard2.1`). References only Roslyn
@@ -36,9 +36,17 @@ Owns:
   `SourcePatch` back into the source text, formatting-preserving.
 - The **IdentityMap** read/write (§4).
 
+### `SceneBuilder.Authoring` — the user-facing fluent API (zero Unity dependency)
+The third assembly, living in `com.scenebuilder/Runtime/` with `"references": []` and **no
+`UnityEngine` types** — the fluent `ISceneDefinition` / `SceneRoot` / `NodeHandle` / `ComponentHandle`
+surface the author writes against. Transforms and vectors are authored as plain float tuples
+(`pos: (0,0,0)`), not `UnityEngine.Vector3`. The methods are compile-time scaffolding only: SceneBuilder
+parses the source **text** (Roslyn) to build the scene, so the handles return themselves for chaining
+and perform no work at runtime. `autoReferenced: true`, so Unity's predefined assemblies see it in scope.
+
 ### `SceneBuilder.Editor` — Unity-only adapter (thin, dumb)
-A Unity asmdef referencing `UnityEditor` + Core. **Deliberately logic-light** — it is confirmed by
-driving Unity manually (and later via EditMode tests in batchmode), not by unit tests.
+A Unity asmdef referencing `UnityEditor` + Core + Authoring. **Deliberately logic-light** — its real
+Unity behavior is covered by EditMode tests in `unity-gate/` (§8), not by headless unit tests.
 
 Owns exactly four responsibilities:
 1. **Execute** a `Plan` against the live scene via Editor APIs (`EditorSceneManager`, `GameObject`,
@@ -47,15 +55,23 @@ Owns exactly four responsibilities:
 3. **Capture** edits via `ObjectChangeEvents.changesPublished` (trigger only) and `sceneSaved`.
 4. **Resolve** asset path↔GUID and `GlobalObjectId`↔object.
 
-**Dependency direction:** Editor → Core. Core NEVER references Editor or `UnityEngine`. The
-user-facing fluent builder API (which *does* use `UnityEngine.Vector3` etc.) lives in the Editor
-assembly and **lowers** to Core POCOs at build time.
+**Dependency direction:** Editor → Core, Editor → Authoring. Core and Authoring NEVER reference
+Editor or `UnityEngine`. The Editor adapter parses the Authoring-shaped source into Core POCOs at
+build time.
+
+**Builder location (a §-constraint, not a preference):** user-authored builder sources and their
+identity sidecars live at `<ProjectRoot>/SceneBuilders/`, **outside** Unity's asset pipeline — read
+and written with plain `File` IO, never through `AssetDatabase`, so a write never triggers a domain
+reload. Only the *scene* stays under `Assets/`. IDE support (IntelliSense, type-checking) is restored
+by injecting the builder into Unity's generated `Assembly-CSharp.csproj` (`OnGeneratedCSProject`),
+which the IDE reads but Unity never compiles from — the same mechanism Unity's own Rider/VS packages
+use. (Owned by `SceneBuilderPaths` + `BuilderProjectInjector`; §12.)
 
 ### How Core ships into Unity
-Core's source is compiled two ways: (a) the standalone `dotnet` project + xUnit tests for TDD/CI;
-(b) referenced into Unity via an asmdef with no Unity references (or a precompiled DLL in a package).
-Same source, two consumers. TDD happens against (a) with `dotnet test` — fully headless, real
-behavior.
+Core is compiled once as the standalone `dotnet` project (with xUnit tests for TDD/CI), and a Core
+post-build target **stages the prebuilt `SceneBuilder.Core.dll`** (plus its 9 Roslyn/System dependency
+DLLs) into `com.scenebuilder/Plugins/`. Unity consumes that prebuilt DLL — it never compiles Core from
+source. TDD happens against the `dotnet` project with `dotnet test` — fully headless, real behavior.
 
 ---
 
@@ -94,6 +110,8 @@ ComponentData
 TypeRef
   FullName      : string                     // e.g. "UnityEngine.Rigidbody"
   AssemblyHint  : string?                    // for MonoBehaviours resolved via script GUID
+  MonoScriptGuid: string?                    // IDENTITY-AUTHORITATIVE: when non-null, Equals/GetHashCode
+                                             //   short-circuit on it alone (FullName/AssemblyHint ignored)
 
 ValueNode  =  one of
   Primitive(kind: bool|int|long|float|double|string, value)
@@ -108,8 +126,12 @@ ValueNode  =  one of
 AssetRef
   Guid          : string                      // AUTHORITATIVE identity (Unity .meta GUID)
   FileId        : long                         // sub-object id within the asset (0 = main)
-  TypeHint      : string                       // e.g. "Material", "Mesh", "MonoScript"
-  DisplayPath   : string                       // human-readable, NOT authoritative; re-derived
+  IsBuiltin     : bool                         // built-in resource, not a project asset
+  TypeHint      : string                       // e.g. "Material", "Mesh", "MonoScript"; when IsBuiltin,
+                                              //   the authored type qualifier (empty when the bare name suffices)
+  DisplayPath   : string                       // human-readable, NOT authoritative; re-derived. When IsBuiltin,
+                                              //   carries the built-in object NAME ("Cube"), not a project path
+// Identity/equality is (Guid, FileId, IsBuiltin); DisplayPath/TypeHint are non-authoritative.
 
 Vec3 { x,y,z : float }   Quat { x,y,z,w : float }   Color { r,g,b,a : float }   // etc.
 ```
@@ -135,12 +157,18 @@ Three distinct identities, connected by the IdentityMap:
 
 - **LogicalId** — Core's stable id for a node/component, the anchor that appears (implicitly) in code.
   Derivation (Core, at parse time), in priority order:
-  1. Explicit handle: a `var player = scene.Add("Player")` → LogicalId derived from the handle name.
-  2. Explicit `.Id("...")` call if the author provided one.
+  1. Explicit handle: a `var player = scene.Add("Player")` → LogicalId is the handle (var) name **used
+     bare/verbatim, NOT path-qualified by parent**.
+  2. Explicit `.Id("...")` call if the author provided one — the literal, verbatim.
   3. Synthesized from `parentLogicalId / name / siblingIndex` and **persisted** in the IdentityMap so
-     it stays stable even if a later edit would change the positional derivation. If a synthesized id
-     becomes ambiguous (e.g. two same-named siblings reordered), Reconcile surfaces a **conflict**
-     rather than guessing.
+     it stays stable even if a later edit would change the positional derivation.
+
+  Tiers 1–2 (handle name, `.Id` literal) are used verbatim, so they form a **single global namespace**;
+  only the tier-3 synthesized id is **per-parent**. A sibling group distinguishable only by position
+  (≥2 same-named siblings, all tier-3, no handle and no `.Id`) is a **hazard**: any statement move would
+  silently re-point identity. Such groups are detected on **every** `BuilderParser.Parse` — the one
+  chokepoint both directions reach — and surfaced (located) as `ParseResult.Ambiguities`. Parse does NOT
+  throw; the **policy is per-consumer**: Build refuses (never guesses), Sync heals by injecting `.Id(...)`.
 - **GlobalObjectId** — Unity's durable scene-object identity (stable across save/reload/session;
   exists only after first save; prefab-instance objects keyed on the `(targetPrefabId, targetObjectId)`
   pair). The correctness anchor for sync.
@@ -158,11 +186,16 @@ FooScene.sbmap.json
     Kind                    // GameObject | Component
     ComponentType?          // for components
     ParentLogicalId?
+    Name                    // structural fingerprint — feeds IdentityRemapper matching
+    SiblingIndex            // structural fingerprint — feeds IdentityRemapper matching
   Assets[] :                // asset-ref cache: display paths re-derived from these
     Guid, LastKnownPath, TypeHint
 ```
 The map keeps GUIDs/GlobalObjectIds **out of the clean C# source**. Source stays readable; the map
-carries identity.
+carries identity. `Name` + `SiblingIndex` are the structural fingerprint `IdentityRemapper` uses to carry
+a GlobalObjectId across a rename/reparent/reorder that re-derives the LogicalId (match by LogicalId, then
+Name, then SiblingIndex, parent-by-parent). `Assets[]` is a merge-only cache — **never pruned**; a GUID no
+longer referenced persists as a harmless fossil by design.
 
 ---
 
@@ -174,8 +207,10 @@ carries identity.
 3. `Diff(desired, actual)` keyed on LogicalId↔GlobalObjectId (via IdentityMap) → `ChangeSet`.
 4. Lower `ChangeSet` → **`Plan`**: ordered ops —
    `CreateObject, DestroyObject, SetParent, ReorderChild, SetName/Tag/Layer/Active/Static,
-    AddComponent, RemoveComponent, SetField(path,value), SetReference(path,target),
-    SetAssetRef(path,guid,fileId)`.
+    AddComponent, RemoveComponent, ReorderComponent, SetField(path,value),
+    SetAssetRef(path,guid,fileId)`. (`SetReference(path,target)` for cross-object refs is **forthcoming**
+    — M5-pending, not yet emitted.) The `Plan` also carries **`Skipped : SkippedField[]`** — fields the
+    plan deliberately does NOT write (see §7), surfaced for preview rather than emitted destructively.
 5. Adapter executes the Plan **in place** (reconcile-into-existing — NEVER wipe-and-recreate; this
    preserves GlobalObjectId identity). New objects get their GlobalObjectId recorded to the map on save.
 
@@ -218,7 +253,7 @@ Illustrative surface (exact API is M-owned):
 public class FooScene : ISceneDefinition {
     public void Build(SceneRoot scene) {
         var player = scene.Add("Player").Transform(pos: (0,0,0));
-        player.Add<Rigidbody>(rb => rb.Set(r => r.mass, 5f));
+        player.Component<Rigidbody>(rb => rb.Set(r => r.mass, 5f));
         var door = scene.Add("Door");
         scene.Add("Button").Component<Button>(b => b.OnClickTarget(door)); // handle → ObjectRef
     }
@@ -233,30 +268,42 @@ public class FooScene : ISceneDefinition {
   (`Player > Weapon: component 'Rigidbdy' not found`). No silent drops.
 - **Unsupported serialized values round-trip verbatim** via `ValueNode.Unsupported` and are flagged,
   never lost.
-- **One authoritative direction per reconcile**, with a preview/plan the user confirms. Never
-  last-write-wins; conflicts are surfaced.
+- **One authoritative direction per reconcile.** Never last-write-wins; conflicts are surfaced. Sync
+  writes directly and silently — there is no confirmation dialog or preview-and-approve step, because
+  the product is seamless-by-default (the user never presses a button).
+- **Never emit a destructive default for an unresolved target.** An op whose target could not be
+  resolved is **skipped** and reported via `Plan.Skipped` as a `SkippedField{Reason="Unresolved"}` —
+  never written. Concretely, an `AssetRef` that exists but carries no resolved GUID (`Ref != null &&
+  Guid == ""`) is skipped, because emitting it as a null-GUID clear would silently destroy the live
+  value. Only an **explicitly-authored** `Asset(null)` (a null `Ref`) clears a field to None.
 
 ---
 
 ## 8. Testing strategy (how each milestone is verified)
 
-- **Core (TDD, real tests):** `SceneBuilder.Core.Tests` (xUnit, `dotnet test`, headless). Covers the
-  data model, canonical serializer, differ, Materialize→Plan, Reconcile→SourcePatch, Roslyn
-  parse/patch, IdentityMap. These are the `tdd-pipeline`'s RED/GREEN tests — real behavior, no mocks.
-- **Editor adapter (pipeline-built, headless COMPILE gate):** the Unity Authoring + Editor adapter is a
-  **first-class pipeline deliverable** — the `tdd-pipeline` writes it end-to-end; it is **never hand-wired
-  by the assistant.** It is gated headlessly by **`SceneBuilder.Editor.CompileCheck`**, a compile-only
-  project that references the installed Unity 6000.5 DLLs
-  (`~/Unity/Hub/Editor/6000.5.3f1/Editor/Data/Managed/{UnityEngine.dll, UnityEditor.dll, UnityEngine/*.dll}`)
-  and includes all `com.scenebuilder/Runtime` + `Editor` sources, so **adapter compile errors are caught
-  in CI before the editor.** Only genuine RUNTIME behavior is confirmed by the user via the milestone's
-  Unity confirmation checklist. (A future full runtime gate via `unity -batchmode -runTests`/`-executeMethod`
-  is possible since the editor is installed here, but not required.)
-- **Gate command** for a milestone that touches the adapter: `dotnet build SceneBuilder.sln && dotnet test
-  SceneBuilder.sln` (the build compiles Core + the adapter compile-check; the test runs the Core suite).
-- A milestone is DONE only when: `dotnet test` is green, the **adapter compile-check builds**, **and** the
-  user's Unity confirmation checklist passes on a real runtime edit. The assistant does no build work
-  between the pipeline and the user's editor test.
+The gate is **`./verify.sh`** and it has two layers.
+
+- **Layer 1 — Core (always):** `dotnet build SceneBuilder.sln && dotnet test SceneBuilder.sln` — the
+  fast headless `SceneBuilder.Core.Tests` suite (xUnit, seconds). Covers the data model, canonical
+  serializer, differ, Materialize→Plan, Reconcile→SourcePatch, Roslyn parse/patch, IdentityMap. These
+  are the `tdd-pipeline`'s RED/GREEN tests — real behavior, no mocks. This is the inner loop for
+  pure-Core work, and it runs on every gate invocation.
+- **Layer 2 — Unity EditMode (required whenever Unity-facing code changes):** the real editor suite in
+  `unity-gate/` (`unity -runTests -batchmode -testPlatform EditMode`, minutes), exercising live
+  `GameObject`/`SerializedProperty`/`GlobalObjectId`/`AssetDatabase` behavior. It runs — and MUST pass —
+  whenever the change touches `com.scenebuilder/` or `unity-gate/` (or `GATE_FORCE_UNITY=1` forces it).
+  It gates on BOTH the process exit code AND the results XML: a missing or failed `results.xml` is a
+  **FAILURE**, never "probably fine", and a skipped/ignored test is never a pass. A pure-Core change
+  skips Layer 2 and says so — a skip never counts as a Unity pass. Any change to `com.scenebuilder/` or
+  to Unity-observable behavior is **not complete** without an EditMode test in
+  `unity-gate/Assets/GateTests/` that runs the real behavior.
+- The Unity Authoring + Editor adapter is a **first-class `tdd-pipeline` deliverable** — written
+  end-to-end, never hand-wired by the assistant.
+- **Gate command:** `./verify.sh`. Nothing ships without it.
+
+**DONE = a quoted `GATE PASS` line from `./verify.sh`.** That verdict line (`GATE PASS: ...`) is the
+ONLY reliable check — a wrapper's or subshell's exit code is not the gate's exit code and has fooled
+agents into reporting a failed gate as green. Never report a gate as passed on an exit code alone.
 
 ---
 
@@ -322,11 +369,14 @@ public class FooScene : ISceneDefinition {
   declarative set of common easing curves (linear, ease-in/out quad/cubic, bounce, elastic, etc.)
   applied to named properties; reference them from `Animator`/`Animation`. Advanced animation content
   is explicitly deferred to `needs_research`.
-- **M-Auto Automatic sync (auto-build/auto-sync toggles + drift indicator)** — makes the Build/Sync
-  buttons optional: auto-build on `.cs` save (code→scene) + auto-sync on scene edit (scene→code), behind
-  independent toggles, with debounce + one-authoritative-direction-per-cycle + conflict-surfacing (never
-  clobber, never a feedback loop). Depends on **M1b** (in-place build) + **M7** (self-event suppression).
-  Full always-on continuous per-keystroke sync stays parked in `needs_research`.
+- **M-Auto Seamless automatic sync (the product, not a toggle)** — sync is on by default, with no
+  buttons, no toggles and no panel: code→scene fires from the plugin's own **debounced file watcher** on
+  the builder under `<ProjectRoot>/SceneBuilders/` (Unity does not watch outside `Assets/`); scene→code
+  fires from `ObjectChangeEvents`. Debounce + one-authoritative-direction-per-cycle + self-event
+  suppression prevent clobber and feedback loops. Depends on **M1b** (in-place build) + **M7**
+  (self-event suppression). *(The current `specs/14-m-auto-live-sync.md` still describes an opt-in
+  toggle/drift-panel shape — that shape is wrong and MUST be re-specified as seamless-by-default.)* Full
+  always-on continuous per-keystroke sync stays parked in `needs_research`.
 
 ### Folders
 - `specs/*.md` — the active contract (this file) + milestone specs **M0, M1, M1b, M2, M2b, M2c, M3–M11, M-UI, M-Auto**.
@@ -350,7 +400,9 @@ the authoritative index so the additions stay coherent. Each is defined in the o
 |---|---|---|
 | `Plan`, `PlanOp` (base) + `CreateObject` | ordered-op container from Materialize; op vocabulary in §5 | M0 |
 | `IdentityMap`/`IdentityMapEntry`/`AssetEntry` | POCO typing of the §4 sidecar JSON | M0 |
-| On-disk layout | Core = dual-consumed (dotnet project **and** Unity embedded package, same source) | M0 |
+| `IdentityMapEntry.Name` / `.SiblingIndex` | structural fingerprint feeding `IdentityRemapper` matching (§4) | M2b |
+| On-disk layout | Core builds once as the `dotnet` project; its prebuilt `SceneBuilder.Core.dll` (+9 dep DLLs) is staged into `com.scenebuilder/Plugins/` by a post-build target — Unity consumes the DLL, not the source | M0 |
+| `FieldMap` | ordered, immutable `string`→`ValueNode` map; backs `ComponentData.Fields` + `ValueNode.Nested.Fields` | M1 |
 | `ChangeSet`/`ChangeOp` | differ output consumed by Materialize/Reconcile | M1 |
 | `ParseResult { Model; Anchors: LogicalId->SourceSpan }` | Roslyn parse result; `Anchors` added in M2 | M1/M2 |
 | `SourcePatch`/`SourceEdit` (`PatchArgument`, `MoveStatement`, `ReorderStatement`), `SourceSpan` | span-local, formatting-preserving code edits | M2 |
@@ -367,9 +419,14 @@ the authoritative index so the additions stay coherent. Each is defined in the o
 | `AppendStatement`/`RemoveStatement`; `ReconcileResult.AddedEntries`/`RemovedLogicalIds` | structural sync-back (create/delete objects) | M2b |
 | `PatchFlagArgument`/`IntroduceFlagCall`/`RemoveFlagCall` | flag (tag/layer/active/static) sync-back | M2c |
 | `ReorderComponent` PlanOp (`ReorderStatement` reused) | component reorder | M3 |
+| `Plan.Skipped : SkippedField[]` (`SkippedField{LogicalId,Path,Reason}`) | fields the plan does not write, surfaced for preview (§5, §7) | M3 |
+| `IdentityRemapper.Remap(model, priorMap)` | carries GlobalObjectIds across a LogicalId re-derivation via LogicalId→Name→SiblingIndex structural matching (§4) | M2b |
+| `TypeRef.MonoScriptGuid : string?` | identity-authoritative type key; `Equals`/`GetHashCode` short-circuit on it when non-null (§3) | M3 |
 | `AssetRef(null)` via `SetAssetRef` null-guid | clear an asset field to None | M4 |
+| `AssetRef.IsBuiltin : bool` + `AssetRefs.Builtin(name[, typeHint])` + `SkippedField.Reason="Unresolved"` | author Unity built-in resources; equality is `(Guid,FileId,IsBuiltin)`; an unresolved ref is skipped, not written as a destructive clear (§7) | M-Builtin |
 | `TransformData` RectTransform Vec2 fields; `SetRectTransform`; `SourceExpr.Vec2Literal`; `.RectTransform(...)` | RectTransform UI sync | M-UI |
-| `SceneBuilder` EditorWindow panel + auto-build/auto-sync triggers + `DriftState` (reuses M7 `SuppressionScope`; no new Core type) | automatic sync toggles + drift indicator | M-Auto |
+| Builder relocation: `<ProjectRoot>/SceneBuilders/`, `SceneBuilderPaths`, `BuilderProjectInjector` (`OnGeneratedCSProject`) | builder outside `Assets/`, IDE support via csproj injection (§2, §12) | M-Auto |
+| Debounced file watcher + `ObjectChangeEvents` triggers (reuses M7 `SuppressionScope`; no new Core type) | seamless-by-default automatic sync — no toggles, no panel | M-Auto |
 
 **Promoted to milestone scope (2026-07-13, both actively used):** `[Flags]` enum combinations are now
 **in M3 scope** (`Enum` carries OR-combined members); dynamic/multi-arg (EventDefined) UnityEvent
@@ -383,37 +440,32 @@ sharing** — shared `rid` objects / reference cycles — is genuinely open and 
 
 ## 12. Packaging & sample
 
-The plugin ships as ONE UPM package, `com.scenebuilder`, developed in this repo and consumed by a
-Unity project (e.g. `SceneBuilderTest`) via a local `file:` reference. Layout:
+The plugin ships as ONE UPM package, `com.scenebuilder`, developed in this repo. The repo's own Unity
+consumer — where the gate runs — is `unity-gate/`, which embeds the package via a relative package ref.
+Layout:
 
 ```
 com.scenebuilder/
-  package.json            # lists the RoundTripDemo under "samples"
-  Runtime/                # SceneBuilder.Authoring — the fluent ISceneDefinition/SceneRoot API (refs UnityEngine)
-  Editor/                 # SceneBuilder.Editor — adapter: menu, PlanExecutor, snapshot reader, ObjectChangeEvents (refs UnityEditor + Core + Authoring)
-  <Core dependency>       # SceneBuilder.Core — same source the dotnet tests build; asmdef noEngineReferences
-  Samples~/
-    RoundTripDemo/
-      ExampleScene.cs     # the example builder file
-      README.md           # (or a Readme.asset) the two-way demo script
+  package.json
+  Runtime/                # SceneBuilder.Authoring — the fluent ISceneDefinition/SceneRoot API; refs: [] (no UnityEngine)
+  Editor/                 # SceneBuilder.Editor — adapter: menu, PlanExecutor, snapshot reader, ObjectChangeEvents,
+                          #   SceneBuilderPaths, BuilderProjectInjector (refs UnityEditor + Core + Authoring)
+  Plugins/                # prebuilt SceneBuilder.Core.dll + its 9 Roslyn/System dependency DLLs,
+                          #   staged by the Core dotnet project's post-build target — never hand-copied
 ```
 
-- **`Samples~` is the idiomatic mechanism** — hidden from compilation until the user clicks **Import**
-  in Package Manager, which copies it into `Assets/Samples/com.scenebuilder/<version>/RoundTripDemo/`.
-  It lives in the repo *inside the one package* — NOT a separate sibling package or a second `file:` ref.
-- **The sample generates its scene on first Build** (menu: SceneBuilder ▸ Build) rather than shipping a
-  pre-baked `.unity` + sidecar. Why: (1) robustness — the sidecar's `GlobalObjectId`s are minted against
-  the real scene in the user's own project, avoiding cross-project identity staleness; (2) it is the
-  better demo — materializing a scene from code shows the wedge, then editing the scene shows the moat.
-  The Readme is a 3-beat script: **Build** (code→scene) → **edit the `.cs` and rebuild** → **edit in
-  Unity and Sync** (scene→code).
-- **User-authored builder files** live in the project's `Assets/…` (referencing the Authoring
-  assembly), next to their `Assets/Scenes/*.unity` + `*.sbmap.json`. Core parses builder files as text
-  (Roslyn), never executes them, so their location is flexible for Core; the Unity project is their home
-  for type-checking and versioning.
-- **Development sequencing:** the M1/M2 confirmation example is authored directly in the test project's
-  `Assets` first (fastest iteration), then promoted verbatim into `Samples~/RoundTripDemo/` once the
-  round-trip is proven. **The confirmation example IS the shipped sample.**
+- **Core enters Unity as a prebuilt DLL, not source.** The `SceneBuilder.Core.csproj` post-build target
+  copies `SceneBuilder.Core.dll` (and 9 dependency DLLs) into `com.scenebuilder/Plugins/`. This keeps
+  Core Unity-free while giving the adapter a reference to link against.
+- **User-authored builder files live at `<ProjectRoot>/SceneBuilders/`, OUTSIDE `Assets/`** (see §2),
+  each alongside its `*.sbmap.json` sidecar. They are read and written with plain `File` IO — never
+  through `AssetDatabase`, so a write never triggers a domain reload. Only the *scene* lives under
+  `Assets/Scenes/*.unity`. IDE support (IntelliSense, type-checking) comes from `BuilderProjectInjector`
+  injecting these files into Unity's generated `Assembly-CSharp.csproj` (`OnGeneratedCSProject`), which
+  the IDE reads but Unity never compiles from.
+- **Target state (unbuilt):** a shipped `Samples~/RoundTripDemo/` importable from Package Manager, and a
+  3-beat demo (Build code→scene → edit the `.cs` and rebuild → edit in Unity and Sync scene→code). No
+  `Samples~` folder exists in the repo yet.
 
 ---
 

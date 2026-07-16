@@ -62,7 +62,7 @@ no-op.
   double-emission. M2c is strictly EDIT-of-existing-mapped.
 - Component/field flags, asset/cross-object refs, prefab flags (M3+/M4+/M6+).
 - Transform / name / parent / order (M2) — unchanged.
-- Auto-apply without confirmation — the patch is previewed/confirmed (§7).
+- Robust both-directions merge / self-event suppression (M7) — M2c writes the patch directly.
 
 ## Core deliverables
 
@@ -112,8 +112,9 @@ no-op.
   the statement and file formatting intact.
 
 ## Editor adapter deliverables
-> **Built by the pipeline, gated by the Unity-DLL compile-check** (`SceneBuilder.Editor.CompileCheck`,
-> §8) — NOT hand-wired. The snapshot reader ALREADY provides the four flags (M2's full-scene reader reads
+> **Built by the pipeline, gated by `./verify.sh`** (§8) — its Core layer plus, because this touches the
+> Unity adapter, its mandatory Unity EditMode layer (the `unity-gate/` editor suite run against a live
+> scene). The snapshot reader ALREADY provides the four flags (M2's full-scene reader reads
 > `gameObject.tag`, `.layer`, `.activeSelf`, and `GameObjectUtility.GetStaticEditorFlags != 0` into
 > `SnapshotNode.Tag/Layer/Active/IsStatic`), so M2c adds **no new adapter read**. The only adapter surface
 > is that `SceneBuilderSync` already applies the returned `SourcePatch` — the new flag edit kinds flow
@@ -189,4 +190,5 @@ checklist step passing on a real edit (§8).
 - **Chain-call insertion point:** append before the statement's terminating `;`, after existing chained
   calls (`.Transform(...)`, `.Id(...)`), so order stays deterministic and Roslyn trivia is preserved —
   string-splicing is forbidden (byte-diff test guards it).
-- **Confirmation/preview before writing source (§7)** — never last-write-wins.
+- **Source is written directly via `WriteIfChanged`** (write only when the content differs) — no
+  preview/confirm dialog; robust both-directions merge is M7.

@@ -191,7 +191,8 @@ Thin, logic-light Unity-side pieces (confirmed by the checklist, not unit-tested
    | `Color`                       | `Color`                                    | `colorValue`                             |
    | `Generic` (`isArray`)         | `List(items)` via `GetArrayElementAtIndex`| resize + recurse per element             |
    | `Generic` (non-array)         | `Nested(fields)` via child iteration      | recurse into children                    |
-   | `ObjectReference`, `ManagedReference`, and all others | `Unsupported(rawToken)` | **no-op** (flagged) |
+   | `ObjectReference`             | asset-ref field → `AssetRef` via `AssetReferenceResolver.ReadObjectReference` (M4); a scene-object ref stays `Unsupported` (M5) | asset written via M4's `SetAssetRef` path |
+   | `ManagedReference`, and all others | `Unsupported(rawToken)`              | **no-op** (flagged)                      |
 
    Writes call `ApplyModifiedProperties` once per component. Enum `typeFullName` comes from
    reflecting the field's managed type (needed because `SerializedProperty` alone gives only names).

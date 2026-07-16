@@ -31,9 +31,11 @@ moat: a durable, living code↔scene relationship.
   `Diff` keyed on `GlobalObjectId` → `ChangeSet` → lower to `SourcePatch`, surfacing `Conflict`s.
 - **Roslyn `SourcePatch` application** for the four edit kinds — move / rename / reparent / reorder —
   applied to the builder file preserving surrounding formatting/trivia (§5 step 4).
-- **`ObjectChangeEvents.changesPublished` + `sceneSaved` as TRIGGER only** (§5 correctness rule): the
-  event tells us *when/roughly where*; the authority is always a fresh full snapshot diffed on
-  `GlobalObjectId`. Reconcile also runs on domain reload and focus-regain.
+- **The fresh full snapshot is always the diff authority** (§5 correctness rule): Sync is invoked from
+  the `SceneBuilder/Sync DemoScene (scene -> code)` menu and reconciles a fresh full snapshot diffed on
+  `GlobalObjectId` — whatever triggers a Sync only says *when* to run, never bounds *what* is diffed.
+  (Automatic event-driven triggering — `ObjectChangeEvents`/`sceneSaved`/domain-reload/focus-regain — is
+  M-Auto; today Sync is menu-driven.)
 - **Conflict surfacing** when an edit cannot be localized to a single builder construct (§5/§7).
 
 ## Out of scope
@@ -41,8 +43,6 @@ moat: a durable, living code↔scene relationship.
   transform, name, parent, and sibling order.
 - Deletion/creation *round-trip* into source beyond what rename disambiguation requires (append/remove
   statements broadly is M3+; M2 handles the four named edit kinds).
-- Auto-apply without confirmation — the patch is previewed and confirmed (§7); M2 does not silently
-  overwrite source.
 - Merging simultaneous edits in both directions (M7 robustness).
 
 ## Core deliverables
@@ -71,9 +71,9 @@ moat: a durable, living code↔scene relationship.
   `Name` changed but its `GlobalObjectId` matches an existing map entry, `Reconcile` emits a **rename**
   patch — NOT a `RemoveNode`+`AddNode`. Conversely, a NEW `GlobalObjectId` with a familiar name is
   treated as a new object, and a MISSING `GlobalObjectId` as a deletion (§4 correctness anchor).
-- **Events are trigger, snapshot is authority (§5).** Given an `ObjectChangeEvents` batch that reports
-  only object A moved, but a fresh snapshot shows A moved AND B renamed, `Reconcile` (run on the full
-  snapshot) patches BOTH — the event stream never bounds the diff.
+- **The trigger never bounds the diff (§5).** However narrow the change that prompted a Sync — even a
+  hypothetical `ObjectChangeEvents` batch naming only object A — `Reconcile` runs on a FRESH full
+  snapshot, so if that snapshot shows A moved AND B renamed it patches BOTH.
 - **Conflict when unlocalizable.** Given two same-named siblings with synthesized LogicalIds reordered
   such that the positional anchor is ambiguous (§4), `Reconcile` yields a `Conflict` (naming both
   candidates + location) instead of guessing a patch; no `SourceEdit` is emitted for that node.
@@ -86,12 +86,12 @@ moat: a durable, living code↔scene relationship.
 ## Editor adapter deliverables
 - Full `SceneSnapshot` reader: walk the active scene, for each object read name/parent/order/transform
   and stamp `GlobalObjectId` (§2 responsibility #2); include objects absent from the IdentityMap.
-- Subscribe to `ObjectChangeEvents.changesPublished` and `EditorSceneManager.sceneSaved` as **triggers**
-  that schedule a Reconcile; also schedule Reconcile on domain reload (`[InitializeOnLoad]`) and
-  editor focus-regain (§5 correctness rule). The adapter passes the fresh snapshot to Core and never
-  computes diffs itself (§2 logic-light).
-- Present the returned `SourcePatch`/`Conflict`s for confirmation, then write the patched builder file
-  and refresh the IdentityMap (any newly stamped `GlobalObjectId`s for objects now anchored to source).
+- Run Reconcile from the `SceneBuilder/Sync DemoScene (scene -> code)` menu command: read the fresh full
+  snapshot and hand it to Core (§2 logic-light — the adapter never computes diffs itself). (Automatic
+  triggering — `ObjectChangeEvents`/`sceneSaved`/domain-reload/focus-regain — is M-Auto.)
+- Write the returned `SourcePatch` straight to the builder file via `WriteIfChanged` (write only when the
+  content differs; no preview/confirm dialog), log any `Conflict`s, and refresh the IdentityMap (any
+  newly stamped `GlobalObjectId`s for objects now anchored to source).
 - `GlobalObjectId ↔ object` resolution for both directions (§2 responsibility #4).
 
 ## Authoring API added
@@ -124,7 +124,7 @@ non-conforming files fail loud/located and are not patched.
 
 ## Unity confirmation checklist
 1. Build a scene from a `FooScene` builder file (M1), so objects have `GlobalObjectId`s in the sidecar.
-2. In Unity, **move** `Root` (change its position) → trigger Reconcile (save / focus / menu).
+2. In Unity, **move** `Root` (change its position) → run Sync (the `SceneBuilder/Sync …` menu).
    *Expected:* `FooScene.cs` `Root.Transform(pos:…)` argument updates to the new position; nothing else
    in the file changes.
 3. **Rename** a child in the Hierarchy → Reconcile.
@@ -136,9 +136,9 @@ non-conforming files fail loud/located and are not patched.
    *Expected:* the statements reorder to match the new sibling order; `GlobalObjectId`s preserved.
 6. Create two same-named siblings and reorder to force ambiguity → Reconcile.
    *Expected:* a **conflict** is surfaced (naming candidates + location), NOT a silent/incorrect patch.
-7. Make an edit, then check the event path: perform an edit that `ObjectChangeEvents` under-reports
-   (batch coalescing), reload domain, and Reconcile.
-   *Expected:* the full-snapshot diff still catches the edit and patches source (events are trigger-only).
+7. Make several edits at once (e.g. move one object AND rename another), then run Sync ONCE.
+   *Expected:* the full-snapshot diff catches BOTH edits and patches source — a single Sync is never
+   bounded to one change.
 
 ## Dependencies
 - **M0** — harness, Plan, sidecar, layout.
@@ -146,19 +146,16 @@ non-conforming files fail loud/located and are not patched.
   IdentityMap populated with real `GlobalObjectId`s, transform/name/parent/order model coverage.
 
 ## Risks/notes
-- **Correctness rule (§5) is load-bearing:** `ObjectChangeEvents` MUST remain a trigger only; the diff
-  authority is always a fresh full `SceneSnapshot` on `GlobalObjectId`. Tests pin that a narrower event
-  batch never bounds the patch set. Reconcile runs on domain reload and focus-regain because the event
-  stream can miss edits.
+- **Correctness rule (§5) is load-bearing:** the diff authority is always a fresh full `SceneSnapshot`
+  on `GlobalObjectId`; whatever triggers a Sync only decides *when* to run, never *what* is diffed. Tests
+  pin that a narrower change never bounds the patch set. (When M-Auto adds automatic triggers —
+  `ObjectChangeEvents`, domain reload, focus-regain — this same full-snapshot rule keeps them safe.)
 - Rename/move disambiguation depends entirely on `GlobalObjectId` stability (§4); if an object has no
   `GlobalObjectId` yet (never saved), it can only be treated as new — surfaced, not guessed.
 - Formatting preservation requires editing via Roslyn syntax-node replacement with original trivia, not
   string splicing; the byte-diff test guards regressions.
-- Self-triggered writes (our own patch causing a `sceneSaved`/event echo) are only *noted* here; robust
+- Self-triggered writes (our own patch causing a re-Sync echo) are only *noted* here; robust
   self-event suppression is M7. M2 avoids loops by reconciling against the freshly written source’s
   model (which now matches the scene → empty diff).
-- Confirmation/preview before writing source (§7) — never last-write-wins.
-- **Sample seed (§12):** the M2 confirmation example (a small hierarchy authored in a builder file,
-  then moved/renamed/reparented in Unity) is the seed of the shipped `Samples~/RoundTripDemo`. Once M2
-  is green, this exact example is promoted verbatim into the package sample — it demonstrates the moat
-  (scene→code) that the sample's Readme walks through.
+- Source is written directly via `WriteIfChanged` (write only when the content differs) — no
+  preview/confirm dialog; robust both-directions merge / self-event suppression is M7.
