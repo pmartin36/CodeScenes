@@ -221,5 +221,61 @@ public class ComponentUnsupportedValueScene : ISceneDefinition
     }
 }
 ";
+
+        // b1-t1 (unqualified-type-names): file-scope `using` capture fixtures.
+
+        public const string TwoPlainUsings = @"
+using UnityEngine;
+using UnityEngine.UI;
+
+public class TwoUsingsScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Root"");
+    }
+}
+";
+
+        public const string StaticAndAliasUsingsWithOnePlain = @"
+using static UnityEngine.Mathf;
+using RB = UnityEngine.Rigidbody;
+using UnityEngine;
+
+public class StaticAliasUsingsScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Root"");
+    }
+}
+";
+
+        public const string NamespaceNestedUsing = @"
+namespace MyGame
+{
+    using UnityEngine;
+
+    public class NestedUsingScene : ISceneDefinition
+    {
+        public void Build(SceneRoot scene)
+        {
+            scene.Add(""X"");
+        }
+    }
+}
+";
+
+        public const string ShortComponentTypeWithUsing = @"
+using UnityEngine;
+
+public class ShortComponentTypeScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Player"").Component<Rigidbody>(rb => rb.Set(""m_Mass"", 5f));
+    }
+}
+";
     }
 }

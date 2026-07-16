@@ -329,6 +329,43 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(ValueNode.Primitive.Float(baseline), setField.Value);
         }
 
+        // b1-t2: no-regression guard — a component whose desired FullName is already qualified
+        // ("UnityEngine.Rigidbody") and matches the snapshot's FullName + fields exactly is matched,
+        // not churned. Pins the invariant b2's normalization chokepoint relies on holding once a
+        // short authored name is rewritten to this qualified form.
+        [Fact]
+        public void Diff_QualifiedComponent_MatchesSnapshotNoChange()
+        {
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(5f)),
+            });
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Rigidbody#0",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = fields,
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData { Type = new TypeRef("UnityEngine.Rigidbody"), Fields = fields };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.Empty(changeSet.Ops);
+        }
+
         [Fact]
         public void Diff_SameComponentSetDifferentOrder_EmitsReorder_NoAddRemove()
         {

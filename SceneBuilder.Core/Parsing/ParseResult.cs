@@ -53,5 +53,13 @@ namespace SceneBuilder.Core.Parsing
         // file in order to heal it by injecting `.Id(...)`. Detection lives here; the POLICY is the
         // consumer's — Build REFUSES (never guesses), Sync HEALS.
         public IReadOnlyList<Conflict> Ambiguities { get; init; } = new List<Conflict>();
+
+        // b1-t1 stub (unqualified-type-names): file-scope PLAIN `using` directives (no
+        // `Alias`, no `StaticKeyword`), rendered dotted ("UnityEngine", "UnityEngine.UI"),
+        // in document order. Source-level only — NEVER enters SceneModel/CanonicalJson/
+        // identity; the adapter (b2) reads it to resolve short Component<T> names.
+        // Population is BuilderParser's job (ParseCore); this default (always empty) is a
+        // compile-only stub for the test-writer's RED tests.
+        public IReadOnlyList<string> Usings { get; init; } = new List<string>();
     }
 }

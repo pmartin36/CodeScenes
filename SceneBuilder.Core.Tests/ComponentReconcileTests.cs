@@ -412,6 +412,53 @@ public class Scene3 : ISceneDefinition
             Assert.Equal("Unsupported", skipped.Reason);
         }
 
+        // b1-t2: no-regression guard — a matched component (source has Component<UnityEngine.Rigidbody>,
+        // snapshot FullName + field values equal) is left byte-identical: no patch, no append, no
+        // remove. Pins the anti-churn invariant b2's normalization chokepoint relies on: once a short
+        // authored name is rewritten to this qualified form, a matched component must never be re-emitted.
+        [Fact]
+        public void Reconcile_MatchedComponent_LeavesStatementTextByteIdentical()
+        {
+            const string source = @"
+public class Scene6 : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var root = scene.Add(""Root"").Component<UnityEngine.Rigidbody>(rb => rb.Set(""m_Mass"", 5f));
+    }
+}
+";
+            var (parsed, map) = ParseWithMappedRootAndComponent(source, "UnityEngine.Rigidbody");
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-root",
+                        Name = "Root",
+                        Components = new[]
+                        {
+                            new ComponentData
+                            {
+                                LogicalId = "unused",
+                                Type = new TypeRef("UnityEngine.Rigidbody"),
+                                Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(5f)) }),
+                            },
+                        },
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(
+                parsed.Model, snapshot, map, parsed.Anchors, null, null, parsed.ComponentAnchors, parsed.FieldArgumentSpans);
+
+            Assert.Empty(result.Patch.Edits);
+            Assert.Empty(result.Skipped);
+        }
+
         // A snapshot-only field key (present in scene, absent from source) is newly-detected ->
         // IntroduceComponentField carrying the snapshot value, not a PatchComponentField.
         [Fact]

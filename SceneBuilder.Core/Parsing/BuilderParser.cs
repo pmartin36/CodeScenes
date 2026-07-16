@@ -59,6 +59,15 @@ namespace SceneBuilder.Core.Parsing
             var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
             var handles = BuildHandles(ctx.Roots);
 
+            // File-scope PLAIN `using` directives (no Alias, no static keyword), in document
+            // order. `root.Usings` is file-scope-only by construction (namespace-nested and
+            // other-file `global using` directives are never in this list). Source-level only —
+            // resolves nothing here (b2's job).
+            var usings = root.Usings
+                .Where(u => u.Alias == null && u.StaticKeyword.IsKind(SyntaxKind.None) && u.Name != null)
+                .Select(u => u.Name!.ToString())
+                .ToList();
+
             // Unconditional: every parse reports which sibling groups are distinguishable only by
             // position, and which hand-authored ids collide. Both directions come through here, so
             // neither can skip the check. Order matters: SceneBuilderBuild.FormatAmbiguities renders
@@ -67,7 +76,7 @@ namespace SceneBuilder.Core.Parsing
                 .Concat(ConflictDetector.DuplicateLogicalIdConflicts(nodeAnchors))
                 .ToList();
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities, Usings = usings };
         }
 
         // ---- Build-method discovery -------------------------------------------------
