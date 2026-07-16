@@ -8,6 +8,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Editor;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Validation;
 
 // M4 (asset references) bidirectional round-trip gate tests. Each test DRIVES a real change on one
 // side — an authored builder-source edit, or a live EditMode scene edit assigning/clearing a real
@@ -419,14 +420,16 @@ using SceneBuilder.Authoring;
             "        var cube = scene.Add(\"Cube\");\n" +
             "        cube.Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Asset(\"Library/unity default resources\")));"));
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene()),
-            "Build did not throw on an authored container path — the old warn-and-continue branch must be gone.");
+        // Since b3-t2: collect-all-refuse, not throw-on-first — the container path is a collected
+        // SB2101 diagnostic on BuildResult. Messages are generic (Code + Line only per research
+        // Verdict #2) — do not assert object/component/field names or the old "Builtin" fix hint.
+        var result = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
 
-        StringAssert.Contains("Cube", ex.Message, "Error does not name the object.\n" + ex.Message);
-        StringAssert.Contains("MeshFilter", ex.Message, "Error does not name the component.\n" + ex.Message);
-        StringAssert.Contains("m_Mesh", ex.Message, "Error does not name the field.\n" + ex.Message);
-        StringAssert.Contains("Builtin", ex.Message, "Error does not point at Builtin(...) as the fix.\n" + ex.Message);
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.AssetPathNotFound);
+        Assert.IsNotNull(diagnostic,
+            "Build did not report a diagnostic for an authored container path — the old "
+            + "warn-and-continue branch must be gone. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         // Build refused BEFORE touching the scene: the live mesh must survive untouched, not cleared.
         Assert.AreEqual(builtinMesh, cube.GetComponent<MeshFilter>().sharedMesh,

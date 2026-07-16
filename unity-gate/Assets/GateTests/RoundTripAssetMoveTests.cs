@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Editor;
+using SceneBuilder.Core.Validation;
 
 // M4 GUID-authoritative survival gate. Proves the spec's move/rename stability intent
 // (specs/05-m4-asset-references.md §"Move/rename stability"): an asset referenced by an authored
@@ -199,10 +200,13 @@ using SceneBuilder.Authoring;
             "Red.mat still loads after delete — test premise invalid");
 
         // The sidecar Assets[] still caches the (now-dead) GUID at Red.mat, so the resolver recovers the
-        // GUID — but the GUID maps to nothing, which MUST stay a loud, located error (not a silent move).
-        var ex = Assert.Throws<System.InvalidOperationException>(
-            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene()),
-            "Build did NOT raise a missing-asset error for a genuinely deleted asset.");
-        StringAssert.Contains("SceneBuilder", ex.Message, "Missing-asset error was not the located SceneBuilder error");
+        // GUID — but the GUID maps to nothing, which MUST stay a loud, located diagnostic (not a silent
+        // move, and — since b3-t2 — not a throw either: collect-all-refuse, scene untouched).
+        var result = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.AssetPathNotFound);
+        Assert.IsNotNull(diagnostic,
+            "Build did NOT raise a missing-asset diagnostic for a genuinely deleted asset. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 }

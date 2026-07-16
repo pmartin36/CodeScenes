@@ -10,6 +10,7 @@ using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Materialize;
 using SceneBuilder.Core.Parsing;
 using SceneBuilder.Core.Serialization;
+using SceneBuilder.Core.Validation;
 
 namespace SceneBuilder.Editor
 {
@@ -42,6 +43,14 @@ namespace SceneBuilder.Editor
 
             /// <summary>Number of plan ops executed against the scene.</summary>
             public int PlanOpCount { get; set; }
+
+            /// <summary>
+            /// Planning-phase diagnostics collected before any mutation. Non-empty means the Build
+            /// REFUSED (scene untouched) — collect-all, not throw-on-first (b3-t2). Empty on a clean
+            /// build.
+            /// </summary>
+            public System.Collections.Generic.IReadOnlyList<SceneBuilder.Core.Validation.Diagnostic> Diagnostics
+                { get; set; } = System.Array.Empty<SceneBuilder.Core.Validation.Diagnostic>();
         }
 
         [MenuItem("CodeScenes/Build DemoScene (code -> scene)")]
@@ -57,7 +66,11 @@ namespace SceneBuilder.Editor
                     return;
                 }
 
-                Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene());
+                var result = Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene());
+                foreach (var diagnostic in result.Diagnostics)
+                {
+                    Debug.LogError(FormatDiagnostic(diagnostic));
+                }
             }
             catch (System.Exception e)
             {
@@ -65,12 +78,17 @@ namespace SceneBuilder.Editor
             }
         }
 
+        private static string FormatDiagnostic(SceneBuilder.Core.Validation.Diagnostic diagnostic) =>
+            $"[SceneBuilder] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): {diagnostic.Message}";
+
         /// <summary>
         /// Build (code-&gt;scene) against a PASSED scene + paths: parse the builder file at
         /// <paramref name="builderPath"/>, materialize a Plan against <paramref name="scene"/> and the
         /// sidecar at <paramref name="sidecarPath"/>, execute it IN PLACE, save the scene to
         /// <paramref name="scenePath"/>, and rewrite the sidecar. The testable seam behind
-        /// <see cref="BuildDemo"/>. Throws on failure (no swallowing) so callers/tests observe errors.
+        /// <see cref="BuildDemo"/>. Collect-all-refuse for planning-phase errors: never throws for a
+        /// resolvable type/asset/identity problem — returns a <see cref="BuildResult"/> whose
+        /// <see cref="BuildResult.Diagnostics"/> carries every error found, scene left untouched.
         /// </summary>
         public static BuildResult Run(string builderPath, string scenePath, string sidecarPath, Scene scene)
         {
@@ -81,22 +99,33 @@ namespace SceneBuilder.Editor
                 ? IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath))
                 : null;
 
+            // THE shared collect-all planning walk (b4's headless validator drives the exact same
+            // one): raw parse (un-normalized short tokens — normalizing first would THROW on the
+            // very first unresolved/ambiguous type, defeating collect-all), then every planning-phase
+            // error class (structural ambiguities, component types, asset refs) in ONE pass via
+            // PlanningValidator + the non-throwing UnityResolutionProvider. REFUSE, never guess
+            // (§4/§7): on any error, return every diagnostic collected — scene untouched, nothing
+            // created — instead of throwing on the first one found.
+            var rawParse = BuilderParser.Parse(source, existingMap);
+            var validation = PlanningValidator.Validate(
+                rawParse, source, new UnityResolutionProvider(existingMap?.Assets), builderPath);
+
+            // NOTE: no Debug.LogError here — `Run` is the testable seam and must stay silent on a
+            // collected refusal so callers (including tests) observe it via the returned
+            // `BuildResult.Diagnostics`, not an unhandled console error. The interactive entry point
+            // (`BuildDemo`) logs each diagnostic for the user after calling `Run`.
+            if (!validation.Ok)
+            {
+                return new BuildResult { Diagnostics = validation.Diagnostics };
+            }
+
             // THE shared source->desired seam (parse -> resolve authored paths -> lower asset refs).
-            // Sync goes through the exact same call, so neither direction can skip a stage.
+            // Sync goes through the exact same call, so neither direction can skip a stage. Guaranteed
+            // not to throw here: the walk above already confirmed every type/asset/builtin resolves
+            // via the SAME resolvers.
             var loaded = DesiredModelLoader.Load(source, existingMap);
             var parse = loaded.Parse;
             var desired = loaded.Desired;
-
-            // REFUSE, never guess (§4/§7). Sibling statements that only their POSITION tells apart
-            // cannot be matched to scene objects: Build would silently pick one, and picking wrong
-            // destroys a real object and repurposes another — with a self-consistent end state, so
-            // nothing surfaces. Sync injects `.Id(...)` to prevent the pair ever forming; a pair a
-            // human/LLM hand-authored has no correct answer available, so it is an error the user
-            // resolves. Thrown BEFORE Materialize/Execute: the scene is not touched.
-            if (parse.Ambiguities.Count > 0)
-            {
-                throw new ParseException(FormatAmbiguities(parse.Ambiguities, source, builderPath), 0, 0);
-            }
 
             // Structurally remap the freshly-parsed model against the PRIOR sidecar so a renamed
             // or reordered handle-less object inherits its prior GlobalObjectId (no dup-create),
@@ -148,49 +177,6 @@ namespace SceneBuilder.Editor
                 ObjectCount = execution.GameObjectsByLogicalId.Count,
                 PlanOpCount = plan.Ops.Length,
             };
-        }
-
-        /// <summary>
-        /// Renders parse ambiguities as a located, actionable error (§7: fail loud, located — name the
-        /// object and the source location, never a silent drop). Each conflict's SourceSpan is resolved
-        /// to a file:line:column against the builder source so the user can click straight to it.
-        /// </summary>
-        private static string FormatAmbiguities(
-            IReadOnlyList<SceneBuilder.Core.Reconcile.Conflict> ambiguities, string source, string builderPath)
-        {
-            var message = new System.Text.StringBuilder();
-            message.AppendLine(
-                $"[SceneBuilder] Build REFUSED: {ambiguities.Count} identity conflict(s) in {builderPath}.");
-
-            foreach (var conflict in ambiguities)
-            {
-                var location = conflict.Location == null
-                    ? builderPath
-                    : $"{builderPath}({LineOf(source, conflict.Location.Value.Start)},{ColumnOf(source, conflict.Location.Value.Start)})";
-                message.AppendLine($"  {location}: {conflict.Reason}");
-            }
-
-            return message.ToString();
-        }
-
-        private static int LineOf(string source, int offset)
-        {
-            var line = 1;
-            for (var i = 0; i < offset && i < source.Length; i++)
-            {
-                if (source[i] == '\n')
-                {
-                    line++;
-                }
-            }
-
-            return line;
-        }
-
-        private static int ColumnOf(string source, int offset)
-        {
-            var lineStart = source.LastIndexOf('\n', System.Math.Min(offset, source.Length - 1));
-            return offset - lineStart;
         }
 
         private static IdentityMap WithGlobalObjectIds(IdentityMap map, PlanExecutor.ExecutionResult execution)

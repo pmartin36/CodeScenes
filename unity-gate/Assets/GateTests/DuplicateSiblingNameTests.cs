@@ -7,6 +7,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Editor;
 using SceneBuilder.Core.Parsing;
+using SceneBuilder.Core.Validation;
 
 // DUPLICATE SIBLING NAMES — the Unity boundary.
 //
@@ -64,10 +65,10 @@ public class DupScene : ISceneDefinition
     private static GameObject[] RootsNamed(string name) =>
         EditorSceneManager.GetActiveScene().GetRootGameObjects().Where(go => go.name == name).ToArray();
 
-    // BUILD REFUSES, and does not touch the scene.
+    // BUILD REFUSES (collect-all: a returned diagnostic, not a throw), and does not touch the scene.
     //
     // A pair a human or an LLM hand-authored has no correct answer available — the information that
-    // tells the two objects apart was never written down — so Build must surface a located error
+    // tells the two objects apart was never written down — so Build must surface a located diagnostic
     // (§7), not guess. Guessing wrong destroys a real object and repurposes another, and the end
     // state LOOKS right, so nothing would ever surface.
     [Test]
@@ -78,20 +79,22 @@ public class DupScene : ISceneDefinition
             "        scene.Add(\"Enemy\");"));
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-        var error = Assert.Throws<ParseException>(() =>
-            SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene()));
+        var result = SceneBuilderBuild.Run(
+            _builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
 
-        StringAssert.Contains("REFUSED", error.Message);
-        StringAssert.Contains(".Id(", error.Message);
+        Assert.IsTrue(
+            result.Diagnostics.Any(d => d.Code == DiagnosticCodes.AmbiguousDuplicateSibling),
+            "Expected a collected SB2201 diagnostic for the positional duplicate-sibling ambiguity. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         // Refused BEFORE Materialize/Execute: nothing was created.
         Assert.AreEqual(0, EditorSceneManager.GetActiveScene().GetRootGameObjects().Length,
             "Build refused but still mutated the scene.");
     }
 
-    // BUILD REFUSES on a colliding LogicalId too, and the header is KIND-NEUTRAL — it must not say
-    // "duplicate sibling name" for a hazard that is a hand-authored `.Id(...)` collision, not a
-    // positional one. The per-kind instruction lives in the conflict's own Reason.
+    // BUILD REFUSES on a colliding LogicalId too, via its OWN code (SB2202) — distinct from the
+    // positional-sibling code (SB2201), since a hand-authored `.Id(...)` collision is a different
+    // hazard from a positional one. The conflict's own Reason still names the colliding id.
     [Test]
     public void Build_HandAuthoredCollidingLogicalIds_RefusesAndLeavesSceneUntouched()
     {
@@ -100,13 +103,14 @@ public class DupScene : ISceneDefinition
             "        scene.Add(\"Enemy\").Id(\"Enemy-2\");"));
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-        var error = Assert.Throws<ParseException>(() =>
-            SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene()));
+        var result = SceneBuilderBuild.Run(
+            _builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
 
-        StringAssert.Contains("REFUSED", error.Message);
-        StringAssert.Contains("Enemy-2", error.Message);
-        StringAssert.DoesNotContain("duplicate sibling name", error.Message,
-            "Header must be kind-neutral: a colliding LogicalId is not a duplicate SIBLING NAME hazard.");
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.DuplicateLogicalId);
+        Assert.IsNotNull(diagnostic,
+            "Expected a collected SB2202 diagnostic for the colliding LogicalId. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        StringAssert.Contains("Enemy-2", diagnostic!.Message);
 
         // Refused BEFORE Materialize/Execute: nothing was created.
         Assert.AreEqual(0, EditorSceneManager.GetActiveScene().GetRootGameObjects().Length,

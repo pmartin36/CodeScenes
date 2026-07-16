@@ -7,6 +7,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Editor;
+using SceneBuilder.Core.Validation;
 
 // specs/20-unqualified-type-names.md — the 9-case EditMode round-trip suite proving the
 // usings-aware resolution chokepoint (ComponentTypeResolver + ComponentTypeNormalizer, wired through
@@ -211,8 +212,8 @@ public class RoundTripScene : ISceneDefinition
         Assert.AreEqual(9f, rbsAfter[0].mass, "Edited mass=9 did not survive the Sync + rebuild cycle");
     }
 
-    // 6. A typo that matches no simple name anywhere throws a located error naming the object and the
-    //    bad token, with NO "Did you mean" clause (no candidate exists) — and leaves the scene untouched.
+    // 6. A typo that matches no simple name anywhere yields a collected, located SB2001 diagnostic
+    //    with NO Suggestion (no candidate exists) — no throw, and the scene is left untouched.
     [Test]
     public void Build_TypoName_ThrowsLocatedError_SceneUntouched()
     {
@@ -224,27 +225,28 @@ public class RoundTripScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene),
-            "Build did not throw on an unresolvable typo'd component name.");
+        var result = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
 
-        StringAssert.Contains("Cube", ex.Message, "Error does not name the object.\n" + ex.Message);
-        StringAssert.Contains("'Rigidbdy'", ex.Message, "Error does not name the bad token.\n" + ex.Message);
-        StringAssert.Contains("cannot resolve", ex.Message, "Error does not say 'cannot resolve'.\n" + ex.Message);
-        StringAssert.Contains("Qualify it, or add a matching using", ex.Message,
-            "Error does not tell the author how to fix it.\n" + ex.Message);
-        // A typo with no simple-name match anywhere offers no suggestion — asserting "Did you mean"
-        // here would be red for the wrong reason (ComponentTypeNormalizer.cs SuggestQualified returns empty).
-        StringAssert.DoesNotContain("Did you mean", ex.Message,
-            "Error offered a suggestion for a token with no simple-name match.\n" + ex.Message);
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.UnresolvedType);
+        Assert.IsNotNull(diagnostic,
+            "Expected a collected SB2001 diagnostic for the unresolvable typo'd component name. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        // A typo with no simple-name match anywhere yields an empty candidate list from
+        // ComponentTypeNormalizer.SuggestQualified — but PlanningValidator ALWAYS populates
+        // Diagnostic.Suggestion, falling back to this generic fix-hint (not null/empty) when the
+        // candidate list is empty (PlanningValidator.cs:70-72). Assert the fallback, not absence.
+        Assert.AreEqual("Qualify the type or add a matching using.", diagnostic!.Suggestion,
+            "Expected the generic no-candidate fallback suggestion.\n" + diagnostic.Suggestion);
+        StringAssert.DoesNotContain("Did you mean", diagnostic.Suggestion,
+            "A typo with no simple-name match should not offer a 'Did you mean' suggestion.");
 
         Assert.IsNull(FindRoot(EditorSceneManager.GetActiveScene(), "Cube"),
-            "Scene was touched despite Build throwing on an unresolvable component name.");
+            "Scene was touched despite Build refusing on an unresolvable component name.");
     }
 
-    // 7. A short name with NO matching using throws a located "cannot resolve" error. Because both
-    //    UnityEngine.Rigidbody and the MyGame.Physics.Rigidbody fixture share the simple name
-    //    "Rigidbody", a suggestion IS offered — but which one is not asserted (SuggestQualified sorts
+    // 7. A short name with NO matching using yields a collected, located SB2001 diagnostic. Because
+    //    both UnityEngine.Rigidbody and the MyGame.Physics.Rigidbody fixture share the simple name
+    //    "Rigidbody", a Suggestion IS offered — but which one is not asserted (SuggestQualified sorts
     //    Ordinal, so the exact candidate is an implementation detail, not part of the contract).
     [Test]
     public void Build_ShortNameNoUsing_ThrowsLocatedError()
@@ -257,25 +259,22 @@ public class RoundTripScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene),
-            "Build did not throw on a short component name with no matching using.");
+        var result = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
 
-        StringAssert.Contains("Cube", ex.Message, "Error does not name the object.\n" + ex.Message);
-        StringAssert.Contains("'Rigidbody'", ex.Message, "Error does not name the bad token.\n" + ex.Message);
-        StringAssert.Contains("cannot resolve", ex.Message, "Error does not say 'cannot resolve'.\n" + ex.Message);
-        StringAssert.Contains("Qualify it, or add a matching using", ex.Message,
-            "Error does not tell the author how to fix it.\n" + ex.Message);
-        StringAssert.Contains("Did you mean", ex.Message,
-            "Error did not offer a suggestion despite a simple-name match existing.\n" + ex.Message);
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.UnresolvedType);
+        Assert.IsNotNull(diagnostic,
+            "Expected a collected SB2001 diagnostic for the short name with no matching using. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.IsFalse(string.IsNullOrEmpty(diagnostic!.Suggestion),
+            "Diagnostic did not offer a suggestion despite a simple-name match existing.");
 
         Assert.IsNull(FindRoot(EditorSceneManager.GetActiveScene(), "Cube"),
-            "Scene was touched despite Build throwing on a short name with no matching using.");
+            "Scene was touched despite Build refusing on a short name with no matching using.");
     }
 
-    // 8. Two in-scope namespaces both defining "Rigidbody" throws a located AMBIGUOUS error listing
-    //    both fully-qualified candidates and telling the author to qualify — nothing is guessed, and
-    //    the scene is untouched.
+    // 8. Two in-scope namespaces both defining "Rigidbody" yields a collected, located SB2002
+    //    diagnostic listing both fully-qualified candidates — nothing is guessed, no throw, and the
+    //    scene is untouched.
     [Test]
     public void Build_AmbiguousShortName_ThrowsLocatedError()
     {
@@ -287,19 +286,19 @@ public class RoundTripScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene),
-            "Build did not throw on an ambiguous short component name.");
+        var result = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
 
-        StringAssert.Contains("AMBIGUOUS", ex.Message, "Error does not say AMBIGUOUS.\n" + ex.Message);
-        StringAssert.Contains("MyGame.Physics.Rigidbody", ex.Message,
-            "Error does not list the MyGame.Physics.Rigidbody candidate.\n" + ex.Message);
-        StringAssert.Contains("UnityEngine.Rigidbody", ex.Message,
-            "Error does not list the UnityEngine.Rigidbody candidate.\n" + ex.Message);
-        StringAssert.Contains("Qualify it", ex.Message, "Error does not tell the author to qualify.\n" + ex.Message);
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.AmbiguousType);
+        Assert.IsNotNull(diagnostic,
+            "Expected a collected SB2002 diagnostic for the ambiguous short component name. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        StringAssert.Contains("MyGame.Physics.Rigidbody", diagnostic!.Message,
+            "Diagnostic does not list the MyGame.Physics.Rigidbody candidate.\n" + diagnostic.Message);
+        StringAssert.Contains("UnityEngine.Rigidbody", diagnostic.Message,
+            "Diagnostic does not list the UnityEngine.Rigidbody candidate.\n" + diagnostic.Message);
 
         Assert.IsNull(FindRoot(EditorSceneManager.GetActiveScene(), "Cube"),
-            "Scene was touched despite Build throwing on an ambiguous component name.");
+            "Scene was touched despite Build refusing on an ambiguous component name.");
     }
 
     // 9. A nested-namespace built-in short name (UnityEngine.UI.Image via `using UnityEngine.UI;`)

@@ -1,11 +1,13 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using SceneBuilder.Editor;
+using SceneBuilder.Core.Validation;
 
 // b4-t3: located-error round-trip gate tests (#9, #10, #11) — the real-Build + live-slot-untouched
 // half that RoundTripAssetRefTests.cs:468-499 does not cover (those two drive DesiredModelLoader.Load
@@ -43,21 +45,20 @@ public class RoundTripBuiltinRefErrorTests : BuiltinRefGateHarness
         var donorMesh = PrimitiveMesh(PrimitiveType.Sphere);
         mf.sharedMesh = donorMesh;
 
-        // Phase 3: author the misspelled Builtin(...) name and rebuild. Must THROW, must not clear.
+        // Phase 3: author the misspelled Builtin(...) name and rebuild. Must REFUSE (collected
+        // diagnostic), not throw, and must not clear the live field.
         File.WriteAllText(BuilderPath, Source(
             "        var widget = scene.Add(\"Widget\");\n" +
             "        widget.Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cub\")));"));
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => SceneBuilderBuild.Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene()),
-            "Build did not throw on an unresolvable Builtin(...) name.");
+        var result = SceneBuilderBuild.Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene());
 
-        StringAssert.Contains("Widget", ex.Message, "Error does not name the object.\n" + ex.Message);
-        StringAssert.Contains("MeshFilter", ex.Message, "Error does not name the component.\n" + ex.Message);
-        StringAssert.Contains("m_Mesh", ex.Message, "Error does not name the field.\n" + ex.Message);
-        StringAssert.Contains("'Cub'", ex.Message, "Error does not name the bad name.\n" + ex.Message);
-        StringAssert.Contains("Did you mean", ex.Message, "Error does not offer suggestions.\n" + ex.Message);
-        StringAssert.Contains("Cube", ex.Message, "Error does not suggest the near-miss 'Cube'.\n" + ex.Message);
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.AssetPathNotFound);
+        Assert.IsNotNull(diagnostic,
+            "Expected a collected SB2101 diagnostic for the unresolvable Builtin(...) name. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        StringAssert.Contains("Cube", diagnostic!.Suggestion ?? "",
+            "Diagnostic does not suggest the near-miss 'Cube'.\n" + diagnostic.Suggestion);
 
         Assert.AreEqual(donorMesh, widget.GetComponent<MeshFilter>().sharedMesh,
             "Build must leave the live mesh untouched when refusing an unresolvable Builtin(...) name, not clear it.");
@@ -91,22 +92,22 @@ public class RoundTripBuiltinRefErrorTests : BuiltinRefGateHarness
         var donorMesh = PrimitiveMesh(PrimitiveType.Sphere);
         mf.sharedMesh = donorMesh;
 
-        // Phase 3: author the bare ambiguous Builtin(...) name and rebuild. Must THROW, must not guess.
+        // Phase 3: author the bare ambiguous Builtin(...) name and rebuild. Must REFUSE (collected
+        // diagnostic), not throw, and must not guess.
         File.WriteAllText(BuilderPath, Source(
             "        var widget = scene.Add(\"Widget\");\n" +
             "        widget.Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"UISprite\")));"));
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => SceneBuilderBuild.Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene()),
-            "Build did not throw on a bare ambiguous Builtin(...) name.");
+        var result = SceneBuilderBuild.Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene());
 
-        StringAssert.Contains("Widget", ex.Message, "Error does not name the object.\n" + ex.Message);
-        StringAssert.Contains("MeshFilter", ex.Message, "Error does not name the component.\n" + ex.Message);
-        StringAssert.Contains("m_Mesh", ex.Message, "Error does not name the field.\n" + ex.Message);
-        Assert.IsTrue(Regex.IsMatch(ex.Message, @"\bSprite\b"),
-            "Error does not name the standalone Sprite candidate.\n" + ex.Message);
-        StringAssert.Contains("Texture2D", ex.Message, "Error does not name the Texture2D candidate.\n" + ex.Message);
-        StringAssert.Contains("Qualify", ex.Message, "Error does not tell the author to qualify.\n" + ex.Message);
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.AssetPathNotFound);
+        Assert.IsNotNull(diagnostic,
+            "Expected a collected SB2101 diagnostic for the bare ambiguous Builtin(...) name. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.IsTrue(Regex.IsMatch(diagnostic!.Message, @"\bSprite\b"),
+            "Diagnostic does not name the standalone Sprite candidate.\n" + diagnostic.Message);
+        StringAssert.Contains("Texture2D", diagnostic.Message,
+            "Diagnostic does not name the Texture2D candidate.\n" + diagnostic.Message);
 
         Assert.AreEqual(donorMesh, widget.GetComponent<MeshFilter>().sharedMesh,
             "Build must leave the live mesh untouched (nothing guessed) when refusing an ambiguous Builtin(...) name.");
@@ -136,20 +137,19 @@ public class RoundTripBuiltinRefErrorTests : BuiltinRefGateHarness
         var donorMesh = PrimitiveMesh(PrimitiveType.Sphere);
         mf.sharedMesh = donorMesh;
 
-        // Phase 3: author the OLD container-path form (second literal) and rebuild. Must THROW.
+        // Phase 3: author the OLD container-path form (second literal) and rebuild. Must REFUSE
+        // (collected diagnostic), not throw.
         // Source(...) injects "using static AssetRefs;" automatically because this body contains "Asset(".
         File.WriteAllText(BuilderPath, Source(
             "        var widget = scene.Add(\"Widget\");\n" +
             "        widget.Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Asset(\"Resources/unity_builtin_extra\")));"));
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => SceneBuilderBuild.Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene()),
-            "Build did not throw on an authored 'Resources/unity_builtin_extra' container path.");
+        var result = SceneBuilderBuild.Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene());
 
-        StringAssert.Contains("Widget", ex.Message, "Error does not name the object.\n" + ex.Message);
-        StringAssert.Contains("MeshFilter", ex.Message, "Error does not name the component.\n" + ex.Message);
-        StringAssert.Contains("m_Mesh", ex.Message, "Error does not name the field.\n" + ex.Message);
-        StringAssert.Contains("Builtin", ex.Message, "Error does not point at Builtin(...) as the fix.\n" + ex.Message);
+        var diagnostic = result.Diagnostics.FirstOrDefault(d => d.Code == DiagnosticCodes.AssetPathNotFound);
+        Assert.IsNotNull(diagnostic,
+            "Expected a collected SB2101 diagnostic for the 'Resources/unity_builtin_extra' container path. Got: "
+            + string.Join("; ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         Assert.AreEqual(donorMesh, widget.GetComponent<MeshFilter>().sharedMesh,
             "Build must leave the live mesh untouched when refusing a container-path reference, not clear it.");

@@ -131,7 +131,7 @@ namespace SceneBuilder.Editor
                 $"cannot resolve component type '{token}'.{suggestClause} Qualify it, or add a matching using.");
         }
 
-        private static IReadOnlyList<string> SuggestQualified(string token)
+        internal static IReadOnlyList<string> SuggestQualified(string token)
         {
             var results = new List<string>();
             foreach (var t in TypeCache.GetTypesDerivedFrom<UnityEngine.Component>())

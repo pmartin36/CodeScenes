@@ -73,21 +73,65 @@ namespace SceneBuilder.Editor
             /// </summary>
             public IReadOnlyList<AssetEntry> Harvested => _harvested;
 
-            /// <summary>The Core lowering delegate. See <see cref="LoweringResolver"/>.</summary>
-            public (string guid, long fileId, string typeHint)? Resolve(string displayPath)
+            /// <summary>
+            /// The non-throwing path→GUID decision shared by <see cref="Resolve"/> (the throwing Build
+            /// backstop) and <see cref="UnityResolutionProvider"/> (the collect-all headless-validation
+            /// seam) — ONE decision, two surfaces; never hand-sync a second copy.
+            /// </summary>
+            internal enum PathProbeKind
+            {
+                Empty,
+                ContainerPath,
+                MissingPath,
+                DeletedGuid,
+                Resolved,
+            }
+
+            internal readonly struct PathProbe
+            {
+                internal readonly PathProbeKind Kind;
+                internal readonly string Guid;
+                internal readonly long FileId;
+                internal readonly string TypeHint;
+                internal readonly string CurrentPath;
+
+                internal PathProbe(PathProbeKind kind, string guid, long fileId, string typeHint, string currentPath)
+                {
+                    Kind = kind;
+                    Guid = guid;
+                    FileId = fileId;
+                    TypeHint = typeHint;
+                    CurrentPath = currentPath;
+                }
+
+                internal static PathProbe Empty() => new(PathProbeKind.Empty, "", 0, "", "");
+
+                internal static PathProbe ContainerPath() => new(PathProbeKind.ContainerPath, "", 0, "", "");
+
+                internal static PathProbe MissingPath() => new(PathProbeKind.MissingPath, "", 0, "", "");
+
+                internal static PathProbe DeletedGuid(string guid) => new(PathProbeKind.DeletedGuid, guid, 0, "", "");
+
+                internal static PathProbe Resolved(string guid, long fileId, string typeHint, string currentPath) =>
+                    new(PathProbeKind.Resolved, guid, fileId, typeHint, currentPath);
+            }
+
+            /// <summary>
+            /// The pure path→GUID decision, with NO throw and NO harvest side effect — see
+            /// <see cref="PathProbe"/>. <see cref="Resolve"/> is the throwing/harvesting wrapper over this.
+            /// </summary>
+            internal PathProbe TryResolve(string displayPath)
             {
                 if (string.IsNullOrEmpty(displayPath))
                 {
-                    return null;
+                    return PathProbe.Empty();
                 }
 
                 // An authored path naming a BUILT-IN container (e.g. 'Library/unity default resources')
-                // never identifies a specific object — it is a located, loud refusal pointing at
-                // Builtin(...) as the fix, not a warn-and-continue. This is the backstop any direct
-                // caller of Resolve inherits, even one that skipped DesiredModelLoader's located pre-pass.
+                // never identifies a specific object.
                 if (BuiltinCatalog.IsContainerPath(displayPath))
                 {
-                    BuiltinRefValidator.ThrowContainerPath(displayPath, location: null);
+                    return PathProbe.ContainerPath();
                 }
 
                 // Prefer the live path→GUID mapping; when the authored path is stale (moved/renamed),
@@ -98,9 +142,7 @@ namespace SceneBuilder.Editor
                     guid = RecoverGuidFromCache(displayPath);
                     if (string.IsNullOrEmpty(guid))
                     {
-                        throw new InvalidOperationException(
-                            $"[SceneBuilder] Asset not found at path '{displayPath}' (referenced via Asset(\"{displayPath}\")). " +
-                            "The asset is missing or not imported — fix the path or restore the asset.");
+                        return PathProbe.MissingPath();
                     }
                 }
 
@@ -112,9 +154,7 @@ namespace SceneBuilder.Editor
                 var main = string.IsNullOrEmpty(currentPath) ? null : AssetDatabase.LoadMainAssetAtPath(currentPath);
                 if (main == null)
                 {
-                    throw new InvalidOperationException(
-                        $"[SceneBuilder] Asset {guid} (was '{displayPath}') not found — the asset was deleted. " +
-                        "Restore it or remove the reference.");
+                    return PathProbe.DeletedGuid(guid);
                 }
 
                 long fileId = 0;
@@ -124,9 +164,41 @@ namespace SceneBuilder.Editor
                 }
 
                 var typeHint = main.GetType().Name;
+                return PathProbe.Resolved(guid, fileId, typeHint, currentPath);
+            }
 
-                _harvested.Add(new AssetEntry { Guid = guid, LastKnownPath = currentPath, TypeHint = typeHint });
-                return (guid, fileId, typeHint);
+            /// <summary>The Core lowering delegate. See <see cref="LoweringResolver"/>.</summary>
+            public (string guid, long fileId, string typeHint)? Resolve(string displayPath)
+            {
+                var probe = TryResolve(displayPath);
+                switch (probe.Kind)
+                {
+                    case PathProbeKind.Empty:
+                        return null;
+
+                    case PathProbeKind.ContainerPath:
+                        // An authored path naming a BUILT-IN container (e.g. 'Library/unity default
+                        // resources') never identifies a specific object — it is a located, loud refusal
+                        // pointing at Builtin(...) as the fix, not a warn-and-continue. This is the
+                        // backstop any direct caller of Resolve inherits, even one that skipped
+                        // DesiredModelLoader's located pre-pass.
+                        BuiltinRefValidator.ThrowContainerPath(displayPath, location: null);
+                        return null; // unreachable — ThrowContainerPath always throws.
+
+                    case PathProbeKind.MissingPath:
+                        throw new InvalidOperationException(
+                            $"[SceneBuilder] Asset not found at path '{displayPath}' (referenced via Asset(\"{displayPath}\")). " +
+                            "The asset is missing or not imported — fix the path or restore the asset.");
+
+                    case PathProbeKind.DeletedGuid:
+                        throw new InvalidOperationException(
+                            $"[SceneBuilder] Asset {probe.Guid} (was '{displayPath}') not found — the asset was deleted. " +
+                            "Restore it or remove the reference.");
+
+                    default:
+                        _harvested.Add(new AssetEntry { Guid = probe.Guid, LastKnownPath = probe.CurrentPath, TypeHint = probe.TypeHint });
+                        return (probe.Guid, probe.FileId, probe.TypeHint);
+                }
             }
 
             /// <summary>
