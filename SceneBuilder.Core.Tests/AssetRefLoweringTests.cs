@@ -76,7 +76,7 @@ public class AssetLoweringScene : ISceneDefinition
                     "inner",
                     new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/Inner.mat" })),
             });
-            var model = ModelWithField(new ValueNode.Nested(nestedFields));
+            var model = ModelWithField(new ValueNode.Nested("Game.ImpactData", nestedFields));
             var resolver = StubResolver(new Dictionary<string, (string, long, string)>
             {
                 ["Assets/Inner.mat"] = ("guid-inner", 0, "Material"),
@@ -85,6 +85,7 @@ public class AssetLoweringScene : ISceneDefinition
             var lowered = AssetRefLowering.Lower(model, resolver);
 
             var nested = Assert.IsType<ValueNode.Nested>(FieldOf(lowered));
+            Assert.Equal("Game.ImpactData", nested.TypeName);
             var inner = Assert.IsType<ValueNode.AssetRef>(nested.Fields["inner"]);
             Assert.Equal("guid-inner", inner.Ref!.Guid);
         }

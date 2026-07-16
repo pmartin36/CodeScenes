@@ -303,7 +303,17 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            return new ValueNode.Nested(new FieldMap(fields));
+            var type = ResolveFieldType(p.serializedObject.targetObject, p.propertyPath);
+            if (type == null || type.IsGenericType)
+            {
+                // Cannot resolve to a concrete, non-generic managed type (e.g. a built-in native
+                // field, or an unsupported generic serializable) — preserve verbatim, never emit
+                // a broken Nested (e.g. a backtick-arity type name).
+                return new ValueNode.Unsupported(p.type);
+            }
+
+            var typeName = type.FullName!.Replace('+', '.');
+            return new ValueNode.Nested(typeName, new FieldMap(fields));
         }
 
         // ---- Write (ValueNode -> SerializedProperty) ---------------------------------------

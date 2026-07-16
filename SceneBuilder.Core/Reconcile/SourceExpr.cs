@@ -94,7 +94,7 @@ namespace SceneBuilder.Core.Reconcile
             ValueNode.List { Items.Count: 0 } => "new object[] { }",
             ValueNode.List list => "new[] { " + string.Join(", ", list.Items.Select(ValueNodeLiteral)) + " }",
 
-            ValueNode.Nested nested => "new object { " +
+            ValueNode.Nested nested => "new " + nested.TypeName + " { " +
                 string.Join(", ", nested.Fields.Select(kv => kv.Key + " = " + ValueNodeLiteral(kv.Value))) +
                 " }",
 

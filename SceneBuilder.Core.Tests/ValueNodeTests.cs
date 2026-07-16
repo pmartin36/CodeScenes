@@ -86,10 +86,10 @@ namespace SceneBuilder.Core.Tests
                 new KeyValuePair<string, ValueNode>("x", x),
             });
 
-            var nested = new ValueNode.Nested(mapXY);
-            var nestedAgain = new ValueNode.Nested(mapXYAgain);
-            var nestedReordered = new ValueNode.Nested(mapYX);
-            var nestedFewer = new ValueNode.Nested(mapXOnly);
+            var nested = new ValueNode.Nested("Foo", mapXY);
+            var nestedAgain = new ValueNode.Nested("Foo", mapXYAgain);
+            var nestedReordered = new ValueNode.Nested("Foo", mapYX);
+            var nestedFewer = new ValueNode.Nested("Foo", mapXOnly);
 
             Assert.Equal(nested, nestedAgain);
             Assert.NotEqual(nested, nestedReordered);
@@ -134,8 +134,8 @@ namespace SceneBuilder.Core.Tests
 
             var map = new FieldMap(new[] { new KeyValuePair<string, ValueNode>("x", x) });
             var mapAgain = new FieldMap(new[] { new KeyValuePair<string, ValueNode>("x", x) });
-            var nested = new ValueNode.Nested(map);
-            var nestedAgain = new ValueNode.Nested(mapAgain);
+            var nested = new ValueNode.Nested("Foo", map);
+            var nestedAgain = new ValueNode.Nested("Foo", mapAgain);
             Assert.Equal(nested.GetHashCode(), nestedAgain.GetHashCode());
 
             var flags = new ValueNode.Enum("Game.Layers", new[] { "Ground", "Water" }, IsFlags: true);

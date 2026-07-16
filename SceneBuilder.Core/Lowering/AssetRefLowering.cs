@@ -54,7 +54,7 @@ namespace SceneBuilder.Core.Lowering
                 case ValueNode.List list:
                     return new ValueNode.List(list.Items.Select(item => LowerNode(item, resolvers)).ToList());
                 case ValueNode.Nested nested:
-                    return new ValueNode.Nested(LowerFieldMap(nested.Fields, resolvers));
+                    return new ValueNode.Nested(nested.TypeName, LowerFieldMap(nested.Fields, resolvers));
                 default:
                     return node;
             }

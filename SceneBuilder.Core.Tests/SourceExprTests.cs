@@ -245,7 +245,7 @@ namespace SceneBuilder.Core.Tests
                 new KeyValuePair<string, ValueNode>("x", ValueNode.Primitive.Int(1)),
                 new KeyValuePair<string, ValueNode>("y", ValueNode.Primitive.Int(2)),
             });
-            var node = new ValueNode.Nested(fields);
+            var node = new ValueNode.Nested("Foo", fields);
 
             Assert.Equal(node, Roundtrip(SourceExpr.ValueNodeLiteral(node)));
         }

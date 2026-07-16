@@ -126,7 +126,7 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(new ValueNode.Quat(new Quat(0f, 0f, 0f, 1f)), fields["rot"]);
             Assert.Equal(new ValueNode.Color(new Color(1f, 0f, 0f, 1f)), fields["tint"]);
 
-            var expectedNested = new ValueNode.Nested(new FieldMap(new[]
+            var expectedNested = new ValueNode.Nested("Game.ImpactData", new FieldMap(new[]
             {
                 new System.Collections.Generic.KeyValuePair<string, ValueNode>("damage", ValueNode.Primitive.Int(10)),
                 new System.Collections.Generic.KeyValuePair<string, ValueNode>("knockback", ValueNode.Primitive.Float(2.5f)),

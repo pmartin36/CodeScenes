@@ -284,7 +284,7 @@ namespace SceneBuilder.Core.Tests
                 new KeyValuePair<string, ValueNode>("faction", new ValueNode.Enum("Game.Faction", new[] { "Enemy" }, false)),
                 new KeyValuePair<string, ValueNode>("velocity", new ValueNode.Vec3(new Vec3(1, 2, 3))),
                 new KeyValuePair<string, ValueNode>("tint", new ValueNode.Color(new Color(1, 0, 0, 1))),
-                new KeyValuePair<string, ValueNode>("nested", new ValueNode.Nested(new FieldMap(new[]
+                new KeyValuePair<string, ValueNode>("nested", new ValueNode.Nested("Game.Impact", new FieldMap(new[]
                 {
                     new KeyValuePair<string, ValueNode>("inner", ValueNode.Primitive.Int(1)),
                 }))),
@@ -297,7 +297,7 @@ namespace SceneBuilder.Core.Tests
                 new KeyValuePair<string, ValueNode>("faction", new ValueNode.Enum("Game.Faction", new[] { "Neutral" }, false)),
                 new KeyValuePair<string, ValueNode>("velocity", new ValueNode.Vec3(new Vec3(0, 0, 0))),
                 new KeyValuePair<string, ValueNode>("tint", new ValueNode.Color(new Color(0, 0, 0, 1))),
-                new KeyValuePair<string, ValueNode>("nested", new ValueNode.Nested(new FieldMap(new[]
+                new KeyValuePair<string, ValueNode>("nested", new ValueNode.Nested("Game.Impact", new FieldMap(new[]
                 {
                     new KeyValuePair<string, ValueNode>("inner", ValueNode.Primitive.Int(0)),
                 }))),

@@ -155,7 +155,7 @@ namespace SceneBuilder.Core.Parsing
 
             if (initializerKind == SyntaxKind.ObjectInitializerExpression)
             {
-                return ParseNested(objectCreation.Initializer!, whole);
+                return ParseNested(objectCreation.Type, objectCreation.Initializer!, whole);
             }
 
             if (initializerKind == SyntaxKind.CollectionInitializerExpression)
@@ -180,7 +180,7 @@ namespace SceneBuilder.Core.Parsing
             _ => null,
         };
 
-        private static ValueNode ParseNested(InitializerExpressionSyntax initializer, ExpressionSyntax whole)
+        private static ValueNode ParseNested(TypeSyntax type, InitializerExpressionSyntax initializer, ExpressionSyntax whole)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
@@ -194,7 +194,8 @@ namespace SceneBuilder.Core.Parsing
                 fields.Add(new KeyValuePair<string, ValueNode>(ident.Identifier.Text, Parse(assignment.Right)));
             }
 
-            return new ValueNode.Nested(new FieldMap(fields));
+            // Full written type text (namespace preserved), NOT TypeNameOf (drops the namespace).
+            return new ValueNode.Nested(type.ToString().Trim(), new FieldMap(fields));
         }
 
         private static ValueNode ParseList(InitializerExpressionSyntax initializer)

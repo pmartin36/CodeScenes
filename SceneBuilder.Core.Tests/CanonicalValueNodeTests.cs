@@ -57,7 +57,7 @@ namespace SceneBuilder.Core.Tests
                 new ValueNode.Vec4(new Vec4(1, 2, 3, 4)),
                 new ValueNode.Quat(new Quat(0, 0, 0, 1)),
                 new ValueNode.Color(new Color(1, 0, 0, 1)),
-                new ValueNode.Nested(new FieldMap(new[]
+                new ValueNode.Nested("Foo", new FieldMap(new[]
                 {
                     new KeyValuePair<string, ValueNode>("zeta", ValueNode.Primitive.Int(1)),
                     new KeyValuePair<string, ValueNode>("alpha", ValueNode.Primitive.Int(2)),
@@ -116,7 +116,7 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Canonical_Nested_Fields_EmittedInSortedKeyOrder()
         {
-            var nested = new ValueNode.Nested(new FieldMap(new[]
+            var nested = new ValueNode.Nested("Foo", new FieldMap(new[]
             {
                 new KeyValuePair<string, ValueNode>("zeta", ValueNode.Primitive.Int(1)),
                 new KeyValuePair<string, ValueNode>("alpha", ValueNode.Primitive.Int(2)),

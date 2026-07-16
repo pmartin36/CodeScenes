@@ -66,8 +66,10 @@ namespace SceneBuilder.Core.Model
         public sealed record Quat(global::SceneBuilder.Core.Model.Quat Value) : ValueNode;
         public sealed record Color(global::SceneBuilder.Core.Model.Color Value) : ValueNode;
 
-        // Equality delegates to FieldMap (see FieldMap.cs — deep equality not yet implemented).
-        public sealed record Nested(FieldMap Fields) : ValueNode;
+        // TypeName is the fully-qualified written/reflected type of the nested value
+        // (e.g. "MyGame.Combat.Damage"); Fields' equality delegates to FieldMap. Default
+        // record equality is correct for both members — no custom Equals/GetHashCode needed.
+        public sealed record Nested(string TypeName, FieldMap Fields) : ValueNode;
 
         public sealed record List(IReadOnlyList<ValueNode> Items) : ValueNode
         {
