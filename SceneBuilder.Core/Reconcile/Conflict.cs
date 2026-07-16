@@ -4,7 +4,8 @@ namespace SceneBuilder.Core.Reconcile
     {
         AmbiguousAnchor,
         MissingSourceAnchor,
-        ReferencedHandle
+        ReferencedHandle,
+        DuplicateLogicalId
     }
 
     public sealed record Conflict

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Diff;
@@ -88,6 +89,55 @@ namespace SceneBuilder.Core.Reconcile
                         "position in the file. Any edit that moves a statement would silently re-point identity at a " +
                         "different object. Add `.Id(\"...\")` to each to disambiguate them.",
                     Location = anchors.TryGetValue(members[0].LogicalId, out var span) ? span : null,
+                });
+            }
+
+            return conflicts;
+        }
+
+        // Colliding LogicalIds (b1-t3): two or more nodes whose authored `var` handle / explicit
+        // `.Id(...)` resolve to the SAME id. Unlike DuplicateNameConflicts (positional-only ids,
+        // always `Name/index`), a collision here is on a HAND-AUTHORED id, so it is disjoint by
+        // construction from that detector — a positional id can never appear in this grouping.
+        // Ids are GLOBAL identity (not scoped per-parent), so `nodeAnchors` — the un-collapsed,
+        // whole-file, document-order list (unlike ParseResult.Anchors, a dict that silently
+        // collapses collisions to one entry) — is grouped across the entire file.
+        internal static IReadOnlyList<Conflict> DuplicateLogicalIdConflicts(IReadOnlyList<NodeAnchor> nodeAnchors)
+        {
+            var order = new List<string>();
+            var groups = new Dictionary<string, List<NodeAnchor>>(StringComparer.Ordinal);
+
+            foreach (var anchor in nodeAnchors)
+            {
+                if (!groups.TryGetValue(anchor.LogicalId, out var members))
+                {
+                    members = new List<NodeAnchor>();
+                    groups[anchor.LogicalId] = members;
+                    order.Add(anchor.LogicalId);
+                }
+
+                members.Add(anchor);
+            }
+
+            var conflicts = new List<Conflict>();
+
+            foreach (var logicalId in order)
+            {
+                var members = groups[logicalId];
+                if (members.Count < 2)
+                {
+                    continue;
+                }
+
+                conflicts.Add(new Conflict
+                {
+                    Kind = ConflictKind.DuplicateLogicalId,
+                    LogicalId = logicalId,
+                    Reason =
+                        $"Duplicate LogicalId '{logicalId}': {members.Count} nodes resolve to the same id. " +
+                        "Explicit `.Id(\"...\")` values and `var` handles are a GLOBAL identity, not scoped " +
+                        "per-parent, so the same id must not be reused anywhere in the file.",
+                    Location = members[1].Span,
                 });
             }
 

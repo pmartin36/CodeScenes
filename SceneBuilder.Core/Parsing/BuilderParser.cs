@@ -53,16 +53,21 @@ namespace SceneBuilder.Core.Parsing
 
             var identityMap = BuildIdentityMap(ctx.Roots, existingMap);
             var anchors = BuildAnchors(ctx.Roots);
+            var nodeAnchors = BuildNodeAnchors(ctx.Roots);
             var componentAnchors = BuildComponentAnchors(ctx.Roots);
             var flagPresence = BuildFlagPresence(ctx.Roots);
             var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
             var handles = BuildHandles(ctx.Roots);
 
             // Unconditional: every parse reports which sibling groups are distinguishable only by
-            // position. Both directions come through here, so neither can skip the check.
-            var ambiguities = ConflictDetector.DuplicateNameConflicts(model, anchors);
+            // position, and which hand-authored ids collide. Both directions come through here, so
+            // neither can skip the check. Order matters: SceneBuilderBuild.FormatAmbiguities renders
+            // in list order.
+            var ambiguities = ConflictDetector.DuplicateNameConflicts(model, anchors)
+                .Concat(ConflictDetector.DuplicateLogicalIdConflicts(nodeAnchors))
+                .ToList();
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -261,6 +266,9 @@ namespace SceneBuilder.Core.Parsing
                         break;
                     case "Id":
                         explicitId = EvalStringLiteral(args.Arguments[0].Expression);
+                        var idMemberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
+                        var idAnchorStart = idMemberAccess.OperatorToken.SpanStart;
+                        node.IdCallSpan = new SourceSpan(idAnchorStart, invocation.Span.End - idAnchorStart);
                         break;
                     case "Component":
                         ApplyComponent(node, args, invocation);
@@ -668,6 +676,37 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
+        // Builds one NodeAnchor per parsed node, pre-order, NEVER collapsed by LogicalId — mirrors
+        // BuildAnchors/CollectAnchors but appends to a List (not a dict-indexer assignment), so two
+        // nodes resolving to the same LogicalId (a colliding hand-authored `.Id(...)`) both survive.
+        private static IReadOnlyList<NodeAnchor> BuildNodeAnchors(List<NodeBuilder> roots)
+        {
+            var nodeAnchors = new List<NodeAnchor>();
+            foreach (var root in roots)
+            {
+                CollectNodeAnchors(root, nodeAnchors);
+            }
+
+            return nodeAnchors;
+        }
+
+        private static void CollectNodeAnchors(NodeBuilder node, List<NodeAnchor> nodeAnchors)
+        {
+            nodeAnchors.Add(new NodeAnchor
+            {
+                LogicalId = node.LogicalId,
+                Name = node.Name,
+                Span = node.AnchorSpan,
+                Handle = node.Handle,
+                IdCallSpan = node.IdCallSpan,
+            });
+
+            foreach (var child in node.Children)
+            {
+                CollectNodeAnchors(child, nodeAnchors);
+            }
+        }
+
         // Builds one LogicalId->handle(var) name entry per parsed node with an AUTHORED handle
         // (NodeBuilder.Handle set only at the two ctx.Handles[handleName]=node registration
         // spots), pre-order, keyed by each node's FINAL LogicalId — mirrors
@@ -836,6 +875,7 @@ namespace SceneBuilder.Core.Parsing
             public Vec3? Scale;
             public SourceSpan AnchorSpan;
             public string? Handle;
+            public SourceSpan? IdCallSpan;
             public readonly List<NodeBuilder> Children = new();
             public readonly List<ComponentBuilder> Components = new();
         }

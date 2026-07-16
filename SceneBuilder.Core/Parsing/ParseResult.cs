@@ -35,6 +35,14 @@ namespace SceneBuilder.Core.Parsing
         // a compile-only stub for the test-writer's RED tests.
         public IReadOnlyDictionary<string, string> Handles { get; init; } = new Dictionary<string, string>();
 
+        // b1-t2 stub: one NodeAnchor per parsed node, pre-order/document order, NEVER collapsed
+        // by LogicalId — two nodes resolving to the same LogicalId (a colliding hand-authored
+        // `.Id(...)`) produce TWO entries here, unlike Anchors (a dict, which collapses them to
+        // one). Population is BuilderParser's job (BuildNodeAnchors/CollectNodeAnchors); this
+        // default (always empty) is a compile-only stub for the test-writer's RED tests. Feeds
+        // b1-t3 (DuplicateLogicalIdConflicts) and b3-t1 (IdCollisionHealer).
+        public IReadOnlyList<NodeAnchor> NodeAnchors { get; init; } = new List<NodeAnchor>();
+
         // Sibling groups this file CANNOT distinguish: >= 2 same-named siblings under one parent with
         // neither a handle nor an explicit `.Id(...)`, so only their position tells them apart (§4).
         // Located per §7.
