@@ -107,9 +107,9 @@ public class DupScene : ISceneDefinition
     // THE WRITE PATH CANNOT CREATE THE HAZARD.
     //
     // Duplicating a GameObject in the Hierarchy is how a user produces same-named siblings. Sync is
-    // the only path that writes builder source, so it injects `.Id(...)` at the moment it would
-    // otherwise emit a second positional `Add("Enemy")` — the file never CONTAINS an ambiguous pair,
-    // not even for one sync.
+    // the only path that writes builder source, so it heads the duplicate with its own `var` handle
+    // at the moment it would otherwise emit a second positional `Add("Enemy")` — the file never
+    // CONTAINS an ambiguous pair, not even for one sync.
     [Test]
     public void Sync_DuplicateNamedSiblingCreatedInScene_InjectsDeterministicSemanticId()
     {
@@ -127,7 +127,7 @@ public class DupScene : ISceneDefinition
 
         // Deterministic and SEMANTIC — derived from the object's own name, never a random GUID (the
         // file gets rewritten by an LLM; an opaque GUID does not survive that).
-        StringAssert.Contains(".Id(\"Enemy-2\")", emitted);
+        StringAssert.Contains("var enemy", emitted);
 
         // And the file is no longer ambiguous, which is the whole deliverable.
         Assert.IsEmpty(BuilderParser.Parse(emitted).Ambiguities,
@@ -153,7 +153,8 @@ public class DupScene : ISceneDefinition
         var second = new GameObject("Enemy");
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene(), ScenePath);
 
-        // Sync writes the pair down — with an injected id, so they are no longer position-only.
+        // Sync writes the pair down — the duplicate heads its own `var` handle, so they are no
+        // longer position-only.
         SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
 
         var firstId = first.GetEntityId();

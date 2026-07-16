@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using SceneBuilder.Core.Diff;
 using SceneBuilder.Core.Identity;
@@ -474,7 +473,7 @@ namespace SceneBuilder.Core.Reconcile
 
                     foreach (var member in positional.Skip(1))
                     {
-                        InjectExplicitId(member);
+                        InjectHandle(member);
                     }
                 }
 
@@ -502,7 +501,7 @@ namespace SceneBuilder.Core.Reconcile
                 }
 
                 var append = FindAppend(node.GlobalObjectId);
-                return append != null && append.Handle == null && append.ExplicitId == null;
+                return append != null && append.Handle == null;
             }
 
             AppendStatement? FindAppend(string globalObjectId)
@@ -513,66 +512,30 @@ namespace SceneBuilder.Core.Reconcile
                     : edits.OfType<AppendStatement>().FirstOrDefault(a => a.NewLogicalId == entry.LogicalId);
             }
 
-            void InjectExplicitId(SnapshotNode node)
+            // The mapped arm of the retired `InjectExplicitId`: the unmapped (same-batch append) arm
+            // is DEAD — a duplicate append already heads its own handle via DetectAppends' third
+            // `headsHandle` clause (b2-t2), so a positional append never reaches this pass.
+            void InjectHandle(SnapshotNode node)
             {
                 var goid = node.GlobalObjectId;
-
-                // The object's id RIGHT NOW in this batch: an append's predicted id, or a mapped id
-                // possibly already re-keyed by a reparent earlier in this same reconcile.
-                var pending = addedEntries.LastOrDefault(e => e.Kind == "GameObject" && e.GlobalObjectId == goid);
-                var mapped = globalObjectIdToLogicalId.TryGetValue(goid, out var originalId);
-                var currentId = pending?.LogicalId ?? originalId;
-                if (currentId == null)
+                if (!globalObjectIdToLogicalId.TryGetValue(goid, out var originalId))
                 {
                     return;
                 }
 
-                var newId = MintId(node.Name);
-
-                if (!mapped)
-                {
-                    // Appended this batch: rewrite the pending AppendStatement so the statement is
-                    // emitted WITH its `.Id(...)` — the file never exists in an ambiguous state, not
-                    // even for one sync. A positional append heads no handle, which (see DetectAppends'
-                    // `headsHandle`) means it has no representable components and no create-candidate
-                    // children, so nothing else embeds its id.
-                    var append = edits.OfType<AppendStatement>().FirstOrDefault(a => a.NewLogicalId == currentId);
-                    if (append == null)
-                    {
-                        return;
-                    }
-
-                    edits[edits.IndexOf(append)] = append with { NewLogicalId = newId, ExplicitId = newId };
-                    Rekey(currentId, newId, append.ParentHandle);
-                    return;
-                }
-
-                // Already in the file: patch its statement in place. The anchor is the id the source
-                // was PARSED under (what `anchors` is keyed by), which is not necessarily `currentId`
-                // once a reparent has re-keyed it this batch.
-                if (anchors != null && !anchors.ContainsKey(originalId!))
+                // Already in the file: the anchor is the id the source was PARSED under (what
+                // `anchors` is keyed by).
+                if (anchors != null && !anchors.ContainsKey(originalId))
                 {
                     return;
                 }
 
-                edits.Add(new IntroduceIdCall { Anchor = originalId!, NewId = newId });
-                Rekey(currentId, newId, logicalIdToParentLogicalId.GetValueOrDefault(currentId));
-            }
-
-            // Deterministic and SEMANTIC: `Enemy-2`, `Enemy-3`, ... — derived from the object's own
-            // name, never a random GUID. The builder file gets rewritten by an LLM (CLAUDE.md); an
-            // opaque GUID does not survive that, whereas a name-derived id reads as meaningful and is
-            // reproduced verbatim. `reserved` already holds every known LogicalId and handle, so the
-            // first free suffix is collision-checked against the whole file.
-            string MintId(string name)
-            {
-                for (var n = 2; ; n++)
+                // THE one handle-introduction path — derives the name, reserves it, and Rekeys the
+                // sidecar so the GlobalObjectId follows the id. Do NOT re-Rekey here.
+                var (handle, introduce) = ResolveOwnerHandle(originalId);
+                if (introduce && handle != null)
                 {
-                    var candidate = name + "-" + n.ToString(CultureInfo.InvariantCulture);
-                    if (reserved.Add(candidate))
-                    {
-                        return candidate;
-                    }
+                    edits.Add(new IntroduceHandle { Anchor = originalId, Handle = handle });
                 }
             }
 
@@ -688,9 +651,14 @@ namespace SceneBuilder.Core.Reconcile
                     // b2-t3: a node with >=1 create-candidate (unmapped, non-empty-goid) child
                     // heads its own handle so its descendants can reference it - otherwise they
                     // would be stranded (the old dead-end recursion below).
+                    // A create candidate whose Name duplicates another sibling in the same snapshot
+                    // array also heads its own handle - this covers a duplicate against an
+                    // already-MAPPED sibling as well as against another append, and keeps
+                    // EnsureNoAmbiguousDuplicateNames from injecting a positional `.Id(...)`.
                     var headsHandle = node.Children.Any(c =>
                         !string.IsNullOrEmpty(c.GlobalObjectId) && !goidToLogicalId.ContainsKey(c.GlobalObjectId))
-                        || representableComponents.Length > 0;
+                        || representableComponents.Length > 0
+                        || nodes.Count(n => n.Name == node.Name) > 1;
 
                     string newLogicalId;
                     string? ownHandle = null;

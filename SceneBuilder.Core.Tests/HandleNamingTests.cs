@@ -65,5 +65,26 @@ namespace SceneBuilder.Core.Tests
 
             Assert.Equal(new[] { "weapon" }, existing);
         }
+
+        // A taken POSITIONAL LogicalId (§4: `{parent}/{name}/{index}`) does not collide with the
+        // identifier namespace — "Enemy/0" != "enemy" under Ordinal comparison. This is the entire
+        // basis for the write path emitting `var enemy` rather than `var enemy2` (b2-t2).
+        [Fact]
+        public void Derive_TakenPositionalId_DoesNotCollideWithIdentifier()
+        {
+            var result = HandleNaming.Derive("Enemy", new[] { "Enemy/0" });
+
+            Assert.Equal("enemy", result);
+        }
+
+        // A taken EXPLICIT `.Id(...)` LogicalId also does not collide with the identifier
+        // namespace, even alongside a taken positional id.
+        [Fact]
+        public void Derive_TakenExplicitId_DoesNotCollideWithIdentifier()
+        {
+            var result = HandleNaming.Derive("Enemy", new[] { "Enemy/0", "Enemy-2" });
+
+            Assert.Equal("enemy", result);
+        }
     }
 }

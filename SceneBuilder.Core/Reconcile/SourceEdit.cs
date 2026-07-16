@@ -69,12 +69,6 @@ namespace SceneBuilder.Core.Reconcile
         // When set, Handle == NewLogicalId.
         public string? Handle { get; init; }
 
-        // Explicit `.Id("<value>")` to render into the emitted chain. Set ONLY when this append would
-        // otherwise land a second positional statement with the same Name under the same parent —
-        // i.e. the moment the write path would itself create an object distinguishable only by
-        // position. When set, NewLogicalId == ExplicitId (§4 priority 2).
-        public string? ExplicitId { get; init; }
-
         // Receiver variable for a CHILD append (the parent's handle, existing or newly
         // introduced). null for a root append.
         public string? ParentHandle { get; init; }
@@ -89,15 +83,17 @@ namespace SceneBuilder.Core.Reconcile
         // Uses inherited SourceEdit.Anchor = the LogicalId of the statement to delete.
     }
 
-    // Injects `.Id("<NewId>")` into an EXISTING statement whose id is otherwise positional, to
-    // disambiguate a duplicate-name sibling group before a later statement move can silently
-    // re-point identity (§4). Emitted by the Reconciler; the anchor's LogicalId becomes NewId, so
-    // it is ALWAYS paired with a Rekey so the sidecar's GlobalObjectId follows the id.
-    public sealed record IntroduceIdCall : SourceEdit
+    // Rewrites an anchored (currently handle-less) statement into `var <Handle> = ...;` on its own,
+    // without requiring an accompanying Append/Move/AppendComponent to carry the introduce flag.
+    // Emitted by the Reconciler/Healer (b2/b3) when a statement must gain a handle before a LATER
+    // edit (in the SAME or a subsequent patch) can reference it. Resolved by the applier's existing
+    // ResolveHandleIntroductions pre-pass (SourcePatchApplier.cs), which dedups against any other
+    // handle request for the same anchor and throws on a conflicting handle.
+    public sealed record IntroduceHandle : SourceEdit
     {
-        // Inherited Anchor = the LogicalId of the statement to disambiguate (its id BEFORE the
-        // rekey, which is what `anchors` is still keyed by).
-        public string NewId { get; init; } = "";
+        // Inherited Anchor = the LogicalId of the statement to rewrite (its id BEFORE the rekey,
+        // which is what `anchors` is still keyed by).
+        public string Handle { get; init; } = "";
     }
 
     public enum FlagKind { Tag, Layer, Active, Static }

@@ -291,21 +291,28 @@ public class DupScene : ISceneDefinition
             var result = Reconciler.Reconcile(model, snapshot, map, anchors);
 
             var append = Assert.Single(result.Patch.Edits.OfType<AppendStatement>());
-            Assert.Equal("Enemy-2", append.ExplicitId);
-            Assert.Equal("Enemy-2", append.NewLogicalId);
+            // A duplicate-name create candidate heads its own `var` handle (b2-t2) — never a
+            // positional id and never a minted `.Id(...)`. `reserved` is {Enemy/0} only, so
+            // Derive yields "enemy", NOT "enemy2" (a positional id and the identifier namespace
+            // are separate — see HandleNamingTests).
+            Assert.Equal("enemy", append.Handle);
+            Assert.Equal("enemy", append.NewLogicalId);
 
             // The sidecar entry must carry the SAME id, or the next sync reads the object as
             // unmapped and appends it a second time.
-            Assert.Contains(result.AddedEntries, e => e.LogicalId == "Enemy-2" && e.GlobalObjectId == "goid-NEW");
+            Assert.Contains(result.AddedEntries, e => e.LogicalId == "enemy" && e.GlobalObjectId == "goid-NEW");
         }
 
-        // Deterministic AND collision-checked: `Enemy-2` already taken => `Enemy-3`.
+        // Deterministic AND collision-checked: the identifier "enemy" already taken by an authored
+        // handle => "enemy2".
         [Fact]
         public void Reconcile_AppendDuplicateName_MintedIdAvoidsCollisionWithAuthoredId()
         {
-            var existing = new GameObjectNode { LogicalId = "Enemy/0", Name = "Enemy" };
-            var authored = new GameObjectNode { LogicalId = "Enemy-2", Name = "Enemy" };
-            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { existing, authored } };
+            // The incumbent is an authored HANDLE (not a minted `.Id(...)`) — a positional id like
+            // "Enemy-2" no longer forces a suffix (separate namespaces), so the only way to force a
+            // collision on the identifier "enemy" is for it to already be taken.
+            var existing = new GameObjectNode { LogicalId = "enemy", Name = "Enemy" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { existing } };
 
             var snapshot = new SceneSnapshot
             {
@@ -313,7 +320,6 @@ public class DupScene : ISceneDefinition
                 Roots = new[]
                 {
                     new SnapshotNode { GlobalObjectId = "goid-A", Name = "Enemy" },
-                    new SnapshotNode { GlobalObjectId = "goid-B", Name = "Enemy" },
                     new SnapshotNode { GlobalObjectId = "goid-NEW", Name = "Enemy" },
                 },
             };
@@ -322,21 +328,20 @@ public class DupScene : ISceneDefinition
             {
                 Entries = new[]
                 {
-                    new IdentityMapEntry { LogicalId = "Enemy/0", GlobalObjectId = "goid-A", Kind = "GameObject" },
-                    new IdentityMapEntry { LogicalId = "Enemy-2", GlobalObjectId = "goid-B", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = "enemy", GlobalObjectId = "goid-A", Kind = "GameObject" },
                 },
             };
 
             var anchors = new Dictionary<string, SourceSpan>
             {
-                ["Enemy/0"] = new SourceSpan(0, 10),
-                ["Enemy-2"] = new SourceSpan(20, 10),
+                ["enemy"] = new SourceSpan(0, 10),
             };
 
             var result = Reconciler.Reconcile(model, snapshot, map, anchors);
 
             var append = Assert.Single(result.Patch.Edits.OfType<AppendStatement>());
-            Assert.Equal("Enemy-3", append.ExplicitId);
+            Assert.Equal("enemy2", append.Handle);
+            Assert.Equal("enemy2", append.NewLogicalId);
         }
 
         // THE FIX, half 3: a pre-existing hand-authored ambiguous group is HEALED — while the
@@ -381,12 +386,12 @@ public class DupScene : ISceneDefinition
             // Exactly ONE injection: leaving one member positional is enough, because the (parent,
             // name) claim queue then holds a single id that its sole positional statement claims
             // wherever it sits.
-            var inject = Assert.Single(result.Patch.Edits.OfType<IntroduceIdCall>());
+            var inject = Assert.Single(result.Patch.Edits.OfType<IntroduceHandle>());
             Assert.Equal("Enemy/1", inject.Anchor);
-            Assert.Equal("Enemy-2", inject.NewId);
+            Assert.Equal("enemy", inject.Handle);
 
-            // The re-key: goid-B must move to the new id, and the old id must be dropped.
-            Assert.Contains(result.AddedEntries, e => e.LogicalId == "Enemy-2" && e.GlobalObjectId == "goid-B");
+            // The re-key: goid-B must move to the derived handle, and the old id must be dropped.
+            Assert.Contains(result.AddedEntries, e => e.LogicalId == "enemy" && e.GlobalObjectId == "goid-B");
             Assert.Contains("Enemy/1", result.RemovedLogicalIds);
         }
 
@@ -436,8 +441,8 @@ public class DupScene : ISceneDefinition
             var result = Reconciler.Reconcile(parsed.Model, snapshot, prior, parsed.Anchors);
             var healed = SourcePatchApplier.Apply(ambiguous, result.Patch, parsed.Anchors);
 
-            // The id is IN the statement now.
-            Assert.Contains(".Id(\"Enemy-2\")", healed);
+            // The handle is IN the statement now.
+            Assert.Contains("var enemy", healed);
 
             // And the file is no longer ambiguous — which is the entire deliverable.
             var reparsed = BuilderParser.Parse(healed, prior);
@@ -445,7 +450,79 @@ public class DupScene : ISceneDefinition
 
             // The healed file still describes the same two Enemies, one of which owns the Rigidbody.
             Assert.Equal(2, reparsed.Model.Roots.Length);
-            Assert.Single(reparsed.Model.Roots, r => r.LogicalId == "Enemy-2");
+            Assert.Single(reparsed.Model.Roots, r => r.LogicalId == "enemy");
+        }
+
+        // THE FIX, half 2 — spec test 18: once a handle is introduced, a reorder of the
+        // now-disambiguated pair preserves both identities. A `var` lives IN the statement, so a
+        // statement move carries it, whereas a sibling index is only IMPLIED BY position and is
+        // destroyed by the same move (contrast with Reorder_TwoSameNamedPositionalSiblings... above).
+        [Fact]
+        public void Reorder_HandleHeadedSameNamedSiblings_PreservesBothIdentities()
+        {
+            // The healed shape Reconcile_ThenApply_HealsAmbiguousSourceIntoAnUnambiguousFile
+            // produces: statement 1 stays positional (Enemy/0), statement 2 heads the handle.
+            const string healed = @"
+public class DupScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Enemy"").Transform(pos: (0f, 0f, 0f));
+        var enemy = scene.Add(""Enemy"").Transform(pos: (5f, 0f, 0f));
+    }
+}
+";
+            // The same two statements, SWAPPED.
+            const string healedSwapped = @"
+public class DupScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Add(""Enemy"").Transform(pos: (5f, 0f, 0f));
+        scene.Add(""Enemy"").Transform(pos: (0f, 0f, 0f));
+    }
+}
+";
+            // The healed sidecar: prior minus RemovedLogicalIds "Enemy/1" plus AddedEntry enemy<->goid-B.
+            var healedMap = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Dup.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "Enemy/0", GlobalObjectId = "goid-A", Kind = "GameObject", Name = "Enemy", SiblingIndex = 0 },
+                    new IdentityMapEntry { LogicalId = "enemy", GlobalObjectId = "goid-B", Kind = "GameObject", Name = "Enemy", SiblingIndex = 1 },
+                },
+            };
+
+            Assert.Empty(BuilderParser.Parse(healed, healedMap).Ambiguities);
+
+            var reparsed = BuilderParser.Parse(healedSwapped, healedMap);
+
+            // The reorder did NOT re-introduce ambiguity.
+            Assert.Empty(reparsed.Ambiguities);
+
+            var remapped = IdentityRemapper.Remap(reparsed.Model, healedMap);
+
+            // Each GlobalObjectId still maps to the SAME LogicalId it had before the reorder.
+            Assert.Equal("goid-A", Assert.Single(remapped.Entries, e => e.Kind == "GameObject" && e.LogicalId == "Enemy/0").GlobalObjectId);
+            Assert.Equal("goid-B", Assert.Single(remapped.Entries, e => e.Kind == "GameObject" && e.LogicalId == "enemy").GlobalObjectId);
+
+            // The scene, in the SAME order as the swapped source.
+            var reorderedSnapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode { GlobalObjectId = "goid-B", Name = "Enemy", Transform = new TransformData { Position = new Vec3(5f, 0f, 0f) } },
+                    new SnapshotNode { GlobalObjectId = "goid-A", Name = "Enemy", Transform = new TransformData { Position = new Vec3(0f, 0f, 0f) } },
+                },
+            };
+
+            var result = Reconciler.Reconcile(reparsed.Model, reorderedSnapshot, healedMap, reparsed.Anchors);
+
+            // A pure reorder creates and destroys nothing.
+            Assert.Empty(result.Patch.Edits.OfType<RemoveStatement>());
+            Assert.Empty(result.Patch.Edits.OfType<AppendStatement>());
         }
     }
 }

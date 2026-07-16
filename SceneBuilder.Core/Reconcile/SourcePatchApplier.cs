@@ -91,8 +91,9 @@ namespace SceneBuilder.Core.Reconcile
                     case RemoveFlagCall removeFlagCall:
                         ResolveRemoveFlagCall(root, anchors, removeFlagCall, allTargets, appliers);
                         break;
-                    case IntroduceIdCall introduceIdCall:
-                        ResolveIntroduceIdCall(root, anchors, introduceIdCall, allTargets, appliers);
+                    case IntroduceHandle:
+                        // Fully resolved by the ResolveHandleIntroductions pre-pass above; nothing
+                        // left to do in the main dispatch loop.
                         break;
                     case PatchComponentField patchComponentField:
                         ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers);
@@ -397,6 +398,9 @@ namespace SceneBuilder.Core.Reconcile
                         break;
                     case AppendComponentStatement component:
                         Request(component.Anchor, component.OwnerHandle, component.IntroduceOwnerHandle);
+                        break;
+                    case IntroduceHandle introduceHandle:
+                        Request(introduceHandle.Anchor, introduceHandle.Handle, true);
                         break;
                 }
             }
@@ -712,44 +716,6 @@ namespace SceneBuilder.Core.Reconcile
                             current.WithoutTrailingTrivia(),
                             SyntaxFactory.IdentifierName(flagName)),
                         argList)
-                    .WithTrailingTrivia(current.GetTrailingTrivia());
-
-                return currentRoot.ReplaceNode(current, newCall);
-            });
-        }
-
-        // ---- IntroduceIdCall --------------------------------------------------------------------
-
-        // Appends `.Id("<NewId>")` to the anchor statement's chain. Chain position is irrelevant to
-        // the parser (ApplyChainedCalls reads `.Id` anywhere in the chain), so this reuses the
-        // established end-of-chain introduction shape rather than splicing mid-chain.
-        private static void ResolveIntroduceIdCall(
-            CompilationUnitSyntax root,
-            IReadOnlyDictionary<string, SourceSpan> anchors,
-            IntroduceIdCall edit,
-            List<SyntaxNode> allTargets,
-            List<Func<SyntaxNode, SyntaxNode>> appliers)
-        {
-            var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
-            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
-                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
-
-            var chainExpr = GetChainExpression(statement);
-
-            allTargets.Add(chainExpr);
-            appliers.Add(currentRoot =>
-            {
-                var current = currentRoot.GetCurrentNode(chainExpr)!;
-
-                var newCall = SyntaxFactory.InvocationExpression(
-                        SyntaxFactory.MemberAccessExpression(
-                            SyntaxKind.SimpleMemberAccessExpression,
-                            current.WithoutTrailingTrivia(),
-                            SyntaxFactory.IdentifierName("Id")),
-                        SyntaxFactory.ArgumentList(
-                            SyntaxFactory.SingletonSeparatedList(
-                                SyntaxFactory.Argument(
-                                    SyntaxFactory.ParseExpression(SourceExpr.StringLiteral(edit.NewId))))))
                     .WithTrailingTrivia(current.GetTrailingTrivia());
 
                 return currentRoot.ReplaceNode(current, newCall);

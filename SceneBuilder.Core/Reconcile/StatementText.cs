@@ -70,14 +70,6 @@ namespace SceneBuilder.Core.Reconcile
             var nameLiteral = SyntaxFactory.Literal(edit.Name).ToString();
             var chain = $"{receiver}.Add({nameLiteral})";
 
-            // Directly after `.Add(name)`, so the id reads as part of the object's declaration rather
-            // than trailing a long fluent chain — and so a human/LLM rewriting the statement's data
-            // calls keeps it.
-            if (edit.ExplicitId != null)
-            {
-                chain += $".Id({SourceExpr.StringLiteral(edit.ExplicitId)})";
-            }
-
             if (edit.Transform != null)
             {
                 var transform = edit.Transform;
