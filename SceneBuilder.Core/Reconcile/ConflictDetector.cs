@@ -205,6 +205,18 @@ namespace SceneBuilder.Core.Reconcile
                 Location = null,
             };
 
+        public static Conflict DanglingReference(
+            string sourceLogicalId, string fieldPath, string? missingTarget, SourceSpan? location) =>
+            new()
+            {
+                Kind = ConflictKind.DanglingReference,
+                LogicalId = sourceLogicalId,
+                Reason = $"Dangling reference: field '{fieldPath}' on '{sourceLogicalId}' targets " +
+                    $"'{missingTarget ?? "<unknown>"}', which no longer exists in the scene. The field was NOT " +
+                    "silently cleared — restore the target, or set the reference to NodeHandle.None.",
+                Location = location,
+            };
+
         public static Conflict UnanchorableComponentEdit(string componentLogicalId, string editKind) =>
             new()
             {

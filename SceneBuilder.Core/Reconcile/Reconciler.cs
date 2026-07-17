@@ -8,7 +8,9 @@ using SceneBuilder.Core.Parsing;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    public static class Reconciler
+    // DetectAppends (incl. its recursion) lives in ReconcilerAppends.cs — a pure split to keep this
+    // file under the project's file-size budget after b4-t3 threaded `pendingTargets` through it.
+    public static partial class Reconciler
     {
         private sealed record SnapshotEntry(SnapshotNode Node, string? ParentGlobalObjectId, int SiblingIndex);
 
@@ -380,6 +382,41 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
+            // b4-t2: two scene-derived membership sets for ObjectRef dangling-reference detection,
+            // built ONCE and threaded into every ReconcileComponents call below.
+            //   sceneLiveTargets: "object exists in the current scene" — the SAME liveness predicate
+            //     DetectRemovals uses (a mapped entry whose GlobalObjectId is still in the snapshot).
+            //     A deleted target is still authored in the model AND in `handles`, so membership in
+            //     either of those cannot signal liveness.
+            //   resolvableTargets: "reference can be honored to a real object" — sceneLiveTargets PLUS
+            //     the parsed source model and the handle table, so a rewire to an object this sync
+            //     hasn't mapped yet (but is genuinely authored) is not mistaken for dangling.
+            var sceneLiveTargets = new HashSet<string>(
+                identityMap.Entries
+                    .Where(e => e.Kind == "GameObject"
+                        && !string.IsNullOrEmpty(e.GlobalObjectId)
+                        && snapshotByGoid.ContainsKey(e.GlobalObjectId))
+                    .Select(e => e.LogicalId),
+                StringComparer.Ordinal);
+
+            var resolvableTargets = new HashSet<string>(sceneLiveTargets, StringComparer.Ordinal);
+            resolvableTargets.UnionWith(modelByLogicalId.Keys);
+            if (handles != null)
+            {
+                resolvableTargets.UnionWith(handles.Keys);
+            }
+
+            // b4-t3: same-batch create-candidate identities — snapshot nodes present in the scene
+            // but with no IdentityMap entry yet (about to be mapped by DetectAppends THIS pass). A
+            // ref to one of these is PENDING, not dangling: it resolves on the guaranteed second
+            // Sync once DetectAppends maps it. DISTINCT address space from resolvableTargets
+            // (LogicalIds): an ObjectRef to an unmapped target carries the target's
+            // GlobalObjectId — its only identity before DetectAppends runs (b4-t3/research.md B5
+            // CONTRACT) — never a LogicalId.
+            var pendingTargets = new HashSet<string>(
+                snapshotByGoid.Keys.Where(goid => !globalObjectIdToLogicalId.ContainsKey(goid)),
+                StringComparer.Ordinal);
+
             // Mapped-owner component pass (add/remove/reorder on GameObjects already present in
             // the IdentityMap). Snapshot+map-driven; independent of DetectAppends, which only
             // visits UNMAPPED nodes and `continue`s past mapped owners.
@@ -401,6 +438,9 @@ namespace SceneBuilder.Core.Reconcile
                     identityMap,
                     componentAnchors,
                     fieldArgumentSpans,
+                    sceneLiveTargets,
+                    resolvableTargets,
+                    pendingTargets,
                     ResolveOwnerHandle,
                     edits,
                     addedEntries,
@@ -420,6 +460,8 @@ namespace SceneBuilder.Core.Reconcile
                 logicalIdToGlobalObjectId,
                 logicalIdToParentLogicalId,
                 reserved,
+                resolvableTargets,
+                pendingTargets,
                 ResolveOwnerHandle,
                 nextIndexByParentKey,
                 edits,
@@ -564,204 +606,6 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             return result.ToArray();
-        }
-
-        // Snapshot-driven create-detection: walks the ACTUAL (scene) tree depth-first looking
-        // for GameObjectIds absent from the IdentityMap. Emits an AppendStatement only for a
-        // create candidate whose parent is a root or an already-MAPPED parent. A create candidate
-        // with >=1 create-candidate child heads its own handle (b2-t3) so its descendants can be
-        // appended referencing it; a create candidate with no create-candidate children is a leaf
-        // (Handle stays null, recursion into its children is a no-op guard).
-        private static void DetectAppends(
-            SnapshotNode[] nodes,
-            string? parentLogicalId,
-            bool parentIsMapped,
-            SceneModel expected,
-            IReadOnlyDictionary<string, string> goidToLogicalId,
-            IReadOnlyDictionary<string, GameObjectNode> modelByLogicalId,
-            IReadOnlyDictionary<string, string> logicalIdToGlobalObjectId,
-            IReadOnlyDictionary<string, string?> logicalIdToParentLogicalId,
-            HashSet<string> reserved,
-            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
-            Dictionary<string, int> nextIndexByParentKey,
-            List<SourceEdit> edits,
-            List<IdentityMapEntry> addedEntries,
-            List<string> removedLogicalIds,
-            List<Conflict> conflicts,
-            List<AssetEntry> addedAssets)
-        {
-            // The array position IS the scene sibling index (FlattenSnapshot keys SnapshotEntry off the
-            // same index), and it is what a created node's statement must be placed at.
-            for (var siblingIndex = 0; siblingIndex < nodes.Length; siblingIndex++)
-            {
-                var node = nodes[siblingIndex];
-                string? mappedLogicalId = null;
-                var isMapped = !string.IsNullOrEmpty(node.GlobalObjectId)
-                    && goidToLogicalId.TryGetValue(node.GlobalObjectId, out mappedLogicalId);
-
-                if (isMapped)
-                {
-                    DetectAppends(
-                        node.Children,
-                        mappedLogicalId,
-                        true,
-                        expected,
-                        goidToLogicalId,
-                        modelByLogicalId,
-                        logicalIdToGlobalObjectId,
-                        logicalIdToParentLogicalId,
-                        reserved,
-                        resolveOwnerHandle,
-                        nextIndexByParentKey,
-                        edits,
-                        addedEntries,
-                        removedLogicalIds,
-                        conflicts,
-                        addedAssets);
-
-                    continue;
-                }
-
-                if (parentIsMapped)
-                {
-                    var parentKey = parentLogicalId ?? string.Empty;
-                    if (!nextIndexByParentKey.TryGetValue(parentKey, out var index))
-                    {
-                        index = parentLogicalId == null
-                            ? expected.Roots.Length
-                            : modelByLogicalId.TryGetValue(parentLogicalId, out var parentModel)
-                                ? parentModel.Children.Length
-                                : 0;
-                    }
-
-                    nextIndexByParentKey[parentKey] = index + 1;
-
-                    // The parent's receiver, via the ONE handle-introduction path (shared with
-                    // reparent and component-attach emission, so one parent never gets two handles).
-                    // `parentHandle` doubles as the parent's EFFECTIVE LogicalId: a statement's `var`
-                    // name IS its LogicalId, so for a handled parent the two are already the same
-                    // string, and for a handle-less one the introduction makes them so.
-                    var (parentHandle, introduceParentHandle) = resolveOwnerHandle(parentLogicalId);
-
-                    // b4-t1 §13: representable (non-Transform) components force the owner to head
-                    // a handle too, so the same-batch component append (ComponentPatchApplier) has
-                    // an `OwnerHandle` to attach onto.
-                    var representableComponents = ComponentReconciler.ExcludeTransform(node.Components);
-
-                    // b2-t3: a node with >=1 create-candidate (unmapped, non-empty-goid) child
-                    // heads its own handle so its descendants can reference it - otherwise they
-                    // would be stranded (the old dead-end recursion below).
-                    // A create candidate whose Name duplicates another sibling in the same snapshot
-                    // array also heads its own handle - this covers a duplicate against an
-                    // already-MAPPED sibling as well as against another append, and keeps
-                    // EnsureNoAmbiguousDuplicateNames from injecting a positional `.Id(...)`.
-                    var headsHandle = node.Children.Any(c =>
-                        !string.IsNullOrEmpty(c.GlobalObjectId) && !goidToLogicalId.ContainsKey(c.GlobalObjectId))
-                        || representableComponents.Length > 0
-                        || nodes.Count(n => n.Name == node.Name) > 1;
-
-                    string newLogicalId;
-                    string? ownHandle = null;
-
-                    if (headsHandle)
-                    {
-                        ownHandle = HandleNaming.Derive(node.Name, reserved);
-                        reserved.Add(ownHandle);
-                        newLogicalId = ownHandle;
-                    }
-                    else
-                    {
-                        newLogicalId = LogicalIdResolver.Synthesize(parentHandle, node.Name, index);
-                    }
-
-                    edits.Add(new AppendStatement
-                    {
-                        NewLogicalId = newLogicalId,
-                        ParentAnchor = parentLogicalId,
-                        NewSiblingIndex = siblingIndex,
-                        Name = node.Name,
-                        Transform = node.Transform != new TransformData() ? node.Transform : null,
-                        Active = node.Active != true ? node.Active : null,
-                        Tag = node.Tag != "Untagged" ? node.Tag : null,
-                        Layer = node.Layer != 0 ? node.Layer : null,
-                        IsStatic = node.IsStatic != false ? node.IsStatic : null,
-                        Handle = ownHandle,
-                        ParentHandle = parentHandle,
-                        IntroduceParentHandle = introduceParentHandle,
-                    });
-
-                    addedEntries.Add(new IdentityMapEntry
-                    {
-                        LogicalId = newLogicalId,
-                        GlobalObjectId = node.GlobalObjectId,
-                        Kind = "GameObject",
-                        ParentLogicalId = parentHandle,
-                    });
-
-                    // §13 one-pass attach: the owner is mapped IN-MEMORY by the AddedEntry just
-                    // above, so its components attach in this same pass instead of waiting for a
-                    // 2nd Sync. Reuses ComponentReconciler's ADD-emission shape (same
-                    // `{owner}/{Type}#{ordinal}` id, same AppendComponentStatement + Component
-                    // AddedEntry) rather than reinventing it here.
-                    if (representableComponents.Length > 0)
-                    {
-                        var keys = ComponentReconciler.ComputeComponentKeys(representableComponents);
-                        for (var i = 0; i < representableComponents.Length; i++)
-                        {
-                            ComponentReconciler.EmitComponentAppend(
-                                newLogicalId,
-                                newLogicalId,
-                                keys[i].TypeFullName,
-                                keys[i].Ordinal,
-                                i,
-                                representableComponents[i].Fields,
-                                ownHandle,
-                                false,
-                                edits,
-                                addedEntries,
-                                addedAssets);
-                        }
-                    }
-
-                    DetectAppends(
-                        node.Children,
-                        headsHandle ? ownHandle : null,
-                        headsHandle,
-                        expected,
-                        goidToLogicalId,
-                        modelByLogicalId,
-                        logicalIdToGlobalObjectId,
-                        logicalIdToParentLogicalId,
-                        reserved,
-                        resolveOwnerHandle,
-                        nextIndexByParentKey,
-                        edits,
-                        addedEntries,
-                        removedLogicalIds,
-                        conflicts,
-                        addedAssets);
-
-                    continue;
-                }
-
-                DetectAppends(
-                    node.Children,
-                    null,
-                    false,
-                    expected,
-                    goidToLogicalId,
-                    modelByLogicalId,
-                    logicalIdToGlobalObjectId,
-                    logicalIdToParentLogicalId,
-                    reserved,
-                    resolveOwnerHandle,
-                    nextIndexByParentKey,
-                    edits,
-                    addedEntries,
-                    removedLogicalIds,
-                    conflicts,
-                    addedAssets);
-            }
         }
 
         // Symmetric to DetectAppends: walks the IdentityMap (code-side objects) looking for

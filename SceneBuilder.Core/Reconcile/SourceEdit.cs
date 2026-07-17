@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
@@ -141,6 +142,14 @@ namespace SceneBuilder.Core.Reconcile
         // SourceExpr.ValueNodeLiteral (b1-t1), matching AppendStatement's "structured-in, render-at-apply".
         public FieldMap Fields { get; init; } = FieldMap.Empty;
 
+        // b4-t3: pre-rendered ObjectRef expression overrides, keyed by field-key. null => no
+        // overrides (every field renders via SourceExpr.ValueNodeLiteral, unchanged). Mirrors
+        // PatchComponentField.NewExpr's pre-rendered-string pattern: SourceExpr stays a pure,
+        // context-free formatter with no ObjectRef arm, so anything context-dependent (a handle
+        // name) or side-effecting (an IntroduceHandle) is pre-rendered here at EMIT time, not
+        // apply time.
+        public IReadOnlyDictionary<string, string>? FieldExpressions { get; init; }
+
         // Receiver variable of the owner statement (existing handle, an introduced handle, or the
         // same-batch owner's Handle). null => resolved by applier. Mirrors AppendStatement.ParentHandle.
         public string? OwnerHandle { get; init; }
@@ -169,7 +178,13 @@ namespace SceneBuilder.Core.Reconcile
         // ComponentAnchors in b3-t2).
         public string FieldKey { get; init; } = "";
         // Unrendered value; applier renders via SourceExpr.ValueNodeLiteral, mirroring
-        // AppendComponentStatement's per-field rendering (both create new `.Set` calls).
+        // AppendComponentStatement's per-field rendering (both create new `.Set` calls) — used
+        // ONLY when NewExpr is null.
         public ValueNode Value { get; init; } = new ValueNode.Unsupported("");
+        // b4-t3: pre-rendered expression override (mirrors PatchComponentField.NewExpr /
+        // AppendComponentStatement.FieldExpressions). null => Value renders via
+        // SourceExpr.ValueNodeLiteral (the pure, context-free formatter, which has NO ObjectRef
+        // arm). Set at EMIT time for an ObjectRef field so the applier never has to render one.
+        public string? NewExpr { get; init; }
     }
 }

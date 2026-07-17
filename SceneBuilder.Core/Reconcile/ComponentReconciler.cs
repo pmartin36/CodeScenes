@@ -22,6 +22,18 @@ namespace SceneBuilder.Core.Reconcile
             IdentityMap identityMap,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans,
+            // b4-t2: two scene-derived membership sets, built ONCE by Reconciler and threaded through
+            // every call. sceneLiveTargets = "object exists in the current scene" (Detection 1, a
+            // deleted source target). resolvableTargets = "reference can be honored to a real object"
+            // (Detection 2, a phantom snapshot target) — a strict superset of sceneLiveTargets. See
+            // research.md b4-t2 for why the two predicates are NOT interchangeable.
+            ISet<string> sceneLiveTargets,
+            ISet<string> resolvableTargets,
+            // b4-t3: same-batch create-candidate identities (unmapped snapshot GlobalObjectIds —
+            // about to be mapped by DetectAppends THIS pass). A ref to one of these is PENDING, not
+            // dangling: it resolves on the guaranteed second Sync. Distinct address space from
+            // resolvableTargets (LogicalIds) — see Reconciler.cs pendingTargets build site.
+            ISet<string> pendingTargets,
             // Reconciler.ResolveOwnerHandle — the ONE handle-introduction path, shared with reparent
             // and child-append emission. Deriving a handle locally here instead produced a SECOND
             // name for an owner another edit had already named, and a second Introduce flag the
@@ -94,6 +106,16 @@ namespace SceneBuilder.Core.Reconcile
                     key.Ordinal,
                     i,
                     snapshotComps[i].Fields,
+                    resolveOwnerHandle,
+                    resolvableTargets,
+                    pendingTargets,
+                    conflicts,
+                    // b4-t3: this component is ALSO present in source at the same key precisely when
+                    // the FIELD-VALUE DIFF pass (4) below is ALSO about to run for it (the identical
+                    // sourceKeySet.Contains(key) test as `harvestSink` above) — that pass already
+                    // reports every dangling field of an in-source component, so this path must not
+                    // double-report. A genuinely-new object (DetectAppends) never has this overlap.
+                    reportUnresolvable: !sourceKeySet.Contains(key),
                     ownerHandle,
                     introduceOwnerHandle,
                     edits,
@@ -193,6 +215,39 @@ namespace SceneBuilder.Core.Reconcile
                             continue;
                         }
 
+                        // b4-t2 Detection 1: the source handle's target vanished from the scene (Unity
+                        // nulls the field when its referenced GameObject is deleted) -> a located
+                        // DanglingReference conflict, NEVER a silent NodeHandle.None patch. A target
+                        // that IS still live falls through to the ordinary None-patch below (legit clear).
+                        if (srcVal is ValueNode.ObjectRef(var srcTarget) && srcTarget != null
+                            && snapVal is ValueNode.ObjectRef(null)
+                            && !sceneLiveTargets.Contains(srcTarget))
+                        {
+                            conflicts.Add(ConflictDetector.DanglingReference(
+                                sourceComp.LogicalId, fieldKey, srcTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
+                        // b4-t2 Detection 2 (refactored b4-t3 onto the shared classifier): the
+                        // snapshot points at a target that resolves to nothing (no live map entry, no
+                        // model node, no known handle) -> a located DanglingReference conflict, never
+                        // a phantom-handle render. A same-batch create-candidate (not yet mapped,
+                        // about to be appended THIS pass) is PENDING, not dangling — suppress both the
+                        // patch and the conflict and converge quietly on the guaranteed second Sync.
+                        var fieldValueDiffResolution = ClassifySnapshotRef(snapVal, resolvableTargets, pendingTargets);
+                        if (fieldValueDiffResolution == RefResolution.Pending)
+                        {
+                            continue;
+                        }
+
+                        if (fieldValueDiffResolution == RefResolution.Dangling)
+                        {
+                            var danglingTarget = ((ValueNode.ObjectRef)snapVal).TargetLogicalId;
+                            conflicts.Add(ConflictDetector.DanglingReference(
+                                sourceComp.LogicalId, fieldKey, danglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
                         if (fieldArgumentSpans != null
                             && fieldArgumentSpans.TryGetValue(sourceComp.LogicalId, out var compSpans)
                             && compSpans.TryGetValue(fieldKey, out var valueSpan))
@@ -201,7 +256,7 @@ namespace SceneBuilder.Core.Reconcile
                             {
                                 Anchor = sourceComp.LogicalId,
                                 ValueSpan = valueSpan,
-                                NewExpr = SourceExpr.ValueNodeLiteral(snapVal),
+                                NewExpr = RenderFieldValue(snapVal, resolveOwnerHandle, edits),
                             });
 
                             CollectAssetEntries(snapVal, addedAssets);
@@ -218,18 +273,103 @@ namespace SceneBuilder.Core.Reconcile
                     }
                     else
                     {
-                        // Newly-detected field: present in snapshot, absent from source.
+                        // Newly-detected field: present in snapshot, absent from source. b4-t3
+                        // (Finding 1): an ObjectRef here must classify the same as Detection 2 above —
+                        // resolvable/null pre-renders a handle-aware NewExpr (the applier's
+                        // ValueNodeLiteral has no ObjectRef arm and would throw), pending defers
+                        // silently, dangling reports a located conflict and emits nothing.
+                        var introduceResolution = ClassifySnapshotRef(snapVal, resolvableTargets, pendingTargets);
+                        if (introduceResolution == RefResolution.Pending)
+                        {
+                            continue;
+                        }
+
+                        if (introduceResolution == RefResolution.Dangling)
+                        {
+                            var danglingTarget = ((ValueNode.ObjectRef)snapVal).TargetLogicalId;
+                            conflicts.Add(ConflictDetector.DanglingReference(
+                                sourceComp.LogicalId, fieldKey, danglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
                         edits.Add(new IntroduceComponentField
                         {
                             Anchor = sourceComp.LogicalId,
                             FieldKey = fieldKey,
                             Value = snapVal,
+                            NewExpr = introduceResolution == RefResolution.Resolvable
+                                ? RenderFieldValue(snapVal, resolveOwnerHandle, edits)
+                                : null,
                         });
 
                         CollectAssetEntries(snapVal, addedAssets);
                     }
                 }
             }
+        }
+
+        // b4-t3: the ONE place the liveness/pending/dangling decision for a snapshot ObjectRef is
+        // made — present-field Detection 2, the introduce-field branch, and the append loop all
+        // route through this instead of re-inlining `!resolvableTargets.Contains(...) /
+        // pendingTargets.Contains(...)` a fourth time.
+        private enum RefResolution { NotObjectRef, Resolvable, Pending, Dangling }
+
+        private static RefResolution ClassifySnapshotRef(
+            ValueNode snapVal, ISet<string> resolvableTargets, ISet<string> pendingTargets)
+        {
+            if (snapVal is not ValueNode.ObjectRef(var target))
+            {
+                return RefResolution.NotObjectRef;
+            }
+
+            if (target == null || resolvableTargets.Contains(target))
+            {
+                return RefResolution.Resolvable;
+            }
+
+            return pendingTargets.Contains(target) ? RefResolution.Pending : RefResolution.Dangling;
+        }
+
+        // b4-t2: the identical span lookup used by the span-based patch emission below, reused for a
+        // DanglingReference conflict's Location. Emitted even when the span is absent (returns null) —
+        // "never a silent null" outranks having a located span (research.md CLEANLINESS).
+        private static SourceSpan? DanglingFieldSpan(
+            string componentLogicalId,
+            string fieldKey,
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans) =>
+            fieldArgumentSpans != null
+                && fieldArgumentSpans.TryGetValue(componentLogicalId, out var compSpans)
+                && compSpans.TryGetValue(fieldKey, out var valueSpan)
+                ? valueSpan
+                : null;
+
+        // b4-t1: renders a changed field's replacement expression. SourceExpr.ValueNodeLiteral has
+        // no ObjectRef arm (it is a pure, context-free formatter) because rendering an ObjectRef is
+        // BOTH context-dependent (needs the handle table) and side-effecting (may need to introduce
+        // a handle on the target) — neither belongs in a pure formatter, so this intercepts
+        // ValueNode.ObjectRef before delegating everything else to ValueNodeLiteral unchanged.
+        private static string RenderFieldValue(
+            ValueNode value,
+            System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<SourceEdit> edits)
+        {
+            if (value is ValueNode.ObjectRef(var targetLogicalId))
+            {
+                if (targetLogicalId == null)
+                {
+                    return "NodeHandle.None";
+                }
+
+                var (handle, introduce) = resolveOwnerHandle(targetLogicalId);
+                if (introduce && handle != null)
+                {
+                    edits.Add(new IntroduceHandle { Anchor = targetLogicalId, Handle = handle });
+                }
+
+                return handle ?? targetLogicalId;
+            }
+
+            return SourceExpr.ValueNodeLiteral(value);
         }
 
         // §13 one-pass attach (b4-t1) reuses this for the just-appended owner: same
@@ -249,6 +389,22 @@ namespace SceneBuilder.Core.Reconcile
             // Distinct from `ordinal`, which counts only same-TYPED components and keys the id.
             int siblingIndex,
             FieldMap fields,
+            // b4-t3: reused verbatim from RenderFieldValue below — resolves/introduces a handle for
+            // an ObjectRef field's target. Side-effecting; called only for a field actually emitted.
+            System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            ISet<string> resolvableTargets,
+            // b4-t3: same-batch create-candidate identities — a field targeting one of these is
+            // PENDING, not dangling (converges on the guaranteed second Sync). Same set
+            // ReconcileComponents/ClassifySnapshotRef consult; not a second liveness notion.
+            ISet<string> pendingTargets,
+            // b4-t3: only appended to when `reportUnresolvable` — see below.
+            List<Conflict> conflicts,
+            // b4-t3: true only when this append has NO overlapping FIELD-VALUE DIFF pass to report a
+            // dangling field for it (a genuinely-new object, DetectAppends). False for the
+            // mapped-owner ADD-path call when the component is ALSO in source, because that overlap's
+            // dangling fields are already reported by Detection 2 / the introduce branch — reporting
+            // here too would double-report the SAME field.
+            bool reportUnresolvable,
             string? ownerHandle,
             bool introduceOwnerHandle,
             List<SourceEdit> edits,
@@ -257,13 +413,62 @@ namespace SceneBuilder.Core.Reconcile
         {
             var componentLogicalId = $"{ownerEffectiveId}/{typeFullName}#{ordinal}";
 
+            // b4-t3: pre-render every ObjectRef field's expression at EMIT time (mirroring
+            // RenderFieldValue's field-diff use below) instead of leaving it in Fields for
+            // SourceExpr.ValueNodeLiteral to throw on at apply time. `filteredFields` stays null
+            // (reuse `fields` unchanged) unless a field is actually dropped.
+            List<KeyValuePair<string, ValueNode>>? filteredFields = null;
+            Dictionary<string, string>? fieldExpressions = null;
+
+            for (var i = 0; i < fields.Count; i++)
+            {
+                var (fieldKey, value) = fields[i];
+                var resolution = ClassifySnapshotRef(value, resolvableTargets, pendingTargets);
+
+                if (resolution == RefResolution.Dangling)
+                {
+                    // Genuinely unknown THIS pass — never a bogus handle, never {fileID:0}, never a
+                    // thrown NotSupportedException. Omit the field; report it (never a permanent
+                    // silent null) unless the FIELD-VALUE DIFF pass already owns this component's
+                    // dangling report.
+                    filteredFields ??= new List<KeyValuePair<string, ValueNode>>(fields.Take(i));
+                    if (reportUnresolvable)
+                    {
+                        var targetId = ((ValueNode.ObjectRef)value).TargetLogicalId;
+                        conflicts.Add(ConflictDetector.DanglingReference(componentLogicalId, fieldKey, targetId, null));
+                    }
+
+                    continue;
+                }
+
+                if (resolution == RefResolution.Pending)
+                {
+                    // A same-batch create-candidate not yet mapped — omit and converge on the
+                    // guaranteed second Sync, by which point the target is mapped and the ref wires
+                    // through the ordinary FIELD-VALUE DIFF pass (b4-t1/b4-t3) as a ONE-OFF patch.
+                    filteredFields ??= new List<KeyValuePair<string, ValueNode>>(fields.Take(i));
+                    continue;
+                }
+
+                filteredFields?.Add(new KeyValuePair<string, ValueNode>(fieldKey, value));
+
+                if (value is ValueNode.ObjectRef)
+                {
+                    fieldExpressions ??= new Dictionary<string, string>();
+                    fieldExpressions[fieldKey] = RenderFieldValue(value, resolveOwnerHandle, edits);
+                }
+            }
+
+            var emittedFields = filteredFields != null ? new FieldMap(filteredFields) : fields;
+
             edits.Add(new AppendComponentStatement
             {
                 Anchor = ownerAnchor,
                 ComponentLogicalId = componentLogicalId,
                 TypeFullName = typeFullName,
                 NewSiblingIndex = siblingIndex,
-                Fields = fields,
+                Fields = emittedFields,
+                FieldExpressions = fieldExpressions,
                 OwnerHandle = ownerHandle,
                 IntroduceOwnerHandle = introduceOwnerHandle,
             });
@@ -279,7 +484,7 @@ namespace SceneBuilder.Core.Reconcile
 
             if (addedAssets != null)
             {
-                foreach (var (_, value) in fields)
+                foreach (var (_, value) in emittedFields)
                 {
                     CollectAssetEntries(value, addedAssets);
                 }

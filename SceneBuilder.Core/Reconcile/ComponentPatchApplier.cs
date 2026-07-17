@@ -103,14 +103,22 @@ namespace SceneBuilder.Core.Reconcile
                 return $"{call}();";
             }
 
+            // b4-t3: FieldExpressions carries a pre-rendered override for a field SourceExpr
+            // cannot format context-free (an ObjectRef handle argument) — consulted first, with
+            // ValueNodeLiteral as the unchanged fallback for every other field.
+            string Render(string key, ValueNode value) =>
+                edit.FieldExpressions != null && edit.FieldExpressions.TryGetValue(key, out var expr)
+                    ? expr
+                    : SourceExpr.ValueNodeLiteral(value);
+
             if (edit.Fields.Count == 1)
             {
                 var (key, value) = edit.Fields[0];
-                return $"{call}(c => c.Set({SourceExpr.StringLiteral(key)}, {SourceExpr.ValueNodeLiteral(value)}));";
+                return $"{call}(c => c.Set({SourceExpr.StringLiteral(key)}, {Render(key, value)}));";
             }
 
             var sets = string.Join(" ", edit.Fields.Select(kv =>
-                $"c.Set({SourceExpr.StringLiteral(kv.Key)}, {SourceExpr.ValueNodeLiteral(kv.Value)});"));
+                $"c.Set({SourceExpr.StringLiteral(kv.Key)}, {Render(kv.Key, kv.Value)});"));
             return $"{call}(c => {{ {sets} }});";
         }
 
@@ -152,13 +160,18 @@ namespace SceneBuilder.Core.Reconcile
             var invocation = FindComponentInvocation(root, anchors, edit.Anchor);
             var arguments = invocation.ArgumentList.Arguments;
 
+            // b4-t3: pre-rendered ObjectRef override (mirrors AppendComponentStatement.FieldExpressions'
+            // pattern) — SourceExpr.ValueNodeLiteral has no ObjectRef arm and stays pure/context-free,
+            // so anything context-dependent or side-effecting is pre-rendered at EMIT time.
+            var valueExpr = edit.NewExpr ?? SourceExpr.ValueNodeLiteral(edit.Value);
+
             if (arguments.Count == 0)
             {
                 allTargets.Add(invocation);
                 appliers.Add(currentRoot =>
                 {
                     var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(invocation)!;
-                    var lambdaText = $"c => {BuildSetCallText("c", edit.FieldKey, edit.Value)}";
+                    var lambdaText = $"c => {BuildSetCallText("c", edit.FieldKey, valueExpr)}";
                     var lambdaArg = SyntaxFactory.Argument(SyntaxFactory.ParseExpression(lambdaText));
                     var newArgList = SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(lambdaArg));
                     return currentRoot.ReplaceNode(current, current.WithArgumentList(newArgList));
@@ -181,7 +194,7 @@ namespace SceneBuilder.Core.Reconcile
                 if (currentLambda.Body is BlockSyntax block)
                 {
                     var indent = block.Statements.Count > 0 ? IndentOf(block.Statements[0]) : IndentOf(block) + "    ";
-                    var newStatement = SyntaxFactory.ParseStatement($"{BuildSetCallText(receiver, edit.FieldKey, edit.Value)};")
+                    var newStatement = SyntaxFactory.ParseStatement($"{BuildSetCallText(receiver, edit.FieldKey, valueExpr)};")
                         .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
                         .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
                     var newBlock = block.AddStatements(newStatement);
@@ -190,7 +203,7 @@ namespace SceneBuilder.Core.Reconcile
 
                 var exprBody = (ExpressionSyntax)currentLambda.Body;
                 var originalText = exprBody.WithoutTrivia().ToFullString();
-                var newSetText = BuildSetCallText(receiver, edit.FieldKey, edit.Value);
+                var newSetText = BuildSetCallText(receiver, edit.FieldKey, valueExpr);
                 var blockText = $"{{ {originalText}; {newSetText}; }}";
                 var newLambda = (SimpleLambdaExpressionSyntax)SyntaxFactory.ParseExpression($"{receiver} => {blockText}")
                     .WithTriviaFrom(currentLambda);
@@ -199,9 +212,9 @@ namespace SceneBuilder.Core.Reconcile
             });
         }
 
-        private static string BuildSetCallText(string receiver, string fieldKey, ValueNode value)
+        private static string BuildSetCallText(string receiver, string fieldKey, string valueExpr)
         {
-            return $"{receiver}.Set({SourceExpr.StringLiteral(fieldKey)}, {SourceExpr.ValueNodeLiteral(value)})";
+            return $"{receiver}.Set({SourceExpr.StringLiteral(fieldKey)}, {valueExpr})";
         }
 
         // ---- Component-aware anchor resolution (b3-t2) ---------------------------------------

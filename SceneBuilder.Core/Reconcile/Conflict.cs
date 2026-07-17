@@ -5,7 +5,10 @@ namespace SceneBuilder.Core.Reconcile
         AmbiguousAnchor,
         MissingSourceAnchor,
         ReferencedHandle,
-        DuplicateLogicalId
+        DuplicateLogicalId,
+        // A source handle's target vanished from the scene (Detection 1), or a snapshot target
+        // resolves to nothing live (Detection 2) — see ComponentReconciler's FIELD-VALUE DIFF pass.
+        DanglingReference
     }
 
     public sealed record Conflict
