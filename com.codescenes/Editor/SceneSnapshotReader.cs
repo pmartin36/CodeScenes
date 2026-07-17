@@ -19,30 +19,40 @@ namespace SceneBuilder.Editor
         private static readonly Func<GameObject, string> DefaultResolver =
             go => GlobalObjectId.GetGlobalObjectIdSlow(go).ToString();
 
-        public static SceneSnapshot Read(Scene scene) => Read(scene, DefaultResolver);
+        public static SceneSnapshot Read(Scene scene) => Read(scene, DefaultResolver, resolveSceneRef: null);
 
-        public static SceneSnapshot Read(Scene scene, Func<GameObject, string> resolveId)
+        /// <summary>
+        /// Cold read with a scene-object identity resolver (M5, see
+        /// <see cref="ObjectReferenceResolver.BuildSceneRefResolver"/>) threaded to every
+        /// object-reference field — the sync-cold read path. <paramref name="resolveSceneRef"/> null
+        /// (the default, build-path <see cref="Read(Scene)"/> overload) leaves scene-object refs
+        /// Unsupported, M4-preserved.
+        /// </summary>
+        public static SceneSnapshot Read(Scene scene, Func<UnityEngine.Object, string?>? resolveSceneRef) =>
+            Read(scene, DefaultResolver, resolveSceneRef);
+
+        private static SceneSnapshot Read(Scene scene, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var roots = new List<SnapshotNode>();
             foreach (var go in scene.GetRootGameObjects())
             {
-                roots.Add(ReadNode(go, resolveId));
+                roots.Add(ReadNode(go, resolveId, resolveSceneRef));
             }
 
             return new SceneSnapshot { SchemaVersion = 1, Roots = roots.ToArray() };
         }
 
-        internal static SnapshotNode ReadNode(GameObject go, Func<GameObject, string> resolveId)
+        internal static SnapshotNode ReadNode(GameObject go, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var t = go.transform;
 
             var children = new SnapshotNode[t.childCount];
             for (var i = 0; i < t.childCount; i++)
             {
-                children[i] = ReadNode(t.GetChild(i).gameObject, resolveId);
+                children[i] = ReadNode(t.GetChild(i).gameObject, resolveId, resolveSceneRef);
             }
 
-            return ReadNodeShallow(go, children, resolveId);
+            return ReadNodeShallow(go, children, resolveId, resolveSceneRef);
         }
 
         /// <summary>
@@ -50,8 +60,11 @@ namespace SceneBuilder.Editor
         /// resolved id) from already-built <paramref name="children"/>. The ONE place components and
         /// the id are read — shared by the cold walk (<see cref="ReadNode"/>) and by
         /// <see cref="ChangeScopedSnapshot"/>'s incremental rebuild of dirty nodes.
+        /// <paramref name="resolveSceneRef"/> is REQUIRED (not defaulted) so every caller — including
+        /// <see cref="ChangeScopedSnapshot"/> — must explicitly decide whether object-reference fields
+        /// resolve to scene identity (M5) or stay Unsupported (build path: pass null).
         /// </summary>
-        internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<GameObject, string> resolveId)
+        internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var t = go.transform;
             var lp = t.localPosition;
@@ -68,7 +81,7 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                components.Add(SerializedFieldBridge.ReadComponent(component));
+                components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef));
             }
 
             return new SnapshotNode

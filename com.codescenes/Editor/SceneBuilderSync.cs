@@ -150,7 +150,12 @@ namespace SceneBuilder.Editor
             var desired = loaded.Desired;
             var fieldArgumentSpans = loaded.FieldArgumentSpans;
 
-            var snapshot = preAssembledSnapshot ?? SceneSnapshotReader.Read(scene);
+            // M5: reverse-map a live scene-object reference to its LogicalId (or raw GlobalObjectId
+            // when not yet mapped) — built once per sync from the IdentityMap, used only for the cold
+            // read (a preAssembledSnapshot, e.g. auto-sync's ChangeScopedSnapshot, carries its own
+            // resolver set by the caller).
+            var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
+            var snapshot = preAssembledSnapshot ?? SceneSnapshotReader.Read(scene, sceneRef);
 
             var result = Reconciler.Reconcile(
                 desired,

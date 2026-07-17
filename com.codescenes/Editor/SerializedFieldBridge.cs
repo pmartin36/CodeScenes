@@ -40,9 +40,9 @@ namespace SceneBuilder.Editor
 
         // ---- Read (component -> ComponentData) ---------------------------------------------
 
-        public static ComponentData ReadComponent(Component component)
+        public static ComponentData ReadComponent(Component component, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
-            var fields = CollectFields(new SerializedObject(component));
+            var fields = CollectFields(new SerializedObject(component), resolveSceneRef);
             var defaults = GetDefaultFieldMap(component.GetType());
 
             var kept = new List<KeyValuePair<string, ValueNode>>(fields.Count);
@@ -98,7 +98,7 @@ namespace SceneBuilder.Editor
         // Collects the supported, non-bookkeeping top-level serialized fields of a component as
         // (propertyPath -> ValueNode) pairs. Shared by the real-component read path and the
         // default-reference builder so both filter identically.
-        private static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so)
+        private static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
@@ -112,7 +112,7 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                var value = ReadProperty(it.Copy());
+                var value = ReadProperty(it.Copy(), resolveSceneRef);
 
                 // Field types M3 cannot represent — object/asset references (mesh, material, physics
                 // material) and LayerMask are M4+ — are SKIPPED, never written. Emitting them would
@@ -188,7 +188,7 @@ namespace SceneBuilder.Editor
             return map;
         }
 
-        private static ValueNode ReadProperty(SerializedProperty p)
+        private static ValueNode ReadProperty(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
             switch (p.propertyType)
             {
@@ -232,13 +232,15 @@ namespace SceneBuilder.Editor
                     return new ValueNode.Color(new CoreColor(c.r, c.g, c.b, c.a));
                 }
                 case SerializedPropertyType.Generic:
-                    return p.isArray ? ReadList(p) : ReadNested(p);
+                    return p.isArray ? ReadList(p, resolveSceneRef) : ReadNested(p, resolveSceneRef);
                 case SerializedPropertyType.ObjectReference:
                     // M4: an object-reference field pointing at a project asset becomes a
-                    // ValueNode.AssetRef (populated), a null asset field becomes AssetRef(null) (None),
-                    // and a scene-object reference stays Unsupported (M5). Replaces the old blanket
-                    // "object refs are unsupported" skip for asset-pointing refs.
-                    return AssetReferenceResolver.ReadObjectReference(p);
+                    // ValueNode.AssetRef (populated), a null asset field becomes AssetRef(null) (None).
+                    // M5: a scene-object reference becomes a ValueNode.ObjectRef (resolved via
+                    // resolveSceneRef when supplied), and a null GameObject/Component-typed field
+                    // becomes ObjectRef(null). Replaces the old blanket "object refs are unsupported"
+                    // skip for asset-pointing refs.
+                    return AssetReferenceResolver.ReadObjectReference(p, resolveSceneRef);
                 default:
                     return new ValueNode.Unsupported(p.propertyType.ToString());
             }
@@ -276,18 +278,18 @@ namespace SceneBuilder.Editor
             return new ValueNode.Enum(type.FullName ?? type.Name, new[] { member }, false);
         }
 
-        private static ValueNode ReadList(SerializedProperty p)
+        private static ValueNode ReadList(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
             var items = new List<ValueNode>(p.arraySize);
             for (var i = 0; i < p.arraySize; i++)
             {
-                items.Add(ReadProperty(p.GetArrayElementAtIndex(i).Copy()));
+                items.Add(ReadProperty(p.GetArrayElementAtIndex(i).Copy(), resolveSceneRef));
             }
 
             return new ValueNode.List(items);
         }
 
-        private static ValueNode ReadNested(SerializedProperty p)
+        private static ValueNode ReadNested(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var it = p.Copy();
@@ -299,7 +301,7 @@ namespace SceneBuilder.Editor
                 enterChildren = false;
                 if (it.depth == childDepth)
                 {
-                    fields.Add(new KeyValuePair<string, ValueNode>(it.name, ReadProperty(it.Copy())));
+                    fields.Add(new KeyValuePair<string, ValueNode>(it.name, ReadProperty(it.Copy(), resolveSceneRef)));
                 }
             }
 

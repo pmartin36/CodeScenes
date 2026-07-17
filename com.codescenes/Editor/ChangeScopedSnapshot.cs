@@ -19,6 +19,15 @@ namespace SceneBuilder.Editor
         /// <summary>The identity cache backing every id resolve this assembler performs — the counting seam.</summary>
         public GlobalObjectIdCache Ids { get; } = new GlobalObjectIdCache();
 
+        /// <summary>
+        /// The M5 scene-object identity resolver (see
+        /// <see cref="ObjectReferenceResolver.BuildSceneRefResolver"/>) threaded into every
+        /// object-reference field read by this assemble. Null (the default) leaves scene-object refs
+        /// Unsupported — set by <see cref="SceneBuilderAutoSync"/> from the loaded IdentityMap before
+        /// assembling a snapshot feeding a sync-back read.
+        /// </summary>
+        public System.Func<UnityEngine.Object, string?>? SceneRefResolver { get; set; }
+
         private Dictionary<EntityId, SnapshotNode>? _nodeByGoEntityId;
 
         /// <summary>Full re-walk, warming <see cref="Ids"/> via one batch call. Establishes the baseline for future incremental assembles.</summary>
@@ -31,7 +40,7 @@ namespace SceneBuilder.Editor
 
             SnapshotNode BuildNode(GameObject go)
             {
-                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve);
+                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve, SceneRefResolver);
                 CacheDescendants(go, node, nodeByGoEntityId);
                 return node;
             }
@@ -93,7 +102,7 @@ namespace SceneBuilder.Editor
                 SnapshotNode node;
                 if (changedGo.Contains(entityId) || !priorNodes.TryGetValue(entityId, out var cached))
                 {
-                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve);
+                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve, SceneRefResolver);
                 }
                 else
                 {

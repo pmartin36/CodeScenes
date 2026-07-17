@@ -24,7 +24,8 @@ namespace SceneBuilder.Editor
     /// <item><see cref="ReadObjectReference"/> — an object-reference field pointing at a project asset
     /// → <c>ValueNode.AssetRef</c> with the re-derived <c>DisplayPath</c>; a built-in resource →
     /// <see cref="ReadBuiltinRef"/>; a null asset field → the None inhabitant <c>AssetRef(null)</c>; a
-    /// scene-object reference stays Unsupported (M5).</item>
+    /// scene-object reference → <c>ValueNode.ObjectRef</c> (M5, via an injected identity resolver; a
+    /// null GameObject/Component-typed field → <c>ObjectRef(null)</c>).</item>
     /// </list>
     /// FileId is taken from <see cref="AssetDatabase.TryGetGUIDAndLocalFileIdentifier(UnityEngine.Object, out string, out long)"/>
     /// on BOTH the write (via the main asset) and read sides, so the two directions agree on identity
@@ -230,24 +231,37 @@ namespace SceneBuilder.Editor
 
         /// <summary>
         /// Reads an object-reference <see cref="SerializedProperty"/> into a Core <see cref="ValueNode"/>:
-        /// a null field → <c>AssetRef(null)</c> (None); an asset reference → a populated
-        /// <c>ValueNode.AssetRef</c> (GUID/FileId/TypeHint + re-derived DisplayPath); a scene-object
-        /// reference → <c>Unsupported</c> (M5, still skipped by the bridge).
+        /// a null field → <c>AssetRef(null)</c> (None) for an asset-typed field, or
+        /// <c>ObjectRef(null)</c> for a GameObject/Component-typed field (M5); an asset reference → a
+        /// populated <c>ValueNode.AssetRef</c> (GUID/FileId/TypeHint + re-derived DisplayPath); a
+        /// scene-object reference → <c>ValueNode.ObjectRef</c> resolved via
+        /// <paramref name="resolveSceneRef"/> (M5) when supplied, else <c>Unsupported</c> (build path,
+        /// M4-preserved — build never reads scene refs, only writes them via <c>SetReference</c>).
         /// </summary>
-        public static ValueNode ReadObjectReference(SerializedProperty p)
+        public static ValueNode ReadObjectReference(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
             var obj = p.objectReferenceValue;
             if (obj == null)
             {
-                // None / cleared — the null inhabitant of ValueNode.AssetRef, NOT an error, NOT skipped.
-                return new ValueNode.AssetRef(null);
+                // None / cleared. A GameObject/Component-typed field's None is ObjectRef(null) (M5); an
+                // asset-typed field's None is the null inhabitant of ValueNode.AssetRef (M4, unchanged).
+                return ObjectReferenceResolver.IsSceneObjectField(p)
+                    ? new ValueNode.ObjectRef(null)
+                    : new ValueNode.AssetRef(null);
             }
 
-            // A reference to a scene GameObject/Component (not a project asset) is M5 — leave it
-            // Unsupported so the bridge skips it exactly as it did pre-M4.
+            // A reference to a scene GameObject/Component (not a project asset) resolves via the
+            // injected identity resolver (M5) when one was supplied; otherwise (the build read path,
+            // which never consumes scene refs) it stays Unsupported exactly as pre-M5.
             if (!AssetDatabase.Contains(obj))
             {
-                return new ValueNode.Unsupported("ObjectReference");
+                if (resolveSceneRef == null)
+                {
+                    return new ValueNode.Unsupported("ObjectReference");
+                }
+
+                var id = resolveSceneRef(obj);
+                return id != null ? new ValueNode.ObjectRef(id) : new ValueNode.Unsupported("ObjectReference");
             }
 
             if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(obj, out var guid, out var fileId)
@@ -380,7 +394,8 @@ namespace SceneBuilder.Editor
 
         // Resolves an ordinary property path OR an array element path (`name[index]`), sizing the array
         // up to include the index so a materialize into a shorter (or empty) live array still lands.
-        private static SerializedProperty? FindOrCreateProperty(SerializedObject so, string path)
+        // internal: also reused by ObjectReferenceResolver (M5) for the same array-aware lookup.
+        internal static SerializedProperty? FindOrCreateProperty(SerializedObject so, string path)
         {
             var bracket = path.LastIndexOf('[');
             if (bracket < 0 || !path.EndsWith("]", StringComparison.Ordinal))

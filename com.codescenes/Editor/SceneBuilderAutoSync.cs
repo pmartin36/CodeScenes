@@ -425,9 +425,10 @@ namespace SceneBuilder.Editor
                 return; // nothing to sync back into
             }
 
+            var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+
             if (!string.IsNullOrEmpty(scene.path) && ids.Count > 0)
             {
-                var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
                 if (NeedsSaveForDurableId(ids, map))
                 {
                     using (SuppressionScope.SuppressScene())
@@ -438,6 +439,9 @@ namespace SceneBuilder.Editor
             }
 
             _snapshotAssembler ??= new ChangeScopedSnapshot();
+            // M5: resolve live scene-object reference fields to LogicalId (mapped) / raw GlobalObjectId
+            // (unmapped) — the reconcile-feeding incremental read path, mirroring the cold Sync path.
+            _snapshotAssembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
             var snapshot = ids.Count == 0
                 ? _snapshotAssembler.AssembleCold(scene)          // sceneSaved catch-all
                 : _snapshotAssembler.AssembleIncremental(scene, ids);
@@ -565,6 +569,19 @@ namespace SceneBuilder.Editor
 
             BaselineSource = File.ReadAllText(builderPath);
             _snapshotAssembler ??= new ChangeScopedSnapshot();
+
+            // M5: resolve live scene-object reference fields the same way the reconcile-feeding reads
+            // do, so a baseline ObjectRef agrees with the field-diff (ExecuteBothChanged) that compares
+            // against it. No sidecar yet -> resolver stays whatever it was (an ObjectRef read as
+            // Unsupported is harmless here: the baseline is only used for desired-vs-desired code diffs
+            // and scene-vs-baseline field attribution, never written back).
+            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
+            if (File.Exists(sidecarPath))
+            {
+                var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+                _snapshotAssembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
+            }
+
             BaselineSnapshot = _snapshotAssembler.AssembleCold(scene);
         }
 
@@ -603,6 +620,10 @@ namespace SceneBuilder.Editor
             }
 
             _snapshotAssembler ??= new ChangeScopedSnapshot();
+            // M5: same reverse-map every reconcile-feeding read applies, so the live snapshot's
+            // ObjectRefs agree with the baseline's for unchanged fields (idempotent field attribution).
+            var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+            _snapshotAssembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
             var liveSnapshot = ids.Count == 0
                 ? _snapshotAssembler.AssembleCold(scene)
                 : _snapshotAssembler.AssembleIncremental(scene, ids);
