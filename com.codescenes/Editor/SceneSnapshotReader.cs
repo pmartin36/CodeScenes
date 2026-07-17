@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -9,30 +10,50 @@ namespace SceneBuilder.Editor
     /// <summary>
     /// Reads the live scene into a Core <see cref="SceneSnapshot"/>, stamping every object with its
     /// durable <see cref="GlobalObjectId"/> — the identity the reconciler keys on to know what changed.
+    /// The node-construction body is shared (via <see cref="ReadNodeShallow"/>) with
+    /// <see cref="ChangeScopedSnapshot"/> so cold and incremental assembly are byte-identical by
+    /// construction.
     /// </summary>
     public static class SceneSnapshotReader
     {
-        public static SceneSnapshot Read(Scene scene)
+        private static readonly Func<GameObject, string> DefaultResolver =
+            go => GlobalObjectId.GetGlobalObjectIdSlow(go).ToString();
+
+        public static SceneSnapshot Read(Scene scene) => Read(scene, DefaultResolver);
+
+        public static SceneSnapshot Read(Scene scene, Func<GameObject, string> resolveId)
         {
             var roots = new List<SnapshotNode>();
             foreach (var go in scene.GetRootGameObjects())
             {
-                roots.Add(ReadNode(go));
+                roots.Add(ReadNode(go, resolveId));
             }
 
             return new SceneSnapshot { SchemaVersion = 1, Roots = roots.ToArray() };
         }
 
-        private static SnapshotNode ReadNode(GameObject go)
+        internal static SnapshotNode ReadNode(GameObject go, Func<GameObject, string> resolveId)
         {
             var t = go.transform;
 
-            var children = new List<SnapshotNode>(t.childCount);
+            var children = new SnapshotNode[t.childCount];
             for (var i = 0; i < t.childCount; i++)
             {
-                children.Add(ReadNode(t.GetChild(i).gameObject));
+                children[i] = ReadNode(t.GetChild(i).gameObject, resolveId);
             }
 
+            return ReadNodeShallow(go, children, resolveId);
+        }
+
+        /// <summary>
+        /// Builds a single node's own fields (name/tag/layer/active/isStatic/transform/components +
+        /// resolved id) from already-built <paramref name="children"/>. The ONE place components and
+        /// the id are read — shared by the cold walk (<see cref="ReadNode"/>) and by
+        /// <see cref="ChangeScopedSnapshot"/>'s incremental rebuild of dirty nodes.
+        /// </summary>
+        internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<GameObject, string> resolveId)
+        {
+            var t = go.transform;
             var lp = t.localPosition;
             var lr = t.localRotation;
             var ls = t.localScale;
@@ -52,7 +73,7 @@ namespace SceneBuilder.Editor
 
             return new SnapshotNode
             {
-                GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(go).ToString(),
+                GlobalObjectId = resolveId(go),
                 Name = go.name,
                 Tag = go.tag,
                 Layer = go.layer,
@@ -66,7 +87,7 @@ namespace SceneBuilder.Editor
                     Scale = new Vec3(ls.x, ls.y, ls.z),
                 },
                 Components = components.ToArray(),
-                Children = children.ToArray(),
+                Children = children,
             };
         }
     }
