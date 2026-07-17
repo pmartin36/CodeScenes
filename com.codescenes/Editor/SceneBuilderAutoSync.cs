@@ -29,6 +29,12 @@ namespace SceneBuilder.Editor
             // re-arm) auto-syncs with real logic by default — no manual wiring on the happy path.
             WireDefaultExecutors();
 
+            // Play-mode gate (b7-t1, checklist #12): subscribe once, idempotently, bound to the
+            // class lifecycle (not Arm/Disarm) so the handler stays live while disarmed and can
+            // re-arm on EnteredEditMode.
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+
             // Domain-reload survival: static ctor re-runs on every reload and re-arms iff the
             // persisted master toggle is on (SceneBuilderAutoToggle.Enabled defaults true).
             ApplyToggleState();
@@ -74,7 +80,7 @@ namespace SceneBuilder.Editor
         /// <summary>Arm iff the persisted master toggle is on; else disarm. Domain-reload survival + menu-flip wiring.</summary>
         public static void ApplyToggleState()
         {
-            if (SceneBuilderAutoToggle.Enabled)
+            if (SceneBuilderAutoToggle.Enabled && !EditorApplication.isPlayingOrWillChangePlaymode)
             {
                 Arm();
             }
@@ -109,6 +115,24 @@ namespace SceneBuilder.Editor
             StopWatcher();
 
             IsArmed = false;
+        }
+
+        /// <summary>
+        /// Play-mode gate (b7-t1, spec checklist #12): disarm on entering Play (no scene-edit
+        /// cycles run while playing) and re-arm on returning to Edit mode iff the persisted
+        /// master toggle is still on (toggle state survives the round trip).
+        /// </summary>
+        internal static void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            switch (state)
+            {
+                case PlayModeStateChange.EnteredPlayMode:
+                    Disarm();
+                    break;
+                case PlayModeStateChange.EnteredEditMode:
+                    ApplyToggleState();
+                    break;
+            }
         }
 
         private static void StartWatcher()
