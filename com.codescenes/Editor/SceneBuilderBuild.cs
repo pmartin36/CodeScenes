@@ -139,10 +139,14 @@ namespace SceneBuilder.Editor
 
             var plan = Materializer.Materialize(desired, snapshot, remapped);
 
-            var execution = PlanExecutor.Execute(plan, remapped, scene);
+            PlanExecutor.ExecutionResult execution;
+            using (SuppressionScope.SuppressScene())
+            {
+                execution = PlanExecutor.Execute(plan, remapped, scene);
 
-            EditorSceneManager.MarkSceneDirty(scene);
-            EditorSceneManager.SaveScene(scene, scenePath);
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene, scenePath);
+            }
 
             // Persist the CURRENT code structure only (drop destroyed orphans), carrying the
             // remapped fingerprint (Name+SiblingIndex) and inherited GlobalObjectIds, then stamp

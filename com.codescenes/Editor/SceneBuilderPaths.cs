@@ -66,6 +66,7 @@ namespace SceneBuilder.Editor
             }
 
             File.WriteAllText(path, contents);
+            SuppressionScope.RecordWrite(path, SuppressionScope.ComputeContentHash(contents));
             return true;
         }
     }
