@@ -140,6 +140,15 @@ namespace SceneBuilder.Core.Materialize
                     });
                 }
             }
+            else if (value is ValueNode.ObjectRef objectRef)
+            {
+                passB.Add(new SetReference
+                {
+                    LogicalId = logicalId,
+                    Path = path,
+                    TargetLogicalId = objectRef.TargetLogicalId,
+                });
+            }
             else if (value is ValueNode.List list && list.Items.Count > 0 && list.Items.All(item => item is ValueNode.AssetRef))
             {
                 for (var i = 0; i < list.Items.Count; i++)
