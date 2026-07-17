@@ -11,6 +11,9 @@ namespace SceneBuilder.Authoring
     /// </remarks>
     public sealed class NodeHandle
     {
+        /// <summary>The cleared/no-target sentinel for a <see cref="NodeHandle"/> reference field.</summary>
+        public static readonly NodeHandle None = new NodeHandle();
+
         /// <summary>Add a child GameObject.</summary>
         public NodeHandle Add(string name) => new NodeHandle();
 

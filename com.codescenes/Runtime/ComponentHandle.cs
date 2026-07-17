@@ -25,5 +25,11 @@ namespace SceneBuilder.Authoring
         /// return type is the asset type; the value is the <see cref="AssetReference"/> factory result.
         /// </summary>
         public ComponentHandle<T> Set<TValue>(Func<T, TValue> selector, AssetReference asset) => this;
+
+        /// <summary>
+        /// Set a cross-object-reference field by typed member selector, e.g.
+        /// <c>c.Set(r =&gt; r.target, door)</c>. Pass <see cref="NodeHandle.None"/> to clear the slot.
+        /// </summary>
+        public ComponentHandle<T> Set<TValue>(Func<T, TValue> selector, NodeHandle target) => this;
     }
 }

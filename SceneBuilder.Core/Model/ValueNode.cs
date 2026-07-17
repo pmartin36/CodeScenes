@@ -22,6 +22,7 @@ namespace SceneBuilder.Core.Model
     [JsonDerivedType(typeof(ValueNode.List), "List")]
     [JsonDerivedType(typeof(ValueNode.Unsupported), "Unsupported")]
     [JsonDerivedType(typeof(ValueNode.AssetRef), "AssetRef")]
+    [JsonDerivedType(typeof(ValueNode.ObjectRef), "ObjectRef")]
     public abstract record ValueNode
     {
         public sealed record Primitive(
@@ -93,5 +94,9 @@ namespace SceneBuilder.Core.Model
         // Default record equality is correct: delegates to AssetRef.Equals through
         // EqualityComparer<AssetRef?>.Default (null-safe).
         public sealed record AssetRef(global::SceneBuilder.Core.Model.AssetRef? Ref) : ValueNode;
+
+        // Default record equality is correct: string? TargetLogicalId compared ordinal +
+        // null-safe (both-null == equal), per spec §64-68. No custom Equals.
+        public sealed record ObjectRef(string? TargetLogicalId) : ValueNode;
     }
 }

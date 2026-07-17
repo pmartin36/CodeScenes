@@ -89,4 +89,14 @@ namespace SceneBuilder.Core.Plan
         [JsonPropertyOrder(3)]
         public long FileId { get; init; }
     }
+
+    public sealed record SetReference : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public string Path { get; init; } = "";
+
+        // null/empty => clear-slot form
+        [JsonPropertyOrder(2)]
+        public string? TargetLogicalId { get; init; }
+    }
 }
