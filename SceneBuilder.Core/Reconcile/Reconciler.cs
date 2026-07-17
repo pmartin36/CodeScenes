@@ -260,7 +260,8 @@ namespace SceneBuilder.Core.Reconcile
                     case SetTransform:
                         if (modelByLogicalId.TryGetValue(op.LogicalId, out var modelNode))
                         {
-                            edits.AddRange(TransformEdits(op.LogicalId, modelNode.Transform, entry.Node.Transform));
+                            var masked = MaskDriven(modelNode.Transform, entry.Node.Transform);
+                            edits.AddRange(TransformEdits(op.LogicalId, modelNode.Transform, masked));
                         }
 
                         break;
@@ -784,6 +785,29 @@ namespace SceneBuilder.Core.Reconcile
             {
                 yield return new PatchArgument { Anchor = logicalId, ArgName = "scale", NewExpr = snapshotScale };
             }
+        }
+
+        // b4-t2: driven axes never sync scene->source: hold the source model's value on each driven
+        // axis so it cannot differ, while free axes still reflect the scene. snapshot.DrivenChannels
+        // is enabled-coupled (b6); default None returns the snapshot unchanged for every non-spatial
+        // node.
+        private static TransformData MaskDriven(TransformData model, TransformData snapshot)
+        {
+            var d = snapshot.DrivenChannels;
+            if (d == ChannelMask.None)
+            {
+                return snapshot;
+            }
+
+            var pos = new Vec3(
+                (d & ChannelMask.PositionX) != 0 ? model.Position.X : snapshot.Position.X,
+                (d & ChannelMask.PositionY) != 0 ? model.Position.Y : snapshot.Position.Y,
+                (d & ChannelMask.PositionZ) != 0 ? model.Position.Z : snapshot.Position.Z);
+            var scale = new Vec3(
+                (d & ChannelMask.ScaleX) != 0 ? model.Scale.X : snapshot.Scale.X,
+                (d & ChannelMask.ScaleY) != 0 ? model.Scale.Y : snapshot.Scale.Y,
+                (d & ChannelMask.ScaleZ) != 0 ? model.Scale.Z : snapshot.Scale.Z);
+            return snapshot with { Position = pos, Scale = scale };
         }
 
         private static void FlattenSnapshot(SnapshotNode[] nodes, string? parentGoid, Dictionary<string, SnapshotEntry> snapshotByGoid)

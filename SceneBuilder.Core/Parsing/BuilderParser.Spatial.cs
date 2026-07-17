@@ -85,7 +85,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             node.Components.Add(cb);
-            node.DrivenChannels |= ChannelMask.Scale;
+            node.DrivenChannels |= SpatialComponents.SizerMask;
         }
 
         // Scalar field: reuse ValueNodeParser, then coerce any numeric primitive to Float
@@ -196,21 +196,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             node.Components.Add(cb);
-
-            if (left || right)
-            {
-                node.DrivenChannels |= ChannelMask.PositionX;
-            }
-
-            if (up || down)
-            {
-                node.DrivenChannels |= ChannelMask.PositionY;
-            }
-
-            if (forward || back)
-            {
-                node.DrivenChannels |= ChannelMask.PositionZ;
-            }
+            node.DrivenChannels |= SpatialComponents.SnapperMask(up, down, left, right, forward, back);
         }
 
         // A bool axis flag: a literal `true` is stored `Bool(true)` and marks the axis SET (drives + contradiction).

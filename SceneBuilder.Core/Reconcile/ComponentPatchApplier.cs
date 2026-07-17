@@ -96,6 +96,14 @@ namespace SceneBuilder.Core.Reconcile
 
         private static string BuildComponentStatementText(AppendComponentStatement edit, string receiver)
         {
+            // b4-t1: Sizer/Snapper always render as their dedicated fluent call — never the
+            // generic .Component<T> form, which would fail to stamp TransformData.DrivenChannels
+            // on re-parse and defeat b3 driven-suppression.
+            if (SpatialComponentSource.IsSpatial(edit.TypeFullName))
+            {
+                return SpatialComponentSource.RenderStatement(receiver, edit.TypeFullName, edit.Fields, edit.FieldExpressions);
+            }
+
             var call = $"{receiver}.Component<{edit.TypeFullName}>";
 
             if (edit.Fields.Count == 0)
@@ -165,6 +173,26 @@ namespace SceneBuilder.Core.Reconcile
             // so anything context-dependent or side-effecting is pre-rendered at EMIT time.
             var valueExpr = edit.NewExpr ?? SourceExpr.ValueNodeLiteral(edit.Value);
 
+            // b7-t1 fix: a dedicated `.Sizer(...)/.Snapper(...)` call has ALL-named-argument shape
+            // (SpatialComponentSource.RenderArguments), never the generic `c => ...` closure the
+            // fallback below expects — introducing a previously-absent field (e.g. toggling a
+            // Snapper flag from unset->true) must append a new named argument in that SAME
+            // "key: value" style, not throw as an unsupported closure form.
+            if (IsSpatialComponentAnchor(edit.Anchor))
+            {
+                allTargets.Add(invocation);
+                appliers.Add(currentRoot =>
+                {
+                    var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(invocation)!;
+                    var existingArgsText = string.Join(", ", current.ArgumentList.Arguments.Select(a => a.ToString()));
+                    var newArgText = $"{edit.FieldKey}: {valueExpr}";
+                    var combined = existingArgsText.Length > 0 ? $"{existingArgsText}, {newArgText}" : newArgText;
+                    var newArgList = SyntaxFactory.ParseArgumentList($"({combined})");
+                    return currentRoot.ReplaceNode(current, current.WithArgumentList(newArgList));
+                });
+                return;
+            }
+
             if (arguments.Count == 0)
             {
                 allTargets.Add(invocation);
@@ -215,6 +243,27 @@ namespace SceneBuilder.Core.Reconcile
         private static string BuildSetCallText(string receiver, string fieldKey, string valueExpr)
         {
             return $"{receiver}.Set({SourceExpr.StringLiteral(fieldKey)}, {valueExpr})";
+        }
+
+        // A component LogicalId is always synthesized "{ownerLogicalId}/{TypeFullName}#{ordinal}"
+        // (BuilderParser.AssignComponentLogicalIds) — the one place an anchor string reliably encodes
+        // its component's type without threading TypeFullName onto IntroduceComponentField itself.
+        private static bool IsSpatialComponentAnchor(string anchor)
+        {
+            var hashIndex = anchor.LastIndexOf('#');
+            if (hashIndex <= 0)
+            {
+                return false;
+            }
+
+            var slashIndex = anchor.LastIndexOf('/', hashIndex - 1);
+            if (slashIndex < 0)
+            {
+                return false;
+            }
+
+            var typeFullName = anchor.Substring(slashIndex + 1, hashIndex - slashIndex - 1);
+            return SpatialComponentSource.IsSpatial(typeFullName);
         }
 
         // ---- Component-aware anchor resolution (b3-t2) ---------------------------------------

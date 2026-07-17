@@ -401,5 +401,192 @@ namespace SceneBuilder.Core.Tests
             Assert.Contains(reorders, r => r.ComponentLogicalId == "root-1/UnityEngine.Rigidbody#0" && r.ToIndex == 0);
             Assert.Contains(reorders, r => r.ComponentLogicalId == "root-1/UnityEngine.BoxCollider#0" && r.ToIndex == 1);
         }
+
+        // ---- b3-t1: channel-masked transform diff (Sizer/Snapper driven-channel suppression) ----
+
+        [Fact]
+        public void Diff_SizerNode_ScaleDriftInSnapshot_ProducesNoScaleOp()
+        {
+            var desiredTransform = new TransformData { Position = new Vec3(0, 0, 0), Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.Scale };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotTransform = new TransformData { Position = new Vec3(0, 0, 0), Scale = new Vec3(5, 5, 5), DrivenChannels = ChannelMask.Scale };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotTransform };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.DoesNotContain(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+        }
+
+        [Fact]
+        public void Diff_SnapperDownNode_PositionYDrift_ProducesNoPositionYOp_ButXZStillDiff()
+        {
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var desiredTransform = new TransformData { Position = new Vec3(1, 2, 3), DrivenChannels = ChannelMask.PositionY };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            // Y-only drift: fully suppressed, no op at all.
+            var snapshotYOnly = new TransformData { Position = new Vec3(1, 99, 3), DrivenChannels = ChannelMask.PositionY };
+            var snapshotRootYOnly = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotYOnly };
+            var sceneYOnly = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRootYOnly } };
+
+            var changeSetYOnly = Differ.Diff(model, sceneYOnly, map);
+            Assert.DoesNotContain(changeSetYOnly.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+
+            // X and Z also drift: those still diff back to the desired value; Y holds the snapshot's own value.
+            var snapshotAll = new TransformData { Position = new Vec3(50, 99, 60), DrivenChannels = ChannelMask.PositionY };
+            var snapshotRootAll = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotAll };
+            var sceneAll = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRootAll } };
+
+            var changeSetAll = Differ.Diff(model, sceneAll, map);
+            var setTransform = Assert.Single(changeSetAll.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            Assert.Equal(1f, setTransform.Transform.Position.X);
+            Assert.Equal(99f, setTransform.Transform.Position.Y);
+            Assert.Equal(3f, setTransform.Transform.Position.Z);
+        }
+
+        [Fact]
+        public void Diff_SnapperBackNode_PositionZDrift_ProducesNoPositionZOp_ButXYStillDiff()
+        {
+            var desiredTransform = new TransformData { Position = new Vec3(1, 2, 3), DrivenChannels = ChannelMask.PositionZ };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotTransform = new TransformData { Position = new Vec3(77, 88, 999), DrivenChannels = ChannelMask.PositionZ };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotTransform };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setTransform = Assert.Single(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            Assert.Equal(1f, setTransform.Transform.Position.X);
+            Assert.Equal(2f, setTransform.Transform.Position.Y);
+            Assert.Equal(999f, setTransform.Transform.Position.Z);
+        }
+
+        [Fact]
+        public void Diff_SizerFieldChanged_ProducesComponentFieldChange()
+        {
+            var transform = new TransformData { Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.Scale };
+
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = $"root-1/{SpatialComponents.SizerTypeName}#0",
+                Type = new TypeRef(SpatialComponents.SizerTypeName),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(3f)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = transform, Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef(SpatialComponents.SizerTypeName),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(1.5f)),
+                }),
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = transform, Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal(SpatialComponents.SizerFields.Height, setField.Path);
+            Assert.Equal(ValueNode.Primitive.Float(3f), setField.Value);
+            Assert.DoesNotContain(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+        }
+
+        [Fact]
+        public void Diff_SnapperTargetRewired_ProducesComponentFieldChange()
+        {
+            var transform = new TransformData { Position = new Vec3(1, 0, 1), DrivenChannels = ChannelMask.PositionY };
+
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = $"root-1/{SpatialComponents.SnapperTypeName}#0",
+                Type = new TypeRef(SpatialComponents.SnapperTypeName),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Target, new ValueNode.ObjectRef("floor-1")),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = transform, Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef(SpatialComponents.SnapperTypeName),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Target, new ValueNode.ObjectRef("wall-1")),
+                }),
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = transform, Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal(SpatialComponents.SnapperFields.Target, setField.Path);
+            var objectRef = Assert.IsType<ValueNode.ObjectRef>(setField.Value);
+            Assert.Equal("floor-1", objectRef.TargetLogicalId);
+            Assert.DoesNotContain(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+        }
+
+        [Fact]
+        public void Diff_NonDrivenNode_ScaleAndPositionStillDiffNormally()
+        {
+            var desiredTransform = new TransformData { Position = new Vec3(1, 2, 3), Scale = new Vec3(2, 2, 2) };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotTransform = new TransformData { Position = new Vec3(9, 9, 9), Scale = new Vec3(5, 5, 5) };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotTransform };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setTransform = Assert.Single(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            Assert.Equal(new Vec3(1, 2, 3), setTransform.Transform.Position);
+            Assert.Equal(new Vec3(2, 2, 2), setTransform.Transform.Scale);
+        }
     }
 }

@@ -466,5 +466,37 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("m_Mass", setField.Path);
             Assert.Equal(ValueNode.Primitive.Float(7f), setField.Value);
         }
+
+        // b3-t1: CREATE/materialize mask carrier — a SetTransform's DrivenChannels flows onto the
+        // lowered m_LocalPosition/m_LocalScale SetField ops so b6-t1's write seam can skip driven
+        // channels on create, where there is no snapshot to compare against.
+        [Fact]
+        public void Materialize_CreateSizerSnapperNode_LoweredTransformOpsCarryDrivenMask()
+        {
+            var emptySnapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
+            var map = new IdentityMap { Scene = "Assets/Scenes/Demo.unity" };
+
+            var sizerTransform = new TransformData { Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.Scale };
+            var sizerRoot = new GameObjectNode { LogicalId = "sizer-1", Name = "Crate", Transform = sizerTransform };
+            var sizerModel = new SceneModel { SchemaVersion = 1, Roots = new[] { sizerRoot } };
+
+            var sizerPlan = Materializer.Materialize(sizerModel, emptySnapshot, map);
+
+            var sizerScaleField = Assert.Single(sizerPlan.Ops.OfType<SetField>(), op => op.LogicalId == "sizer-1" && op.Path == "m_LocalScale");
+            Assert.Equal(ChannelMask.Scale, sizerScaleField.DrivenChannels & ChannelMask.Scale);
+            var sizerPositionField = Assert.Single(sizerPlan.Ops.OfType<SetField>(), op => op.LogicalId == "sizer-1" && op.Path == "m_LocalPosition");
+            Assert.Equal(ChannelMask.None, sizerPositionField.DrivenChannels);
+
+            var snapperTransform = new TransformData { DrivenChannels = ChannelMask.PositionY };
+            var snapperRoot = new GameObjectNode { LogicalId = "snapper-1", Name = "Crate", Transform = snapperTransform };
+            var snapperModel = new SceneModel { SchemaVersion = 1, Roots = new[] { snapperRoot } };
+
+            var snapperPlan = Materializer.Materialize(snapperModel, emptySnapshot, map);
+
+            var snapperPositionField = Assert.Single(snapperPlan.Ops.OfType<SetField>(), op => op.LogicalId == "snapper-1" && op.Path == "m_LocalPosition");
+            Assert.Equal(ChannelMask.PositionY, snapperPositionField.DrivenChannels);
+            var snapperScaleField = Assert.Single(snapperPlan.Ops.OfType<SetField>(), op => op.LogicalId == "snapper-1" && op.Path == "m_LocalScale");
+            Assert.Equal(ChannelMask.None, snapperScaleField.DrivenChannels);
+        }
     }
 }

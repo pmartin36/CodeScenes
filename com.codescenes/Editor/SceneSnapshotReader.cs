@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using SceneBuilder.Authoring;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Editor
@@ -98,10 +99,43 @@ namespace SceneBuilder.Editor
                     Position = new Vec3(lp.x, lp.y, lp.z),
                     Rotation = new Quat(lr.x, lr.y, lr.z, lr.w),
                     Scale = new Vec3(ls.x, ls.y, ls.z),
+                    DrivenChannels = DeriveDrivenChannels(go),
                 },
                 Components = components.ToArray(),
                 Children = children,
             };
+        }
+
+        /// <summary>
+        /// ORs together the driven channels of every ACTIVE-AND-ENABLED Sizer/Snapper on
+        /// <paramref name="go"/> — the same guard those components' own <c>Evaluate()</c> use
+        /// (<c>isActiveAndEnabled</c>), so "reader says driven" always agrees with "component
+        /// actually drives". A disabled/inactive component contributes nothing (releases its
+        /// channel so a manual edit syncs normally). Mirrors the parse-time mapping in
+        /// <c>SpatialComponents.SizerMask</c>/<c>SnapperMask</c> so desired and actual never diverge.
+        /// </summary>
+        private static ChannelMask DeriveDrivenChannels(GameObject go)
+        {
+            var mask = ChannelMask.None;
+
+            foreach (var sizer in go.GetComponents<Sizer>())
+            {
+                if (sizer.isActiveAndEnabled)
+                {
+                    mask |= SpatialComponents.SizerMask;
+                }
+            }
+
+            foreach (var snapper in go.GetComponents<Snapper>())
+            {
+                if (snapper.isActiveAndEnabled)
+                {
+                    mask |= SpatialComponents.SnapperMask(
+                        snapper.up, snapper.down, snapper.left, snapper.right, snapper.forward, snapper.back);
+                }
+            }
+
+            return mask;
         }
     }
 }

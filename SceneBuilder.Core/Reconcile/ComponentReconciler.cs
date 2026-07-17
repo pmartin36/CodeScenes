@@ -46,7 +46,10 @@ namespace SceneBuilder.Core.Reconcile
             List<SkippedField> skippedFields,
             List<AssetEntry> addedAssets)
         {
-            var snapshotComps = ExcludeTransform(snapshotComponents);
+            // b4-t1: canonicalize Sizer-before-Snapper BEFORE the ADD/REORDER passes so both emit
+            // in canonical order and the REORDER pass compares canonical-vs-canonical for the
+            // spatial pair (never churns on live GetComponents order).
+            var snapshotComps = SpatialComponentSource.OrderForEmit(ExcludeTransform(snapshotComponents));
             var snapshotKeys = ComputeComponentKeys(snapshotComps);
             var snapshotKeySet = new HashSet<(string TypeFullName, int Ordinal)>(snapshotKeys);
 
@@ -71,7 +74,14 @@ namespace SceneBuilder.Core.Reconcile
             // harvests only fields that actually changed). Guards the (1) ADD harvest below from
             // double-counting/leaking identity-equal asset refs when the IdentityMap simply
             // hasn't recorded this component's entry yet (edit emission is unaffected).
-            var sourceComps = ExcludeTransform(sourceComponents);
+            // b7-t1 fix: the REORDER pass (3) below compares source physical order against
+            // snapshotComps' CANONICAL (Sizer-before-Snapper) order — so source must be canonicalized
+            // identically, or an untouched node whose live GetComponents() order simply differs from
+            // canonical (e.g. authored MeshFilter/MeshRenderer/Sizer/Snapper) spuriously looks
+            // reordered every sync (a no-op churn the applier can't actually apply to a fluent chain,
+            // surfacing as the "convergence defect" byte-identical-patch guard). Matches the
+            // "REORDER pass compares canonical-vs-canonical for the spatial pair" intent above.
+            var sourceComps = SpatialComponentSource.OrderForEmit(ExcludeTransform(sourceComponents));
             var sourceKeys = ComputeComponentKeys(sourceComps);
             var sourceKeySet = new HashSet<(string TypeFullName, int Ordinal)>(sourceKeys);
 
@@ -256,7 +266,7 @@ namespace SceneBuilder.Core.Reconcile
                             {
                                 Anchor = sourceComp.LogicalId,
                                 ValueSpan = valueSpan,
-                                NewExpr = RenderFieldValue(snapVal, resolveOwnerHandle, edits),
+                                NewExpr = RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits),
                             });
 
                             CollectAssetEntries(snapVal, addedAssets);
@@ -298,7 +308,7 @@ namespace SceneBuilder.Core.Reconcile
                             FieldKey = fieldKey,
                             Value = snapVal,
                             NewExpr = introduceResolution == RefResolution.Resolvable
-                                ? RenderFieldValue(snapVal, resolveOwnerHandle, edits)
+                                ? RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits)
                                 : null,
                         });
 
@@ -395,6 +405,7 @@ namespace SceneBuilder.Core.Reconcile
         // ValueNode.ObjectRef before delegating everything else to ValueNodeLiteral unchanged.
         private static string RenderFieldValue(
             ValueNode value,
+            string typeFullName,
             System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits)
         {
@@ -414,7 +425,12 @@ namespace SceneBuilder.Core.Reconcile
                 return handle ?? targetLogicalId;
             }
 
-            return SourceExpr.ValueNodeLiteral(value);
+            // b4-t2: a Sizer/Snapper field patch/introduce must render through the dedicated
+            // formatter (SourceExpr.Float/Vec3Literal) so it stays byte-identical to the append
+            // form — never the generic ValueNodeLiteral fallback.
+            return SpatialComponentSource.IsSpatial(typeFullName)
+                ? SpatialComponentSource.RenderFieldValue(value)
+                : SourceExpr.ValueNodeLiteral(value);
         }
 
         // §13 one-pass attach (b4-t1) reuses this for the just-appended owner: same
@@ -500,7 +516,7 @@ namespace SceneBuilder.Core.Reconcile
                 if (value is ValueNode.ObjectRef)
                 {
                     fieldExpressions ??= new Dictionary<string, string>();
-                    fieldExpressions[fieldKey] = RenderFieldValue(value, resolveOwnerHandle, edits);
+                    fieldExpressions[fieldKey] = RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits);
                 }
             }
 
