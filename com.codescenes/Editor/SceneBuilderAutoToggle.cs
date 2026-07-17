@@ -32,12 +32,13 @@ namespace SceneBuilder.Editor
             set => EditorPrefs.SetBool(PrefKey, value);
         }
 
-        /// <summary>Flips the persisted value and syncs the menu checkmark.</summary>
+        /// <summary>Flips the persisted value, syncs the menu checkmark, and arms/disarms the live loop.</summary>
         [MenuItem(MenuPath, false, 100)]
         public static void Toggle()
         {
             Enabled = !Enabled;
             Menu.SetChecked(MenuPath, Enabled);
+            SceneBuilderAutoSync.ApplyToggleState();
         }
 
         /// <summary>Syncs the menu checkmark to the persisted value every time the menu opens.</summary>

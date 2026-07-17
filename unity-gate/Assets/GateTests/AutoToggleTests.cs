@@ -3,6 +3,11 @@ using NUnit.Framework;
 using SceneBuilder.Editor;
 using UnityEditor;
 
+// NOTE (b4-t1 hygiene): once SceneBuilderAutoToggle.Toggle() calls
+// SceneBuilderAutoSync.ApplyToggleState() (ADD-3), Auto_Toggle_FlipsValue_AndChecksMenuItem below
+// transitively arms/disarms the live auto-sync loop. TearDown resets that state so an armed loop
+// (subscriptions, live FileSystemWatcher) never leaks into a later test in the same gate run.
+
 // Gate for SceneBuilderAutoToggle — the single persisted master boolean governing BOTH sync
 // directions (spec checklist #11, persistence half; #1, default-on). EditorPrefs is real
 // machine-global state, so every test restores whatever was there before it ran.
@@ -30,6 +35,7 @@ public class AutoToggleTests
         {
             EditorPrefs.DeleteKey(SceneBuilderAutoToggle.PrefKey);
         }
+        SceneBuilderAutoSync.ResetForTests();
     }
 
     [Test]
