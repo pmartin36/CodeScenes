@@ -14,7 +14,7 @@ namespace SceneBuilder.Core.Parsing
     // Syntax-only Roslyn parser for the M1 builder-file authoring surface (§6).
     // No semantic binding: fixture/builder source references types (ISceneDefinition, SceneRoot)
     // that do not exist in Core, so only CSharpSyntaxTree.ParseText is used.
-    public static class BuilderParser
+    public static partial class BuilderParser
     {
         private static readonly string[] TransformPositionalArgs = { "pos", "rot", "scale" };
 
@@ -293,6 +293,12 @@ namespace SceneBuilder.Core.Parsing
                         break;
                     case "Component":
                         ApplyComponent(node, args, invocation);
+                        break;
+                    case "Sizer":
+                        ApplySizer(node, args, invocation);
+                        break;
+                    case "Snapper":
+                        ApplySnapper(node, args, invocation);
                         break;
                     default:
                         throw Fail(args, $"Unsupported builder call '.{method}(...)'");
@@ -855,6 +861,7 @@ namespace SceneBuilder.Core.Parsing
                 Position = builder.Position ?? Vec3.Zero,
                 Rotation = builder.Rotation ?? Quat.Identity,
                 Scale = builder.Scale ?? Vec3.One,
+                DrivenChannels = builder.DrivenChannels,
             },
             Components = builder.Components.Select(BuildComponent).ToArray(),
             Children = builder.Children.Select(BuildNode).ToArray(),
@@ -897,6 +904,7 @@ namespace SceneBuilder.Core.Parsing
             public SourceSpan AnchorSpan;
             public string? Handle;
             public SourceSpan? IdCallSpan;
+            public ChannelMask DrivenChannels;
             public readonly List<NodeBuilder> Children = new();
             public readonly List<ComponentBuilder> Components = new();
         }
