@@ -42,6 +42,13 @@ namespace SceneBuilder.Core.Parsing
                     when member.Expression.ToString() == "Asset" && member.Name.Identifier.Text == "None":
                     return new ValueNode.AssetRef(null);
 
+                case MemberAccessExpressionSyntax member
+                    when member.Expression.ToString() == "NodeHandle" && member.Name.Identifier.Text == "None":
+                    return new ValueNode.ObjectRef(null);
+
+                case IdentifierNameSyntax id:
+                    return new ValueNode.ObjectRef(id.Identifier.Text);
+
                 case MemberAccessExpressionSyntax memberAccess:
                     return new ValueNode.Enum(
                         memberAccess.Expression.ToString(),

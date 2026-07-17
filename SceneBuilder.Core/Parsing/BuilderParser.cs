@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SceneBuilder.Core.Identity;
+using SceneBuilder.Core.Lowering;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Reconcile;
 
@@ -58,6 +59,17 @@ namespace SceneBuilder.Core.Parsing
             var flagPresence = BuildFlagPresence(ctx.Roots);
             var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
             var handles = BuildHandles(ctx.Roots);
+
+            // Invert LogicalId->handle-name into name->LogicalId for ObjectRef resolution.
+            // Handle var-names are unique C# locals, so no value collision; built defensively
+            // (skip duplicate names rather than throw) in case that ever changes.
+            var handlesByName = new Dictionary<string, string>();
+            foreach (var kv in handles)
+            {
+                handlesByName.TryAdd(kv.Value, kv.Key);
+            }
+
+            model = ObjectRefLowering.Lower(model, name => handlesByName.TryGetValue(name, out var id) ? id : null);
 
             // File-scope PLAIN `using` directives (no Alias, no static keyword), in document
             // order. `root.Usings` is file-scope-only by construction (namespace-nested and

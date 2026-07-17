@@ -253,11 +253,16 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void ValueNodeLiteral_UnsupportedSimpleToken_RendersRawTokenVerbatimPerDeliverable()
         {
-            var node = new ValueNode.Unsupported("someToken");
+            // b2-t1: a bare identifier (e.g. "someToken") is no longer Unsupported at the
+            // ValueNodeParser layer — it is now the intermediate handle-reference form
+            // ValueNode.ObjectRef(name) (see ObjectRefLoweringTests). Use a non-identifier
+            // simple token ("null") so this test still exercises the raw-token-verbatim
+            // contract for genuinely unrecognized single-token expressions.
+            var node = new ValueNode.Unsupported("null");
 
             var text = SourceExpr.ValueNodeLiteral(node);
 
-            Assert.Equal("someToken", text);
+            Assert.Equal("null", text);
             Assert.Equal(node, Roundtrip(text));
         }
 
