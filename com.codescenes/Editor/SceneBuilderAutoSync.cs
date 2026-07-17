@@ -6,6 +6,10 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using SceneBuilder.Core.Identity;
+using SceneBuilder.Core.Parsing;
+using SceneBuilder.Core.Serialization;
+using SceneBuilder.Core.Validation;
 
 namespace SceneBuilder.Editor
 {
@@ -21,10 +25,18 @@ namespace SceneBuilder.Editor
     {
         static SceneBuilderAutoSync()
         {
+            // Wire the production executors BEFORE arming so a fresh session (or a post-reload
+            // re-arm) auto-syncs with real logic by default — no manual wiring on the happy path.
+            WireDefaultExecutors();
+
             // Domain-reload survival: static ctor re-runs on every reload and re-arms iff the
             // persisted master toggle is on (SceneBuilderAutoToggle.Enabled defaults true).
             ApplyToggleState();
         }
+
+        // Matches SceneBuilderSync/SceneBuilderBuild's own copy of this literal — the single demo
+        // builder this milestone scopes. A third copy; flagged, not refactored here (research.md).
+        private const string BuilderName = "DemoScene";
 
         public static bool IsArmed { get; private set; }
 
@@ -48,6 +60,10 @@ namespace SceneBuilder.Editor
         private static readonly object _watcherLock = new();
         private static readonly HashSet<string> _watcherPendingPaths = new();
         private static FileSystemWatcher? _watcher;
+
+        // Session-local O(changed) snapshot assembler for the scene->code executor; wiped on reload
+        // (a cold re-assemble rewarms). Reset alongside the rest of the pump's state for tests.
+        private static ChangeScopedSnapshot? _snapshotAssembler;
 
         /// <summary>Arm iff the persisted master toggle is on; else disarm. Domain-reload survival + menu-flip wiring.</summary>
         public static void ApplyToggleState()
@@ -310,6 +326,156 @@ namespace SceneBuilder.Editor
             }
         }
 
+        /// <summary>
+        /// The real scene-&gt;code cycle body (spec checklist #7, #8; blocker 4): save-on-create for
+        /// any live object in <paramref name="ids"/> that is not yet known to the sidecar's identity
+        /// map (a genuinely new object, with no durable identity for the reconcile to key on), then
+        /// assemble a change-scoped snapshot and reconcile via the pre-assembled-snapshot
+        /// <see cref="SceneBuilderSync.Run(string, string, Scene, SceneBuilder.Core.Model.SceneSnapshot)"/>
+        /// overload. An edit on an already-known object (e.g. a transform drag) never forces a save.
+        /// </summary>
+        internal static void ExecuteSceneToCode(IReadOnlyCollection<EntityId> ids)
+        {
+            var scene = EditorSceneManager.GetActiveScene();
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                return;
+            }
+
+            // Prefer the last builder/sidecar this session actually BUILT (SceneBuilderBuild.Run) —
+            // covers the isolated-fixture case (build against a non-default path) as well as the
+            // production default, since a normal session's Build/BuildDemo call always targets
+            // SceneBuilderPaths.Builder(BuilderName) itself. Falls back to the fixed default when
+            // nothing has been built yet this session (e.g. a fresh domain reload).
+            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
+            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
+            if (!File.Exists(builderPath) || !File.Exists(sidecarPath))
+            {
+                return; // nothing to sync back into
+            }
+
+            if (!string.IsNullOrEmpty(scene.path) && ids.Count > 0)
+            {
+                var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+                if (NeedsSaveForDurableId(ids, map))
+                {
+                    using (SuppressionScope.SuppressScene())
+                    {
+                        EditorSceneManager.SaveScene(scene); // in place; dropped as self-echo
+                    }
+                }
+            }
+
+            _snapshotAssembler ??= new ChangeScopedSnapshot();
+            var snapshot = ids.Count == 0
+                ? _snapshotAssembler.AssembleCold(scene)          // sceneSaved catch-all
+                : _snapshotAssembler.AssembleIncremental(scene, ids);
+
+            SceneBuilderSync.Run(builderPath, sidecarPath, scene, snapshot);
+        }
+
+        /// <summary>
+        /// True iff any live object in <paramref name="ids"/> is NOT already known to
+        /// <paramref name="map"/> (no entry carries its <see cref="GlobalObjectId"/>) — i.e. a
+        /// genuinely new object the reconcile has never seen, which needs a save before it earns a
+        /// durable identity to key on. A destroyed/unresolvable id is skipped (not a create).
+        /// </summary>
+        /// <remarks>
+        /// NOT keyed on <c>GlobalObjectId.targetObjectId == 0</c> — falsified on 6000.5.3f1: once the
+        /// active scene already has a saved path, a brand-new, never-saved GameObject already reports
+        /// a nonzero, deterministically-hashed targetObjectId, so that check never fires in the
+        /// realistic scenario. "Known to the sidecar" is the actual on-disk-durability signal.
+        /// </remarks>
+        private static bool NeedsSaveForDurableId(IReadOnlyCollection<EntityId> ids, IdentityMap map)
+        {
+            foreach (var id in ids)
+            {
+                var obj = EditorUtility.EntityIdToObject(id);
+                var go = obj as GameObject;
+                if (go == null && obj is Component component)
+                {
+                    go = component.gameObject;
+                }
+
+                if (go == null)
+                {
+                    continue; // destroyed or unresolved, not a create
+                }
+
+                var globalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(go).ToString();
+                if (!map.IsManaged(globalObjectId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The code-&gt;scene cycle body (b5-t2, spec checklist #4): on a real external write to the
+        /// governing builder, parse+validate+build in place via <see cref="SceneBuilderBuild.Run"/>;
+        /// on a parse error or planning-phase diagnostic, log LOCATED and leave the scene untouched.
+        /// </summary>
+        internal static void ExecuteCodeToScene(IReadOnlyCollection<string> paths)
+        {
+            var scene = EditorSceneManager.GetActiveScene();
+            if (!scene.IsValid() || !scene.isLoaded || string.IsNullOrEmpty(scene.path))
+            {
+                return;
+            }
+
+            // Same last-built-pair discovery ExecuteSceneToCode uses (research.md), for symmetry.
+            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
+            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
+
+            // Only build on a real change to the governing builder — defensive against a watcher
+            // event for an unrelated file in the builders directory.
+            var fullBuilderPath = Path.GetFullPath(builderPath);
+            var isGoverningBuilderChanged = false;
+            foreach (var path in paths)
+            {
+                if (string.Equals(Path.GetFullPath(path), fullBuilderPath, StringComparison.Ordinal))
+                {
+                    isGoverningBuilderChanged = true;
+                    break;
+                }
+            }
+
+            if (!isGoverningBuilderChanged || !File.Exists(builderPath))
+            {
+                return;
+            }
+
+            try
+            {
+                var result = SceneBuilderBuild.Run(builderPath, scene.path, sidecarPath, scene);
+                foreach (var diagnostic in result.Diagnostics)
+                {
+                    Debug.LogError(
+                        $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
+                        $"{diagnostic.Message} — scene left untouched.");
+                }
+            }
+            catch (ParseException e)
+            {
+                Debug.LogError(
+                    $"[CodeScenes] Parse error in {builderPath} at line {e.Line}, column {e.Column}: " +
+                    $"{e.Message} — scene left untouched.");
+            }
+        }
+
+        /// <summary>
+        /// Wires the production executors (<see cref="ExecuteSceneToCode"/>,
+        /// <see cref="ExecuteCodeToScene"/>) onto the pump's injection seam. Called from the static
+        /// ctor before <see cref="ApplyToggleState"/> so auto-sync is wired to real logic by default.
+        /// </summary>
+        internal static void WireDefaultExecutors()
+        {
+            SceneToCodeExecutor = ExecuteSceneToCode;
+            CodeToSceneExecutor = ExecuteCodeToScene;
+        }
+
         /// <summary>Test hygiene: full disarm + state reset, then re-arm to the default (auto-on) state the tests expect.</summary>
         internal static void ResetForTests()
         {
@@ -321,6 +487,9 @@ namespace SceneBuilder.Editor
             CodeToSceneCycleCount = 0;
             SceneToCodeExecutor = null;
             CodeToSceneExecutor = null;
+            _snapshotAssembler = null;
+            SceneBuilderBuild.LastBuilderPath = null;
+            SceneBuilderBuild.LastSidecarPath = null;
 
             _pendingSceneIds.Clear();
             _sceneDeadlineArmed = false;

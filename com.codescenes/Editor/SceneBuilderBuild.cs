@@ -32,6 +32,17 @@ namespace SceneBuilder.Editor
         private static string BuilderPath => SceneBuilderPaths.Builder(BuilderName);
         private static string SidecarPath => SceneBuilderPaths.Sidecar(BuilderName);
 
+        /// <summary>
+        /// The builder/sidecar paths this session's LAST successful <see cref="Run"/> built — the
+        /// auto-sync scene-&gt;code executor's fallback discovery for "which builder governs the
+        /// active scene" (b5-t1), so a caller that builds against a non-default path (e.g. an
+        /// isolated test fixture) is the pair auto-sync reconciles against, without a wider
+        /// scene-&gt;builder registry this single-demo-builder milestone does not need. Null until the
+        /// first successful <see cref="Run"/> this session; wiped on domain reload.
+        /// </summary>
+        internal static string? LastBuilderPath;
+        internal static string? LastSidecarPath;
+
         /// <summary>Summary of a <see cref="Run"/> build for callers/tests.</summary>
         public sealed class BuildResult
         {
@@ -174,6 +185,9 @@ namespace SceneBuilder.Editor
 
             Debug.Log($"[SceneBuilder] Built in place: {execution.GameObjectsByLogicalId.Count} object(s), " +
                       $"{plan.Ops.Length} plan op(s) into {scenePath}. Sidecar: {sidecarPath}");
+
+            LastBuilderPath = builderPath;
+            LastSidecarPath = sidecarPath;
 
             return new BuildResult
             {

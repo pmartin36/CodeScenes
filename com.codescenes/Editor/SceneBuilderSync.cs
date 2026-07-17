@@ -95,6 +95,22 @@ namespace SceneBuilder.Editor
         /// failure (no swallowing) so callers/tests observe errors.
         /// </summary>
         public static SyncResult Run(string builderPath, string sidecarPath, Scene scene)
+            => Run(builderPath, sidecarPath, scene, preAssembledSnapshot: null);
+
+        /// <summary>
+        /// Sync-back (scene-&gt;code) identical to <see cref="Run(string, string, Scene)"/>, except the
+        /// scene snapshot is either the passed <paramref name="preAssembledSnapshot"/> (e.g. the
+        /// auto-sync executor's O(changed) <c>ChangeScopedSnapshot</c> result) or, when null, a cold
+        /// <see cref="SceneSnapshotReader.Read"/> — so the two overloads are byte-identical in effect
+        /// given an equivalent snapshot. Also logs a loud convergence-defect error when the reconcile
+        /// emits a patch that applies byte-identically (PatchEdits &gt; 0, EditsApplied == 0), so both
+        /// the manual and auto-sync paths inherit the guard by default.
+        /// </summary>
+        public static SyncResult Run(
+            string builderPath,
+            string sidecarPath,
+            Scene scene,
+            SceneBuilder.Core.Model.SceneSnapshot? preAssembledSnapshot)
         {
             var source = File.ReadAllText(builderPath);
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
@@ -123,7 +139,7 @@ namespace SceneBuilder.Editor
             var desired = loaded.Desired;
             var fieldArgumentSpans = loaded.FieldArgumentSpans;
 
-            var snapshot = SceneSnapshotReader.Read(scene);
+            var snapshot = preAssembledSnapshot ?? SceneSnapshotReader.Read(scene);
 
             var result = Reconciler.Reconcile(
                 desired,
@@ -189,6 +205,19 @@ namespace SceneBuilder.Editor
                     compileErrors = BuilderCompileCheck.CheckAndReport(
                         newSource, $"Sync wrote {Path.GetFileName(builderPath)}");
                 }
+            }
+
+            // Convergence-defect guard (inherit-by-default: the manual SyncDemo path gets it too):
+            // the reconcile PRODUCED edits (PatchEdits > 0) but the applied text was byte-identical to
+            // what was already on disk (EditsApplied == 0, i.e. WriteIfChanged found no real diff).
+            // That means the reconcile believed the source was stale when it was not — a bug in the
+            // reconcile, not a real change. Already treated as converged (no rewrite); this just makes
+            // the defect loud instead of silent.
+            if (result.Patch.Edits.Length > 0 && editsApplied == 0)
+            {
+                Debug.LogError(
+                    $"[SceneBuilder] Convergence defect: reconcile produced {result.Patch.Edits.Length} " +
+                    "patch edit(s) that applied byte-identically — treating as converged (not re-applying).");
             }
 
             // The sidecar is keyed by LogicalId, and a LogicalId is DERIVED from the source (name +
