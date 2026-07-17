@@ -19,8 +19,8 @@ every change.
 | **Incremental identity** | debounce + a cached `GlobalObjectId` map invalidated by change events + a change-scoped snapshot; batch `GetGlobalObjectIdsSlow` where a walk is unavoidable | M-Auto |
 | `DriftState { CodeAhead, SceneAhead }` (adapter helper) | derived from the existing empty-Plan / empty-Patch determination; no Core type | M-Auto |
 
-The manual **Build** / **Sync** menu items (`SceneBuilder/Build DemoScene (code -> scene)`,
-`SceneBuilder/Sync DemoScene (scene -> code)`) are **retained** — as debug + testing tools, not as the
+The manual **Build** / **Sync** menu items (`CodeScenes/Build DemoScene (code -> scene)`,
+`CodeScenes/Sync DemoScene (scene -> code)`) are **retained** — as debug + testing tools, not as the
 product. They are how a developer disables auto and validates a future milestone step-by-step.
 
 ---
@@ -194,15 +194,17 @@ behind.** This is the real open decision.
    overlay on the affected object. Nothing blocks; the loop keeps converging every non-conflicting
    field.
 
-3. **Tie-break: code wins, scene edit preserved.** On the residual same-field overlap, **code is
-   authoritative** (the builder is the source of truth), and the scene edit is **not silently
-   discarded** — it is captured into the emitted `// CONFLICT:` marker as the alternate value so the
-   author can accept it by editing code. Never last-write-wins; never a silent clobber (§7).
+3. **Tie-break: SCENE wins, code intent preserved (RATIFIED by the user, 2026-07-16).** On the
+   residual same-field overlap the **scene edit is authoritative** — the source is patched to the
+   scene's value, so the loop converges on what the user just did in the editor. The prior **code**
+   value is **not silently discarded** — it is captured into the emitted `// CONFLICT:` marker as the
+   alternate so the author can restore it by editing code. Never last-write-wins; never a silent
+   clobber (§7). (The builder remains the source of truth in general; this narrow same-field tie-break
+   favors the live scene edit by explicit user decision — not code-wins, not mark-and-halt.)
 
-Recommendation: adopt **(1) + (2) + (3)**. It is the only shape consistent with "no buttons, no
-panel, no modal" while still honoring "one authoritative direction, never a silent pick." **Flagged
-OPEN** — the tie-break in (3) (code-wins vs. scene-wins vs. mark-and-halt) is the specific decision
-the user must confirm before the pipeline builds it.
+Adopt **(1) + (2) + (3)** — the only shape consistent with "no buttons, no panel, no modal" while
+still honoring "one authoritative direction, never a silent pick." **RATIFIED:** the tie-break in (3)
+is **scene-wins** (user decision, 2026-07-16).
 
 ## In scope
 
@@ -217,7 +219,7 @@ the user must confirm before the pipeline builds it.
   snapshot assembly; batch `GetGlobalObjectIdsSlow` for unavoidable walks.
 - **Byte-grounded drift** (blocker 2) and **write-seam echo suppression** (blocker 5).
 - **Save-on-sync for structural creates** (blocker 4).
-- **Field-level conflict authority + non-modal surfacing** (the conflict section), pending ratification.
+- **Field-level conflict authority + non-modal surfacing, scene-wins tie-break** (the conflict section, ratified).
 - **Retained manual Build/Sync menu items** as debug/testing tools with auto off.
 - **Play mode:** auto pauses in Play mode (edits don't persist) and resumes on return to edit mode.
 
@@ -254,7 +256,7 @@ Why `EditorPrefs` keyed by project path, and not the alternatives:
   testing affordance to disable auto must **not** propagate to every teammate's checkout, and it
   should be per-machine, which `EditorPrefs` gives directly.
 
-The toggle is exposed as a single checkable menu item (`SceneBuilder/Auto` with a checkmark) reading
+The toggle is exposed as a single checkable menu item (`CodeScenes/Auto` with a checkmark) reading
 and writing this key. The `[InitializeOnLoad]` bootstrap reads it to decide whether to arm the
 triggers; flipping it arms/disarms both directions atomically.
 
@@ -287,7 +289,7 @@ All under `com.codescenes/Editor/` unless noted.
   subscribes `ObjectChangeEvents.changesPublished` + `EditorSceneManager.sceneSaved`, starts the
   `FileSystemWatcher`, and registers the `EditorApplication.update` pump. Re-runs on every domain
   reload (that is what `[InitializeOnLoad]` guarantees). Unsubscribes/disposes when the toggle is off.
-- **Master toggle menu item** (`SceneBuilder/Auto`, checked): reads/writes the `EditorPrefs` key above;
+- **Master toggle menu item** (`CodeScenes/Auto`, checked): reads/writes the `EditorPrefs` key above;
   arms or disarms both directions.
 - **Debounce pump** on `EditorApplication.update`: per-direction settle timer (~300–500 ms).
 - **Scene→code executor:** builds a **change-scoped snapshot** from the cached `GlobalObjectId` map
@@ -368,11 +370,12 @@ human** is called out honestly.
 9. **Both-sides field-disjoint change auto-resolves.** Edit field A of object X in the scene and field
    B of object Y in code ⇒ both apply in their own direction, **no** conflict raised (field-level
    authority).
-10. **True same-field overlap surfaces non-modally.** Edit the *same* field of the *same* object on
-    both sides ⇒ a located Console error + an inline `// CONFLICT:` marker in the builder; **neither
+10. **True same-field overlap → scene wins, non-modally.** Edit the *same* field of the *same* object
+    on both sides ⇒ the source is patched to the **scene** value (scene-wins), the prior **code** value
+    is preserved in an inline `// CONFLICT:` marker, and a located Console error is logged; **neither
     side silently clobbered**; no modal opens.
 11. **Master toggle off ⇒ manual only.** Toggle auto off; a scene edit produces **no** sync; the
-    retained `SceneBuilder/Sync` and `SceneBuilder/Build` menu items still work. Toggle back on ⇒ the
+    retained `CodeScenes/Sync` and `CodeScenes/Build` menu items still work. Toggle back on ⇒ the
     key persists and (re-read after a simulated restart) auto is on again.
 12. **Play mode pauses auto.** Enter Play mode ⇒ edits do not sync; exit ⇒ auto resumes.
 
@@ -417,9 +420,10 @@ human** is called out honestly.
   scene) on a structural create that manual Sync never did. It is consistent with Build (which already
   saves) and is the only way a live-created object earns a durable id before the sidecar records it —
   but it means creating an object auto-saves the scene. Flagged for the user to confirm.
-- **The conflict tie-break is OPEN.** Field-level authority + non-modal surfacing is recommended and
-  strong; the residual same-field tie-break (code-wins vs. scene-wins vs. mark-and-halt) is the one
-  decision the user must ratify before the pipeline builds it.
+- **The conflict tie-break is RATIFIED: scene-wins.** Field-level authority + non-modal surfacing,
+  and on the residual same-field overlap the scene edit wins — source patched to the scene value, the
+  prior code value preserved in the `// CONFLICT:` marker. User decision 2026-07-16 (not code-wins, not
+  mark-and-halt).
 - **`GetGlobalObjectIdsSlow` (batch) is assumed, not yet exercised.** No current code path uses it; the
   pipeline must confirm the overload against the installed 6000.5.3f1 editor before depending on it,
   and fall back to the per-object call (still correct, only slower) if it is unavailable.
