@@ -483,7 +483,29 @@ namespace SceneBuilder.Core.Reconcile
             // A fix at any one of those call sites would leave the other two silently destroying data.
             EnsureNoAmbiguousDuplicateNames(actual.Roots);
 
-            DetectRemovals(identityMap, anchors, componentAnchors, snapshotByGoid, edits, removedLogicalIds, conflicts);
+            // b6-t1: every LogicalId targeted by an ObjectRef field ANYWHERE in the source model —
+            // cross-object references live outside the structural parent/child + owner/component
+            // dependency graph DetectRemovals otherwise walks, so a handle can be "still needed" by a
+            // sibling's field without being a structural dependent of it. Consulted below so a
+            // structural delete-cascade never strips a `var door = scene.Add(...)` declaration (or its
+            // own component statements) out from under a surviving `.Set(x => x.target, door)`
+            // argument — that produces non-compiling source (CS0103), never a style issue.
+            var referencedByFieldTargets = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var node in modelByLogicalId.Values)
+            {
+                foreach (var component in node.Components)
+                {
+                    foreach (var (_, value) in component.Fields)
+                    {
+                        if (value is ValueNode.ObjectRef(var targetLogicalId) && targetLogicalId != null)
+                        {
+                            referencedByFieldTargets.Add(targetLogicalId);
+                        }
+                    }
+                }
+            }
+
+            DetectRemovals(identityMap, anchors, componentAnchors, snapshotByGoid, referencedByFieldTargets, edits, removedLogicalIds, conflicts);
 
             // Walks the scene tree; for every sibling group of >= 2 same-named objects whose statements
             // would ALL be positional, injects `.Id(...)` into every member but the first. One
@@ -634,6 +656,14 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, SourceSpan>? anchors,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors,
             IReadOnlyDictionary<string, SnapshotEntry> snapshotByGoid,
+            // b6-t1: LogicalIds targeted by an ObjectRef field anywhere in the source model — see call
+            // site. A deleted owner still named by a surviving field argument cannot be removed either;
+            // ComponentReconciler's field-diff pass (Detection 1, restored for the same
+            // default-filtered-out-of-snapshot case this removal would otherwise race) already reports
+            // the located DanglingReference for every such field, so this only needs to leave the
+            // declaration (and the removed owner's own component statements) alone — never a second
+            // conflict for the same field.
+            ISet<string> referencedByFieldTargets,
             List<SourceEdit> edits,
             List<string> removedLogicalIds,
             List<Conflict> conflicts)
@@ -664,6 +694,15 @@ namespace SceneBuilder.Core.Reconcile
                     d.Kind == "GameObject"
                     && !string.IsNullOrEmpty(d.GlobalObjectId)
                     && snapshotByGoid.ContainsKey(d.GlobalObjectId));
+
+                // b6-t1: a field elsewhere in the source still names this handle. The owner is gone
+                // from the scene, so ComponentReconciler's field-diff pass already reports a located
+                // DanglingReference for that field (Detection 1) — this only has to leave the
+                // declaration standing so the still-authored argument keeps resolving, never CS0103.
+                if (referencedByFieldTargets.Contains(entry.LogicalId))
+                {
+                    continue;
+                }
 
                 if (hasSurvivingChild)
                 {

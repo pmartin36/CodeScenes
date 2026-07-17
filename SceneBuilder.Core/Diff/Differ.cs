@@ -69,6 +69,13 @@ namespace SceneBuilder.Core.Diff
             IdentityMap identityMap,
             List<ChangeOp> ops)
         {
+            // b6-t1: siblingIndex counts only nodes MATCHED to a live snapshot entry, not raw source
+            // position. A desired node absent from the live snapshot (EmitCreate below — either
+            // genuinely new, or scene-deleted but kept in source because a cross-object field still
+            // references its handle, see Reconciler.DetectRemovals) occupies no slot in the live
+            // scene's sibling ordering, so it must not shift a MATCHED sibling's expected index — that
+            // produced a spurious Reorder on every matched sibling following a kept dangling entry.
+            var matchedIndex = 0;
             for (var i = 0; i < nodes.Length; i++)
             {
                 var node = nodes[i];
@@ -76,7 +83,8 @@ namespace SceneBuilder.Core.Diff
                     && snapshotByGoid.TryGetValue(goid, out var entry))
                 {
                     visitedGoids.Add(goid);
-                    EmitEdits(node, parentLogicalId, i, logicalIdToGlobalObjectId, entry, identityMap, ops);
+                    EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, ops);
+                    matchedIndex++;
                 }
                 else
                 {

@@ -305,6 +305,51 @@ namespace SceneBuilder.Core.Reconcile
                         CollectAssetEntries(snapVal, addedAssets);
                     }
                 }
+
+                // b6-t1: a source-authored ObjectRef field that REGRESSED to its type default (null)
+                // live is invisible to the loop above — SerializedFieldBridge default-filters a
+                // null-valued reference field out of the snapshot entirely (indistinguishable from
+                // "never touched" at that layer, which has no source-model context to tell the two
+                // apart). Absent-from-snapshot + non-null in source can ONLY mean the live value is
+                // now the type default (ObjectRef(null)): were it still authored-and-live, it would
+                // compare equal above and never have been filtered; were it live-but-different, it
+                // would be present in the snapshot and handled above. So this reconstructs the exact
+                // same dangling-vs-clear branch (Detection 1) against the implied ObjectRef(null).
+                foreach (var (fieldKey, srcVal) in sourceComp.Fields)
+                {
+                    if (snapshotComp.Fields.ContainsKey(fieldKey))
+                    {
+                        continue; // already handled by the loop above.
+                    }
+
+                    if (srcVal is not ValueNode.ObjectRef(var srcTarget) || srcTarget == null)
+                    {
+                        continue;
+                    }
+
+                    if (!sceneLiveTargets.Contains(srcTarget))
+                    {
+                        conflicts.Add(ConflictDetector.DanglingReference(
+                            sourceComp.LogicalId, fieldKey, srcTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                        continue;
+                    }
+
+                    if (fieldArgumentSpans != null
+                        && fieldArgumentSpans.TryGetValue(sourceComp.LogicalId, out var regressedCompSpans)
+                        && regressedCompSpans.TryGetValue(fieldKey, out var regressedValueSpan))
+                    {
+                        edits.Add(new PatchComponentField
+                        {
+                            Anchor = sourceComp.LogicalId,
+                            ValueSpan = regressedValueSpan,
+                            NewExpr = "NodeHandle.None",
+                        });
+                    }
+                    else if (fieldArgumentSpans != null)
+                    {
+                        conflicts.Add(ConflictDetector.UnanchorableComponentEdit(sourceComp.LogicalId, $"patch field '{fieldKey}'"));
+                    }
+                }
             }
         }
 
