@@ -15,5 +15,8 @@ namespace SceneBuilder.Core.Model
 
         [JsonPropertyOrder(3)]
         public Vec3 Scale { get; init; } = Vec3.One;
+
+        [JsonIgnore]
+        public ChannelMask DrivenChannels { get; init; } = ChannelMask.None;
     }
 }
