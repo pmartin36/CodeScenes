@@ -89,10 +89,11 @@ or position churned into source on every floor-nudge is fatal).
   space — i.e. **rotation-independent** (rotating the object does not change what "2 m tall" means; see
   §"Editor adapter deliverables" for why `Mesh.bounds`, not `Renderer.bounds`, is read).
 - **`Snapper`** — snap a mesh to a surface, **origin-agnostic**: uses the mesh's actual **world
-  bounds**, never its pivot. The author picks **one horizontal** (`left` / `right` / none) **and one
-  vertical** (`up` / `down` / none); the two combine (bottom-left corner = `down:true, left:true`; onto
-  a ceiling = `up:true`; onto a floor = `down:true`). A character pivoted at feet, centre or head all
-  land identically.
+  bounds**, never its pivot. The author picks **one horizontal** (`left` / `right` / none), **one
+  vertical** (`up` / `down` / none), **and one depth** (`forward` / `back` / none); they combine
+  (bottom-left corner = `down:true, left:true`; back-bottom-left = `down:true, left:true, back:true`;
+  onto a ceiling = `up:true`; onto a floor = `down:true`; against the back wall = `back:true`). A
+  character pivoted at feet, centre or head all land identically.
 - **Snap target = raycast scene geometry, no wiring** (default), **with an optional explicit target
   override.** Cast from the chosen bounds face along the chosen direction; land on the first surface
   hit. Requires colliders on candidate objects, or falls back to their renderer/mesh bounds
@@ -104,11 +105,13 @@ or position churned into source on every floor-nudge is fatal).
 - **Live re-evaluation, NOT bake-once.** Both components persist as editor-time components and
   re-evaluate when the mesh, its ancestors, or the surface move (move the floor → the snapped object
   follows). Achieved by `[ExecuteAlways]`; no user button.
-- **Driven-channel suppression (both directions).** The transform channels the components derive —
-  Sizer → local scale; Snapper → local position on the snapped axes — are **driven**: code holds the
-  intent (`.Sizer(...)` / `.Snapper(...)`) and **never** the resulting scale/position; Materialize
-  never emits a `SetTransform`/`SetField` for a driven channel, and Reconcile never patches a
-  `.Transform(scale:/pos:)` argument for one. Reuses §13's double-authority model, generalized.
+- **Driven-channel suppression (both directions).** The **raw** transform channels the components
+  derive — Sizer → local scale; Snapper → local position on the snapped axes (X/Y/Z per the set
+  faces) — are **driven**: code holds the intent (`.Sizer(...)` / `.Snapper(...)`) and **never** the
+  resulting scale/position; Materialize never emits a `SetTransform`/`SetField` for a driven channel,
+  and Reconcile never patches a `.Transform(scale:/pos:)` argument for one. Reuses §13's
+  double-authority model, generalized. (A manual edit to a driven channel is not lost — it is absorbed
+  into the component's **intent**; see §"Manual-override".)
 - **Build-strip.** The components are editor-time-only; they are removed from real player builds, the
   baked transform values remaining.
 - **Both-direction round-trip of intent.** Author `.Sizer/.Snapper` in code → components applied in
@@ -127,10 +130,10 @@ or position churned into source on every floor-nudge is fatal).
   cameras, bare `RectTransform` UI) has no bounds to read → out of scope; `.Sizer/.Snapper` on such a
   node is a located error, not a guess. (UI layout is §13's job.)
 - **Rotation authoring / surface-normal alignment.** Neither component drives rotation, and Snapper
-  snaps only along the world axes (up/down/left/right) — it does not orient the object to a slanted
-  surface's normal. Snapping along **depth (world Z)** is intentionally **not** offered: the
-  horizontal/vertical model leaves Z free for the author's `.Transform(pos:)` (see §"Authoring API",
-  flagged OPEN).
+  snaps only along the world axes (up/down/left/right/forward/back) — it does not orient the object to
+  a slanted surface's normal. Snapping along **all three** axis pairs (horizontal, vertical, **depth**)
+  is supported (depth added by user decision); any axis the author leaves `none` stays free for
+  `.Transform(pos:)` on that axis.
 - **Precise fitting to concave colliders / mesh silhouettes.** Bounds are axis-aligned boxes; a
   concave mesh snapped into a corner rests by its AABB, not its true hull.
 - **Composing a whole primitive / mesh import** — orthogonal (§17 authors the mesh ref; M1 the transform).
@@ -150,12 +153,18 @@ existing parse/emit/diff/reconcile files.
   serialized to the sidecar). Derivation:
   - a node carrying a `Sizer` ⇒ `|= Scale`;
   - a node carrying a `Snapper` with `left`/`right` set ⇒ `|= PositionX`;
-  - a node carrying a `Snapper` with `up`/`down` set ⇒ `|= PositionY`.
+  - a node carrying a `Snapper` with `up`/`down` set ⇒ `|= PositionY`;
+  - a node carrying a `Snapper` with `forward`/`back` set ⇒ `|= PositionZ`.
+  (`ChannelMask.PositionZ` already exists in the enum above — depth adds no new mask member, only a new
+  derivation source.)
 - **`Sizer` / `Snapper` as M3 component data.** In the `SceneModel` these are ordinary components in the
   node's component list (a type ref + a field map), identical in shape to any `.Component<T>` — the
   fields are `ValueNode.Bool`/float/`ValueNode.Vec3`/`ValueNode.AssetRef`(target). **No new model type.**
   The Sizer field map is one of `{ width|height|depth : float }` (aspect-locked) or `{ size : Vec3 }`
-  (explicit); the Snapper field map is `{ up, down, left, right : bool, target : ObjectRef? }`.
+  (explicit); the Snapper field map is `{ up, down, left, right, forward, back : bool, target : ObjectRef? }`.
+  Both components additionally carry the standard MonoBehaviour **enabled** state as the per-component
+  driving toggle (§"Manual-override") — it is Unity's built-in `m_Enabled`, not an authored field, so it
+  is not emitted into the `.Sizer(...)` / `.Snapper(...)` call.
 
 **Functions/behaviors (each a testable contract)**
 
@@ -168,7 +177,10 @@ existing parse/emit/diff/reconcile files.
     ambiguous size authority, never a silent pick.
   - `.Snapper(down: true, left: true)` → Snapper `{ down:true, left:true }`, `DrivenChannels |=
     PositionX|PositionY`.
-  - `.Snapper(left: true, right: true)` (or `up`+`down`) → **located error**: contradictory axis.
+  - `.Snapper(down: true, back: true)` → Snapper `{ down:true, back:true }`, `DrivenChannels |=
+    PositionY|PositionZ`.
+  - `.Snapper(left: true, right: true)` (or `up`+`down`, or `forward`+`back`) → **located error**:
+    contradictory axis.
   - `.Snapper(down: true, target: floor)` → additionally an `ObjectRef` to the `floor` handle's
     LogicalId (see §Dependencies for the resolution path).
   - malformed/empty/non-literal args → `Unsupported(raw)` (never throw), matching the `Asset`/`Builtin`
@@ -189,7 +201,8 @@ existing parse/emit/diff/reconcile files.
   (**not** the generic `.Component<Sizer>(c => c.Set(...))`), so scene→code reads as authored:
   - Sizer → `.Sizer(height: 2f)` / `.Sizer(size: (2f, 1f, 0.5f))` (floats f-suffixed via the shared
     `SourceExpr.Float`/`Vec3Literal`, invariant culture, exactly as §13).
-  - Snapper → `.Snapper(down: true, left: true)` (only the set flags emitted) / `.Snapper(down: true,
+  - Snapper → `.Snapper(down: true, left: true)` / `.Snapper(down: true, back: true)` (only the set
+    flags emitted — `forward`/`back` alongside the horizontal/vertical flags) / `.Snapper(down: true,
     target: floor)`.
 - **Deterministic ordering: Sizer before Snapper.** When both are emitted onto one node, the Sizer call
   precedes the Snapper call in source, mirroring the evaluate-time execution order; the ordering is
@@ -227,17 +240,19 @@ sync wiring live in the **Editor** assembly (`com.codescenes/Editor`, `SceneBuil
   - write `transform.localScale`. (A zero/degenerate bounds extent → no-op + one located warning, never
     a divide-by-zero.)
 - **`Snapper : MonoBehaviour` (runtime, `[ExecuteAlways]`, `[DefaultExecutionOrder(-90)]` — after
-  Sizer).** Serialized `bool up/down/left/right` and an optional `Transform target`. Each editor frame /
-  `OnValidate` (same runtime guard):
+  Sizer).** Serialized `bool up/down/left/right/forward/back` and an optional `Transform target`. Each
+  editor frame / `OnValidate` (same runtime guard):
   - read the sibling `Renderer.bounds` — the **world** AABB (`Renderer.bounds`), because snapping needs
     the object's *actual world footprint* including rotation and pivot; this is what makes it
     **origin-agnostic** (the real bottom face, not `transform.position`).
-  - for each snap direction, cast from that bounds face toward the surface. Default path:
+  - for each set snap direction — vertical (`up`/`down`, ±Y), horizontal (`left`/`right`, ±X), **depth
+    (`forward`/`back`, ±Z)** — cast from that bounds face toward the surface. Default path:
     `Physics.Raycast` from a small grid of points across the face (centre + corners, to survive uneven
     surfaces), take the first/nearest hit; **requires colliders**. Fallback when no collider is hit:
     scan candidate scene `Renderer`s (or `MeshFilter` bounds) along the cast axis and take the nearest
     opposing bounds face. **Override:** if `target` is set, skip the raycast and use that object's
-    `Renderer.bounds` face directly.
+    `Renderer.bounds` face directly. `forward` casts along +Z (front face flush to the surface ahead),
+    `back` along −Z (back face flush to the wall behind) — origin-agnostic like the other axes.
   - compute the position delta that brings the chosen bounds face flush to the hit surface and apply it
     to `transform.position` (only the snapped world axes; other axes untouched). Because it works from
     `Renderer.bounds`, the pivot location is irrelevant.
@@ -257,11 +272,12 @@ sync wiring live in the **Editor** assembly (`com.codescenes/Editor`, `SceneBuil
   current) then `Object.DestroyImmediate(component)`. The player build ships the **baked transform**
   and **no** SceneBuilder component — hence no "missing script". (In editor play mode `report` is null:
   the component is not stripped but no-ops via its `Application.isPlaying` guard, so it is harmless.)
-- **Inspector "driven" affordance (enhancement, flagged).** To make "the constraint wins" visible,
-  grey the driven scale/position fields in the Transform inspector. RectTransform has the public
+- **Inspector "driven" affordance (enhancement, flagged).** To make "the component drives this
+  channel" visible, grey the driven scale/position fields in the Transform inspector. RectTransform has the public
   `DrivenRectTransformTracker`; a plain Transform's scale/position uses the **internal**
-  `DrivenPropertyManager` (reflection). This is cosmetic — the real enforcement is `[ExecuteAlways]`
-  reverting manual edits — so it is a nice-to-have, not a gate (see §Risks / OPEN).
+  `DrivenPropertyManager` (reflection). This is cosmetic — the real behavior is the component's
+  `[ExecuteAlways]` re-evaluation (Sizer back-solves its intent from a manual scale; Snapper re-snaps a
+  snapped axis) — so it is a nice-to-have, not a gate (see §"Manual-override" / OPEN).
 - **EditMode coverage** (`unity-gate/Assets/GateTests/`, per CLAUDE.md) — §"Unity confirmation checklist".
 
 ## Authoring API
@@ -276,16 +292,18 @@ public NodeHandle Sizer(float? width = null, float? height = null, float? depth 
 // Sizer — explicit per-axis world size (non-uniform allowed)
 public NodeHandle Sizer(Vector3 size);
 
-// Snapper — one horizontal (left|right), one vertical (up|down), optional explicit target override
+// Snapper — one horizontal (left|right), one vertical (up|down), one depth (forward|back),
+// optional explicit target override
 public NodeHandle Snapper(bool up = false, bool down = false,
                           bool left = false, bool right = false,
+                          bool forward = false, bool back = false,
                           NodeHandle target = null);
 ```
 
 Rules (enforced by the parser, §"Core deliverables"): Sizer takes **exactly one** of
 `width`/`height`/`depth` (aspect-locked) **or** `size:` (explicit) — never both, never none. Snapper
-takes **at most one** of `{up,down}` and **at most one** of `{left,right}`; contradictory pairs are a
-located error.
+takes **at most one** of `{up,down}`, **at most one** of `{left,right}`, and **at most one** of
+`{forward,back}`; contradictory pairs are a located error. At least one snap axis must be set.
 
 ```csharp
 using static SceneBuilder.Authoring.AssetRefs;
@@ -337,13 +355,19 @@ driven-suppression, and round-trip of *intent*.
 4. `Parse_SizerNoDimension_YieldsLocatedError`.
 5. `Parse_SnapperDownLeft_SetsFlagsAndDrivenPositionXY` — `DrivenChannels == PositionX|PositionY`.
 6. `Parse_SnapperDownOnly_DrivesPositionYNotX` — `DrivenChannels == PositionY`.
-7. `Parse_SnapperContradictoryAxis_YieldsLocatedError` — `left:true,right:true` (and `up:true,down:true`).
+7. `Parse_SnapperContradictoryAxis_YieldsLocatedError` — `left:true,right:true`, `up:true,down:true`,
+   **and `forward:true,back:true`**.
 8. `Parse_SnapperWithTarget_CarriesObjectRefToHandleLogicalId`.
 9. `Parse_NodeWithoutSpatialComponent_DrivenChannelsNone`.
+9b. `Parse_SnapperBack_DrivesPositionZ` — `.Snapper(back: true)` → Snapper `{back:true}`,
+    `DrivenChannels == PositionZ`; `.Snapper(down:true, back:true)` → `DrivenChannels ==
+    PositionY|PositionZ`.
 
 **Diff / suppression** (the load-bearing pins)
 10. `Diff_SizerNode_ScaleDriftInSnapshot_ProducesNoScaleOp`.
 11. `Diff_SnapperDownNode_PositionYDrift_ProducesNoPositionYOp_ButXZStillDiff`.
+11b. `Diff_SnapperBackNode_PositionZDrift_ProducesNoPositionZOp_ButXYStillDiff` — depth channel
+    suppressed, the two free axes still diff.
 12. `Diff_SizerFieldChanged_ProducesComponentFieldChange` — intent still diffs via M3.
 13. `Diff_SnapperTargetRewired_ProducesComponentFieldChange`.
 14. `Diff_NonDrivenNode_ScaleAndPositionStillDiffNormally` — regression: suppression is opt-in per channel.
@@ -398,9 +422,10 @@ geometry**, not labels.
 11. **Driven channels not emitted (the anti-churn pin).** Author `.Sizer(height: 2f).Snapper(down:
     true)`; Build; then Sync with no edit. *Expected:* source is unchanged — it contains `.Sizer(...)`
     and `.Snapper(...)` but **no** `.Transform(scale: …)` / `.Transform(pos: …)`; the Sync is a no-op.
-12. **Manual drag reverts, no source write (constraint wins).** Hand-drag the snapped object in the
-    scene view; let the editor tick, then Sync. *Expected:* the component re-snaps it on the next frame
-    **and** the Sync produces no source change (driven position suppressed). (Ratify — §Risks.)
+12. **Manual drag of a snapped axis re-snaps; free axis moves.** Hand-drag a `down`-snapped object in
+    the scene view; let the editor tick, then Sync. *Expected:* the snapped **Y** re-snaps to the floor
+    on the next frame (no `.Transform(pos:)` source write for Y), while a drag on a **free** axis (X/Z)
+    persists and syncs normally (§"Manual-override").
 13. **Field edit round-trips.** Change the `Sizer` height in the Inspector, or toggle a `Snapper` flag;
     Sync. *Expected:* the `.Sizer(height: …)` / `.Snapper(...)` argument updates; nothing else.
 14. **Created-in-editor object with a Snapper.** Add a GameObject in the editor, add a `Snapper`
@@ -411,6 +436,17 @@ geometry**, not labels.
     missing script**, and its transform retains the baked size/position.
 16. **Non-mesh node is refused.** `.Sizer(height: 2f)` on an empty GameObject (no `MeshFilter`).
     *Expected:* a located error naming the node — not a silent no-op or a divide-by-zero.
+17. **Depth snap (forward/back).** `.Snapper(back: true)` against a back wall. *Expected:*
+    `Renderer.bounds.max.z ≈ wallInner` (back face flush); `.Snapper(down: true, back: true)` ⇒ bottom on
+    the floor **and** back flush to the wall (two-axis combine including depth).
+18. **Sizer back-solves intent from a manual scale (§"Manual-override").** With `.Sizer(height: 2f)`
+    active, hand-scale the object taller in the editor; let it tick, then Sync. *Expected:* the
+    `.Sizer(height: …)` argument updates to the new world height (intent back-solved) — **not** a
+    `.Transform(scale:)` write; a second Sync is a no-op.
+19. **Enable-toggle releases the channel (§"Manual-override").** Disable the `Sizer`/`Snapper`
+    (uncheck it); hand-move/scale the object; Sync. *Expected:* driving stops, the manual transform
+    stands and syncs normally (the released channel is no longer suppressed); re-enable ⇒ driving
+    resumes from current intent.
 
 ## Dependencies
 
@@ -432,27 +468,44 @@ geometry**, not labels.
   `SetRectTransform` code today (§13 is not in `completed/`). Therefore this milestone **does not depend
   on §13 having shipped**; it **specifies its own** general `DrivenChannels` mechanism, which §13's
   RectTransform case can later be re-expressed in terms of. Cite §13 for the model, own the mechanism.
-- **M5 (`specs/06-m5-cross-object-references.md`) — the Snapper `target:` override rides on M5's
-  object-reference resolution.** The raycast path (the headline, no wiring) needs nothing from M5. The
-  explicit target is a handle → `LogicalId` → live object; same-run/already-declared targets resolve via
-  the existing `IdentityMap` today, but a **forward-referenced** target (declared later in the file)
-  needs M5's two-pass Materialize. Since this milestone is ordered **before** M5, the target override is
-  specified but **flagged** (§Risks): ship it constrained to already-declared handles now, or land the
-  full form with M5.
+- **M5 (`specs/06-m5-cross-object-references.md`, SHIPPED) — the Snapper `target:` override rides on
+  M5's object-reference resolution.** The raycast path (the headline, no wiring) needs nothing from M5.
+  The explicit target is a handle → `LogicalId` → live object; **M5 has now landed** (`ValueNode.ObjectRef`,
+  two-pass Materialize, `NodeHandle.None`), and this milestone is ordered **after** M5, so the target
+  override ships in its **full** form — the Snapper `target:` handle lowers to a `ValueNode.ObjectRef`
+  exactly like any M5 cross-object reference (mutual/this-run targets resolve two-pass). No constrained
+  interim form is needed.
 
 ## Risks / notes
 
-- **Manual-override conflict — RECOMMENDATION, flag for the user to ratify.** If the author hand-moves or
-  hand-scales a driven channel in the editor, the recommendation is **the constraint wins**: the
-  `[ExecuteAlways]` component re-derives and reverts on the next frame, and because driven channels are
-  suppressed from scene→code the manual edit never reaches source (mirrors RectTransform's driven
-  props). To change size/placement the author edits the `Sizer`/`Snapper` intent or moves the surface;
-  the **free** axes (e.g. a `down`-only Snapper's X/Z) remain hand-movable and sync normally. **OPEN:**
-  confirm "constraint wins" over the alternative "a manual edit detaches the constraint".
+- **Manual-override = BACK-SOLVE INTENT WHILE ACTIVE (RATIFIED by the user, 2026-07-16).** When the
+  author hand-edits a driven channel while the component is **active (enabled)**, the component does
+  **not** blindly revert and does **not** detach — it **conforms its own intent to the manual edit**:
+  - **Sizer** (a driven channel with a scalar intent): a manual `localScale` change alters the world
+    size; the Sizer reads the new world bounds size and **back-solves** its intent field
+    (`height`/`width`/`depth`, or the per-axis `size`) to match, so the manual change is preserved **as
+    intent** and round-trips to source as a `.Sizer(...)` **argument** patch (via the component-field
+    reconcile that already round-trips M3 fields). The raw `localScale` channel itself stays suppressed
+    — only the authored intent number changes.
+  - **Snapper** (a boolean, flush-to-surface intent with **no scalar to back-solve**): a manual move
+    **along a snapped axis** has nothing to conform to — the intent is still "this face flush to the
+    surface" — so the component **re-snaps** on the next tick (that axis reverts). A manual move on a
+    **free** axis (any axis the Snapper does not drive) moves normally and syncs. To relocate a snapped
+    object the author moves the surface, retargets, or disables the component.
+  - **Per-component enable toggle (the escape hatch):** disabling the `Sizer`/`Snapper` (its standard
+    MonoBehaviour `enabled` checkbox) stops it driving; the channel is released and the transform is
+    hand-movable and syncs normally. Re-enabling resumes driving from the current intent.
+  - **Mechanism the pipeline must build:** the component distinguishes a **user** edit from its **own**
+    `[ExecuteAlways]` write — e.g. cache the transform value it last wrote and treat any external
+    divergence as a user edit (Sizer → back-solve; Snapper snapped axis → re-snap). And
+    `DrivenChannels` must reflect the **enabled** state: a **disabled** component drives nothing, so its
+    channels are **not** suppressed (the snapshot-side derivation reads live-component *enabled*, and a
+    disabled component contributes no driven channel). **Flagged for the pipeline to pin** — this
+    enabled↔DrivenChannels coupling is the one subtle seam.
 - **`DrivenPropertyManager` for greying plain-Transform fields is internal.** RectTransform has a public
   tracker; plain scale/position driving would need reflection into an internal API (unverified across
-  versions). Treated as a cosmetic enhancement, not load-bearing — the enforcement is the re-evaluation
-  revert, which needs no such API. **OPEN / unverified.**
+  versions). Treated as a cosmetic enhancement, not load-bearing — the enforcement is the component's
+  re-evaluation (back-solve / re-snap), which needs no such API. **OPEN / unverified.**
 - **`[ExecuteAlways]` per-frame raycast cost.** A scene of many Snappers each casting every editor frame
   is wasteful; gate recompute on `transform.hasChanged` and a surface-dirty check. Editor-only, but real
   at scale — noted so the pipeline builds the gate in, not as a follow-up.
@@ -466,11 +519,11 @@ geometry**, not labels.
   out of scope.
 - **Multiple snapped objects do not de-collide** (out of scope) — two Snapper objects can overlap;
   each is correct against scene surfaces, not against each other.
-- **Depth (world Z) is intentionally not a snap axis.** The horizontal/vertical model leaves Z for the
-  author's `.Transform(pos:)`. **OPEN:** confirm no `forward/back` snap is wanted (a wall-mount case
-  might want it; deferrable).
-- **Component final names — OPEN.** Chosen `Sizer` and `Snapper` (verb-free nouns, symmetric with
-  `.Transform`/`.RectTransform`, LLM-readable). Alternatives `SurfaceSnap`/`FitSize` were considered;
-  ratify or rename before the pipeline runs.
+- **Depth (world Z) IS a snap axis (RATIFIED, user 2026-07-16).** `forward`/`back` drive `PositionZ`,
+  combining with the horizontal/vertical pairs (a wall-mount / back-wall case). Any axis the author
+  leaves `none` stays free for `.Transform(pos:)` on that axis.
+- **Component final names — RATIFIED: `Sizer` and `Snapper`** (user 2026-07-16). Verb-free nouns,
+  symmetric with `.Transform`/`.RectTransform`, LLM-readable; the `SurfaceSnap`/`FitSize` alternatives
+  are dropped.
 - **Non-mesh objects** produce a located error, never a bounds-of-nothing guess — consistent with §7
   fail-loud.
