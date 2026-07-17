@@ -49,6 +49,12 @@ namespace SceneBuilder.Editor
         internal static Action<IReadOnlyCollection<EntityId>>? SceneToCodeExecutor;
         internal static Action<IReadOnlyCollection<string>>? CodeToSceneExecutor;
 
+        // b6-t1 seams (RED stub — pump routing + real merge land with the task's implementation).
+        internal static Action<IReadOnlyCollection<EntityId>, IReadOnlyCollection<string>>? ConflictExecutor;
+        internal static int ConflictCycleCount { get; private set; }
+        internal static SceneBuilder.Core.Model.SceneSnapshot? BaselineSnapshot;
+        internal static string? BaselineSource;
+
         private static readonly HashSet<EntityId> _pendingSceneIds = new();
         private static bool _sceneDeadlineArmed;
         private static double _sceneDeadline;
@@ -266,7 +272,27 @@ namespace SceneBuilder.Editor
         {
             DrainWatcherPaths();
 
-            if (_sceneDeadlineArmed && now >= _sceneDeadline)
+            var sceneDue = _sceneDeadlineArmed && now >= _sceneDeadline;
+            var sourceDue = _sourceDeadlineArmed && now >= _sourceDeadline;
+
+            // Dual-trigger: BOTH a scene deadline and a real external source deadline are due in this
+            // SAME window. Route to the combined conflict-aware cycle INSTEAD OF the two single-
+            // direction blocks below — running them independently would let one side's reconcile-
+            // against-stale-baseline silently revert the other's edit (research.md Refinement 2).
+            if (sceneDue && sourceDue && ConflictExecutor != null)
+            {
+                ConflictCycleCount++;
+                var conflictIds = new List<EntityId>(_pendingSceneIds);
+                _pendingSceneIds.Clear();
+                _sceneDeadlineArmed = false;
+                var conflictPaths = new List<string>(_pendingSourcePaths);
+                _pendingSourcePaths.Clear();
+                _sourceDeadlineArmed = false;
+                InvokeExecutor(ConflictExecutor, conflictIds, conflictPaths);
+                return;
+            }
+
+            if (sceneDue)
             {
                 SceneToCodeCycleCount++;
                 var ids = new List<EntityId>(_pendingSceneIds);
@@ -275,7 +301,7 @@ namespace SceneBuilder.Editor
                 InvokeExecutor(SceneToCodeExecutor, ids);
             }
 
-            if (_sourceDeadlineArmed && now >= _sourceDeadline)
+            if (sourceDue)
             {
                 CodeToSceneCycleCount++;
                 var paths = new List<string>(_pendingSourcePaths);
@@ -318,6 +344,27 @@ namespace SceneBuilder.Editor
             try
             {
                 executor(arg);
+            }
+            catch (Exception e)
+            {
+                // A throwing executor must not wedge the pump — the next debounce cycle must still run.
+                Debug.LogException(e);
+            }
+        }
+
+        private static void InvokeExecutor(
+            Action<IReadOnlyCollection<EntityId>, IReadOnlyCollection<string>>? executor,
+            IReadOnlyCollection<EntityId> ids,
+            IReadOnlyCollection<string> paths)
+        {
+            if (executor == null)
+            {
+                return;
+            }
+
+            try
+            {
+                executor(ids, paths);
             }
             catch (Exception e)
             {
@@ -372,6 +419,11 @@ namespace SceneBuilder.Editor
                 : _snapshotAssembler.AssembleIncremental(scene, ids);
 
             SceneBuilderSync.Run(builderPath, sidecarPath, scene, snapshot);
+
+            // Establish/refresh the b6-t1 conflict-aware baseline at this converged tail (scope-
+            // validator finding, bucket-b6.md #1) — without this, a real session's baseline stays
+            // null forever and every dual-trigger cycle silently degrades to the clobbering fallback.
+            CaptureBaseline(EditorSceneManager.GetActiveScene());
         }
 
         /// <summary>
@@ -456,6 +508,11 @@ namespace SceneBuilder.Editor
                         $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
                         $"{diagnostic.Message} — scene left untouched.");
                 }
+
+                // Establish/refresh the b6-t1 conflict-aware baseline at this converged tail (scope-
+                // validator finding, bucket-b6.md #1) — without this, a real session's baseline stays
+                // null forever and every dual-trigger cycle silently degrades to the clobbering fallback.
+                CaptureBaseline(EditorSceneManager.GetActiveScene());
             }
             catch (ParseException e)
             {
@@ -463,6 +520,86 @@ namespace SceneBuilder.Editor
                     $"[CodeScenes] Parse error in {builderPath} at line {e.Line}, column {e.Column}: " +
                     $"{e.Message} — scene left untouched.");
             }
+        }
+
+        /// <summary>
+        /// Captures the last-converged (source, scene-snapshot) baseline the combined conflict-aware
+        /// cycle (<see cref="ExecuteBothChanged"/>) attributes both sides' field edits against (b6-t1,
+        /// research.md Refinement 2). Called at the tail of a converged single-direction cycle and
+        /// directly by tests to pin a deterministic baseline before making both-side edits. A no-op
+        /// (baseline left null) when no builder has been built this session yet.
+        /// </summary>
+        internal static void CaptureBaseline(Scene scene)
+        {
+            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
+            if (!File.Exists(builderPath))
+            {
+                BaselineSource = null;
+                BaselineSnapshot = null;
+                return;
+            }
+
+            BaselineSource = File.ReadAllText(builderPath);
+            _snapshotAssembler ??= new ChangeScopedSnapshot();
+            BaselineSnapshot = _snapshotAssembler.AssembleCold(scene);
+        }
+
+        /// <summary>
+        /// The combined conflict-aware cycle body (b6-t1, spec checklist #9, #10): a 3-way field-level
+        /// merge of the last-converged baseline, the current on-disk source (code edits) and the live
+        /// scene (scene edits), via <see cref="SceneBuilderSync.RunConflictAware"/>. Non-overlapping
+        /// fields apply in their own direction; a true same-field-same-object overlap resolves
+        /// scene-wins with the prior code value preserved in a `// CONFLICT:` marker, a located Console
+        /// error, and a scene-view overlay registration — never a modal. Degrades to the two
+        /// single-direction executors (never silently clobbering either side) when no baseline is
+        /// established yet (a cold session).
+        /// </summary>
+        internal static void ExecuteBothChanged(IReadOnlyCollection<EntityId> ids, IReadOnlyCollection<string> paths)
+        {
+            var scene = EditorSceneManager.GetActiveScene();
+            if (!scene.IsValid() || !scene.isLoaded || string.IsNullOrEmpty(scene.path))
+            {
+                return;
+            }
+
+            if (BaselineSource == null || BaselineSnapshot == null)
+            {
+                // Cold session: no last-converged baseline to attribute against — degrade safely to
+                // the two single-direction executors rather than risk a stale-baseline clobber.
+                InvokeExecutor(SceneToCodeExecutor, ids);
+                InvokeExecutor(CodeToSceneExecutor, paths);
+                return;
+            }
+
+            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
+            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
+            if (!File.Exists(builderPath) || !File.Exists(sidecarPath))
+            {
+                return; // nothing to sync back into
+            }
+
+            _snapshotAssembler ??= new ChangeScopedSnapshot();
+            var liveSnapshot = ids.Count == 0
+                ? _snapshotAssembler.AssembleCold(scene)
+                : _snapshotAssembler.AssembleIncremental(scene, ids);
+
+            SceneBuilderSync.RunConflictAware(
+                builderPath, sidecarPath, scene, liveSnapshot, BaselineSource, BaselineSnapshot, new ConflictSurfacing());
+
+            // Push CODE-only fields into the scene: the source RunConflictAware just wrote already
+            // carries the scene-authoritative + conflict-resolved values, so this Build call no-ops
+            // those and materializes only the fields the code alone changed. Scene write is
+            // suppression-guarded internally (SceneBuilderBuild.Run), so it never re-triggers us.
+            var currentScene = EditorSceneManager.GetActiveScene();
+            var buildResult = SceneBuilderBuild.Run(builderPath, currentScene.path, sidecarPath, currentScene);
+            foreach (var diagnostic in buildResult.Diagnostics)
+            {
+                Debug.LogError(
+                    $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
+                    $"{diagnostic.Message} — code-only field(s) left unmaterialized.");
+            }
+
+            CaptureBaseline(EditorSceneManager.GetActiveScene());
         }
 
         /// <summary>
@@ -474,6 +611,7 @@ namespace SceneBuilder.Editor
         {
             SceneToCodeExecutor = ExecuteSceneToCode;
             CodeToSceneExecutor = ExecuteCodeToScene;
+            ConflictExecutor = ExecuteBothChanged;
         }
 
         /// <summary>Test hygiene: full disarm + state reset, then re-arm to the default (auto-on) state the tests expect.</summary>
@@ -487,6 +625,10 @@ namespace SceneBuilder.Editor
             CodeToSceneCycleCount = 0;
             SceneToCodeExecutor = null;
             CodeToSceneExecutor = null;
+            ConflictExecutor = null;
+            ConflictCycleCount = 0;
+            BaselineSnapshot = null;
+            BaselineSource = null;
             _snapshotAssembler = null;
             SceneBuilderBuild.LastBuilderPath = null;
             SceneBuilderBuild.LastSidecarPath = null;
