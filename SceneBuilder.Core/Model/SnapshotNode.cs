@@ -21,5 +21,11 @@ namespace SceneBuilder.Core.Model
         public ComponentData[] Components { get; init; } = Array.Empty<ComponentData>();
 
         public SnapshotNode[] Children { get; init; } = Array.Empty<SnapshotNode>();
+
+        public string? SourcePrefabGuid { get; init; } = null;
+
+        public PrefabInstanceKey? PrefabKey { get; init; } = null;
+
+        public ValueNode.Unsupported? OpaqueOverrides { get; init; } = null;
     }
 }

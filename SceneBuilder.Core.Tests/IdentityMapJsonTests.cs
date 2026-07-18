@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SceneBuilder.Core.Identity;
+using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Serialization;
 using Xunit;
 
@@ -71,6 +72,85 @@ namespace SceneBuilder.Core.Tests
 
             Assert.Equal(JsonValueKind.Array, assets.ValueKind);
             Assert.Equal(0, assets.GetArrayLength());
+        }
+
+        [Fact]
+        public void IdentityMap_WithPrefabInstanceEntry_RoundTripsByteIdentical()
+        {
+            var map = new IdentityMap
+            {
+                SchemaVersion = 1,
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new IdentityMapEntry[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "Root/Enemy",
+                        GlobalObjectId = "",
+                        Kind = "PrefabInstance",
+                        ParentLogicalId = "Root",
+                        PrefabKey = new PrefabInstanceKey { TargetPrefabId = 111UL, TargetObjectId = 222UL },
+                        SourcePrefabGuid = "abc123def456",
+                    },
+                },
+                Assets = System.Array.Empty<AssetEntry>(),
+            };
+
+            var json = IdentityMapJson.Serialize(map);
+            var back = IdentityMapJson.Deserialize(json);
+            var roundTripJson = IdentityMapJson.Serialize(back);
+
+            Assert.Equal(json, roundTripJson);
+            Assert.Equal(map.Entries[0], back.Entries[0]);
+            Assert.Equal(111UL, back.Entries[0].PrefabKey!.TargetPrefabId);
+            Assert.Equal(222UL, back.Entries[0].PrefabKey!.TargetObjectId);
+            Assert.Equal("abc123def456", back.Entries[0].SourcePrefabGuid);
+        }
+
+        [Fact]
+        public void IdentityMap_PrefabInstanceEntry_HasPrefabKeyAndSourcePrefabGuidKeys()
+        {
+            var map = new IdentityMap
+            {
+                SchemaVersion = 1,
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new IdentityMapEntry[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "Root/Enemy",
+                        GlobalObjectId = "",
+                        Kind = "PrefabInstance",
+                        ParentLogicalId = "Root",
+                        PrefabKey = new PrefabInstanceKey { TargetPrefabId = 111UL, TargetObjectId = 222UL },
+                        SourcePrefabGuid = "abc123def456",
+                    },
+                },
+                Assets = System.Array.Empty<AssetEntry>(),
+            };
+
+            var json = IdentityMapJson.Serialize(map);
+
+            Assert.Contains("\"prefabKey\"", json);
+            Assert.Contains("\"targetPrefabId\"", json);
+            Assert.Contains("\"targetObjectId\"", json);
+            Assert.Contains("\"sourcePrefabGuid\"", json);
+            Assert.NotEqual(111UL, 222UL);
+        }
+
+        [Fact]
+        public void IdentityMap_PlainEntry_OmitsPrefabKeyAndSourcePrefabGuid()
+        {
+            var map = SampleMap();
+
+            var json = IdentityMapJson.Serialize(map);
+
+            Assert.DoesNotContain("\"prefabKey\"", json);
+            Assert.DoesNotContain("\"sourcePrefabGuid\"", json);
+            // Byte-stability regression guard: existing nullable fields must still be
+            // emitted as explicit null keys (no global DefaultIgnoreCondition was added).
+            Assert.Contains("\"componentType\": null", json);
+            Assert.Contains("\"parentLogicalId\": null", json);
         }
     }
 }

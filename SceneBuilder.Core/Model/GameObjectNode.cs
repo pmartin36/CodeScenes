@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace SceneBuilder.Core.Model
 {
+    [JsonPolymorphic]
+    [JsonDerivedType(typeof(PrefabInstanceNode), "PrefabInstance")]
     public record GameObjectNode
     {
         [JsonPropertyOrder(0)]
