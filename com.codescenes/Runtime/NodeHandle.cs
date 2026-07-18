@@ -66,6 +66,14 @@ namespace SceneBuilder.Authoring
         /// <summary>Assign an explicit, stable logical id (otherwise one is derived).</summary>
         public NodeHandle Id(string id) => this;
 
+        /// <summary>
+        /// Instantiate a prefab instance nested under this GameObject, from <paramref name="assetPath"/>
+        /// (a <c>.prefab</c> or an imported model such as a <c>.fbx</c>). The path is authoring-time
+        /// convenience only — the GUID is authoritative and stored in the sidecar; two calls with the
+        /// same path produce two distinct instances.
+        /// </summary>
+        public InstanceHandle Instance(string assetPath) => new InstanceHandle();
+
         /// <summary>Attach a component of type <typeparamref name="T"/> with no field overrides.</summary>
         public NodeHandle Component<T>() => this;
 

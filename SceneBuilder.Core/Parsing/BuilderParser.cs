@@ -183,6 +183,12 @@ namespace SceneBuilder.Core.Parsing
                 throw Fail(expression, "Expected a builder call chain");
             }
 
+            if (calls[0].Method == "Instance")
+            {
+                ProcessInstanceChain(receiver, calls, handleName, ctx);
+                return;
+            }
+
             if (calls[0].Method == "Add")
             {
                 ProcessAddChain(receiver, calls, handleName, ctx);
@@ -649,6 +655,18 @@ namespace SceneBuilder.Core.Parsing
 
         private static void CollectIdentityEntries(NodeBuilder node, string? parentLogicalId, int siblingIndex, Dictionary<string, string> globalObjectIdByLogicalId, List<IdentityMapEntry> entries)
         {
+            if (node.IsInstance)
+            {
+                entries.Add(BuildInstanceIdentityEntry(node, parentLogicalId, siblingIndex, globalObjectIdByLogicalId));
+
+                for (var i = 0; i < node.Children.Count; i++)
+                {
+                    CollectIdentityEntries(node.Children[i], node.LogicalId, i, globalObjectIdByLogicalId, entries);
+                }
+
+                return;
+            }
+
             entries.Add(new IdentityMapEntry
             {
                 LogicalId = node.LogicalId,
@@ -848,7 +866,17 @@ namespace SceneBuilder.Core.Parsing
 
         // ---- Materialization --------------------------------------------------------------
 
-        private static GameObjectNode BuildNode(NodeBuilder builder) => new()
+        private static GameObjectNode BuildNode(NodeBuilder builder)
+        {
+            if (builder.IsInstance)
+            {
+                return BuildInstanceNode(builder);
+            }
+
+            return BuildPlainNode(builder);
+        }
+
+        private static GameObjectNode BuildPlainNode(NodeBuilder builder) => new()
         {
             LogicalId = builder.LogicalId,
             Name = builder.Name,
@@ -905,6 +933,8 @@ namespace SceneBuilder.Core.Parsing
             public string? Handle;
             public SourceSpan? IdCallSpan;
             public ChannelMask DrivenChannels;
+            public bool IsInstance;
+            public string? SourcePrefabPath;
             public readonly List<NodeBuilder> Children = new();
             public readonly List<ComponentBuilder> Components = new();
         }
