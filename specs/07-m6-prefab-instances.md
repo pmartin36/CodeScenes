@@ -36,6 +36,13 @@ is handled as one whole unit; per-property overrides are preserved but not yet r
 
 ## In scope
 
+- **FBX / imported-model prefabs are first-class sources, not just `.prefab` assets.** An imported
+  model (`Assets/Kenney/sedan.fbx`) is a **model prefab** — `AssetDatabase.LoadAssetAtPath<GameObject>`
+  returns its root and `PrefabUtility.InstantiatePrefab` places the whole model (mesh + materials +
+  hierarchy) exactly as for a `.prefab`. `scene.Instance("Assets/…/sedan.fbx")` is the intended,
+  supported form; the source-prefab GUID is the FBX's GUID. Model-prefab instances report
+  `PrefabInstanceStatus.Connected` and read back through the same instance-detection path — this must
+  be confirmed and covered by an EditMode test using a real imported FBX, not only a `.prefab`.
 - Modelling a prefab instance root as a `PrefabInstanceNode` referencing its source prefab by GUID.
 - **Materialize (code→scene):** instantiate the prefab into the scene at the node's position in the
   hierarchy with the node's root transform.
