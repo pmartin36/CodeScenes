@@ -194,6 +194,44 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void AssetRef_EqualityIgnoresSubAssetName()
+        {
+            var a = new AssetRef { Guid = "abc123", FileId = 4, IsBuiltin = false, SubAsset = "BarrelMesh" };
+            var b = new AssetRef { Guid = "abc123", FileId = 4, IsBuiltin = false, SubAsset = "barrelmesh" };
+
+            Assert.Equal(a, b);
+            Assert.Equal(a.GetHashCode(), b.GetHashCode());
+        }
+
+        [Fact]
+        public void ValueNodeAssetRef_SubAsset_CanonicalRoundTrips()
+        {
+            var original = new ValueNode.AssetRef(new AssetRef
+            {
+                Guid = "abc123",
+                FileId = 4,
+                TypeHint = "Mesh",
+                DisplayPath = "Assets/Models/Barrel.fbx",
+                SubAsset = "BarrelMesh",
+            });
+            var model = ModelWith(original);
+
+            var json = SceneModelSerializer.Serialize(model);
+
+            using var doc = JsonDocument.Parse(json);
+            var refElement = doc.RootElement
+                .GetProperty("roots")[0].GetProperty("components")[0].GetProperty("fields").GetProperty("material").GetProperty("ref");
+            Assert.True(refElement.TryGetProperty("subAsset", out var subAssetElement));
+            Assert.Equal("BarrelMesh", subAssetElement.GetString());
+
+            var back = SceneModelSerializer.Deserialize(json);
+            var field = ExtractField(back);
+            var assetRef = Assert.IsType<ValueNode.AssetRef>(field);
+            Assert.NotNull(assetRef.Ref);
+            Assert.Equal("BarrelMesh", assetRef.Ref!.SubAsset);
+        }
+
+        [Fact]
         public void SourceExpr_RendersAssetPopulatedAndNull()
         {
             var populated = new ValueNode.AssetRef(new AssetRef { Guid = "abc123", FileId = 0, DisplayPath = "Assets/Materials/A \"Weird\" One.mat" });

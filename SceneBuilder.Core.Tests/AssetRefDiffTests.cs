@@ -158,5 +158,52 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(FieldKey, setField.Path);
             Assert.Equal(desired, setField.Value);
         }
+
+        // b1-t1: SubAsset is non-authoritative (like DisplayPath/TypeHint) — Diff keys on
+        // (Guid, FileId, IsBuiltin) only, never on SubAsset name.
+        [Fact]
+        public void Diff_TwoSubAssetsSameFileMainVsSub_ReportsChange()
+        {
+            const long mainFileId = 100;
+            const long subFileId = 200;
+            var desired = new ValueNode.AssetRef(new AssetRef { Guid = "abc123", FileId = subFileId, DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "BarrelMesh" });
+            var actual = new ValueNode.AssetRef(new AssetRef { Guid = "abc123", FileId = mainFileId, DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "" });
+            var (model, snapshot, map) = BuildScene(desired, actual);
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("root-1", setField.LogicalId);
+            Assert.Equal(FieldKey, setField.Path);
+            Assert.Equal(desired, setField.Value);
+        }
+
+        [Fact]
+        public void Diff_SubAssetSameGuidFileIdDifferentName_NoChange()
+        {
+            const long subFileId = 200;
+            var desired = new ValueNode.AssetRef(new AssetRef { Guid = "abc123", FileId = subFileId, DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "BarrelMesh" });
+            var actual = new ValueNode.AssetRef(new AssetRef { Guid = "abc123", FileId = subFileId, DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "barrelmesh" });
+            var (model, snapshot, map) = BuildScene(desired, actual);
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.Empty(changeSet.Ops.OfType<SetField>());
+        }
+
+        [Fact]
+        public void Diff_SubAssetVsBuiltin_ReportsChange()
+        {
+            var desired = new ValueNode.AssetRef(new AssetRef { Guid = "proj-guid", FileId = 200, IsBuiltin = false, DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "X" });
+            var actual = new ValueNode.AssetRef(new AssetRef { Guid = DefaultResourcesGuid, FileId = CubeFileId, IsBuiltin = true, DisplayPath = "Cube" });
+            var (model, snapshot, map) = BuildScene(desired, actual);
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("root-1", setField.LogicalId);
+            Assert.Equal(FieldKey, setField.Path);
+            Assert.Equal(desired, setField.Value);
+        }
     }
 }
