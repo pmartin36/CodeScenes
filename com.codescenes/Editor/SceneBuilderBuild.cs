@@ -62,6 +62,15 @@ namespace SceneBuilder.Editor
             /// </summary>
             public System.Collections.Generic.IReadOnlyList<SceneBuilder.Core.Validation.Diagnostic> Diagnostics
                 { get; set; } = System.Array.Empty<SceneBuilder.Core.Validation.Diagnostic>();
+
+            /// <summary>
+            /// Info-severity diagnostics from a SUCCESSFUL build's <c>plan.Diagnostics</c> (e.g. SB2301
+            /// "prefab overrides preserved but not modelled"). Distinct from <see cref="Diagnostics"/>,
+            /// which means "build refused" — <see cref="Flags"/> is populated only on the success path
+            /// and never implies the build was refused.
+            /// </summary>
+            public System.Collections.Generic.IReadOnlyList<SceneBuilder.Core.Validation.Diagnostic> Flags
+                { get; set; } = System.Array.Empty<SceneBuilder.Core.Validation.Diagnostic>();
         }
 
         [MenuItem("CodeScenes/Build DemoScene (code -> scene)")]
@@ -194,6 +203,7 @@ namespace SceneBuilder.Editor
                 Map = map,
                 ObjectCount = execution.GameObjectsByLogicalId.Count,
                 PlanOpCount = plan.Ops.Length,
+                Flags = plan.Diagnostics,
             };
         }
 
