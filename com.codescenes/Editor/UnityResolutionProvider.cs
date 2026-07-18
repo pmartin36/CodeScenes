@@ -70,7 +70,8 @@ namespace SceneBuilder.Editor
                     return new AssetResolution.Deferred();
 
                 case AssetReferenceResolver.LoweringResolver.PathProbeKind.Resolved:
-                    var subProbe = AssetReferenceResolver.LoweringResolver.TryResolveSubObject(probe.CurrentPath, subAsset);
+                    // subAsset is non-null past the IsNullOrEmpty guard above (line 49).
+                    var subProbe = AssetReferenceResolver.LoweringResolver.TryResolveSubObject(probe.CurrentPath, subAsset!);
                     switch (subProbe.Kind)
                     {
                         case AssetReferenceResolver.LoweringResolver.SubObjectProbeKind.Resolved:
@@ -81,7 +82,7 @@ namespace SceneBuilder.Editor
 
                         default:
                             // NotFound / Unidentifiable — no sub-object by that name resolves cleanly.
-                            return new AssetResolution.SubAssetUnresolved(subAsset, subProbe.Names);
+                            return new AssetResolution.SubAssetUnresolved(subAsset!, subProbe.Names);
                     }
 
                 default:
