@@ -62,69 +62,69 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void SpatialComponents_TypeNames_MatchRuntimeFqns()
         {
-            Assert.Equal("SceneBuilder.Authoring.Sizer", SpatialComponents.SizerTypeName);
-            Assert.Equal("SceneBuilder.Authoring.Snapper", SpatialComponents.SnapperTypeName);
+            Assert.Equal("SceneBuilder.Authoring.FitSize", SpatialComponents.FitSizeTypeName);
+            Assert.Equal("SceneBuilder.Authoring.SurfaceSnap", SpatialComponents.SurfaceSnapTypeName);
         }
 
         [Fact]
-        public void SpatialComponents_SizerFieldKeys_MatchExpectedLiterals()
+        public void SpatialComponents_FitSizeFieldKeys_MatchExpectedLiterals()
         {
-            Assert.Equal("width", SpatialComponents.SizerFields.Width);
-            Assert.Equal("height", SpatialComponents.SizerFields.Height);
-            Assert.Equal("depth", SpatialComponents.SizerFields.Depth);
-            Assert.Equal("size", SpatialComponents.SizerFields.Size);
+            Assert.Equal("width", SpatialComponents.FitSizeFields.Width);
+            Assert.Equal("height", SpatialComponents.FitSizeFields.Height);
+            Assert.Equal("depth", SpatialComponents.FitSizeFields.Depth);
+            Assert.Equal("size", SpatialComponents.FitSizeFields.Size);
         }
 
         [Fact]
-        public void SpatialComponents_SnapperFieldKeys_MatchExpectedLiterals()
+        public void SpatialComponents_SurfaceSnapFieldKeys_MatchExpectedLiterals()
         {
-            Assert.Equal("up", SpatialComponents.SnapperFields.Up);
-            Assert.Equal("down", SpatialComponents.SnapperFields.Down);
-            Assert.Equal("left", SpatialComponents.SnapperFields.Left);
-            Assert.Equal("right", SpatialComponents.SnapperFields.Right);
-            Assert.Equal("forward", SpatialComponents.SnapperFields.Forward);
-            Assert.Equal("back", SpatialComponents.SnapperFields.Back);
-            Assert.Equal("target", SpatialComponents.SnapperFields.Target);
+            Assert.Equal("up", SpatialComponents.SurfaceSnapFields.Up);
+            Assert.Equal("down", SpatialComponents.SurfaceSnapFields.Down);
+            Assert.Equal("left", SpatialComponents.SurfaceSnapFields.Left);
+            Assert.Equal("right", SpatialComponents.SurfaceSnapFields.Right);
+            Assert.Equal("forward", SpatialComponents.SurfaceSnapFields.Forward);
+            Assert.Equal("back", SpatialComponents.SurfaceSnapFields.Back);
+            Assert.Equal("target", SpatialComponents.SurfaceSnapFields.Target);
         }
 
-        // ---- b2-t1: .Sizer(...) parse arm ------------------------------------------------
+        // ---- b2-t1: .FitSize(...) parse arm ------------------------------------------------
 
-        private const string SizerHeightSource = @"
-public class SizerHeightScene : ISceneDefinition
+        private const string FitSizeHeightSource = @"
+public class FitSizeHeightScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Sizer(height: 2f);
+        scene.Add(""Crate"").FitSize(height: 2f);
     }
 }
 ";
 
-        private const string SizerExplicitSizeSource = @"
-public class SizerExplicitSizeScene : ISceneDefinition
+        private const string FitSizeExplicitSizeSource = @"
+public class FitSizeExplicitSizeScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Sizer(size: (2f, 1f, 0.5f));
+        scene.Add(""Crate"").FitSize(size: (2f, 1f, 0.5f));
     }
 }
 ";
 
-        private const string SizerAspectAndExplicitSource = @"
-public class SizerBothScene : ISceneDefinition
+        private const string FitSizeAspectAndExplicitSource = @"
+public class FitSizeBothScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Sizer(height: 2f, size: (1f, 1f, 1f));
+        scene.Add(""Crate"").FitSize(height: 2f, size: (1f, 1f, 1f));
     }
 }
 ";
 
-        private const string SizerNoDimensionSource = @"
-public class SizerNoneScene : ISceneDefinition
+        private const string FitSizeNoDimensionSource = @"
+public class FitSizeNoneScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Sizer();
+        scene.Add(""Crate"").FitSize();
     }
 }
 ";
@@ -140,48 +140,48 @@ public class TransformOnlyScene : ISceneDefinition
 ";
 
         [Fact]
-        public void Parse_SizerHeight_YieldsSizerComponentAndDrivenScale()
+        public void Parse_FitSizeHeight_YieldsFitSizeComponentAndDrivenScale()
         {
-            var result = BuilderParser.Parse(SizerHeightSource);
+            var result = BuilderParser.Parse(FitSizeHeightSource);
 
             var node = Assert.Single(result.Model.Roots);
             var component = Assert.Single(node.Components);
 
-            Assert.Equal(SpatialComponents.SizerTypeName, component.Type.FullName);
+            Assert.Equal(SpatialComponents.FitSizeTypeName, component.Type.FullName);
             Assert.Equal(
                 ValueNode.Primitive.Float(2f),
-                component.Fields[SpatialComponents.SizerFields.Height]);
+                component.Fields[SpatialComponents.FitSizeFields.Height]);
             Assert.Equal(ChannelMask.Scale, node.Transform.DrivenChannels);
         }
 
         [Fact]
-        public void Parse_SizerExplicitSize_YieldsPerAxisFieldsAndDrivenScale()
+        public void Parse_FitSizeExplicitSize_YieldsPerAxisFieldsAndDrivenScale()
         {
-            var result = BuilderParser.Parse(SizerExplicitSizeSource);
+            var result = BuilderParser.Parse(FitSizeExplicitSizeSource);
 
             var node = Assert.Single(result.Model.Roots);
             var component = Assert.Single(node.Components);
 
-            Assert.Equal(SpatialComponents.SizerTypeName, component.Type.FullName);
+            Assert.Equal(SpatialComponents.FitSizeTypeName, component.Type.FullName);
             Assert.Equal(
                 new ValueNode.Vec3(new Vec3(2f, 1f, 0.5f)),
-                component.Fields[SpatialComponents.SizerFields.Size]);
+                component.Fields[SpatialComponents.FitSizeFields.Size]);
             Assert.Equal(ChannelMask.Scale, node.Transform.DrivenChannels);
         }
 
         [Fact]
-        public void Parse_SizerAspectAndExplicitTogether_YieldsLocatedError()
+        public void Parse_FitSizeAspectAndExplicitTogether_YieldsLocatedError()
         {
-            var ex = Assert.Throws<ParseException>(() => BuilderParser.Parse(SizerAspectAndExplicitSource));
+            var ex = Assert.Throws<ParseException>(() => BuilderParser.Parse(FitSizeAspectAndExplicitSource));
 
             Assert.True(ex.Line > 0);
             Assert.Contains("combine", ex.Message);
         }
 
         [Fact]
-        public void Parse_SizerNoDimension_YieldsLocatedError()
+        public void Parse_FitSizeNoDimension_YieldsLocatedError()
         {
-            var ex = Assert.Throws<ParseException>(() => BuilderParser.Parse(SizerNoDimensionSource));
+            var ex = Assert.Throws<ParseException>(() => BuilderParser.Parse(FitSizeNoDimensionSource));
 
             Assert.True(ex.Line > 0);
             Assert.Contains("requires", ex.Message);
@@ -197,125 +197,125 @@ public class TransformOnlyScene : ISceneDefinition
             Assert.Equal(ChannelMask.None, node.Transform.DrivenChannels);
         }
 
-        // ---- b2-t2: .Snapper(...) parse arm ----------------------------------------------
+        // ---- b2-t2: .SurfaceSnap(...) parse arm ----------------------------------------------
 
-        private const string SnapperDownLeftSource = @"
-public class SnapperDownLeftScene : ISceneDefinition
+        private const string SurfaceSnapDownLeftSource = @"
+public class SurfaceSnapDownLeftScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Snapper(down: true, left: true);
+        scene.Add(""Crate"").SurfaceSnap(down: true, left: true);
     }
 }
 ";
 
-        private const string SnapperDownOnlySource = @"
-public class SnapperDownOnlyScene : ISceneDefinition
+        private const string SurfaceSnapDownOnlySource = @"
+public class SurfaceSnapDownOnlyScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Snapper(down: true);
+        scene.Add(""Crate"").SurfaceSnap(down: true);
     }
 }
 ";
 
-        private const string SnapperBackOnlySource = @"
-public class SnapperBackOnlyScene : ISceneDefinition
+        private const string SurfaceSnapBackOnlySource = @"
+public class SurfaceSnapBackOnlyScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Snapper(back: true);
+        scene.Add(""Crate"").SurfaceSnap(back: true);
     }
 }
 ";
 
-        private const string SnapperDownBackSource = @"
-public class SnapperDownBackScene : ISceneDefinition
+        private const string SurfaceSnapDownBackSource = @"
+public class SurfaceSnapDownBackScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Snapper(down: true, back: true);
+        scene.Add(""Crate"").SurfaceSnap(down: true, back: true);
     }
 }
 ";
 
-        private const string SnapperLeftRightSource = @"
-public class SnapperLeftRightScene : ISceneDefinition
+        private const string SurfaceSnapLeftRightSource = @"
+public class SurfaceSnapLeftRightScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Snapper(left: true, right: true);
+        scene.Add(""Crate"").SurfaceSnap(left: true, right: true);
     }
 }
 ";
 
-        private const string SnapperUpDownSource = @"
-public class SnapperUpDownScene : ISceneDefinition
+        private const string SurfaceSnapUpDownSource = @"
+public class SurfaceSnapUpDownScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Snapper(up: true, down: true);
+        scene.Add(""Crate"").SurfaceSnap(up: true, down: true);
     }
 }
 ";
 
-        private const string SnapperForwardBackSource = @"
-public class SnapperForwardBackScene : ISceneDefinition
+        private const string SurfaceSnapForwardBackSource = @"
+public class SurfaceSnapForwardBackScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").Snapper(forward: true, back: true);
+        scene.Add(""Crate"").SurfaceSnap(forward: true, back: true);
     }
 }
 ";
 
-        private const string SnapperWithTargetSource = @"
-public class SnapperTargetScene : ISceneDefinition
+        private const string SurfaceSnapWithTargetSource = @"
+public class SurfaceSnapTargetScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
         var floor = scene.Add(""Floor"");
-        scene.Add(""Crate"").Snapper(down: true, target: floor);
+        scene.Add(""Crate"").SurfaceSnap(down: true, target: floor);
     }
 }
 ";
 
         [Fact]
-        public void Parse_SnapperDownLeft_SetsFlagsAndDrivenPositionXY()
+        public void Parse_SurfaceSnapDownLeft_SetsFlagsAndDrivenPositionXY()
         {
-            var result = BuilderParser.Parse(SnapperDownLeftSource);
+            var result = BuilderParser.Parse(SurfaceSnapDownLeftSource);
 
             var node = Assert.Single(result.Model.Roots);
             var component = Assert.Single(node.Components);
 
-            Assert.Equal(SpatialComponents.SnapperTypeName, component.Type.FullName);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SnapperFields.Down]);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SnapperFields.Left]);
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SnapperFields.Up));
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SnapperFields.Right));
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SnapperFields.Forward));
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SnapperFields.Back));
+            Assert.Equal(SpatialComponents.SurfaceSnapTypeName, component.Type.FullName);
+            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Down]);
+            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Left]);
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Up));
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Right));
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Forward));
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Back));
             Assert.Equal(ChannelMask.PositionX | ChannelMask.PositionY, node.Transform.DrivenChannels);
         }
 
         [Fact]
-        public void Parse_SnapperDownOnly_DrivesPositionYNotX()
+        public void Parse_SurfaceSnapDownOnly_DrivesPositionYNotX()
         {
-            var result = BuilderParser.Parse(SnapperDownOnlySource);
+            var result = BuilderParser.Parse(SurfaceSnapDownOnlySource);
 
             var node = Assert.Single(result.Model.Roots);
             var component = Assert.Single(node.Components);
 
             Assert.Single(component.Fields);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SnapperFields.Down]);
+            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Down]);
             Assert.Equal(ChannelMask.PositionY, node.Transform.DrivenChannels);
         }
 
         [Theory]
-        [InlineData(SnapperLeftRightSource)]
-        [InlineData(SnapperUpDownSource)]
-        [InlineData(SnapperForwardBackSource)]
-        public void Parse_SnapperContradictoryAxis_YieldsLocatedError(string source)
+        [InlineData(SurfaceSnapLeftRightSource)]
+        [InlineData(SurfaceSnapUpDownSource)]
+        [InlineData(SurfaceSnapForwardBackSource)]
+        public void Parse_SurfaceSnapContradictoryAxis_YieldsLocatedError(string source)
         {
             var ex = Assert.Throws<ParseException>(() => BuilderParser.Parse(source));
 
@@ -324,83 +324,83 @@ public class SnapperTargetScene : ISceneDefinition
         }
 
         [Fact]
-        public void Parse_SnapperWithTarget_CarriesObjectRefToHandleLogicalId()
+        public void Parse_SurfaceSnapWithTarget_CarriesObjectRefToHandleLogicalId()
         {
-            var result = BuilderParser.Parse(SnapperWithTargetSource);
+            var result = BuilderParser.Parse(SurfaceSnapWithTargetSource);
 
             var floor = Assert.Single(result.Model.Roots, r => r.Name == "Floor");
             var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
             var component = Assert.Single(crate.Components);
 
-            var target = Assert.IsType<ValueNode.ObjectRef>(component.Fields[SpatialComponents.SnapperFields.Target]);
+            var target = Assert.IsType<ValueNode.ObjectRef>(component.Fields[SpatialComponents.SurfaceSnapFields.Target]);
             Assert.Equal(floor.LogicalId, target.TargetLogicalId);
             Assert.Equal(ChannelMask.PositionY, crate.Transform.DrivenChannels & ChannelMask.PositionY);
         }
 
         [Fact]
-        public void Parse_SnapperBack_DrivesPositionZ()
+        public void Parse_SurfaceSnapBack_DrivesPositionZ()
         {
-            var result = BuilderParser.Parse(SnapperBackOnlySource);
+            var result = BuilderParser.Parse(SurfaceSnapBackOnlySource);
 
             var node = Assert.Single(result.Model.Roots);
             var component = Assert.Single(node.Components);
 
             Assert.Single(component.Fields);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SnapperFields.Back]);
+            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Back]);
             Assert.Equal(ChannelMask.PositionZ, node.Transform.DrivenChannels);
         }
 
         [Fact]
-        public void Parse_SnapperDownBack_DrivesPositionYAndZ()
+        public void Parse_SurfaceSnapDownBack_DrivesPositionYAndZ()
         {
-            var result = BuilderParser.Parse(SnapperDownBackSource);
+            var result = BuilderParser.Parse(SurfaceSnapDownBackSource);
 
             var node = Assert.Single(result.Model.Roots);
 
             Assert.Equal(ChannelMask.PositionY | ChannelMask.PositionZ, node.Transform.DrivenChannels);
         }
 
-        // ---- b4-t1: dedicated .Sizer(...)/.Snapper(...) emit --------------------------------
+        // ---- b4-t1: dedicated .FitSize(...)/.SurfaceSnap(...) emit --------------------------------
 
         [Fact]
-        public void Emit_Sizer_EmitsDedicatedCallNotGenericComponent()
+        public void Emit_FitSize_EmitsDedicatedCallNotGenericComponent()
         {
             var fields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(2f)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
             });
 
-            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.SizerTypeName, fields, null);
+            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.FitSizeTypeName, fields, null);
 
-            Assert.Equal("crate.Sizer(height: 2f);", text);
+            Assert.Equal("crate.FitSize(height: 2f);", text);
             Assert.DoesNotContain(".Component<", text);
         }
 
         [Fact]
-        public void Emit_SizerExplicit_EmitsSizeVectorFSuffixed()
+        public void Emit_FitSizeExplicit_EmitsSizeVectorFSuffixed()
         {
             var fields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Size, new ValueNode.Vec3(new Vec3(2f, 1f, 0.5f))),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, new ValueNode.Vec3(new Vec3(2f, 1f, 0.5f))),
             });
 
-            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.SizerTypeName, fields, null);
+            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.FitSizeTypeName, fields, null);
 
-            Assert.Equal("crate.Sizer(size: (2f, 1f, 0.5f));", text);
+            Assert.Equal("crate.FitSize(size: (2f, 1f, 0.5f));", text);
         }
 
         [Fact]
-        public void Emit_Snapper_EmitsOnlySetFlags()
+        public void Emit_SurfaceSnap_EmitsOnlySetFlags()
         {
             var fields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Left, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Left, ValueNode.Primitive.Bool(true)),
             });
 
-            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.SnapperTypeName, fields, null);
+            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.SurfaceSnapTypeName, fields, null);
 
-            Assert.Equal("crate.Snapper(down: true, left: true);", text);
+            Assert.Equal("crate.SurfaceSnap(down: true, left: true);", text);
             Assert.DoesNotContain("up:", text);
             Assert.DoesNotContain("right:", text);
             Assert.DoesNotContain("forward:", text);
@@ -408,15 +408,15 @@ public class SnapperTargetScene : ISceneDefinition
         }
 
         [Fact]
-        public void Emit_SizerBeforeSnapper_OrderingDeterministicAndStable()
+        public void Emit_FitSizeBeforeSurfaceSnap_OrderingDeterministicAndStable()
         {
-            var sizer = new ComponentData { LogicalId = "x/Sizer#0", Type = new TypeRef(SpatialComponents.SizerTypeName), Fields = FieldMap.Empty };
-            var snapper = new ComponentData { LogicalId = "x/Snapper#0", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = FieldMap.Empty };
+            var sizer = new ComponentData { LogicalId = "x/FitSize#0", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = FieldMap.Empty };
+            var snapper = new ComponentData { LogicalId = "x/SurfaceSnap#0", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = FieldMap.Empty };
 
             var ordered = SpatialComponentSource.OrderForEmit(new[] { snapper, sizer });
 
-            Assert.Equal(SpatialComponents.SizerTypeName, ordered[0].Type.FullName);
-            Assert.Equal(SpatialComponents.SnapperTypeName, ordered[1].Type.FullName);
+            Assert.Equal(SpatialComponents.FitSizeTypeName, ordered[0].Type.FullName);
+            Assert.Equal(SpatialComponents.SurfaceSnapTypeName, ordered[1].Type.FullName);
 
             var reordered = SpatialComponentSource.OrderForEmit(ordered);
             Assert.Equal(ordered, reordered);
@@ -425,26 +425,26 @@ public class SnapperTargetScene : ISceneDefinition
         [Fact]
         public void Parse_Emit_SpatialCalls_TextRoundTripsIdentically()
         {
-            var heightResult = BuilderParser.Parse(SizerHeightSource);
+            var heightResult = BuilderParser.Parse(FitSizeHeightSource);
             var heightComponent = Assert.Single(Assert.Single(heightResult.Model.Roots).Components);
             Assert.Equal(
-                "x.Sizer(height: 2f);",
+                "x.FitSize(height: 2f);",
                 SpatialComponentSource.RenderStatement("x", heightComponent.Type.FullName, heightComponent.Fields, null));
 
-            var sizeResult = BuilderParser.Parse(SizerExplicitSizeSource);
+            var sizeResult = BuilderParser.Parse(FitSizeExplicitSizeSource);
             var sizeComponent = Assert.Single(Assert.Single(sizeResult.Model.Roots).Components);
             Assert.Equal(
-                "x.Sizer(size: (2f, 1f, 0.5f));",
+                "x.FitSize(size: (2f, 1f, 0.5f));",
                 SpatialComponentSource.RenderStatement("x", sizeComponent.Type.FullName, sizeComponent.Fields, null));
 
-            var snapperResult = BuilderParser.Parse(SnapperDownBackSource);
+            var snapperResult = BuilderParser.Parse(SurfaceSnapDownBackSource);
             var snapperComponent = Assert.Single(Assert.Single(snapperResult.Model.Roots).Components);
             Assert.Equal(
-                "x.Snapper(down: true, back: true);",
+                "x.SurfaceSnap(down: true, back: true);",
                 SpatialComponentSource.RenderStatement("x", snapperComponent.Type.FullName, snapperComponent.Fields, null));
         }
 
-        // ---- b4-t1: created-node (§13) attach uses the dedicated call + Sizer-before-Snapper ----
+        // ---- b4-t1: created-node (§13) attach uses the dedicated call + FitSize-before-SurfaceSnap ----
 
         private const string EmptySpatialScene = @"
 public class EmptySpatialScene : ISceneDefinition
@@ -456,14 +456,14 @@ public class EmptySpatialScene : ISceneDefinition
 ";
 
         [Fact]
-        public void Reconcile_CreatedNodeWithSnapper_AppendsSnapperCall_SecondSyncNoOp()
+        public void Reconcile_CreatedNodeWithSurfaceSnap_AppendsSurfaceSnapCall_SecondSyncNoOp()
         {
             var parsed = BuilderParser.Parse(EmptySpatialScene);
             var map = new IdentityMap { Entries = System.Array.Empty<IdentityMapEntry>() };
 
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
             });
 
             var snapshot = new SceneSnapshot
@@ -477,7 +477,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Name = "Crate",
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
                         },
                     },
                 },
@@ -488,7 +488,7 @@ public class EmptySpatialScene : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(EmptySpatialScene, pass1.Patch, parsed.Anchors);
 
-            Assert.Contains(".Snapper(down: true)", patched);
+            Assert.Contains(".SurfaceSnap(down: true)", patched);
             Assert.DoesNotContain(".Component<", patched);
 
             // ---- Pass 2: reparse the applied source; unchanged scene must converge (no edits). ----
@@ -502,18 +502,18 @@ public class EmptySpatialScene : ISceneDefinition
         }
 
         [Fact]
-        public void Reconcile_SnapperAndSizerOnCreatedNode_AppendsInSizerThenSnapperOrder()
+        public void Reconcile_SurfaceSnapAndFitSizeOnCreatedNode_AppendsInFitSizeThenSurfaceSnapOrder()
         {
             var parsed = BuilderParser.Parse(EmptySpatialScene);
             var map = new IdentityMap { Entries = System.Array.Empty<IdentityMapEntry>() };
 
             var sizerFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(2f)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
             });
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
             });
 
             var snapshot = new SceneSnapshot
@@ -525,11 +525,11 @@ public class EmptySpatialScene : ISceneDefinition
                     {
                         GlobalObjectId = "goid-crate",
                         Name = "Crate",
-                        // Snapshot lists Snapper THEN Sizer — emit must still place Sizer first.
+                        // Snapshot lists SurfaceSnap THEN FitSize — emit must still place FitSize first.
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = snapperFields },
-                            new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.SizerTypeName), Fields = sizerFields },
+                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = sizerFields },
                         },
                     },
                 },
@@ -540,11 +540,11 @@ public class EmptySpatialScene : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(EmptySpatialScene, pass1.Patch, parsed.Anchors);
 
-            var sizerIndex = patched.IndexOf(".Sizer(", System.StringComparison.Ordinal);
-            var snapperIndex = patched.IndexOf(".Snapper(", System.StringComparison.Ordinal);
-            Assert.True(sizerIndex >= 0, "expected a .Sizer(...) statement in applied source");
-            Assert.True(snapperIndex >= 0, "expected a .Snapper(...) statement in applied source");
-            Assert.True(sizerIndex < snapperIndex, "Sizer statement must precede Snapper statement");
+            var sizerIndex = patched.IndexOf(".FitSize(", System.StringComparison.Ordinal);
+            var snapperIndex = patched.IndexOf(".SurfaceSnap(", System.StringComparison.Ordinal);
+            Assert.True(sizerIndex >= 0, "expected a .FitSize(...) statement in applied source");
+            Assert.True(snapperIndex >= 0, "expected a .SurfaceSnap(...) statement in applied source");
+            Assert.True(sizerIndex < snapperIndex, "FitSize statement must precede SurfaceSnap statement");
 
             // ---- Pass 2: reparse the applied source; unchanged scene must converge (no edits). ----
             var reparsed = BuilderParser.Parse(patched);
@@ -559,9 +559,9 @@ public class EmptySpatialScene : ISceneDefinition
         // ---- b4-t2: field-edit reconcile -> PatchComponentField on the dedicated call ----------
 
         [Fact]
-        public void Reconcile_EditedSizerHeightInScene_PatchesSizerArgumentOnly()
+        public void Reconcile_EditedFitSizeHeightInScene_PatchesFitSizeArgumentOnly()
         {
-            var parsed = BuilderParser.Parse(SizerHeightSource);
+            var parsed = BuilderParser.Parse(FitSizeHeightSource);
             var crate = Assert.Single(parsed.Model.Roots);
             var sizer = Assert.Single(crate.Components);
 
@@ -575,7 +575,7 @@ public class EmptySpatialScene : ISceneDefinition
                         LogicalId = sizer.LogicalId,
                         GlobalObjectId = "",
                         Kind = "Component",
-                        ComponentType = SpatialComponents.SizerTypeName,
+                        ComponentType = SpatialComponents.FitSizeTypeName,
                         ParentLogicalId = crate.LogicalId,
                     },
                 },
@@ -587,7 +587,7 @@ public class EmptySpatialScene : ISceneDefinition
             // round value would happen to format identically under both paths and prove nothing.
             var editedFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(2.34567f)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2.34567f)),
             });
 
             var snapshot = new SceneSnapshot
@@ -602,7 +602,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.Scale },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SizerTypeName), Fields = editedFields },
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = editedFields },
                         },
                     },
                 },
@@ -622,8 +622,8 @@ public class EmptySpatialScene : ISceneDefinition
             Assert.Equal(sizer.LogicalId, patch.Anchor);
             Assert.Equal("2.3457f", patch.NewExpr);
 
-            var applied = SourcePatchApplier.Apply(SizerHeightSource, result.Patch, parsed.Anchors);
-            Assert.Contains(".Sizer(height: 2.3457f)", applied);
+            var applied = SourcePatchApplier.Apply(FitSizeHeightSource, result.Patch, parsed.Anchors);
+            Assert.Contains(".FitSize(height: 2.3457f)", applied);
             Assert.DoesNotContain(".Transform(", applied);
             Assert.DoesNotContain(".Component<", applied);
         }
@@ -633,11 +633,11 @@ public class EmptySpatialScene : ISceneDefinition
         {
             var sizerFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(2f)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
             });
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
             });
 
             var model = new SceneModel
@@ -652,7 +652,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.Scale },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "sizer-1/" + SpatialComponents.SizerTypeName + "#0", Type = new TypeRef(SpatialComponents.SizerTypeName), Fields = sizerFields },
+                            new ComponentData { LogicalId = "sizer-1/" + SpatialComponents.FitSizeTypeName + "#0", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = sizerFields },
                         },
                     },
                     new GameObjectNode
@@ -662,7 +662,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "snapper-1/" + SpatialComponents.SnapperTypeName + "#0", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "snapper-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
                         },
                     },
                 },
@@ -673,9 +673,9 @@ public class EmptySpatialScene : ISceneDefinition
                 Entries = new[]
                 {
                     new IdentityMapEntry { LogicalId = "sizer-1", GlobalObjectId = "goid-sizer", Kind = "GameObject" },
-                    new IdentityMapEntry { LogicalId = "sizer-1/" + SpatialComponents.SizerTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SizerTypeName, ParentLogicalId = "sizer-1" },
+                    new IdentityMapEntry { LogicalId = "sizer-1/" + SpatialComponents.FitSizeTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.FitSizeTypeName, ParentLogicalId = "sizer-1" },
                     new IdentityMapEntry { LogicalId = "snapper-1", GlobalObjectId = "goid-snapper", Kind = "GameObject" },
-                    new IdentityMapEntry { LogicalId = "snapper-1/" + SpatialComponents.SnapperTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SnapperTypeName, ParentLogicalId = "snapper-1" },
+                    new IdentityMapEntry { LogicalId = "snapper-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SurfaceSnapTypeName, ParentLogicalId = "snapper-1" },
                 },
             };
 
@@ -694,7 +694,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.Scale, Scale = new Vec3(4f, 2f, 1f) },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.SizerTypeName), Fields = sizerFields },
+                            new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = sizerFields },
                         },
                     },
                     new SnapshotNode
@@ -705,7 +705,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY, Position = new Vec3(0f, 7f, 0f) },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
                         },
                     },
                 },
@@ -718,11 +718,11 @@ public class EmptySpatialScene : ISceneDefinition
         }
 
         [Fact]
-        public void Reconcile_SnapperDownFreeAxisDrag_PatchesFreeAxisNotDrivenY()
+        public void Reconcile_SurfaceSnapDownFreeAxisDrag_PatchesFreeAxisNotDrivenY()
         {
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
             });
 
             var model = new SceneModel
@@ -737,7 +737,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "crate-1/" + SpatialComponents.SnapperTypeName + "#0", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "crate-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
                         },
                     },
                 },
@@ -748,7 +748,7 @@ public class EmptySpatialScene : ISceneDefinition
                 Entries = new[]
                 {
                     new IdentityMapEntry { LogicalId = "crate-1", GlobalObjectId = "goid-crate", Kind = "GameObject" },
-                    new IdentityMapEntry { LogicalId = "crate-1/" + SpatialComponents.SnapperTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SnapperTypeName, ParentLogicalId = "crate-1" },
+                    new IdentityMapEntry { LogicalId = "crate-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SurfaceSnapTypeName, ParentLogicalId = "crate-1" },
                 },
             };
 
@@ -767,7 +767,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY, Position = new Vec3(5f, 3f, 0f) },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
                         },
                     },
                 },
@@ -781,17 +781,17 @@ public class EmptySpatialScene : ISceneDefinition
         }
 
         [Fact]
-        public void RoundTrip_SizerSnapper_Idempotent()
+        public void RoundTrip_FitSizeSurfaceSnap_Idempotent()
         {
             const string source = @"
-public class SizerSnapperRoundTripScene : ISceneDefinition
+public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
         var floor = scene.Add(""Floor"");
         var crate = scene.Add(""Crate"");
-        crate.Sizer(height: 2f);
-        crate.Snapper(down: true, target: floor);
+        crate.FitSize(height: 2f);
+        crate.SurfaceSnap(down: true, target: floor);
     }
 }
 ";
@@ -799,8 +799,8 @@ public class SizerSnapperRoundTripScene : ISceneDefinition
             var parsed = BuilderParser.Parse(source);
             var floor = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
             var crate = Assert.Single(parsed.Model.Roots, r => r.Name == "Crate");
-            var sizer = Assert.Single(crate.Components, c => c.Type.FullName == SpatialComponents.SizerTypeName);
-            var snapper = Assert.Single(crate.Components, c => c.Type.FullName == SpatialComponents.SnapperTypeName);
+            var sizer = Assert.Single(crate.Components, c => c.Type.FullName == SpatialComponents.FitSizeTypeName);
+            var snapper = Assert.Single(crate.Components, c => c.Type.FullName == SpatialComponents.SurfaceSnapTypeName);
 
             var map = new IdentityMap
             {
@@ -808,19 +808,19 @@ public class SizerSnapperRoundTripScene : ISceneDefinition
                 {
                     new IdentityMapEntry { LogicalId = floor.LogicalId, GlobalObjectId = "goid-floor", Kind = "GameObject" },
                     new IdentityMapEntry { LogicalId = crate.LogicalId, GlobalObjectId = "goid-crate", Kind = "GameObject" },
-                    new IdentityMapEntry { LogicalId = sizer.LogicalId, GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SizerTypeName, ParentLogicalId = crate.LogicalId },
-                    new IdentityMapEntry { LogicalId = snapper.LogicalId, GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SnapperTypeName, ParentLogicalId = crate.LogicalId },
+                    new IdentityMapEntry { LogicalId = sizer.LogicalId, GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.FitSizeTypeName, ParentLogicalId = crate.LogicalId },
+                    new IdentityMapEntry { LogicalId = snapper.LogicalId, GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SurfaceSnapTypeName, ParentLogicalId = crate.LogicalId },
                 },
             };
 
-            var editedSizerFields = new FieldMap(new[]
+            var editedFitSizeFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(3f)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(3f)),
             });
             var snapperFieldsUnchanged = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
             });
 
             var snapshot = new SceneSnapshot
@@ -836,8 +836,8 @@ public class SizerSnapperRoundTripScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.Scale | ChannelMask.PositionY },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.SizerTypeName), Fields = editedSizerFields },
-                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SnapperTypeName), Fields = snapperFieldsUnchanged },
+                            new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = editedFitSizeFields },
+                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFieldsUnchanged },
                         },
                     },
                 },

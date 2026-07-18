@@ -8,8 +8,8 @@ using UnityEngine.SceneManagement;
 namespace SceneBuilder.Editor
 {
     /// <summary>
-    /// Strips editor-only Sizer/Snapper components from a real player build, baking their final
-    /// transform first so the built object retains the driven size/position with no Sizer/Snapper
+    /// Strips editor-only FitSize/SurfaceSnap components from a real player build, baking their final
+    /// transform first so the built object retains the driven size/position with no FitSize/SurfaceSnap
     /// and no missing-script stub.
     /// </summary>
     public sealed class SpatialBuildStripper : IProcessSceneWithReport
@@ -28,13 +28,13 @@ namespace SceneBuilder.Editor
 
         internal static void StripScene(Scene scene)
         {
-            var sizers = new List<Sizer>();
-            var snappers = new List<Snapper>();
+            var sizers = new List<FitSize>();
+            var snappers = new List<SurfaceSnap>();
 
             foreach (var root in scene.GetRootGameObjects())
             {
-                sizers.AddRange(root.GetComponentsInChildren<Sizer>(true));
-                snappers.AddRange(root.GetComponentsInChildren<Snapper>(true));
+                sizers.AddRange(root.GetComponentsInChildren<FitSize>(true));
+                snappers.AddRange(root.GetComponentsInChildren<SurfaceSnap>(true));
             }
 
             foreach (var sizer in sizers)

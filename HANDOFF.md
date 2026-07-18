@@ -16,9 +16,9 @@
 - **spec 18** (7f50133) — nested value types, probe-grounded (reflection FullName, NOT SerializedProperty.type which drops namespaces/mangles generics).
 
 ## STATUS 2026-07-16 ~12:20 EDT
-- **Both new specs DONE + committed to main:** spec 14 (M-Auto seamless, auto ON, persisted master toggle — 36704f0) and spec 19 (Sizer/Snapper — 3874438). CLAUDE.md M-Auto paragraph reconciled (in 36704f0). Spec design decisions all captured below + in memory.
+- **Both new specs DONE + committed to main:** spec 14 (M-Auto seamless, auto ON, persisted master toggle — 36704f0) and spec 19 (FitSize/SurfaceSnap — 3874438). CLAUDE.md M-Auto paragraph reconciled (in 36704f0). Spec design decisions all captured below + in memory.
 - **spec 18 pipeline RE-LAUNCHED and RUNNING** (task w2y3xg3y2, run wf_ceb7e64c-611). When it completes: verify real GATE PASS (GATE_FORCE_UNITY=1 ./verify.sh, quote the line), it's already on main. If session-limit clips it, resume-from-journal.
-- Open user calls (nothing blocks): M-Auto conflict case (recommend field-level authority + non-modal surfacing); Sizer/Snapper manual-override (recommend constraint-wins) and final names.
+- Open user calls (nothing blocks): M-Auto conflict case (recommend field-level authority + non-modal surfacing); FitSize/SurfaceSnap manual-override (recommend constraint-wins) and final names.
 
 ## (historical) spec 18 re-launch command if needed:
 `Workflow({ scriptPath: "/home/paul/.claude/skills/tdd-pipeline/pipeline.workflow.js", args: { feature: "nested-value-types", tasksReady: true } })`
@@ -32,9 +32,9 @@ Plan APPROVED (`valid: true`), 2 buckets / 6 tasks, at `.agent_handoffs/nested-v
 - Session-limit escalations cost ~0 tokens (API refuses); resume-from-journal recovers. Not a real failure.
 
 ## NEW WORK ordered — FINAL ORDER (user-confirmed 2026-07-16)
-**1. spec 18 (running, finish+verify) → 2. M-Auto (spec 14) → 3. M5 cross-object-refs (spec 06) → 4. Sizer/Snapper (spec 19) → M6+.**
+**1. spec 18 (running, finish+verify) → 2. M-Auto (spec 14) → 3. M5 cross-object-refs (spec 06) → 4. FitSize/SurfaceSnap (spec 19) → M6+.**
 Specs 14 and 19 are WRITTEN + committed (36704f0, 3874438). They still need decompose→validate→build via the tdd-pipeline.
-Order rationale: M5 before Sizer/Snapper because Snapper's optional `target:` override uses M5's cross-object two-pass resolution (the raycast default needs nothing from M5).
+Order rationale: M5 before FitSize/SurfaceSnap because SurfaceSnap's optional `target:` override uses M5's cross-object two-pass resolution (the raycast default needs nothing from M5).
 
 **CRITICAL for the M5 step:** spec 06 is UNBUILDABLE as written — repair it FIRST (task #6 brief). Its headline sample fails to compile 4 ways (no generic Add<T> → use Component<T>; Button.target doesn't exist → targetGraphic, Component-typed; passing a handle to .Set has NO overload → M5 must ADD Set<TValue>(Func<T,TValue>, NodeHandle); .Set(...,null) is CS0121-ambiguous → needs an unambiguous null form). Plus F5 component-targets-unauthorable, F6 delete-cascade emits CS0103 (fix inside DetectRemovals), F7 (HIGHEST LEVERAGE) Rekey never rewrites ObjectRef targets (fix inside Rekey), F8 no ConflictKind.DanglingReference. So the M5 step = repair spec 06 → decompose → validate → build.
 
@@ -47,22 +47,22 @@ User DECISIONS:
 - **Single master "auto" toggle** (one on/off, both directions) — NOT per-direction.
 - **Keep the menu items** (manual Build/Sync) as debug + testing tools.
 - Toggle exists so the user can DISABLE auto and validate future specs step-by-step; they'll test both ways.
-- **Default: auto ON** (confirmed by user — matches invisible-product north star). Toggle state is a **persisted per-project editor setting** (must live outside `Assets/`). User will turn it OFF for THIS project. Spec 14 rewrite + Sizer/Snapper spec (19) are being WRITTEN now (specs are cheap; only the tdd-PIPELINE was paused for usage).
+- **Default: auto ON** (confirmed by user — matches invisible-product north star). Toggle state is a **persisted per-project editor setting** (must live outside `Assets/`). User will turn it OFF for THIS project. Spec 14 rewrite + FitSize/SurfaceSnap spec (19) are being WRITTEN now (specs are cheap; only the tdd-PIPELINE was paused for usage).
 - Seamless auto is still THE product/north star; the toggle is a testing affordance, NOT "auto is optional."
 - **RECONCILE CLAUDE.md**: its M-Auto paragraph calls the toggle shape "wrong / must be seamless-by-default." Update that wording so the next agent isn't whipsawed — a toggle is now wanted, for testing.
 - Audit already found the real blockers: old trigger `AssetPostprocessor.OnPostprocessAllAssets` CANNOT fire for a builder outside `Assets/` → needs the plugin's own FileSystemWatcher + `ObjectChangeEvents`; one spurious patch would DEADLOCK sync → needs a guard (treat byte-identical applied text as no-drift); no incremental identity → full-scene `GetGlobalObjectIdSlow` per change is fatal per keystroke, needs debounce + cached/incremental identity (batch `GetGlobalObjectIdsSlow` exists).
 
-### Sizer/Snapper (NEW spec — editor-time-only spatial authoring components)
+### FitSize/SurfaceSnap (NEW spec — editor-time-only spatial authoring components)
 Purpose: LLMs don't understand space. These let the LLM express INTENT, tool computes geometry.
-- **Sizer**: any mesh specifies desired size in WORLD-SPACE units, indifferent to incoming mesh size. Reads mesh bounds, computes local scale to hit target (account for parent lossyScale). (Sizer dimensioning: aspect-lock fit with per-axis override — my inference, spec decides.)
-- **Snapper** (maybe name `SurfaceSnap` — does walls/ceilings too): snap a mesh to a surface, origin-agnostic (uses actual mesh bounds, not pivot). Pick one horizontal (left/right/none) AND one vertical (up/down/none), combine (e.g. bottom-left corner). Runs AFTER Sizer (needs final world size).
+- **FitSize**: any mesh specifies desired size in WORLD-SPACE units, indifferent to incoming mesh size. Reads mesh bounds, computes local scale to hit target (account for parent lossyScale). (FitSize dimensioning: aspect-lock fit with per-axis override — my inference, spec decides.)
+- **SurfaceSnap** (maybe name `SurfaceSnap` — does walls/ceilings too): snap a mesh to a surface, origin-agnostic (uses actual mesh bounds, not pivot). Pick one horizontal (left/right/none) AND one vertical (up/down/none), combine (e.g. bottom-left corner). Runs AFTER FitSize (needs final world size).
 - User DECISIONS:
   - **Snap target = raycast scene geometry, with optional explicit target override.** Needs colliders or falls back to renderer bounds.
   - **Live editor constraint** (NOT bake-once): persists as editor-only component, re-evaluates when mesh/surface moves, driven scale/position SUPPRESSED from code (reuse spec 13 RectTransform driven-property model), STRIPPED from game builds.
 - Built on M3 component machinery (shipped) + spec 13's driven/suppressed-property concept. Editor-only-component-stripped-at-build is an impl concern the spec handles (missing-script risk if it's an Editor-assembly MonoBehaviour on a scene object).
-- Bidirectional design point the spec MUST resolve: if the user manually moves a snapped object in-editor, does Snapper re-snap (win) or does the manual move override? (Same conflict class; acute here since transform is derived.)
+- Bidirectional design point the spec MUST resolve: if the user manually moves a snapped object in-editor, does SurfaceSnap re-snap (win) or does the manual move override? (Same conflict class; acute here since transform is derived.)
 
 ## Open user items
 - M-Auto default state (off-for-now vs) — confirm.
-- Whether the user wants ME to draft both specs (M-Auto rewrite + Sizer/Snapper) for the other agent, or just hand off order + decisions.
+- Whether the user wants ME to draft both specs (M-Auto rewrite + FitSize/SurfaceSnap) for the other agent, or just hand off order + decisions.
 - M16 went straight to main (no branch) per user "just do m16 on main, we can always go back" — user may still want to eyeball it. Test plan at `/tmp/scenebuilder-test-plan.md` (item 14 covers dup siblings).

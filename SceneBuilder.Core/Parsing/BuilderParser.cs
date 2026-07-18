@@ -294,11 +294,11 @@ namespace SceneBuilder.Core.Parsing
                     case "Component":
                         ApplyComponent(node, args, invocation);
                         break;
-                    case "Sizer":
-                        ApplySizer(node, args, invocation);
+                    case "FitSize":
+                        ApplyFitSize(node, args, invocation);
                         break;
-                    case "Snapper":
-                        ApplySnapper(node, args, invocation);
+                    case "SurfaceSnap":
+                        ApplySurfaceSnap(node, args, invocation);
                         break;
                     default:
                         throw Fail(args, $"Unsupported builder call '.{method}(...)'");

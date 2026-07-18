@@ -96,7 +96,7 @@ namespace SceneBuilder.Core.Reconcile
 
         private static string BuildComponentStatementText(AppendComponentStatement edit, string receiver)
         {
-            // b4-t1: Sizer/Snapper always render as their dedicated fluent call — never the
+            // b4-t1: FitSize/SurfaceSnap always render as their dedicated fluent call — never the
             // generic .Component<T> form, which would fail to stamp TransformData.DrivenChannels
             // on re-parse and defeat b3 driven-suppression.
             if (SpatialComponentSource.IsSpatial(edit.TypeFullName))
@@ -173,10 +173,10 @@ namespace SceneBuilder.Core.Reconcile
             // so anything context-dependent or side-effecting is pre-rendered at EMIT time.
             var valueExpr = edit.NewExpr ?? SourceExpr.ValueNodeLiteral(edit.Value);
 
-            // b7-t1 fix: a dedicated `.Sizer(...)/.Snapper(...)` call has ALL-named-argument shape
+            // b7-t1 fix: a dedicated `.FitSize(...)/.SurfaceSnap(...)` call has ALL-named-argument shape
             // (SpatialComponentSource.RenderArguments), never the generic `c => ...` closure the
             // fallback below expects — introducing a previously-absent field (e.g. toggling a
-            // Snapper flag from unset->true) must append a new named argument in that SAME
+            // SurfaceSnap flag from unset->true) must append a new named argument in that SAME
             // "key: value" style, not throw as an unsupported closure form.
             if (IsSpatialComponentAnchor(edit.Anchor))
             {

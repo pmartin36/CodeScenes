@@ -10,12 +10,12 @@ namespace SceneBuilder.Authoring
     /// </summary>
     /// <remarks>
     /// Serialized field names are the real write contract — they MUST equal
-    /// <c>SceneBuilder.Core.Model.SpatialComponents.SizerFields.*</c> so Materialize's by-name write
+    /// <c>SceneBuilder.Core.Model.SpatialComponents.FitSizeFields.*</c> so Materialize's by-name write
     /// hits the right field.
     /// </remarks>
     [ExecuteAlways]
     [DefaultExecutionOrder(-100)]
-    public sealed class Sizer : MonoBehaviour
+    public sealed class FitSize : MonoBehaviour
     {
         /// <summary>Sentinel meaning "not authored" — never a legitimate aspect-locked dimension (must be &gt; 0).</summary>
         private const float Unset = float.NaN;
@@ -60,7 +60,7 @@ namespace SceneBuilder.Authoring
             {
                 if (!_loggedError)
                 {
-                    Debug.LogError($"[CodeScenes] Sizer on '{name}' has no MeshFilter/mesh to size.", this);
+                    Debug.LogError($"[CodeScenes] FitSize on '{name}' has no MeshFilter/mesh to size.", this);
                     _loggedError = true;
                 }
                 return;
@@ -160,7 +160,7 @@ namespace SceneBuilder.Authoring
         private void WarnDegenerate()
         {
             if (_loggedWarning) return;
-            Debug.LogWarning($"[CodeScenes] Sizer on '{name}' has degenerate bounds/scale on an authored axis; skipping.", this);
+            Debug.LogWarning($"[CodeScenes] FitSize on '{name}' has degenerate bounds/scale on an authored axis; skipping.", this);
             _loggedWarning = true;
         }
     }

@@ -46,7 +46,7 @@ namespace SceneBuilder.Core.Reconcile
             List<SkippedField> skippedFields,
             List<AssetEntry> addedAssets)
         {
-            // b4-t1: canonicalize Sizer-before-Snapper BEFORE the ADD/REORDER passes so both emit
+            // b4-t1: canonicalize FitSize-before-SurfaceSnap BEFORE the ADD/REORDER passes so both emit
             // in canonical order and the REORDER pass compares canonical-vs-canonical for the
             // spatial pair (never churns on live GetComponents order).
             var snapshotComps = SpatialComponentSource.OrderForEmit(ExcludeTransform(snapshotComponents));
@@ -75,9 +75,9 @@ namespace SceneBuilder.Core.Reconcile
             // double-counting/leaking identity-equal asset refs when the IdentityMap simply
             // hasn't recorded this component's entry yet (edit emission is unaffected).
             // b7-t1 fix: the REORDER pass (3) below compares source physical order against
-            // snapshotComps' CANONICAL (Sizer-before-Snapper) order — so source must be canonicalized
+            // snapshotComps' CANONICAL (FitSize-before-SurfaceSnap) order — so source must be canonicalized
             // identically, or an untouched node whose live GetComponents() order simply differs from
-            // canonical (e.g. authored MeshFilter/MeshRenderer/Sizer/Snapper) spuriously looks
+            // canonical (e.g. authored MeshFilter/MeshRenderer/FitSize/SurfaceSnap) spuriously looks
             // reordered every sync (a no-op churn the applier can't actually apply to a fluent chain,
             // surfacing as the "convergence defect" byte-identical-patch guard). Matches the
             // "REORDER pass compares canonical-vs-canonical for the spatial pair" intent above.
@@ -425,7 +425,7 @@ namespace SceneBuilder.Core.Reconcile
                 return handle ?? targetLogicalId;
             }
 
-            // b4-t2: a Sizer/Snapper field patch/introduce must render through the dedicated
+            // b4-t2: a FitSize/SurfaceSnap field patch/introduce must render through the dedicated
             // formatter (SourceExpr.Float/Vec3Literal) so it stays byte-identical to the append
             // form — never the generic ValueNodeLiteral fallback.
             return SpatialComponentSource.IsSpatial(typeFullName)

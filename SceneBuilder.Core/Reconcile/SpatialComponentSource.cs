@@ -4,13 +4,13 @@ using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    // b4-t1: dedicated .Sizer(...)/.Snapper(...) fluent-call renderer + Sizer-before-Snapper
+    // b4-t1: dedicated .FitSize(...)/.SurfaceSnap(...) fluent-call renderer + FitSize-before-SurfaceSnap
     // canonical ordering.
     internal static class SpatialComponentSource
     {
         internal static bool IsSpatial(string typeFullName) =>
-            typeFullName == SpatialComponents.SizerTypeName
-            || typeFullName == SpatialComponents.SnapperTypeName;
+            typeFullName == SpatialComponents.FitSizeTypeName
+            || typeFullName == SpatialComponents.SurfaceSnapTypeName;
 
         internal static string RenderStatement(
             string receiver,
@@ -27,7 +27,7 @@ namespace SceneBuilder.Core.Reconcile
                 $"{kv.Key}: {RenderFieldValue(kv.Key, kv.Value, fieldExpressions)}"));
 
         private static string MethodName(string typeFullName) =>
-            typeFullName == SpatialComponents.SizerTypeName ? "Sizer" : "Snapper";
+            typeFullName == SpatialComponents.FitSizeTypeName ? "FitSize" : "SurfaceSnap";
 
         // Reuses SourceExpr so float/vec formatting is byte-identical to the parser's accepted
         // form (bare `2f`, tuple `(2f, 1f, 0.5f)`) — NOT ValueNodeLiteral's
@@ -54,20 +54,20 @@ namespace SceneBuilder.Core.Reconcile
                 _ => SourceExpr.ValueNodeLiteral(value), // total fallback (e.g. Unsupported)
             };
 
-        // Stable canonical order: a Sizer always precedes a Snapper; all other components keep
+        // Stable canonical order: a FitSize always precedes a SurfaceSnap; all other components keep
         // their relative positions (only the spatial pair is pinned). At most one of each per
-        // node in practice; general form pins every Sizer ahead of the first Snapper.
+        // node in practice; general form pins every FitSize ahead of the first SurfaceSnap.
         internal static ComponentData[] OrderForEmit(ComponentData[] components) =>
             components.OrderBy(RankFor).ToArray();
 
         private static int RankFor(ComponentData component)
         {
-            if (component.Type.FullName == SpatialComponents.SizerTypeName)
+            if (component.Type.FullName == SpatialComponents.FitSizeTypeName)
             {
                 return -1;
             }
 
-            if (component.Type.FullName == SpatialComponents.SnapperTypeName)
+            if (component.Type.FullName == SpatialComponents.SurfaceSnapTypeName)
             {
                 return 1;
             }

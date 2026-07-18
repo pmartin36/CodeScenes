@@ -402,10 +402,10 @@ namespace SceneBuilder.Core.Tests
             Assert.Contains(reorders, r => r.ComponentLogicalId == "root-1/UnityEngine.BoxCollider#0" && r.ToIndex == 1);
         }
 
-        // ---- b3-t1: channel-masked transform diff (Sizer/Snapper driven-channel suppression) ----
+        // ---- b3-t1: channel-masked transform diff (FitSize/SurfaceSnap driven-channel suppression) ----
 
         [Fact]
-        public void Diff_SizerNode_ScaleDriftInSnapshot_ProducesNoScaleOp()
+        public void Diff_FitSizeNode_ScaleDriftInSnapshot_ProducesNoScaleOp()
         {
             var desiredTransform = new TransformData { Position = new Vec3(0, 0, 0), Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.Scale };
             var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
@@ -426,7 +426,7 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
-        public void Diff_SnapperDownNode_PositionYDrift_ProducesNoPositionYOp_ButXZStillDiff()
+        public void Diff_SurfaceSnapDownNode_PositionYDrift_ProducesNoPositionYOp_ButXZStillDiff()
         {
             var map = new IdentityMap
             {
@@ -458,7 +458,7 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
-        public void Diff_SnapperBackNode_PositionZDrift_ProducesNoPositionZOp_ButXYStillDiff()
+        public void Diff_SurfaceSnapBackNode_PositionZDrift_ProducesNoPositionZOp_ButXYStillDiff()
         {
             var desiredTransform = new TransformData { Position = new Vec3(1, 2, 3), DrivenChannels = ChannelMask.PositionZ };
             var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
@@ -482,17 +482,17 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
-        public void Diff_SizerFieldChanged_ProducesComponentFieldChange()
+        public void Diff_FitSizeFieldChanged_ProducesComponentFieldChange()
         {
             var transform = new TransformData { Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.Scale };
 
             var desiredComponent = new ComponentData
             {
-                LogicalId = $"root-1/{SpatialComponents.SizerTypeName}#0",
-                Type = new TypeRef(SpatialComponents.SizerTypeName),
+                LogicalId = $"root-1/{SpatialComponents.FitSizeTypeName}#0",
+                Type = new TypeRef(SpatialComponents.FitSizeTypeName),
                 Fields = new FieldMap(new[]
                 {
-                    new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(3f)),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(3f)),
                 }),
             };
             var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = transform, Components = new[] { desiredComponent } };
@@ -500,10 +500,10 @@ namespace SceneBuilder.Core.Tests
 
             var actualComponent = new ComponentData
             {
-                Type = new TypeRef(SpatialComponents.SizerTypeName),
+                Type = new TypeRef(SpatialComponents.FitSizeTypeName),
                 Fields = new FieldMap(new[]
                 {
-                    new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Height, ValueNode.Primitive.Float(1.5f)),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(1.5f)),
                 }),
             };
             var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = transform, Components = new[] { actualComponent } };
@@ -517,24 +517,24 @@ namespace SceneBuilder.Core.Tests
             var changeSet = Differ.Diff(model, snapshot, map);
 
             var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
-            Assert.Equal(SpatialComponents.SizerFields.Height, setField.Path);
+            Assert.Equal(SpatialComponents.FitSizeFields.Height, setField.Path);
             Assert.Equal(ValueNode.Primitive.Float(3f), setField.Value);
             Assert.DoesNotContain(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
         }
 
         [Fact]
-        public void Diff_SnapperTargetRewired_ProducesComponentFieldChange()
+        public void Diff_SurfaceSnapTargetRewired_ProducesComponentFieldChange()
         {
             var transform = new TransformData { Position = new Vec3(1, 0, 1), DrivenChannels = ChannelMask.PositionY };
 
             var desiredComponent = new ComponentData
             {
-                LogicalId = $"root-1/{SpatialComponents.SnapperTypeName}#0",
-                Type = new TypeRef(SpatialComponents.SnapperTypeName),
+                LogicalId = $"root-1/{SpatialComponents.SurfaceSnapTypeName}#0",
+                Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName),
                 Fields = new FieldMap(new[]
                 {
-                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
-                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Target, new ValueNode.ObjectRef("floor-1")),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, new ValueNode.ObjectRef("floor-1")),
                 }),
             };
             var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = transform, Components = new[] { desiredComponent } };
@@ -542,11 +542,11 @@ namespace SceneBuilder.Core.Tests
 
             var actualComponent = new ComponentData
             {
-                Type = new TypeRef(SpatialComponents.SnapperTypeName),
+                Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName),
                 Fields = new FieldMap(new[]
                 {
-                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Down, ValueNode.Primitive.Bool(true)),
-                    new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Target, new ValueNode.ObjectRef("wall-1")),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                    new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, new ValueNode.ObjectRef("wall-1")),
                 }),
             };
             var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = transform, Components = new[] { actualComponent } };
@@ -560,7 +560,7 @@ namespace SceneBuilder.Core.Tests
             var changeSet = Differ.Diff(model, snapshot, map);
 
             var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
-            Assert.Equal(SpatialComponents.SnapperFields.Target, setField.Path);
+            Assert.Equal(SpatialComponents.SurfaceSnapFields.Target, setField.Path);
             var objectRef = Assert.IsType<ValueNode.ObjectRef>(setField.Value);
             Assert.Equal("floor-1", objectRef.TargetLogicalId);
             Assert.DoesNotContain(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");

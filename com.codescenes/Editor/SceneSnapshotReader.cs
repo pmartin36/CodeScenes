@@ -107,30 +107,30 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
-        /// ORs together the driven channels of every ACTIVE-AND-ENABLED Sizer/Snapper on
+        /// ORs together the driven channels of every ACTIVE-AND-ENABLED FitSize/SurfaceSnap on
         /// <paramref name="go"/> — the same guard those components' own <c>Evaluate()</c> use
         /// (<c>isActiveAndEnabled</c>), so "reader says driven" always agrees with "component
         /// actually drives". A disabled/inactive component contributes nothing (releases its
         /// channel so a manual edit syncs normally). Mirrors the parse-time mapping in
-        /// <c>SpatialComponents.SizerMask</c>/<c>SnapperMask</c> so desired and actual never diverge.
+        /// <c>SpatialComponents.FitSizeMask</c>/<c>SurfaceSnapMask</c> so desired and actual never diverge.
         /// </summary>
         private static ChannelMask DeriveDrivenChannels(GameObject go)
         {
             var mask = ChannelMask.None;
 
-            foreach (var sizer in go.GetComponents<Sizer>())
+            foreach (var sizer in go.GetComponents<FitSize>())
             {
                 if (sizer.isActiveAndEnabled)
                 {
-                    mask |= SpatialComponents.SizerMask;
+                    mask |= SpatialComponents.FitSizeMask;
                 }
             }
 
-            foreach (var snapper in go.GetComponents<Snapper>())
+            foreach (var snapper in go.GetComponents<SurfaceSnap>())
             {
                 if (snapper.isActiveAndEnabled)
                 {
-                    mask |= SpatialComponents.SnapperMask(
+                    mask |= SpatialComponents.SurfaceSnapMask(
                         snapper.up, snapper.down, snapper.left, snapper.right, snapper.forward, snapper.back);
                 }
             }

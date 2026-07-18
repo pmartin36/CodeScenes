@@ -10,12 +10,12 @@ namespace SceneBuilder.Authoring
     /// </summary>
     /// <remarks>
     /// Serialized field names are the real write contract — they MUST equal
-    /// <c>SceneBuilder.Core.Model.SpatialComponents.SnapperFields.*</c> so Materialize's by-name write
+    /// <c>SceneBuilder.Core.Model.SpatialComponents.SurfaceSnapFields.*</c> so Materialize's by-name write
     /// hits the right field.
     /// </remarks>
     [ExecuteAlways]
-    [DefaultExecutionOrder(-90)] // after Sizer(-100): snaps the post-resize size
-    public sealed class Snapper : MonoBehaviour
+    [DefaultExecutionOrder(-90)] // after FitSize(-100): snaps the post-resize size
+    public sealed class SurfaceSnap : MonoBehaviour
     {
         private const float RayMargin = 0.05f;
         private const float RayMaxDistance = 10000f;
@@ -64,7 +64,7 @@ namespace SceneBuilder.Authoring
             {
                 if (!_loggedError)
                 {
-                    Debug.LogError($"[CodeScenes] Snapper on '{name}' has no Renderer/mesh bounds to snap.", this);
+                    Debug.LogError($"[CodeScenes] SurfaceSnap on '{name}' has no Renderer/mesh bounds to snap.", this);
                     _loggedError = true;
                 }
                 return;

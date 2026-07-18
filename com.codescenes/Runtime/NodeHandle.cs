@@ -35,10 +35,10 @@ namespace SceneBuilder.Authoring
         /// Aspect-locked world size: exactly one of <paramref name="width"/>/<paramref name="height"/>/
         /// <paramref name="depth"/> drives the size, aspect preserved on the other two axes.
         /// </summary>
-        public NodeHandle Sizer(float? width = null, float? height = null, float? depth = null) => this;
+        public NodeHandle FitSize(float? width = null, float? height = null, float? depth = null) => this;
 
         /// <summary>Explicit per-axis world size (non-uniform allowed).</summary>
-        public NodeHandle Sizer((float x, float y, float z) size) => this;
+        public NodeHandle FitSize((float x, float y, float z) size) => this;
 
         /// <summary>
         /// Snap to a surface: at most one horizontal (<paramref name="left"/>/<paramref name="right"/>),
@@ -46,7 +46,7 @@ namespace SceneBuilder.Authoring
         /// (<paramref name="forward"/>/<paramref name="back"/>) axis, with an optional explicit
         /// <paramref name="target"/> override (skips the raycast/fallback scan).
         /// </summary>
-        public NodeHandle Snapper(bool up = false, bool down = false,
+        public NodeHandle SurfaceSnap(bool up = false, bool down = false,
                                   bool left = false, bool right = false,
                                   bool forward = false, bool back = false,
                                   NodeHandle target = null) => this;

@@ -7,16 +7,16 @@ using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Core.Parsing
 {
-    // Spatial-authoring-component parse arms (`.Sizer(...)`, `.Snapper(...)`), split out of
+    // Spatial-authoring-component parse arms (`.FitSize(...)`, `.SurfaceSnap(...)`), split out of
     // BuilderParser.cs for file-size discipline. Dispatch lives in BuilderParser's
     // ApplyChainedCalls switch; the resulting ComponentBuilder is an ordinary component, so
     // all downstream machinery (LogicalId synthesis, IdentityMap/anchors, BuildComponent)
     // applies unchanged.
     public static partial class BuilderParser
     {
-        // `.Sizer(height: 2f)` (aspect-locked) | `.Sizer(size: (2,1,0.5f))` (explicit).
+        // `.FitSize(height: 2f)` (aspect-locked) | `.FitSize(size: (2,1,0.5f))` (explicit).
         // Total on VALUES (non-literal -> Unsupported); Fail (located) on STRUCTURE.
-        private static void ApplySizer(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
+        private static void ApplyFitSize(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
@@ -27,51 +27,51 @@ namespace SceneBuilder.Core.Parsing
             {
                 if (arg.NameColon == null)
                 {
-                    throw Fail(arg, "Sizer arguments must be named (width:/height:/depth:/size:)");
+                    throw Fail(arg, "FitSize arguments must be named (width:/height:/depth:/size:)");
                 }
 
                 var name = arg.NameColon.Name.Identifier.Text;
                 var span = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
                 switch (name)
                 {
-                    case SpatialComponents.SizerFields.Width:
-                    case SpatialComponents.SizerFields.Height:
-                    case SpatialComponents.SizerFields.Depth:
+                    case SpatialComponents.FitSizeFields.Width:
+                    case SpatialComponents.FitSizeFields.Height:
+                    case SpatialComponents.FitSizeFields.Depth:
                         hasAspect = true;
                         aspectCount++;
                         fields.Add(new KeyValuePair<string, ValueNode>(name, ParseSpatialScalar(arg.Expression)));
                         spans.Add(new KeyValuePair<string, SourceSpan>(name, span));
                         break;
-                    case SpatialComponents.SizerFields.Size:
+                    case SpatialComponents.FitSizeFields.Size:
                         hasExplicit = true;
-                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SizerFields.Size, ParseSpatialVec3(arg.Expression)));
-                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SizerFields.Size, span));
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, ParseSpatialVec3(arg.Expression)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Size, span));
                         break;
                     default:
-                        throw Fail(arg, $"Unknown Sizer argument '{name}'");
+                        throw Fail(arg, $"Unknown FitSize argument '{name}'");
                 }
             }
 
             if (hasAspect && hasExplicit)
             {
-                throw Fail(invocation, "Sizer cannot combine aspect (width/height/depth) with explicit size");
+                throw Fail(invocation, "FitSize cannot combine aspect (width/height/depth) with explicit size");
             }
 
             if (!hasAspect && !hasExplicit)
             {
-                throw Fail(invocation, "Sizer requires one of width/height/depth, or size");
+                throw Fail(invocation, "FitSize requires one of width/height/depth, or size");
             }
 
             if (aspectCount > 1)
             {
-                throw Fail(invocation, "Sizer aspect-locked form takes exactly one of width/height/depth");
+                throw Fail(invocation, "FitSize aspect-locked form takes exactly one of width/height/depth");
             }
 
             var memberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
             var anchorStart = memberAccess.OperatorToken.SpanStart;
             var cb = new ComponentBuilder
             {
-                TypeFullName = SpatialComponents.SizerTypeName,
+                TypeFullName = SpatialComponents.FitSizeTypeName,
                 AnchorSpan = new SourceSpan(anchorStart, invocation.Span.End - anchorStart),
             };
             foreach (var f in fields)
@@ -85,7 +85,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             node.Components.Add(cb);
-            node.DrivenChannels |= SpatialComponents.SizerMask;
+            node.DrivenChannels |= SpatialComponents.FitSizeMask;
         }
 
         // Scalar field: reuse ValueNodeParser, then coerce any numeric primitive to Float
@@ -111,10 +111,10 @@ namespace SceneBuilder.Core.Parsing
             return ValueNodeParser.Parse(expr); // Vector3(...) -> Vec3; else Unsupported
         }
 
-        // `.Snapper(down: true, left: true, target: floor)` — bool axis flags + optional target ObjectRef.
+        // `.SurfaceSnap(down: true, left: true, target: floor)` — bool axis flags + optional target ObjectRef.
         // Structural errors (unnamed/unknown arg, contradictory pair, no axis) -> Fail (located).
         // Non-literal flag value -> Unsupported (total); target -> ValueNodeParser (total, ObjectRef).
-        private static void ApplySnapper(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
+        private static void ApplySurfaceSnap(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
@@ -124,65 +124,65 @@ namespace SceneBuilder.Core.Parsing
             {
                 if (arg.NameColon == null)
                 {
-                    throw Fail(arg, "Snapper arguments must be named (up:/down:/left:/right:/forward:/back:/target:)");
+                    throw Fail(arg, "SurfaceSnap arguments must be named (up:/down:/left:/right:/forward:/back:/target:)");
                 }
 
                 var name = arg.NameColon.Name.Identifier.Text;
                 var span = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
                 switch (name)
                 {
-                    case SpatialComponents.SnapperFields.Up:
+                    case SpatialComponents.SurfaceSnapFields.Up:
                         ApplyFlag(arg.Expression, name, span, ref up, fields, spans);
                         break;
-                    case SpatialComponents.SnapperFields.Down:
+                    case SpatialComponents.SurfaceSnapFields.Down:
                         ApplyFlag(arg.Expression, name, span, ref down, fields, spans);
                         break;
-                    case SpatialComponents.SnapperFields.Left:
+                    case SpatialComponents.SurfaceSnapFields.Left:
                         ApplyFlag(arg.Expression, name, span, ref left, fields, spans);
                         break;
-                    case SpatialComponents.SnapperFields.Right:
+                    case SpatialComponents.SurfaceSnapFields.Right:
                         ApplyFlag(arg.Expression, name, span, ref right, fields, spans);
                         break;
-                    case SpatialComponents.SnapperFields.Forward:
+                    case SpatialComponents.SurfaceSnapFields.Forward:
                         ApplyFlag(arg.Expression, name, span, ref forward, fields, spans);
                         break;
-                    case SpatialComponents.SnapperFields.Back:
+                    case SpatialComponents.SurfaceSnapFields.Back:
                         ApplyFlag(arg.Expression, name, span, ref back, fields, spans);
                         break;
-                    case SpatialComponents.SnapperFields.Target:
-                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SnapperFields.Target, ValueNodeParser.Parse(arg.Expression)));
-                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SnapperFields.Target, span));
+                    case SpatialComponents.SurfaceSnapFields.Target:
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SurfaceSnapFields.Target, span));
                         break;
                     default:
-                        throw Fail(arg, $"Unknown Snapper argument '{name}'");
+                        throw Fail(arg, $"Unknown SurfaceSnap argument '{name}'");
                 }
             }
 
             if (up && down)
             {
-                throw Fail(invocation, "Snapper cannot combine up and down");
+                throw Fail(invocation, "SurfaceSnap cannot combine up and down");
             }
 
             if (left && right)
             {
-                throw Fail(invocation, "Snapper cannot combine left and right");
+                throw Fail(invocation, "SurfaceSnap cannot combine left and right");
             }
 
             if (forward && back)
             {
-                throw Fail(invocation, "Snapper cannot combine forward and back");
+                throw Fail(invocation, "SurfaceSnap cannot combine forward and back");
             }
 
             if (!(up || down || left || right || forward || back))
             {
-                throw Fail(invocation, "Snapper requires at least one snap axis (up/down/left/right/forward/back)");
+                throw Fail(invocation, "SurfaceSnap requires at least one snap axis (up/down/left/right/forward/back)");
             }
 
             var memberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
             var anchorStart = memberAccess.OperatorToken.SpanStart;
             var cb = new ComponentBuilder
             {
-                TypeFullName = SpatialComponents.SnapperTypeName,
+                TypeFullName = SpatialComponents.SurfaceSnapTypeName,
                 AnchorSpan = new SourceSpan(anchorStart, invocation.Span.End - anchorStart),
             };
             foreach (var f in fields)
@@ -196,7 +196,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             node.Components.Add(cb);
-            node.DrivenChannels |= SpatialComponents.SnapperMask(up, down, left, right, forward, back);
+            node.DrivenChannels |= SpatialComponents.SurfaceSnapMask(up, down, left, right, forward, back);
         }
 
         // A bool axis flag: a literal `true` is stored `Bool(true)` and marks the axis SET (drives + contradiction).

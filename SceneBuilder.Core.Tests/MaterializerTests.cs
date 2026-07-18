@@ -471,7 +471,7 @@ namespace SceneBuilder.Core.Tests
         // lowered m_LocalPosition/m_LocalScale SetField ops so b6-t1's write seam can skip driven
         // channels on create, where there is no snapshot to compare against.
         [Fact]
-        public void Materialize_CreateSizerSnapperNode_LoweredTransformOpsCarryDrivenMask()
+        public void Materialize_CreateFitSizeSurfaceSnapNode_LoweredTransformOpsCarryDrivenMask()
         {
             var emptySnapshot = new SceneSnapshot { SchemaVersion = 1, Roots = System.Array.Empty<SnapshotNode>() };
             var map = new IdentityMap { Scene = "Assets/Scenes/Demo.unity" };

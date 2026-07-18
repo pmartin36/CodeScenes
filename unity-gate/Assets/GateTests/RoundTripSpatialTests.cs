@@ -9,10 +9,10 @@ using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Plan;
 using SceneBuilder.Editor;
 
-// M-Spatial (Sizer/Snapper) EditMode geometry coverage. b5-t1 is this file's minimal slice — the exact
-// world-size solve and the serialized-field-name contract for Sizer. Constructs the MonoBehaviour
+// M-Spatial (FitSize/SurfaceSnap) EditMode geometry coverage. b5-t1 is this file's minimal slice — the exact
+// world-size solve and the serialized-field-name contract for FitSize. Constructs the MonoBehaviour
 // directly against a live scene (no builder/sidecar round trip needed for pure geometry). The full
-// checklist suite (Snapper, build-strip, ordering, disabled/re-snap, fallback) lands in b5-t2..b5-t4.
+// checklist suite (SurfaceSnap, build-strip, ordering, disabled/re-snap, fallback) lands in b5-t2..b5-t4.
 public class RoundTripSpatialTests
 {
     private const float Tol = 1e-3f;
@@ -21,19 +21,19 @@ public class RoundTripSpatialTests
     //    WORLD height exactly on the authored value, with X/Z scaled by the same aspect factor (the
     //    unit cube's local bounds are 1x1x1, so the uniform factor equals the target height).
     [Test]
-    public void Sizer_HeightOnNonUnitCube_DrivesWorldHeightToTwo()
+    public void FitSize_HeightOnNonUnitCube_DrivesWorldHeightToTwo()
     {
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
         try
         {
             go.transform.localScale = new Vector3(5f, 5f, 5f);
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
 
             sizer.Evaluate();
 
             var bounds = go.GetComponent<Renderer>().bounds;
-            Assert.AreEqual(2f, bounds.size.y, Tol, "Sizer must drive the WORLD height to the authored value.");
+            Assert.AreEqual(2f, bounds.size.y, Tol, "FitSize must drive the WORLD height to the authored value.");
             Assert.AreEqual(bounds.size.y, bounds.size.x, Tol, "Aspect-locked height must scale X uniformly with Y.");
             Assert.AreEqual(bounds.size.y, bounds.size.z, Tol, "Aspect-locked height must scale Z uniformly with Y.");
         }
@@ -44,40 +44,40 @@ public class RoundTripSpatialTests
     }
 
     // 2. The serialized field names ARE the write contract (SerializedFieldBridge writes M3 field-map
-    //    keys by name) — they must literally match SpatialComponents.SizerFields.*. Subset check: an
+    //    keys by name) — they must literally match SpatialComponents.FitSizeFields.*. Subset check: an
     //    internal discriminator/flag field is permitted in addition.
     [Test]
-    public void Sizer_SerializedFields_MatchSpatialComponentsFieldNameKeys()
+    public void FitSize_SerializedFields_MatchSpatialComponentsFieldNameKeys()
     {
-        var type = typeof(Sizer);
+        var type = typeof(FitSize);
         string[] required =
         {
-            SpatialComponents.SizerFields.Width,
-            SpatialComponents.SizerFields.Height,
-            SpatialComponents.SizerFields.Depth,
-            SpatialComponents.SizerFields.Size,
+            SpatialComponents.FitSizeFields.Width,
+            SpatialComponents.FitSizeFields.Height,
+            SpatialComponents.FitSizeFields.Depth,
+            SpatialComponents.FitSizeFields.Size,
         };
 
         foreach (var fieldName in required)
         {
             var field = type.GetField(fieldName);
-            Assert.IsNotNull(field, $"Sizer must expose a public field named '{fieldName}' (SpatialComponents.SizerFields).");
+            Assert.IsNotNull(field, $"FitSize must expose a public field named '{fieldName}' (SpatialComponents.FitSizeFields).");
         }
     }
 
     // 3. No MeshFilter/mesh to size ⇒ a located error naming the node, never a silent no-op or an
     //    exception, and the transform must be left untouched (no divide-by-zero guess).
     [Test]
-    public void Sizer_NoMeshFilter_LogsLocatedErrorAndDoesNotScale()
+    public void FitSize_NoMeshFilter_LogsLocatedErrorAndDoesNotScale()
     {
-        var go = new GameObject("NoMeshSizer");
+        var go = new GameObject("NoMeshFitSize");
         try
         {
             go.transform.localScale = Vector3.one;
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
 
-            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoMeshSizer"));
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoMeshFitSize"));
             sizer.Evaluate();
 
             Assert.AreEqual(Vector3.one, go.transform.localScale, "No MeshFilter must never write a scale.");
@@ -92,7 +92,7 @@ public class RoundTripSpatialTests
     //    floor collider's top face, leaving the free axes (X/Z) untouched — pivot-agnostic because the
     //    delta is applied to transform.position on the snapped axis only.
     [Test]
-    public void Snapper_DownOnFloor_RestsBottomFaceOnFloorTop()
+    public void SurfaceSnap_DownOnFloor_RestsBottomFaceOnFloorTop()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -102,7 +102,7 @@ public class RoundTripSpatialTests
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
 
             go.transform.position = new Vector3(1.5f, 5f, -2f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
             snapper.Evaluate();
@@ -120,46 +120,46 @@ public class RoundTripSpatialTests
     }
 
     // 5. The serialized field names ARE the write contract — they must literally match
-    //    SpatialComponents.SnapperFields.* (subset check: internal book-keeping fields are permitted).
+    //    SpatialComponents.SurfaceSnapFields.* (subset check: internal book-keeping fields are permitted).
     [Test]
-    public void Snapper_SerializedFields_MatchSpatialComponentsFieldNameKeys()
+    public void SurfaceSnap_SerializedFields_MatchSpatialComponentsFieldNameKeys()
     {
-        var type = typeof(Snapper);
+        var type = typeof(SurfaceSnap);
         string[] required =
         {
-            SpatialComponents.SnapperFields.Up,
-            SpatialComponents.SnapperFields.Down,
-            SpatialComponents.SnapperFields.Left,
-            SpatialComponents.SnapperFields.Right,
-            SpatialComponents.SnapperFields.Forward,
-            SpatialComponents.SnapperFields.Back,
-            SpatialComponents.SnapperFields.Target,
+            SpatialComponents.SurfaceSnapFields.Up,
+            SpatialComponents.SurfaceSnapFields.Down,
+            SpatialComponents.SurfaceSnapFields.Left,
+            SpatialComponents.SurfaceSnapFields.Right,
+            SpatialComponents.SurfaceSnapFields.Forward,
+            SpatialComponents.SurfaceSnapFields.Back,
+            SpatialComponents.SurfaceSnapFields.Target,
         };
 
         foreach (var fieldName in required)
         {
             var field = type.GetField(fieldName);
-            Assert.IsNotNull(field, $"Snapper must expose a public field named '{fieldName}' (SpatialComponents.SnapperFields).");
+            Assert.IsNotNull(field, $"SurfaceSnap must expose a public field named '{fieldName}' (SpatialComponents.SurfaceSnapFields).");
         }
 
-        var targetField = type.GetField(SpatialComponents.SnapperFields.Target);
-        Assert.AreEqual(typeof(Transform), targetField.FieldType, "Snapper.target must be a Transform.");
+        var targetField = type.GetField(SpatialComponents.SurfaceSnapFields.Target);
+        Assert.AreEqual(typeof(Transform), targetField.FieldType, "SurfaceSnap.target must be a Transform.");
     }
 
     // 6. No Renderer/mesh bounds to snap ⇒ a located error naming the node, never a silent no-op or an
     //    exception, and the transform must be left untouched (no bounds-of-nothing guess).
     [Test]
-    public void Snapper_NoRenderer_LogsLocatedErrorAndDoesNotMove()
+    public void SurfaceSnap_NoRenderer_LogsLocatedErrorAndDoesNotMove()
     {
-        var go = new GameObject("NoRendererSnapper");
+        var go = new GameObject("NoRendererSurfaceSnap");
         try
         {
             var originalPosition = new Vector3(3f, 4f, 5f);
             go.transform.position = originalPosition;
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
-            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoRendererSnapper"));
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoRendererSurfaceSnap"));
             snapper.Evaluate();
 
             Assert.AreEqual(originalPosition, go.transform.position, "No Renderer must never write a position.");
@@ -171,12 +171,12 @@ public class RoundTripSpatialTests
     }
 
     // 7. Build-strip (b5-t3): a real player build must bake the current transform then destroy the
-    //    Sizer/Snapper components entirely, leaving no missing-script stub. Drives the internal
+    //    FitSize/SurfaceSnap components entirely, leaving no missing-script stub. Drives the internal
     //    StripScene(scene) entry point directly — BuildReport is not a ScriptableObject and cannot be
     //    constructed via CreateInstance in EditMode (confirmed CS0311), so this is the documented
     //    fallback for exercising the non-null-report path (same observable effect as OnProcessScene).
     [Test]
-    public void BuildStrip_WithReport_RemovesSizerAndSnapper_NoMissingScript()
+    public void BuildStrip_WithReport_RemovesFitSizeAndSurfaceSnap_NoMissingScript()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -186,15 +186,15 @@ public class RoundTripSpatialTests
 
             go.transform.localScale = new Vector3(5f, 5f, 5f);
             go.transform.position = new Vector3(1.5f, 5f, -2f);
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
             SpatialBuildStripper.StripScene(go.scene);
 
-            Assert.IsNull(go.GetComponent<Sizer>(), "Build strip must remove Sizer.");
-            Assert.IsNull(go.GetComponent<Snapper>(), "Build strip must remove Snapper.");
+            Assert.IsNull(go.GetComponent<FitSize>(), "Build strip must remove FitSize.");
+            Assert.IsNull(go.GetComponent<SurfaceSnap>(), "Build strip must remove SurfaceSnap.");
             Assert.AreEqual(0, GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(go),
                 "Build strip must leave no missing-script stub.");
         }
@@ -205,8 +205,8 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 8. The strip must bake before destroying: the object's final world geometry (post Sizer resize,
-    //    post Snapper snap) must survive component removal exactly as if the components were still live.
+    // 8. The strip must bake before destroying: the object's final world geometry (post FitSize resize,
+    //    post SurfaceSnap snap) must survive component removal exactly as if the components were still live.
     [Test]
     public void BuildStrip_WithReport_KeepsBakedTransform()
     {
@@ -219,9 +219,9 @@ public class RoundTripSpatialTests
 
             go.transform.localScale = new Vector3(5f, 5f, 5f);
             go.transform.position = new Vector3(1.5f, 5f, -2f);
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
             SpatialBuildStripper.StripScene(go.scene);
@@ -245,15 +245,15 @@ public class RoundTripSpatialTests
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
         try
         {
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
             new SpatialBuildStripper().OnProcessScene(go.scene, null);
 
-            Assert.IsNotNull(go.GetComponent<Sizer>(), "Null report (editor play) must leave Sizer in place.");
-            Assert.IsNotNull(go.GetComponent<Snapper>(), "Null report (editor play) must leave Snapper in place.");
+            Assert.IsNotNull(go.GetComponent<FitSize>(), "Null report (editor play) must leave FitSize in place.");
+            Assert.IsNotNull(go.GetComponent<SurfaceSnap>(), "Null report (editor play) must leave SurfaceSnap in place.");
         }
         finally
         {
@@ -266,7 +266,7 @@ public class RoundTripSpatialTests
 
     /// <summary>8-vert/12-tri axis-aligned box mesh with an OFFSET centre, so
     /// <c>Renderer.bounds.center != transform.position</c> — the only way to produce genuine pivot
-    /// variance for the three-pivot Snapper test (a primitive cube is always centre-pivoted).</summary>
+    /// variance for the three-pivot SurfaceSnap test (a primitive cube is always centre-pivoted).</summary>
     private static Mesh MakeBoxMesh(Vector3 center, Vector3 size)
     {
         Vector3 h = size * 0.5f;
@@ -300,18 +300,18 @@ public class RoundTripSpatialTests
     // 1 (extends). Native-size indifference: a non-cubic native mesh (cylinder, native local bounds
     // height 2) must still land the WORLD height on the authored value, aspect preserved.
     [Test]
-    public void Sizer_HeightOnNonUnitMesh_DrivesWorldHeightIndependentOfNativeSize()
+    public void FitSize_HeightOnNonUnitMesh_DrivesWorldHeightIndependentOfNativeSize()
     {
         var go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         try
         {
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
 
             sizer.Evaluate();
 
             var bounds = go.GetComponent<Renderer>().bounds;
-            Assert.AreEqual(2f, bounds.size.y, Tol, "Sizer must drive the WORLD height to the authored value regardless of native mesh size.");
+            Assert.AreEqual(2f, bounds.size.y, Tol, "FitSize must drive the WORLD height to the authored value regardless of native mesh size.");
             Assert.AreEqual(bounds.size.x, bounds.size.z, Tol, "Aspect-locked height must scale X and Z by the same factor.");
         }
         finally
@@ -320,25 +320,25 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 2. Sizer under a scaled parent: the parent's lossyScale must be divided out so the child still
+    // 2. FitSize under a scaled parent: the parent's lossyScale must be divided out so the child still
     //    hits the exact authored WORLD height.
     [Test]
-    public void Sizer_UnderScaledParent_DrivesWorldHeightDividingOutParentScale()
+    public void FitSize_UnderScaledParent_DrivesWorldHeightDividingOutParentScale()
     {
-        var parent = new GameObject("SizerParent");
+        var parent = new GameObject("FitSizeParent");
         var child = GameObject.CreatePrimitive(PrimitiveType.Cube);
         try
         {
             parent.transform.localScale = new Vector3(3f, 3f, 3f);
             child.transform.SetParent(parent.transform, worldPositionStays: false);
 
-            var sizer = child.AddComponent<Sizer>();
+            var sizer = child.AddComponent<FitSize>();
             sizer.height = 2f;
 
             sizer.Evaluate();
 
             var bounds = child.GetComponent<Renderer>().bounds;
-            Assert.AreEqual(2f, bounds.size.y, Tol, "Sizer must divide out the parent's lossyScale to hit the exact world height.");
+            Assert.AreEqual(2f, bounds.size.y, Tol, "FitSize must divide out the parent's lossyScale to hit the exact world height.");
         }
         finally
         {
@@ -350,12 +350,12 @@ public class RoundTripSpatialTests
     // 3. Explicit per-axis size (Vector3 size, no aspect-locked dimension set): each axis lands its
     //    own authored world size independently.
     [Test]
-    public void Sizer_ExplicitSize_DrivesPerAxisWorldBounds()
+    public void FitSize_ExplicitSize_DrivesPerAxisWorldBounds()
     {
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
         try
         {
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.size = new Vector3(2f, 1f, 0.5f);
 
             sizer.Evaluate();
@@ -374,7 +374,7 @@ public class RoundTripSpatialTests
     // 4. The headline pivot-agnostic case: three objects with different mesh pivots (feet/centre/head)
     //    down-snapped over the same floor must ALL land their bottom face flush, regardless of pivot.
     [Test]
-    public void Snapper_DownAcrossThreePivots_AllRestBottomOnFloor()
+    public void SurfaceSnap_DownAcrossThreePivots_AllRestBottomOnFloor()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var feet = new GameObject("FeetPivot");
@@ -399,7 +399,7 @@ public class RoundTripSpatialTests
 
             foreach (var go in new[] { feet, centre, head })
             {
-                var snapper = go.AddComponent<Snapper>();
+                var snapper = go.AddComponent<SurfaceSnap>();
                 snapper.down = true;
                 snapper.Evaluate();
             }
@@ -426,7 +426,7 @@ public class RoundTripSpatialTests
 
     // 5. Up-snap against a ceiling: the top face must land flush against the ceiling's bottom face.
     [Test]
-    public void Snapper_UpOntoCeiling_RestsTopFaceOnCeilingBottom()
+    public void SurfaceSnap_UpOntoCeiling_RestsTopFaceOnCeilingBottom()
     {
         var ceiling = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -436,7 +436,7 @@ public class RoundTripSpatialTests
             float ceilingBottom = ceiling.GetComponent<Renderer>().bounds.min.y;
 
             go.transform.position = new Vector3(0f, 2f, 0f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.up = true;
 
             snapper.Evaluate();
@@ -454,7 +454,7 @@ public class RoundTripSpatialTests
     // 6. Corner: down+left combine must land BOTH the bottom face on the floor AND the left face flush
     //    against the wall's inner (right) face.
     [Test]
-    public void Snapper_DownLeftCorner_RestsBottomAndLeftFacesFlush()
+    public void SurfaceSnap_DownLeftCorner_RestsBottomAndLeftFacesFlush()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var leftWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -468,7 +468,7 @@ public class RoundTripSpatialTests
             float leftWallInner = leftWall.GetComponent<Renderer>().bounds.max.x;
 
             go.transform.position = new Vector3(-1f, 5f, 0f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
             snapper.left = true;
 
@@ -486,10 +486,10 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 7. Ordering: Sizer resizes first, THEN Snapper reads the post-resize bounds — proving Snapper
-    //    never rests on the pre-Sizer size.
+    // 7. Ordering: FitSize resizes first, THEN SurfaceSnap reads the post-resize bounds — proving SurfaceSnap
+    //    never rests on the pre-FitSize size.
     [Test]
-    public void SizerThenSnapper_Ordering_PostResizeBottomRestsOnFloor()
+    public void FitSizeThenSurfaceSnap_Ordering_PostResizeBottomRestsOnFloor()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -499,17 +499,17 @@ public class RoundTripSpatialTests
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
 
             go.transform.position = new Vector3(0f, 5f, 0f);
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 1.2f;
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
             sizer.Evaluate();
             snapper.Evaluate();
 
             var bounds = go.GetComponent<Renderer>().bounds;
-            Assert.AreEqual(1.2f, bounds.size.y, Tol, "Sizer must still resize to the authored height.");
-            Assert.AreEqual(floorTop, bounds.min.y, Tol, "Snapper must rest the POST-resize bottom face on the floor.");
+            Assert.AreEqual(1.2f, bounds.size.y, Tol, "FitSize must still resize to the authored height.");
+            Assert.AreEqual(floorTop, bounds.min.y, Tol, "SurfaceSnap must rest the POST-resize bottom face on the floor.");
         }
         finally
         {
@@ -521,7 +521,7 @@ public class RoundTripSpatialTests
     // 8. Live re-evaluation: after the floor moves, a fresh Evaluate() must track the NEW floor top
     //    (no Build/reconstruction needed).
     [Test]
-    public void Snapper_FloorMovesUp_ReEvaluateTracksNewFloorTop()
+    public void SurfaceSnap_FloorMovesUp_ReEvaluateTracksNewFloorTop()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -530,7 +530,7 @@ public class RoundTripSpatialTests
             floor.transform.position = Vector3.zero;
 
             go.transform.position = new Vector3(0f, 5f, 0f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
             snapper.Evaluate();
 
@@ -552,7 +552,7 @@ public class RoundTripSpatialTests
     // 9. Collider-less fallback: a floor with a Renderer but no Collider must still resolve the surface
     //    via the renderer-bounds fallback scan (no raycast hit possible).
     [Test]
-    public void Snapper_FloorWithoutCollider_FallbackScanStillLands()
+    public void SurfaceSnap_FloorWithoutCollider_FallbackScanStillLands()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -563,7 +563,7 @@ public class RoundTripSpatialTests
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
 
             go.transform.position = new Vector3(0f, 5f, 0f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
             snapper.Evaluate();
@@ -581,7 +581,7 @@ public class RoundTripSpatialTests
     // 10. Explicit target override: a nearer obstacle would otherwise win the raycast, but an explicit
     //     target must be used instead of the raycast hit.
     [Test]
-    public void Snapper_ExplicitTarget_SnapsToTargetNotRaycastHit()
+    public void SurfaceSnap_ExplicitTarget_SnapsToTargetNotRaycastHit()
     {
         var obstacle = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var ceiling = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -593,7 +593,7 @@ public class RoundTripSpatialTests
             float ceilingBottom = ceiling.GetComponent<Renderer>().bounds.min.y;
 
             go.transform.position = new Vector3(0f, 2f, 0f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.up = true;
             snapper.target = ceiling.transform;
 
@@ -613,7 +613,7 @@ public class RoundTripSpatialTests
     // 17. Back-snap: the object's −Z (back) face must land flush against the wall-behind's inner
     //     (+Z / max.z) face — i.e. bounds.min.z, NOT bounds.max.z (research.md correction).
     [Test]
-    public void Snapper_BackAgainstWall_RestsBackFaceFlush()
+    public void SurfaceSnap_BackAgainstWall_RestsBackFaceFlush()
     {
         var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -623,7 +623,7 @@ public class RoundTripSpatialTests
             float wallInner = wall.GetComponent<Renderer>().bounds.max.z;
 
             go.transform.position = new Vector3(0f, 0f, 2f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.back = true;
 
             snapper.Evaluate();
@@ -641,7 +641,7 @@ public class RoundTripSpatialTests
     // 17 (combine). down+back two-axis combine: both the bottom face on the floor AND the back face
     //    flush against the wall must land simultaneously.
     [Test]
-    public void Snapper_DownBack_TwoAxisCombineRestsBottomAndBackFlush()
+    public void SurfaceSnap_DownBack_TwoAxisCombineRestsBottomAndBackFlush()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -661,7 +661,7 @@ public class RoundTripSpatialTests
             // Directly above the floor's x/z footprint so the down raycast lands on the floor, not a
             // fallback scan (see item 4's fix for the same reasoning).
             go.transform.position = new Vector3(0f, 5f, 0f);
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
             snapper.back = true;
 
@@ -679,15 +679,15 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 19 (Sizer half). Disabled Sizer must drive nothing — a manual localScale set while disabled must
+    // 19 (FitSize half). Disabled FitSize must drive nothing — a manual localScale set while disabled must
     //    stand untouched through Evaluate().
     [Test]
-    public void Sizer_Disabled_ManualScaleStands()
+    public void FitSize_Disabled_ManualScaleStands()
     {
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
         try
         {
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
             sizer.enabled = false;
 
@@ -696,7 +696,7 @@ public class RoundTripSpatialTests
 
             sizer.Evaluate();
 
-            Assert.AreEqual(manualScale, go.transform.localScale, "A disabled Sizer must never write localScale; the manual scale must stand.");
+            Assert.AreEqual(manualScale, go.transform.localScale, "A disabled FitSize must never write localScale; the manual scale must stand.");
         }
         finally
         {
@@ -704,10 +704,10 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 19 (Snapper half). Disabled Snapper must drive nothing — a manual position set while disabled
+    // 19 (SurfaceSnap half). Disabled SurfaceSnap must drive nothing — a manual position set while disabled
     //    must stand untouched through Evaluate().
     [Test]
-    public void Snapper_Disabled_ManualMoveStands()
+    public void SurfaceSnap_Disabled_ManualMoveStands()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -715,7 +715,7 @@ public class RoundTripSpatialTests
         {
             floor.transform.position = Vector3.zero;
 
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
             snapper.enabled = false;
 
@@ -724,7 +724,7 @@ public class RoundTripSpatialTests
 
             snapper.Evaluate();
 
-            Assert.AreEqual(manualPosition, go.transform.position, "A disabled Snapper must never write position; the manual position must stand.");
+            Assert.AreEqual(manualPosition, go.transform.position, "A disabled SurfaceSnap must never write position; the manual position must stand.");
         }
         finally
         {
@@ -733,12 +733,12 @@ public class RoundTripSpatialTests
         }
     }
 
-    // ---- b6-t1: snapshot read stamps DrivenChannels from live enabled Sizer/Snapper -------------
+    // ---- b6-t1: snapshot read stamps DrivenChannels from live enabled FitSize/SurfaceSnap -------------
     // These stamp SnapshotNode.Transform.DrivenChannels — the "one subtle seam" the spec flags: an
     // enabled component must suppress the edit-path diff on its owned axes; a disabled one must
     // release them so a manual edit still syncs (Differ.cs:162 consumes this value). These tests
     // assert ONLY on the derived DrivenChannels value, not on geometry, so a bare (mesh-less)
-    // GameObject is deliberately used and any Sizer/Snapper "no mesh/renderer" Console noise —
+    // GameObject is deliberately used and any FitSize/SurfaceSnap "no mesh/renderer" Console noise —
     // real or from the components' own [ExecuteAlways] ticking — is irrelevant here and ignored,
     // matching the SyncFuzzTests.cs precedent for tests whose reporting surface is the assertion,
     // not the Console.
@@ -756,22 +756,22 @@ public class RoundTripSpatialTests
     }
 
     [Test]
-    public void Read_LiveEnabledSizer_StampsDrivenChannelsScale()
+    public void Read_LiveEnabledFitSize_StampsDrivenChannelsScale()
     {
         var prevIgnore = LogAssert.ignoreFailingMessages;
         LogAssert.ignoreFailingMessages = true;
-        var go = new GameObject("SizerNode");
+        var go = new GameObject("FitSizeNode");
         try
         {
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);
-            var node = FindNode(snapshot.Roots, "SizerNode");
+            var node = FindNode(snapshot.Roots, "FitSizeNode");
 
-            Assert.IsNotNull(node, "SizerNode not found in snapshot.");
+            Assert.IsNotNull(node, "FitSizeNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.Scale, node.Transform.DrivenChannels,
-                "An active-enabled Sizer must stamp DrivenChannels == Scale.");
+                "An active-enabled FitSize must stamp DrivenChannels == Scale.");
         }
         finally
         {
@@ -781,23 +781,23 @@ public class RoundTripSpatialTests
     }
 
     [Test]
-    public void Read_DisabledSizer_StampsDrivenChannelsNone()
+    public void Read_DisabledFitSize_StampsDrivenChannelsNone()
     {
         var prevIgnore = LogAssert.ignoreFailingMessages;
         LogAssert.ignoreFailingMessages = true;
-        var go = new GameObject("DisabledSizerNode");
+        var go = new GameObject("DisabledFitSizeNode");
         try
         {
-            var sizer = go.AddComponent<Sizer>();
+            var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
             sizer.enabled = false;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);
-            var node = FindNode(snapshot.Roots, "DisabledSizerNode");
+            var node = FindNode(snapshot.Roots, "DisabledFitSizeNode");
 
-            Assert.IsNotNull(node, "DisabledSizerNode not found in snapshot.");
+            Assert.IsNotNull(node, "DisabledFitSizeNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.None, node.Transform.DrivenChannels,
-                "A disabled Sizer must release its channel (DrivenChannels == None) so a manual scale edit syncs.");
+                "A disabled FitSize must release its channel (DrivenChannels == None) so a manual scale edit syncs.");
         }
         finally
         {
@@ -807,22 +807,22 @@ public class RoundTripSpatialTests
     }
 
     [Test]
-    public void Read_EnabledSnapperDown_StampsPositionYOnly()
+    public void Read_EnabledSurfaceSnapDown_StampsPositionYOnly()
     {
         var prevIgnore = LogAssert.ignoreFailingMessages;
         LogAssert.ignoreFailingMessages = true;
-        var go = new GameObject("SnapperDownNode");
+        var go = new GameObject("SurfaceSnapDownNode");
         try
         {
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);
-            var node = FindNode(snapshot.Roots, "SnapperDownNode");
+            var node = FindNode(snapshot.Roots, "SurfaceSnapDownNode");
 
-            Assert.IsNotNull(node, "SnapperDownNode not found in snapshot.");
+            Assert.IsNotNull(node, "SurfaceSnapDownNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.PositionY, node.Transform.DrivenChannels,
-                "An active-enabled down-Snapper must stamp DrivenChannels == PositionY only (X/Z free).");
+                "An active-enabled down-SurfaceSnap must stamp DrivenChannels == PositionY only (X/Z free).");
         }
         finally
         {
@@ -832,23 +832,23 @@ public class RoundTripSpatialTests
     }
 
     [Test]
-    public void Read_EnabledSnapperDownLeft_StampsPositionXAndY()
+    public void Read_EnabledSurfaceSnapDownLeft_StampsPositionXAndY()
     {
         var prevIgnore = LogAssert.ignoreFailingMessages;
         LogAssert.ignoreFailingMessages = true;
-        var go = new GameObject("SnapperDownLeftNode");
+        var go = new GameObject("SurfaceSnapDownLeftNode");
         try
         {
-            var snapper = go.AddComponent<Snapper>();
+            var snapper = go.AddComponent<SurfaceSnap>();
             snapper.down = true;
             snapper.left = true;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);
-            var node = FindNode(snapshot.Roots, "SnapperDownLeftNode");
+            var node = FindNode(snapshot.Roots, "SurfaceSnapDownLeftNode");
 
-            Assert.IsNotNull(node, "SnapperDownLeftNode not found in snapshot.");
+            Assert.IsNotNull(node, "SurfaceSnapDownLeftNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.PositionX | ChannelMask.PositionY, node.Transform.DrivenChannels,
-                "A down+left Snapper must OR both axes into DrivenChannels.");
+                "A down+left SurfaceSnap must OR both axes into DrivenChannels.");
         }
         finally
         {
@@ -870,7 +870,7 @@ public class RoundTripSpatialTests
 
             Assert.IsNotNull(node, "PlainNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.None, node.Transform.DrivenChannels,
-                "A node with no Sizer/Snapper must stamp DrivenChannels == None.");
+                "A node with no FitSize/SurfaceSnap must stamp DrivenChannels == None.");
         }
         finally
         {
@@ -882,7 +882,7 @@ public class RoundTripSpatialTests
     // ---- b6-t1: write-seam per-axis skip (PlanExecutor.ApplyTransformField) -----------------------
     // A SetField op carrying DrivenChannels must skip writing ONLY the driven axes (component-owned,
     // left at whatever the transform already holds), while free axes still write the op's value —
-    // per-axis, not whole-vector, so a down-Snapper still lets X/Z write from source.
+    // per-axis, not whole-vector, so a down-SurfaceSnap still lets X/Z write from source.
 
     [Test]
     public void PlanExecutor_MaskedSetField_SkipsDrivenAxes_WritesFreeAxes()

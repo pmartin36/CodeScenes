@@ -100,9 +100,9 @@ namespace SceneBuilder.Core.Reconcile
                     // b4-t1 §13: representable (non-Transform) components force the owner to head
                     // a handle too, so the same-batch component append (ComponentPatchApplier) has
                     // an `OwnerHandle` to attach onto.
-                    // b4-t1: Sizer-before-Snapper canonical order, regardless of live
-                    // GetComponents order, so a created node's Sizer always attaches before its
-                    // Snapper.
+                    // b4-t1: FitSize-before-SurfaceSnap canonical order, regardless of live
+                    // GetComponents order, so a created node's FitSize always attaches before its
+                    // SurfaceSnap.
                     var representableComponents = SpatialComponentSource.OrderForEmit(
                         ComponentReconciler.ExcludeTransform(node.Components));
 

@@ -151,7 +151,7 @@ namespace SceneBuilder.Core.Diff
         }
 
         // b3-t1: channel-masked transform diff. A channel present in the SNAPSHOT's DrivenChannels
-        // (the live, enabled Sizer/Snapper mask) holds the snapshot's own value in the effective
+        // (the live, enabled FitSize/SurfaceSnap mask) holds the snapshot's own value in the effective
         // transform, contributing no diff on that channel; free channels (and rotation, never driven)
         // still diff normally against the desired value. Emits a SetTransform iff the effective
         // transform actually differs from the snapshot; a driven-only drift emits nothing. Mask None
