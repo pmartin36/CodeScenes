@@ -95,7 +95,7 @@ public class AssetLoweringScene : ISceneDefinition
         {
             var model = ModelWithField(new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/Missing.mat" }));
 
-            var lowered = AssetRefLowering.Lower(model, _ => null);
+            var lowered = AssetRefLowering.Lower(model, (_, _) => null);
 
             var field = Assert.IsType<ValueNode.AssetRef>(FieldOf(lowered));
             Assert.Equal("", field.Ref!.Guid);
@@ -108,7 +108,7 @@ public class AssetLoweringScene : ISceneDefinition
             var preResolved = new AssetRef { Guid = "already-resolved", FileId = 0, TypeHint = "Material", DisplayPath = "Assets/Old.mat" };
             var model = ModelWithField(new ValueNode.AssetRef(preResolved));
 
-            var lowered = AssetRefLowering.Lower(model, _ => ("should-not-be-used", 99, "Wrong"));
+            var lowered = AssetRefLowering.Lower(model, (_, _) => ("should-not-be-used", 99, "Wrong"));
 
             var field = Assert.IsType<ValueNode.AssetRef>(FieldOf(lowered));
             Assert.Equal("already-resolved", field.Ref!.Guid);
@@ -120,7 +120,7 @@ public class AssetLoweringScene : ISceneDefinition
         {
             var model = ModelWithField(new ValueNode.AssetRef(null));
 
-            var lowered = AssetRefLowering.Lower(model, _ => ("guid", 0, "Material"));
+            var lowered = AssetRefLowering.Lower(model, (_, _) => ("guid", 0, "Material"));
 
             var field = Assert.IsType<ValueNode.AssetRef>(FieldOf(lowered));
             Assert.Null(field.Ref);
@@ -131,7 +131,7 @@ public class AssetLoweringScene : ISceneDefinition
         {
             var model = ModelWithField(ValueNode.Primitive.Int(42));
 
-            var lowered = AssetRefLowering.Lower(model, _ => ("guid", 0, "Material"));
+            var lowered = AssetRefLowering.Lower(model, (_, _) => ("guid", 0, "Material"));
 
             Assert.Equal(ValueNode.Primitive.Int(42), FieldOf(lowered));
         }
@@ -217,7 +217,7 @@ public class AssetLoweringScene : ISceneDefinition
         {
             var model = ModelWithField(new ValueNode.AssetRef(
                 new AssetRef { DisplayPath = "Cube", IsBuiltin = true, TypeHint = "" }));
-            Func<string, (string guid, long fileId, string typeHint)?> spyPathResolver = path =>
+            Func<string, string?, (string guid, long fileId, string typeHint)?> spyPathResolver = (path, _) =>
                 throw new Xunit.Sdk.XunitException("path resolver called for a built-in: " + path);
 
             var lowered = AssetRefLowering.Lower(model, spyPathResolver);
@@ -273,10 +273,87 @@ public class AssetLoweringScene : ISceneDefinition
             Assert.Equal("", second.Ref.TypeHint);
         }
 
-        private static System.Func<string, (string guid, long fileId, string typeHint)?> StubResolver(
+        // ---- b3-t2: sub-asset ref lowering (spec #11-14, project-subasset-refs) ----
+        // Lower's path-resolver delegate is now 2-arg: `(displayPath, subName)`. A populated
+        // AssetRef.SubAsset must be threaded through as subName; SubAsset=="" passes null
+        // (unchanged main-asset shape). See SceneBuilder.Core/Lowering/AssetRefLowering.cs.
+
+        [Fact]
+        public void Lowering_SubAssetRef_PassesNameToResolverAndSetsGuidFileId()
+        {
+            var model = ModelWithField(new ValueNode.AssetRef(
+                new AssetRef { DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "BarrelMesh" }));
+            var calls = new List<(string path, string? sub)>();
+            Func<string, string?, (string guid, long fileId, string typeHint)?> spyResolver = (path, sub) =>
+            {
+                calls.Add((path, sub));
+                return path == "Assets/Models/Barrel.fbx" && sub == "BarrelMesh"
+                    ? ("fbxGuid", 4300012L, "Mesh")
+                    : ((string, long, string)?)null;
+            };
+
+            var lowered = AssetRefLowering.Lower(model, spyResolver);
+
+            var field = Assert.IsType<ValueNode.AssetRef>(FieldOf(lowered));
+            Assert.Contains(("Assets/Models/Barrel.fbx", (string?)"BarrelMesh"), calls);
+            Assert.Equal("fbxGuid", field.Ref!.Guid);
+            Assert.Equal(4300012L, field.Ref.FileId);
+        }
+
+        [Fact]
+        public void Lowering_SubAssetRef_PreservesDisplayPathAndSubAsset()
+        {
+            var model = ModelWithField(new ValueNode.AssetRef(
+                new AssetRef { DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "BarrelMesh" }));
+            Func<string, string?, (string guid, long fileId, string typeHint)?> resolver = (path, sub) =>
+                path == "Assets/Models/Barrel.fbx" && sub == "BarrelMesh"
+                    ? ("fbxGuid", 4300012L, "Mesh")
+                    : ((string, long, string)?)null;
+
+            var lowered = AssetRefLowering.Lower(model, resolver);
+
+            var field = Assert.IsType<ValueNode.AssetRef>(FieldOf(lowered));
+            Assert.Equal("fbxGuid", field.Ref!.Guid); // resolution actually happened, not an early no-op
+            Assert.Equal("Assets/Models/Barrel.fbx", field.Ref.DisplayPath);
+            Assert.Equal("BarrelMesh", field.Ref.SubAsset); // anti-churn: name never overwritten
+        }
+
+        [Fact]
+        public void Lowering_MainAssetRef_PassesNullSubNameToResolver()
+        {
+            var model = ModelWithField(new ValueNode.AssetRef(
+                new AssetRef { DisplayPath = "Assets/Materials/Red.mat" }));
+            var calls = new List<(string path, string? sub)>();
+            Func<string, string?, (string guid, long fileId, string typeHint)?> spyResolver = (path, sub) =>
+            {
+                calls.Add((path, sub));
+                return ("guid-red-mat", 0L, "Material");
+            };
+
+            var lowered = AssetRefLowering.Lower(model, spyResolver);
+
+            Assert.Equal(("Assets/Materials/Red.mat", (string?)null), Assert.Single(calls));
+        }
+
+        [Fact]
+        public void Lowering_SubAssetResolverReturnsNull_LeavesNodeUnresolvedNoThrow()
+        {
+            var model = ModelWithField(new ValueNode.AssetRef(
+                new AssetRef { DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "Missing" }));
+            Func<string, string?, (string guid, long fileId, string typeHint)?> resolver = (_, _) => null;
+
+            var lowered = AssetRefLowering.Lower(model, resolver);
+
+            var field = Assert.IsType<ValueNode.AssetRef>(FieldOf(lowered));
+            Assert.Equal("", field.Ref!.Guid);
+            Assert.Equal("Assets/Models/Barrel.fbx", field.Ref.DisplayPath);
+            Assert.Equal("Missing", field.Ref.SubAsset);
+        }
+
+        private static System.Func<string, string?, (string guid, long fileId, string typeHint)?> StubResolver(
             IDictionary<string, (string, long, string)> map)
         {
-            return path => map.TryGetValue(path, out var hit) ? hit : ((string, long, string)?)null;
+            return (path, _) => map.TryGetValue(path, out var hit) ? hit : ((string, long, string)?)null;
         }
 
         private static Func<string, string?, (string guid, long fileId, string typeHint)?> StubBuiltinResolver(

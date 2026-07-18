@@ -22,10 +22,11 @@ namespace SceneBuilder.Editor
     /// <c>ResolveAssetObject</c> call; a null/empty GUID clears the field; a GUID that maps to nothing
     /// is a located error (§7), never a silent null.</item>
     /// <item><see cref="ReadObjectReference"/> — an object-reference field pointing at a project asset
-    /// → <c>ValueNode.AssetRef</c> with the re-derived <c>DisplayPath</c>; a built-in resource →
-    /// <see cref="ReadBuiltinRef"/>; a null asset field → the None inhabitant <c>AssetRef(null)</c>; a
-    /// scene-object reference → <c>ValueNode.ObjectRef</c> (M5, via an injected identity resolver; a
-    /// null GameObject/Component-typed field → <c>ObjectRef(null)</c>).</item>
+    /// → <c>ValueNode.AssetRef</c> with the re-derived <c>DisplayPath</c> (and <c>SubAsset</c> set to
+    /// the object's name when it is a sub-object of that asset, "" for the main asset); a built-in
+    /// resource → <see cref="ReadBuiltinRef"/>; a null asset field → the None inhabitant
+    /// <c>AssetRef(null)</c>; a scene-object reference → <c>ValueNode.ObjectRef</c> (M5, via an injected
+    /// identity resolver; a null GameObject/Component-typed field → <c>ObjectRef(null)</c>).</item>
     /// </list>
     /// FileId is taken from <see cref="AssetDatabase.TryGetGUIDAndLocalFileIdentifier(UnityEngine.Object, out string, out long)"/>
     /// on BOTH the write (via the main asset) and read sides, so the two directions agree on identity
@@ -168,8 +169,14 @@ namespace SceneBuilder.Editor
                 return PathProbe.Resolved(guid, fileId, typeHint, currentPath);
             }
 
-            /// <summary>The Core lowering delegate. See <see cref="LoweringResolver"/>.</summary>
-            public (string guid, long fileId, string typeHint)? Resolve(string displayPath)
+            /// <summary>
+            /// The Core lowering delegate. See <see cref="LoweringResolver"/>. A non-empty
+            /// <paramref name="subName"/> (from <c>Asset(path, subName)</c>) delegates to
+            /// <see cref="ResolveSubObjectOrThrow"/> to pick the sub-object by name within
+            /// <paramref name="displayPath"/>'s current file; an empty/null <paramref name="subName"/>
+            /// resolves the main asset exactly as before.
+            /// </summary>
+            public (string guid, long fileId, string typeHint)? Resolve(string displayPath, string? subName)
             {
                 var probe = TryResolve(displayPath);
                 switch (probe.Kind)
@@ -197,9 +204,149 @@ namespace SceneBuilder.Editor
                             "Restore it or remove the reference.");
 
                     default:
-                        _harvested.Add(new AssetEntry { Guid = probe.Guid, LastKnownPath = probe.CurrentPath, TypeHint = probe.TypeHint });
-                        return (probe.Guid, probe.FileId, probe.TypeHint);
+                        if (string.IsNullOrEmpty(subName))
+                        {
+                            _harvested.Add(new AssetEntry { Guid = probe.Guid, LastKnownPath = probe.CurrentPath, TypeHint = probe.TypeHint });
+                            return (probe.Guid, probe.FileId, probe.TypeHint);
+                        }
+
+                        var (subGuid, subFileId, subType) = ResolveSubObjectOrThrow(probe.CurrentPath, subName!, location: null);
+                        _harvested.Add(new AssetEntry { Guid = subGuid, LastKnownPath = probe.CurrentPath, TypeHint = subType });
+                        return (subGuid, subFileId, subType);
                 }
+            }
+
+            /// <summary>
+            /// b3-t4: the sub-object scan atom shared by <see cref="ResolveSubObjectOrThrow"/> (the
+            /// throwing Build/backstop wrapper) and <see cref="UnityResolutionProvider"/> (the
+            /// collect-all headless-validation seam) — ONE scan, two surfaces; never hand-sync a
+            /// second copy. Scans every object imported at <paramref name="currentPath"/> for a name
+            /// match against <paramref name="subName"/> via <see cref="AssetDatabase.LoadAllAssetsAtPath"/>.
+            /// Never throws.
+            /// </summary>
+            internal static SubObjectProbe TryResolveSubObject(string currentPath, string subName)
+            {
+                var all = AssetDatabase.LoadAllAssetsAtPath(currentPath);
+                var matches = new List<UnityEngine.Object>();
+                foreach (var candidate in all)
+                {
+                    if (candidate != null && candidate.name == subName)
+                    {
+                        matches.Add(candidate);
+                    }
+                }
+
+                if (matches.Count == 1)
+                {
+                    var match = matches[0];
+                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(match, out var guid, out var fileId)
+                        && !string.IsNullOrEmpty(guid))
+                    {
+                        return SubObjectProbe.Resolved(guid, fileId, match.GetType().Name);
+                    }
+
+                    return SubObjectProbe.Unidentifiable();
+                }
+
+                if (matches.Count == 0)
+                {
+                    var names = new SortedSet<string>(StringComparer.Ordinal);
+                    foreach (var candidate in all)
+                    {
+                        if (candidate != null)
+                        {
+                            names.Add(candidate.name);
+                        }
+                    }
+
+                    return SubObjectProbe.NotFound(new List<string>(names));
+                }
+
+                var candidates = new List<string>();
+                foreach (var match in matches)
+                {
+                    candidates.Add($"{match.GetType().Name} '{match.name}'");
+                }
+
+                return SubObjectProbe.Ambiguous(candidates);
+            }
+
+            /// <summary>
+            /// The single sub-object decision + message site (symmetric to
+            /// <see cref="BuiltinRefValidator.ResolveOrThrow"/> for built-ins): a thin throwing wrapper
+            /// over <see cref="TryResolveSubObject"/>. Exactly one match resolves; zero or multiple
+            /// matches throw a located (or unlocated when <paramref name="location"/> is null)
+            /// <see cref="InvalidOperationException"/>. Reused by <see cref="Resolve"/> (this backstop)
+            /// and b3-t4's located pre-pass — never re-implemented per caller.
+            /// </summary>
+            internal static (string guid, long fileId, string typeHint) ResolveSubObjectOrThrow(
+                string currentPath, string subName, string? location)
+            {
+                var probe = TryResolveSubObject(currentPath, subName);
+                switch (probe.Kind)
+                {
+                    case SubObjectProbeKind.Resolved:
+                        return (probe.Guid, probe.FileId, probe.TypeHint);
+
+                    case SubObjectProbeKind.NotFound:
+                        throw new InvalidOperationException(
+                            Prefix(location) +
+                            $"no sub-asset named '{subName}' in '{currentPath}'. Available: {string.Join(", ", probe.Names)}.");
+
+                    case SubObjectProbeKind.Unidentifiable:
+                        throw new InvalidOperationException(
+                            Prefix(location) + $"sub-asset named '{subName}' in '{currentPath}' could not be identified.");
+
+                    default:
+                        throw new InvalidOperationException(
+                            Prefix(location) +
+                            $"sub-asset name '{subName}' in '{currentPath}' is AMBIGUOUS — it matches {string.Join(", ", probe.Names)}. " +
+                            "Qualify by type (not yet supported) or rename the sub-object.");
+                }
+            }
+
+            private static string Prefix(string? location) =>
+                location != null ? $"[SceneBuilder] {location}: " : "[SceneBuilder] ";
+
+            /// <summary>
+            /// The non-throwing sub-object scan result — see <see cref="TryResolveSubObject"/>.
+            /// </summary>
+            internal enum SubObjectProbeKind
+            {
+                Resolved,
+                NotFound,
+                Ambiguous,
+                Unidentifiable,
+            }
+
+            internal readonly struct SubObjectProbe
+            {
+                internal readonly SubObjectProbeKind Kind;
+                internal readonly string Guid;
+                internal readonly long FileId;
+                internal readonly string TypeHint;
+                internal readonly IReadOnlyList<string> Names;
+
+                private SubObjectProbe(SubObjectProbeKind kind, string guid, long fileId, string typeHint, IReadOnlyList<string> names)
+                {
+                    Kind = kind;
+                    Guid = guid;
+                    FileId = fileId;
+                    TypeHint = typeHint;
+                    Names = names;
+                }
+
+                internal static SubObjectProbe Resolved(string guid, long fileId, string typeHint) =>
+                    new(SubObjectProbeKind.Resolved, guid, fileId, typeHint, Array.Empty<string>());
+
+                internal static SubObjectProbe NotFound(IReadOnlyList<string> available) =>
+                    new(SubObjectProbeKind.NotFound, "", 0, "", available);
+
+                internal static SubObjectProbe Ambiguous(IReadOnlyList<string> candidates) =>
+                    new(SubObjectProbeKind.Ambiguous, "", 0, "", candidates);
+
+                internal static SubObjectProbe Unidentifiable() =>
+                    new(SubObjectProbeKind.Unidentifiable, "", 0, "", Array.Empty<string>());
             }
 
             /// <summary>
@@ -233,8 +380,9 @@ namespace SceneBuilder.Editor
         /// Reads an object-reference <see cref="SerializedProperty"/> into a Core <see cref="ValueNode"/>:
         /// a null field → <c>AssetRef(null)</c> (None) for an asset-typed field, or
         /// <c>ObjectRef(null)</c> for a GameObject/Component-typed field (M5); an asset reference → a
-        /// populated <c>ValueNode.AssetRef</c> (GUID/FileId/TypeHint + re-derived DisplayPath); a
-        /// scene-object reference → <c>ValueNode.ObjectRef</c> resolved via
+        /// populated <c>ValueNode.AssetRef</c> (GUID/FileId/TypeHint + re-derived DisplayPath, and
+        /// SubAsset set to the referenced object's name when it is a sub-object, "" for the main
+        /// asset); a scene-object reference → <c>ValueNode.ObjectRef</c> resolved via
         /// <paramref name="resolveSceneRef"/> (M5) when supplied, else <c>Unsupported</c> (build path,
         /// M4-preserved — build never reads scene refs, only writes them via <c>SetReference</c>).
         /// </summary>
@@ -275,12 +423,15 @@ namespace SceneBuilder.Editor
                     return ReadBuiltinRef(guid, fileId, p);
                 }
 
+                var path = AssetDatabase.GetAssetPath(obj);
+                var isSubObject = AssetDatabase.LoadMainAssetAtPath(path) != obj;
                 return new ValueNode.AssetRef(new CoreAssetRef
                 {
                     Guid = guid,
                     FileId = fileId,
                     TypeHint = obj.GetType().Name,
-                    DisplayPath = AssetDatabase.GetAssetPath(obj),
+                    DisplayPath = path,
+                    SubAsset = isSubObject ? obj.name : "",
                 });
             }
 

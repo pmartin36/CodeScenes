@@ -180,6 +180,18 @@ namespace SceneBuilder.Editor
             {
                 ThrowContainerPath(reference.DisplayPath, location);
             }
+
+            // b3-t4: located pre-pass backstop for direct-Load callers (Sync healing) that skip
+            // PlanningValidator's collect-all walk. Guarded on the MAIN asset still being live at
+            // the authored path: a stale/moved path is left to Resolve's own move-recovery backstop
+            // (which throws unlocated on a genuine miss) instead of falsely reporting "no sub-asset"
+            // for an asset that simply moved.
+            if (!string.IsNullOrEmpty(reference.SubAsset)
+                && AssetDatabase.LoadMainAssetAtPath(reference.DisplayPath) != null)
+            {
+                AssetReferenceResolver.LoweringResolver.ResolveSubObjectOrThrow(
+                    reference.DisplayPath, reference.SubAsset, location);
+            }
         }
 
         private static string SimpleTypeName(string fullName)

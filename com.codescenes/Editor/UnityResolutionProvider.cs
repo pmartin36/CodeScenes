@@ -44,16 +44,45 @@ namespace SceneBuilder.Editor
 
         public AssetResolution ResolveAssetPath(string displayPath, string? subAsset)
         {
-            // subAsset is always null from the walk today (§ research); sub-asset existence is
-            // editor/deferred territory, not decided here.
             var probe = _lowering.TryResolve(displayPath);
+
+            if (string.IsNullOrEmpty(subAsset))
+            {
+                switch (probe.Kind)
+                {
+                    case AssetReferenceResolver.LoweringResolver.PathProbeKind.Empty:
+                        return new AssetResolution.Deferred();
+
+                    case AssetReferenceResolver.LoweringResolver.PathProbeKind.Resolved:
+                        return new AssetResolution.Resolved(probe.Guid, probe.FileId, probe.TypeHint);
+
+                    default:
+                        // ContainerPath / MissingPath / DeletedGuid — all unresolved from the collect-all seam.
+                        return new AssetResolution.Unresolved(Array.Empty<string>());
+                }
+            }
+
+            // b3-t4: a sub-asset name was authored. Path problems take precedence over sub-object
+            // scanning — do not scan when the main path itself doesn't resolve.
             switch (probe.Kind)
             {
                 case AssetReferenceResolver.LoweringResolver.PathProbeKind.Empty:
                     return new AssetResolution.Deferred();
 
                 case AssetReferenceResolver.LoweringResolver.PathProbeKind.Resolved:
-                    return new AssetResolution.Resolved(probe.Guid, probe.FileId, probe.TypeHint);
+                    var subProbe = AssetReferenceResolver.LoweringResolver.TryResolveSubObject(probe.CurrentPath, subAsset);
+                    switch (subProbe.Kind)
+                    {
+                        case AssetReferenceResolver.LoweringResolver.SubObjectProbeKind.Resolved:
+                            return new AssetResolution.Resolved(subProbe.Guid, subProbe.FileId, subProbe.TypeHint);
+
+                        case AssetReferenceResolver.LoweringResolver.SubObjectProbeKind.Ambiguous:
+                            return new AssetResolution.Ambiguous(subProbe.Names);
+
+                        default:
+                            // NotFound / Unidentifiable — no sub-object by that name resolves cleanly.
+                            return new AssetResolution.SubAssetUnresolved(subAsset, subProbe.Names);
+                    }
 
                 default:
                     // ContainerPath / MissingPath / DeletedGuid — all unresolved from the collect-all seam.

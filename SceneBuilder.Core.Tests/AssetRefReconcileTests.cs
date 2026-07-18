@@ -336,7 +336,7 @@ public class AssetRefNewObjectScene : ISceneDefinition
 
             var lowered = AssetRefLowering.Lower(
                 reparsed.Model,
-                path => path == "Assets/New.png" ? ("abc123", 0L, "Material") : null);
+                (path, _) => path == "Assets/New.png" ? ("abc123", 0L, "Material") : null);
 
             var plan = Materializer.Materialize(lowered, snapshot, reparsedMap);
 
@@ -538,7 +538,7 @@ public class AssetRefNewObjectScene : ISceneDefinition
 
             var lowered = AssetRefLowering.Lower(
                 reparsed.Model,
-                path => null,
+                (path, _) => null,
                 (name, hint) => name == "Cube" && hint is null ? (DefaultResourcesGuid, CubeFileId, "Mesh") : null);
 
             var plan = Materializer.Materialize(lowered, snapshot, reparsedMap);
@@ -755,7 +755,7 @@ public class AssetRefNewObjectScene : ISceneDefinition
 
             var lowered = AssetRefLowering.Lower(
                 reparsed.Model,
-                path => path == "Assets/Barrel.fbx" ? ("fbxGuid", 2L, "Mesh") : null);
+                (path, _) => path == "Assets/Barrel.fbx" ? ("fbxGuid", 2L, "Mesh") : null);
 
             var plan = Materializer.Materialize(lowered, snapshot, reparsedMap);
 

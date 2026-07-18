@@ -163,6 +163,60 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void Validate_SubAssetRef_PassesSubAssetNameToResolver()
+        {
+            // b3-t4: WalkAssetValue must forward reference.SubAsset (not hardcode null) so the
+            // resolver can scan sub-objects by name.
+            var source = BuilderFixtures.ComponentWithSubAssetField;
+            var parse = BuilderParser.Parse(source);
+            string? capturedSubAsset = "not-called";
+            var stub = new StubResolutionProvider
+            {
+                OnResolveComponentType = (_, _) => new TypeResolution.Resolved("UnityEngine.MeshFilter"),
+                OnResolveAssetPath = (_, subAsset) =>
+                {
+                    capturedSubAsset = subAsset;
+                    return new AssetResolution.Deferred();
+                },
+            };
+
+            PlanningValidator.Validate(parse, source, stub);
+
+            Assert.Equal("BarrelMesh", capturedSubAsset);
+        }
+
+        [Fact]
+        public void Validate_SubAssetUnresolved_YieldsLocatedDiagnosticWithAvailableNames()
+        {
+            // b3-t4: a SubAssetUnresolved resolution (path exists, named sub-object doesn't) must
+            // yield an SB2101 diagnostic listing the available sub-object names — never a silent
+            // main-asset collapse.
+            var source = BuilderFixtures.ComponentWithSubAssetField;
+            var parse = BuilderParser.Parse(source);
+            var stub = new StubResolutionProvider
+            {
+                OnResolveComponentType = (_, _) => new TypeResolution.Resolved("UnityEngine.MeshFilter"),
+                OnResolveAssetPath = (_, _) =>
+                    new AssetResolution.SubAssetUnresolved("BarrelMesh", new[] { "BarrelMain", "BarrelHull" }),
+            };
+
+            var result = PlanningValidator.Validate(parse, source, stub);
+
+            Assert.False(result.Ok);
+            var diagnostic = Assert.Single(result.Diagnostics);
+            Assert.Equal(DiagnosticCodes.AssetPathNotFound, diagnostic.Code);
+            Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+            Assert.Contains("BarrelMain", diagnostic.Suggestion);
+            Assert.Contains("BarrelHull", diagnostic.Suggestion);
+
+            var node = Assert.Single(parse.Model.Roots);
+            var component = Assert.Single(node.Components);
+            var span = parse.FieldArgumentSpans[component.LogicalId]["m_Mesh"];
+            Assert.Equal(LineOf(source, span.Start), diagnostic.Line);
+            Assert.Equal(ColumnOf(source, span.Start), diagnostic.Col);
+        }
+
+        [Fact]
         public void Validate_DuplicateSiblings_YieldsAmbiguityDiagnostic()
         {
             var source = BuilderFixtures.TwoPositionalSameNamedSiblings;

@@ -1,10 +1,12 @@
 namespace SceneBuilder.Authoring
 {
     /// <summary>
-    /// The value produced by the <see cref="AssetRefs.Asset(string)"/>, <see cref="AssetRefs.Builtin(string)"/>,
-    /// or <see cref="AssetRefs.Builtin(string, string)"/> authoring factories — an asset reference authored by
-    /// either a readable project path (e.g. <c>Asset("Assets/Materials/Red.mat")</c>) or the name of a Unity
-    /// built-in resource (e.g. <c>Builtin("Cube")</c>).
+    /// The value produced by the <see cref="AssetRefs.Asset(string)"/>, <see cref="AssetRefs.Asset(string, string)"/>,
+    /// <see cref="AssetRefs.Builtin(string)"/>, or <see cref="AssetRefs.Builtin(string, string)"/> authoring
+    /// factories — an asset reference authored by either a readable project path (e.g.
+    /// <c>Asset("Assets/Materials/Red.mat")</c>), a sub-object of an imported project asset (e.g.
+    /// <c>Asset("Assets/Models/Barrel.fbx", "BarrelMesh")</c>), or the name of a Unity built-in resource
+    /// (e.g. <c>Builtin("Cube")</c>).
     /// </summary>
     /// <remarks>
     /// Compile-time scaffolding only. SceneBuilder parses the builder SOURCE TEXT (it never runs the
@@ -19,9 +21,11 @@ namespace SceneBuilder.Authoring
     }
 
     /// <summary>
-    /// The <c>Asset(displayPath)</c> and <c>Builtin(name[, typeHint])</c> authoring factories. Bring them into
-    /// scope with <c>using static SceneBuilder.Authoring.AssetRefs;</c> and reference an asset from any
-    /// serialized asset field: <c>c.Set("m_Materials", new[] { Asset("Assets/Materials/Red.mat") })</c> or
+    /// The <c>Asset(displayPath[, subAssetName])</c> and <c>Builtin(name[, typeHint])</c> authoring
+    /// factories. Bring them into scope with <c>using static SceneBuilder.Authoring.AssetRefs;</c> and
+    /// reference an asset from any serialized asset field:
+    /// <c>c.Set("m_Materials", new[] { Asset("Assets/Materials/Red.mat") })</c>,
+    /// <c>c.Set("m_Mesh", Asset("Assets/Models/Barrel.fbx", "BarrelMesh"))</c>, or
     /// <c>c.Set("m_Mesh", Builtin("Cube"))</c>. Author a cleared field with <c>Asset(null)</c>.
     /// </summary>
     /// <remarks>
@@ -35,6 +39,13 @@ namespace SceneBuilder.Authoring
         /// time). Pass <c>null</c> to author a cleared / None reference.
         /// </summary>
         public static AssetReference Asset(string displayPath) => new AssetReference();
+
+        /// <summary>
+        /// Reference the sub-object named <paramref name="subAssetName"/> inside the imported project asset
+        /// at <paramref name="displayPath"/> (e.g. a Mesh inside an FBX, a sub-material, a sliced Sprite),
+        /// resolved to the sub-object's GUID + local file identifier at build time.
+        /// </summary>
+        public static AssetReference Asset(string displayPath, string subAssetName) => new AssetReference();
 
         /// <summary>
         /// Reference the Unity built-in resource named <paramref name="name"/> (resolved from the editor's

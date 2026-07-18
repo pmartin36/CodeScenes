@@ -8,6 +8,10 @@ namespace SceneBuilder.Core.Validation
 
         public sealed record Unresolved(IReadOnlyList<string> Suggestions) : AssetResolution;
 
+        // b3-t4: path resolved but the named sub-object was not found on it — distinct from
+        // Unresolved (main path missing) so the diagnostic message differs.
+        public sealed record SubAssetUnresolved(string SubAsset, IReadOnlyList<string> Available) : AssetResolution;
+
         public sealed record Ambiguous(IReadOnlyList<string> Candidates) : AssetResolution;
 
         public sealed record Deferred : AssetResolution;

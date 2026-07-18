@@ -290,6 +290,18 @@ public class ComponentAssetFieldScene : ISceneDefinition
 }
 ";
 
+        // b3-t4 (PlanningValidator sub-asset walk): a top-level 2-arg Asset(path, subName) field —
+        // isolates the SubAsset-passed-to-resolver / SubAssetUnresolved diagnostic path.
+        public const string ComponentWithSubAssetField = @"
+public class ComponentSubAssetFieldScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Barrel"").Component<UnityEngine.MeshFilter>(mf => mf.Set(""m_Mesh"", Asset(""Assets/Models/Barrel.fbx"", ""BarrelMesh"")));
+    }
+}
+";
+
         // b2-t1: a top-level Builtin(...) field, no ambiguity — for the Deferred-is-not-an-error case.
         public const string ComponentWithBuiltinField = @"
 public class ComponentBuiltinFieldScene : ISceneDefinition

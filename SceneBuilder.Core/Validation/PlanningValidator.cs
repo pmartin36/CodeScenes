@@ -154,9 +154,14 @@ namespace SceneBuilder.Core.Validation
                         break;
                     }
 
+                    // SubAsset defaults to "" (no sub-object authored) — normalize to null so
+                    // providers' `subAsset != null` checks (e.g. DiskResolutionProvider deferring
+                    // to the editor) only fire when a sub-asset name was actually authored.
+                    var subAsset = string.IsNullOrEmpty(reference.SubAsset) ? null : reference.SubAsset;
+
                     var resolution = reference.IsBuiltin
                         ? resolver.ResolveBuiltin(reference.DisplayPath, reference.TypeHint)
-                        : resolver.ResolveAssetPath(reference.DisplayPath, null);
+                        : resolver.ResolveAssetPath(reference.DisplayPath, subAsset);
 
                     EmitAssetDiagnostic(bag, componentLogicalId, topLevelKey, reference.DisplayPath, resolution, parse, source, file);
                     break;
@@ -199,6 +204,13 @@ namespace SceneBuilder.Core.Validation
                     message = $"Asset path '{displayPath}' not found (no .meta on disk).";
                     suggestion = unresolved.Suggestions.Count > 0
                         ? $"Nearest: '{unresolved.Suggestions[0]}'."
+                        : null;
+                    break;
+
+                case AssetResolution.SubAssetUnresolved subAssetUnresolved:
+                    message = $"No sub-asset named '{subAssetUnresolved.SubAsset}' in '{displayPath}'.";
+                    suggestion = subAssetUnresolved.Available.Count > 0
+                        ? $"Available: {string.Join(", ", subAssetUnresolved.Available)}."
                         : null;
                     break;
 

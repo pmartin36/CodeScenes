@@ -14,7 +14,7 @@ namespace SceneBuilder.Core.Lowering
     {
         public static SceneModel Lower(
             SceneModel model,
-            Func<string, (string guid, long fileId, string typeHint)?> resolver,
+            Func<string, string?, (string guid, long fileId, string typeHint)?> resolver,
             Func<string, string?, (string guid, long fileId, string typeHint)?>? builtinResolver = null)
         {
             var resolvers = new Resolvers(resolver, builtinResolver);
@@ -22,7 +22,7 @@ namespace SceneBuilder.Core.Lowering
         }
 
         private readonly record struct Resolvers(
-            Func<string, (string guid, long fileId, string typeHint)?> Path,
+            Func<string, string?, (string guid, long fileId, string typeHint)?> Path,
             Func<string, string?, (string guid, long fileId, string typeHint)?>? Builtin);
 
         private static GameObjectNode LowerGameObject(GameObjectNode go, Resolvers resolvers)
@@ -96,7 +96,8 @@ namespace SceneBuilder.Core.Lowering
                 return new ValueNode.AssetRef(reference with { Guid = hit.Value.guid, FileId = hit.Value.fileId });
             }
 
-            var resolved = resolvers.Path(reference.DisplayPath);
+            var subName = string.IsNullOrEmpty(reference.SubAsset) ? null : reference.SubAsset;
+            var resolved = resolvers.Path(reference.DisplayPath, subName);
             if (resolved is null)
             {
                 return assetRef;
