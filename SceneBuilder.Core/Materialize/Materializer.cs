@@ -23,6 +23,16 @@ namespace SceneBuilder.Core.Materialize
                 {
                     passA.Add(new CreateObject { LogicalId = addNode.LogicalId, Name = addNode.Name });
                 }
+                else if (op is Change.AddInstance addInstance)
+                {
+                    passA.Add(new InstantiatePrefab
+                    {
+                        LogicalId = addInstance.LogicalId,
+                        Guid = addInstance.Guid,
+                        ParentLogicalId = addInstance.ParentLogicalId,
+                        SiblingIndex = addInstance.SiblingIndex,
+                    });
+                }
             }
 
             foreach (var op in changeSet.Ops)
@@ -35,6 +45,11 @@ namespace SceneBuilder.Core.Materialize
                             passB.Add(new SetParent { LogicalId = addNode.LogicalId, ParentLogicalId = addNode.ParentLogicalId });
                         }
 
+                        break;
+                    case Change.AddInstance:
+                        // No-op in pass-B: parenting and sibling ordering already ride on the
+                        // InstantiatePrefab op emitted in pass-A above, unlike AddNode which needs a
+                        // separate SetParent.
                         break;
                     case Change.RemoveNode removeNode:
                         passB.Add(new DestroyObject { LogicalId = removeNode.LogicalId });
@@ -119,6 +134,7 @@ namespace SceneBuilder.Core.Materialize
                 ScenePath = identityMap.Scene,
                 Ops = passA.Concat(passB).ToArray(),
                 Skipped = skipped.ToArray(),
+                Diagnostics = changeSet.Diagnostics,
             };
         }
 

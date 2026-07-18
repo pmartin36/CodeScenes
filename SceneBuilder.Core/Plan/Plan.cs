@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json.Serialization;
+using SceneBuilder.Core.Validation;
 
 namespace SceneBuilder.Core.Plan
 {
@@ -16,6 +17,14 @@ namespace SceneBuilder.Core.Plan
 
         [JsonPropertyOrder(3)]
         public SkippedField[] Skipped { get; init; } = Array.Empty<SkippedField>();
+
+        // b3-t2: informational diagnostics carried out of the Differ (e.g. prefab overrides
+        // preserved but not modelled). NOT persisted — must stay JsonIgnore so canonical Plan
+        // JSON is byte-identical, and NOT counted by DriftState (Ops/Skipped only). Population is
+        // the code-writer's job; this is the data carrier stub only.
+        [JsonIgnore]
+        public System.Collections.Generic.IReadOnlyList<Diagnostic> Diagnostics { get; init; }
+            = Array.Empty<Diagnostic>();
     }
 
     // A field the plan does NOT write, surfaced for preview: Reason "Unsupported" (the ValueNode

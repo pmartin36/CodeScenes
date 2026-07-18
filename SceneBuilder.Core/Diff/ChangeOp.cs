@@ -13,6 +13,16 @@ namespace SceneBuilder.Core.Diff
         public string? ParentLogicalId { get; init; }
     }
 
+    // Emitted for an unmatched (new) PrefabInstanceNode instead of AddNode — parenting/sibling
+    // index ride on this op (mirrors the InstantiatePrefab PlanOp), so no SetParent is synthesized
+    // in Materializer's pass-B.
+    public sealed record AddInstance : ChangeOp
+    {
+        public string Guid { get; init; } = "";
+        public string? ParentLogicalId { get; init; }
+        public int SiblingIndex { get; init; }
+    }
+
     public sealed record RemoveNode : ChangeOp;
 
     public sealed record Reparent : ChangeOp

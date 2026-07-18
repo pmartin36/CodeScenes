@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Validation;
 
 namespace SceneBuilder.Core.Diff
 {
@@ -12,7 +13,7 @@ namespace SceneBuilder.Core.Diff
         public static ChangeSet Diff(SceneModel desired, SceneSnapshot actual, IdentityMap identityMap)
         {
             var logicalIdToGlobalObjectId = identityMap.Entries
-                .Where(e => e.Kind == "GameObject" && !string.IsNullOrEmpty(e.GlobalObjectId))
+                .Where(e => (e.Kind == "GameObject" || e.Kind == "PrefabInstance") && !string.IsNullOrEmpty(e.GlobalObjectId))
                 .ToDictionary(e => e.LogicalId, e => e.GlobalObjectId);
 
             var globalObjectIdToLogicalId = logicalIdToGlobalObjectId
@@ -24,8 +25,9 @@ namespace SceneBuilder.Core.Diff
 
             var visitedGoids = new HashSet<string>();
             var ops = new List<ChangeOp>();
+            var diagnostics = new List<Diagnostic>();
 
-            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops);
+            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics);
 
             foreach (var kv in snapshotByGoid)
             {
@@ -43,7 +45,7 @@ namespace SceneBuilder.Core.Diff
                 ops.Add(new RemoveNode { LogicalId = logicalId });
             }
 
-            return new ChangeSet { Ops = ops.ToArray() };
+            return new ChangeSet { Ops = ops.ToArray(), Diagnostics = diagnostics };
         }
 
         private static void FlattenSnapshot(SnapshotNode[] nodes, string? parentGoid, Dictionary<string, SnapshotEntry> snapshotByGoid)
@@ -67,7 +69,8 @@ namespace SceneBuilder.Core.Diff
             Dictionary<string, SnapshotEntry> snapshotByGoid,
             HashSet<string> visitedGoids,
             IdentityMap identityMap,
-            List<ChangeOp> ops)
+            List<ChangeOp> ops,
+            List<Diagnostic> diagnostics)
         {
             // b6-t1: siblingIndex counts only nodes MATCHED to a live snapshot entry, not raw source
             // position. A desired node absent from the live snapshot (EmitCreate below — either
@@ -84,14 +87,33 @@ namespace SceneBuilder.Core.Diff
                 {
                     visitedGoids.Add(goid);
                     EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, ops);
+
+                    // b3-t2: OpaqueOverrides is READ-ONLY (M10) — never diffed into an op, only
+                    // flagged. Diffing it would emit a spurious SetField and corrupt the preserved
+                    // token. The live snapshot is the authoritative source of overrides (desired
+                    // parsed from code carries none).
+                    if (entry.Node.OpaqueOverrides is { RawToken: var rawToken } && !string.IsNullOrEmpty(rawToken))
+                    {
+                        diagnostics.Add(new Diagnostic
+                        {
+                            Code = DiagnosticCodes.PrefabOverridesNotModelled,
+                            Severity = DiagnosticSeverity.Info,
+                            Message = $"Prefab instance '{node.LogicalId}' has property overrides preserved but not modelled in code (M10).",
+                        });
+                    }
+
                     matchedIndex++;
+                }
+                else if (node is PrefabInstanceNode instanceNode)
+                {
+                    EmitCreateInstance(instanceNode, parentLogicalId, i, ops);
                 }
                 else
                 {
                     EmitCreate(node, parentLogicalId, identityMap, ops);
                 }
 
-                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops);
+                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics);
             }
         }
 
@@ -305,6 +327,21 @@ namespace SceneBuilder.Core.Diff
             }
 
             return keys;
+        }
+
+        // b3-t1: unmatched PrefabInstanceNode ⇒ instantiate-not-create. No SetName/SetTag/SetLayer/
+        // SetActive/SetStatic and no EmitComponentEdits — v1 instances carry no authored Components,
+        // so the only emitted edit beyond the instantiate itself is the root transform.
+        private static void EmitCreateInstance(PrefabInstanceNode node, string? parentLogicalId, int siblingIndex, List<ChangeOp> ops)
+        {
+            ops.Add(new AddInstance
+            {
+                LogicalId = node.LogicalId,
+                Guid = node.SourcePrefab.Guid,
+                ParentLogicalId = parentLogicalId,
+                SiblingIndex = siblingIndex,
+            });
+            ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
         }
 
         private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, List<ChangeOp> ops)
