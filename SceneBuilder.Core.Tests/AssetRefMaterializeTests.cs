@@ -355,6 +355,132 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("Unresolved", skip.Reason);
         }
 
+        // b2-t1 #15: a resolved sub-asset ref (non-main, non-zero FileId under the asset's GUID)
+        // emits SetAssetRef carrying the SUB-OBJECT's FileId — Materializer itself is unchanged;
+        // this pins that a populated SubAsset name has no bearing on the emitted op.
+        [Fact]
+        public void Materialize_SubAssetRef_EmitsSetAssetRefWithSubObjectFileId()
+        {
+            var desiredFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    "m_Mesh",
+                    new ValueNode.AssetRef(new AssetRef
+                    {
+                        Guid = "guid-barrel",
+                        FileId = 4300012,
+                        DisplayPath = "Assets/Models/Barrel.fbx",
+                        SubAsset = "BarrelMesh",
+                    })),
+            });
+            var actualFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    "m_Mesh",
+                    new ValueNode.AssetRef(new AssetRef { Guid = "guid-other", FileId = 0, DisplayPath = "Assets/Models/Other.fbx" })),
+            });
+
+            var desiredComponent = new ComponentData { LogicalId = "mesh-1", Type = new TypeRef("Game.MeshHolder"), Fields = desiredFields };
+            var actualComponent = new ComponentData { LogicalId = "mesh-1", Type = new TypeRef("Game.MeshHolder"), Fields = actualFields };
+
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            var op = Assert.Single(plan.Ops.OfType<SetAssetRef>(), o => o.LogicalId == "mesh-1" && o.Path == "m_Mesh");
+            Assert.Equal("guid-barrel", op.Guid);
+            Assert.Equal(4300012, op.FileId);
+        }
+
+        // b2-t1 #16: a mixed list — main asset, built-in, sub-asset — builds ordered SetAssetRef
+        // ops per index, each carrying its own (guid, fileId).
+        [Fact]
+        public void Materialize_MixedRefList_EmitsOrderedSetAssetRefPerIndex()
+        {
+            var desiredFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    "m_Materials",
+                    new ValueNode.List(new ValueNode[]
+                    {
+                        new ValueNode.AssetRef(new AssetRef { Guid = "guid-main", FileId = 2100000, DisplayPath = "Assets/Materials/Red.mat" }),
+                        new ValueNode.AssetRef(new AssetRef
+                        {
+                            Guid = "0000000000000000e000000000000000",
+                            FileId = 10202,
+                            DisplayPath = "Cube",
+                            IsBuiltin = true,
+                        }),
+                        new ValueNode.AssetRef(new AssetRef
+                        {
+                            Guid = "guid-barrel",
+                            FileId = 4300012,
+                            DisplayPath = "Assets/Models/Barrel.fbx",
+                            SubAsset = "BarrelMat",
+                        }),
+                    })),
+            });
+
+            var desiredComponent = new ComponentData { LogicalId = "renderer-1", Type = new TypeRef("Game.MultiRenderer"), Fields = desiredFields };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root" };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            var assetOps = plan.Ops.OfType<SetAssetRef>().Where(op => op.LogicalId == "renderer-1").ToArray();
+            Assert.Equal(3, assetOps.Length);
+            Assert.Equal(new[] { "m_Materials[0]", "m_Materials[1]", "m_Materials[2]" }, assetOps.Select(op => op.Path));
+            Assert.Equal("guid-main", assetOps[0].Guid);
+            Assert.Equal(2100000, assetOps[0].FileId);
+            Assert.Equal("0000000000000000e000000000000000", assetOps[1].Guid);
+            Assert.Equal(10202, assetOps[1].FileId);
+            Assert.Equal("guid-barrel", assetOps[2].Guid);
+            Assert.Equal(4300012, assetOps[2].FileId);
+
+            Assert.Empty(plan.Skipped.Where(sk => sk.LogicalId == "renderer-1"));
+        }
+
+        // b2-t1 #17: a sub-asset ref that never resolved (Guid == "", SubAsset != "") is SKIPPED,
+        // not emitted as a clearing SetAssetRef — the same M-Builtin data-loss guard covers it.
+        [Fact]
+        public void Materialize_UnresolvedSubAssetRef_IsSkippedNotClearing()
+        {
+            var desiredFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    "m_Mesh",
+                    new ValueNode.AssetRef(new AssetRef { Guid = "", FileId = 0, DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "Missing" })),
+            });
+            var actualFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    "m_Mesh",
+                    new ValueNode.AssetRef(new AssetRef { Guid = "guid-existing", FileId = 5, DisplayPath = "Assets/Models/Barrel.fbx" })),
+            });
+
+            var desiredComponent = new ComponentData { LogicalId = "mesh-1", Type = new TypeRef("Game.MeshHolder"), Fields = desiredFields };
+            var actualComponent = new ComponentData { LogicalId = "mesh-1", Type = new TypeRef("Game.MeshHolder"), Fields = actualFields };
+
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var plan = Materializer.Materialize(model, snapshot, MatchedGameObjectMap());
+
+            Assert.DoesNotContain(plan.Ops.OfType<SetAssetRef>(), op => op.LogicalId == "mesh-1" && op.Path == "m_Mesh");
+            var skip = Assert.Single(plan.Skipped, sk => sk.LogicalId == "mesh-1" && sk.Path == "m_Mesh");
+            Assert.Equal("Unresolved", skip.Reason);
+        }
+
         // Degenerate shape pin: Asset("") / Builtin("") — Ref != null, Guid == "", DisplayPath == "" —
         // names nothing, is not the None form (Ref == null exclusively), and must be skipped rather
         // than emitted as a clearing SetAssetRef.

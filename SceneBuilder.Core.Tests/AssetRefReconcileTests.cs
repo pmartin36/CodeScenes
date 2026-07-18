@@ -564,5 +564,202 @@ public class AssetRefNewObjectScene : ISceneDefinition
             Assert.Empty(result.Patch.Edits.OfType<PatchComponentField>());
             Assert.Empty(result.AddedAssets);
         }
+
+        // b2-t2 #21: a source main-asset ref (Guid="") against a resolved-sub-asset snapshot ->
+        // !Equals (differing Guid), patches to the 2-arg form. Characterization: pins the 2-arg
+        // emit (b2-t1) reaching Reconcile, not the AuthoredTextIsCurrent SubAsset clause itself.
+        [Fact]
+        public void Reconcile_SnapshotSubAssetAgainstMainAssetSource_PatchesToTwoArgForm()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "", FileId = 0, DisplayPath = "Assets/Barrel.fbx" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef
+            {
+                Guid = "fbxGuid",
+                FileId = 2,
+                DisplayPath = "Assets/Barrel.fbx",
+                SubAsset = "BarrelMesh",
+            });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Equal("Asset(\"Assets/Barrel.fbx\", \"BarrelMesh\")", patch.NewExpr);
+        }
+
+        // b2-t2 #22 — THE make-or-break pin. Identity-equal (Guid, FileId, IsBuiltin) pair whose
+        // SubAsset differs (renamed in the DCC tool, fileId unchanged): Equals is true, so without
+        // the SubAsset clause in AuthoredTextIsCurrent nothing would be emitted. Must still patch,
+        // since the emitted text is a function of (DisplayPath, IsBuiltin, TypeHint, SubAsset).
+        [Fact]
+        public void Reconcile_SubAssetNameChanged_PatchesEvenWhenIdentityEqual()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "g", FileId = 42, DisplayPath = "Assets/Barrel.fbx", SubAsset = "OldMesh" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "g", FileId = 42, DisplayPath = "Assets/Barrel.fbx", SubAsset = "NewMesh" });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Equal("Asset(\"Assets/Barrel.fbx\", \"NewMesh\")", patch.NewExpr);
+        }
+
+        // b2-t2 #23: the anti-over-application twin of #22 — identical refs including SubAsset
+        // resync as a no-op. Catches the SubAsset clause being over-applied (e.g. comparing
+        // case-insensitively, or always returning false).
+        [Fact]
+        public void Reconcile_ResyncUnchangedSubAsset_IsANoOp()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "g", FileId = 42, DisplayPath = "Assets/Barrel.fbx", SubAsset = "BarrelMesh" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "g", FileId = 42, DisplayPath = "Assets/Barrel.fbx", SubAsset = "BarrelMesh" });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            Assert.Empty(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Empty(result.AddedAssets);
+        }
+
+        // b2-t2 #24: CollectAssetEntries harvest for a sub-asset ref carries LastKnownPath = the
+        // asset PATH (DisplayPath), never the SubAsset name. Pure assertion — CollectAssetEntries
+        // is unchanged by this task (research.md CONFIRMED).
+        [Fact]
+        public void Reconcile_SubAssetRef_HarvestsAssetEntryWithAssetPath()
+        {
+            var sourceValue = new ValueNode.AssetRef(new Model.AssetRef { Guid = "", FileId = 0, DisplayPath = "Assets/Barrel.fbx" });
+            var (model, map, componentLogicalId) = MappedRootWithAssetField(sourceValue);
+
+            var snapshotValue = new ValueNode.AssetRef(new Model.AssetRef
+            {
+                Guid = "fbxGuid",
+                FileId = 2,
+                DisplayPath = "Assets/Barrel.fbx",
+                SubAsset = "BarrelMesh",
+            });
+            var snapshot = SnapshotWithAssetField(snapshotValue);
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId));
+
+            var addedAsset = Assert.Single(result.AddedAssets);
+            Assert.Equal("fbxGuid", addedAsset.Guid);
+            Assert.Equal("Assets/Barrel.fbx", addedAsset.LastKnownPath);
+            Assert.NotEqual("BarrelMesh", addedAsset.LastKnownPath);
+        }
+
+        // b2-t2 #25: a sub-asset ref on a newly-created object converges identically to the
+        // existing main-asset sibling (Reconcile_AssetRefOnNewObject_Converges above) — pass-1
+        // append carries the 2-arg form + harvests the sidecar entry, pass-2 lower+materialize
+        // (against the CURRENT 1-arg Lower resolver — b3-t2's 2-arg migration is out of scope
+        // here) is a no-op.
+        [Fact]
+        public void Reconcile_SubAssetRefOnNewObject_Converges()
+        {
+            var parsed = BuilderParser.Parse(NewObjectUnderMappedRootScene);
+            var rootLogicalId = Assert.Single(parsed.Model.Roots).LogicalId;
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = rootLogicalId, GlobalObjectId = "goid-root", Kind = "GameObject" },
+                },
+            };
+
+            var populatedRef = new ValueNode.AssetRef(new Model.AssetRef
+            {
+                Guid = "fbxGuid",
+                FileId = 2,
+                DisplayPath = "Assets/Barrel.fbx",
+                SubAsset = "BarrelMesh",
+                TypeHint = "Mesh",
+            });
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-root",
+                        Name = "Root",
+                        Children = new[]
+                        {
+                            new SnapshotNode
+                            {
+                                GlobalObjectId = "goid-sprite",
+                                Name = "Sprite",
+                                Components = new[]
+                                {
+                                    new ComponentData
+                                    {
+                                        LogicalId = "unused",
+                                        Type = new TypeRef(ComponentTypeFullName),
+                                        Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(FieldKey, populatedRef) }),
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            };
+
+            // ---- pass 1: append the new object + component in ONE Reconcile call ----
+            var recon = Reconciler.Reconcile(parsed.Model, snapshot, map, parsed.Anchors, handles: parsed.Handles);
+
+            Assert.Empty(recon.Conflicts);
+
+            var append = Assert.Single(recon.Patch.Edits.OfType<AppendStatement>());
+            var componentAppend = Assert.Single(recon.Patch.Edits.OfType<AppendComponentStatement>());
+            Assert.NotNull(append.Handle);
+            Assert.Equal(append.Handle, componentAppend.OwnerHandle);
+
+            var addedAsset = Assert.Single(recon.AddedAssets);
+            Assert.Equal("fbxGuid", addedAsset.Guid);
+            Assert.Equal("Assets/Barrel.fbx", addedAsset.LastKnownPath);
+
+            var patched = SourcePatchApplier.Apply(NewObjectUnderMappedRootScene, recon.Patch, parsed.Anchors);
+
+            Assert.Contains($".Set(\"{FieldKey}\", Asset(\"Assets/Barrel.fbx\", \"BarrelMesh\"))", patched);
+
+            // ---- pass 2: reparse + lower (path->guid, the real adapter pipeline) + converge ----
+            var reparsed = BuilderParser.Parse(patched);
+            var spriteLogicalId = append.Handle!;
+
+            var reparsedMap = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = rootLogicalId, GlobalObjectId = "goid-root", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = spriteLogicalId, GlobalObjectId = "goid-sprite", Kind = "GameObject", ParentLogicalId = rootLogicalId },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = $"{spriteLogicalId}/{ComponentTypeFullName}#0",
+                        GlobalObjectId = "",
+                        Kind = "Component",
+                        ComponentType = ComponentTypeFullName,
+                        ParentLogicalId = spriteLogicalId,
+                    },
+                },
+            };
+
+            var lowered = AssetRefLowering.Lower(
+                reparsed.Model,
+                path => path == "Assets/Barrel.fbx" ? ("fbxGuid", 2L, "Mesh") : null);
+
+            var plan = Materializer.Materialize(lowered, snapshot, reparsedMap);
+
+            Assert.Empty(plan.Ops);
+        }
     }
 }

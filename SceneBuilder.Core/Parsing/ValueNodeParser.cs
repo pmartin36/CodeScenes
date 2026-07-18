@@ -286,13 +286,22 @@ namespace SceneBuilder.Core.Parsing
         private static ValueNode ParseAsset(InvocationExpressionSyntax invocation)
         {
             var args = invocation.ArgumentList.Arguments;
-            if (args.Count != 1) return Unsupported(invocation);
+            if (args.Count is not (1 or 2)) return Unsupported(invocation);
+
             var arg = args[0].Expression;
-            if (TryStringLiteral(arg, out var path))
-                return new ValueNode.AssetRef(new AssetRef { DisplayPath = path });
-            if (arg is LiteralExpressionSyntax lit && lit.IsKind(SyntaxKind.NullLiteralExpression))
-                return new ValueNode.AssetRef(null);
-            return Unsupported(invocation);
+            if (args.Count == 1)
+            {
+                if (TryStringLiteral(arg, out var path))
+                    return new ValueNode.AssetRef(new AssetRef { DisplayPath = path });
+                if (arg is LiteralExpressionSyntax lit && lit.IsKind(SyntaxKind.NullLiteralExpression))
+                    return new ValueNode.AssetRef(null);
+                return Unsupported(invocation);
+            }
+
+            // 2-arg sub-asset form: both args must be string literals.
+            if (!TryStringLiteral(arg, out var displayPath)) return Unsupported(invocation);
+            if (!TryStringLiteral(args[1].Expression, out var subAsset)) return Unsupported(invocation);
+            return new ValueNode.AssetRef(new AssetRef { DisplayPath = displayPath, SubAsset = subAsset });
         }
 
         private static ValueNode ParseBuiltin(InvocationExpressionSyntax invocation)

@@ -562,8 +562,9 @@ namespace SceneBuilder.Core.Reconcile
         // stale text would never be rewritten. Every other ValueNode kind determines its own emission,
         // so equality there already implies identical text and this returns true.
         //
-        // The emitted text is a function of (DisplayPath, IsBuiltin, TypeHint): a built-in renders as
-        // `Builtin("name")` / `Builtin("name", "Qualifier")` (SourceExpr.ValueNodeLiteral).
+        // The emitted text is a function of (DisplayPath, IsBuiltin, TypeHint, SubAsset): a built-in
+        // renders as `Builtin("name")` / `Builtin("name", "Qualifier")`, a project asset ref as
+        // `Asset("path")` / `Asset("path", "subName")` (SourceExpr.ValueNodeLiteral).
         //
         // The inverse case — text equal but identity different (same path, different sub-object fileId)
         // — is why this is an ADDITIONAL condition on top of Equals and never a replacement for it.
@@ -579,7 +580,8 @@ namespace SceneBuilder.Core.Reconcile
 
                     return string.Equals(a.DisplayPath, b.DisplayPath, System.StringComparison.Ordinal)
                         && a.IsBuiltin == b.IsBuiltin
-                        && string.Equals(a.TypeHint, b.TypeHint, System.StringComparison.Ordinal);
+                        && string.Equals(a.TypeHint, b.TypeHint, System.StringComparison.Ordinal)
+                        && string.Equals(a.SubAsset, b.SubAsset, System.StringComparison.Ordinal);
 
                 case (ValueNode.List la, ValueNode.List lb):
                     if (la.Items.Count != lb.Items.Count)

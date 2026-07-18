@@ -151,6 +151,28 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(node, Roundtrip(text));
         }
 
+        // b2-t1 #6: a non-built-in AssetRef with a populated SubAsset emits the 2-arg form.
+        [Fact]
+        public void ValueNodeLiteral_SubAssetRef_EmitsTwoArgAssetCall()
+        {
+            var node = new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/Models/Barrel.fbx", SubAsset = "BarrelMesh" });
+
+            var text = SourceExpr.ValueNodeLiteral(node);
+
+            Assert.Equal("Asset(\"Assets/Models/Barrel.fbx\", \"BarrelMesh\")", text);
+        }
+
+        // b2-t1 #7 regression: SubAsset == "" still emits the plain 1-arg form.
+        [Fact]
+        public void ValueNodeLiteral_MainAssetRef_StillEmitsOneArgAssetCall()
+        {
+            var node = new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/Materials/Red.mat" });
+
+            var text = SourceExpr.ValueNodeLiteral(node);
+
+            Assert.Equal("Asset(\"Assets/Materials/Red.mat\")", text);
+        }
+
         [Fact]
         public void ValueNodeLiteral_EnumSingleMember_RendersFullyQualifiedAndRoundtripsNotFlags()
         {

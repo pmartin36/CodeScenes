@@ -105,7 +105,10 @@ namespace SceneBuilder.Core.Reconcile
                 "Builtin(" + StringLiteral(assetRef.DisplayPath) + ")",
             ValueNode.AssetRef(AssetRef { IsBuiltin: true } assetRef) =>
                 "Builtin(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.TypeHint) + ")",
-            ValueNode.AssetRef(var assetRef) => "Asset(" + StringLiteral(assetRef.DisplayPath) + ")",
+            ValueNode.AssetRef(AssetRef { SubAsset: "" } assetRef) =>
+                "Asset(" + StringLiteral(assetRef.DisplayPath) + ")",
+            ValueNode.AssetRef(var assetRef) =>
+                "Asset(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.SubAsset) + ")",
 
             _ => throw new NotSupportedException($"SourceExpr.ValueNodeLiteral: unsupported ValueNode kind {node.GetType().Name}"),
         };
