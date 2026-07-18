@@ -107,6 +107,12 @@ namespace SceneBuilder.Editor
             var assetResolver = new AssetReferenceResolver.LoweringResolver(existingMap?.Assets);
             var desired = AssetRefLowering.Lower(resolved, assetResolver.Resolve, assetResolver.ResolveBuiltin);
 
+            // b5-t3: lower PrefabInstanceNode.SourcePrefab the same way — a display path resolved to
+            // its (guid, fileId, typeHint) via the SAME harvesting resolver, so the sidecar Assets[]
+            // gains a TypeHint="Prefab" row through the existing AssetCacheMerge at the caller.
+            var prefabLowered = PrefabRefLowering.Lower(desired, assetResolver.ResolvePrefabSource);
+            desired = prefabLowered.Model;
+
             return new Loaded(desired, parse, spans, assetResolver.Harvested);
         }
     }

@@ -213,6 +213,22 @@ namespace SceneBuilder.Editor
                     return e with { GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(comp).ToString() };
                 }
 
+                // b5-t3: stamp the instance root's GlobalObjectId + the (TargetPrefabId, TargetObjectId)
+                // pair-key + SourcePrefabGuid via the SAME probe the read side (b5-t2) uses, so build-side
+                // and read-side identity are byte-identical (the Differ's pair-key match depends on it).
+                // Runs AFTER SaveScene, so the GlobalObjectId pair is real.
+                if (e.Kind == "PrefabInstance"
+                    && execution.GameObjectsByLogicalId.TryGetValue(e.LogicalId, out var instanceGo) && instanceGo != null)
+                {
+                    var (sourceGuid, key, _) = PrefabInstanceProbe.ReadInstanceRoot(instanceGo);
+                    return e with
+                    {
+                        GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(instanceGo).ToString(),
+                        PrefabKey = key,
+                        SourcePrefabGuid = sourceGuid ?? e.SourcePrefabGuid,
+                    };
+                }
+
                 return e;
             }).ToArray();
 

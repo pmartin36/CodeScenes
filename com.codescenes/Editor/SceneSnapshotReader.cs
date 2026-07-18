@@ -48,10 +48,20 @@ namespace SceneBuilder.Editor
         {
             var t = go.transform;
 
-            var children = new SnapshotNode[t.childCount];
-            for (var i = 0; i < t.childCount; i++)
+            // A prefab-instance ROOT reads as one opaque unit — never descend into its internals
+            // (diff correctness + sync performance, research.md b5-t2).
+            SnapshotNode[] children;
+            if (PrefabInstanceProbe.IsInstanceRoot(go))
             {
-                children[i] = ReadNode(t.GetChild(i).gameObject, resolveId, resolveSceneRef);
+                children = Array.Empty<SnapshotNode>();
+            }
+            else
+            {
+                children = new SnapshotNode[t.childCount];
+                for (var i = 0; i < t.childCount; i++)
+                {
+                    children[i] = ReadNode(t.GetChild(i).gameObject, resolveId, resolveSceneRef);
+                }
             }
 
             return ReadNodeShallow(go, children, resolveId, resolveSceneRef);
@@ -73,17 +83,36 @@ namespace SceneBuilder.Editor
             var lr = t.localRotation;
             var ls = t.localScale;
 
-            // Read every component EXCEPT the GameObject's own transform (handled separately above,
-            // and excluded from Components[] by the Core model). Missing scripts (null) are skipped.
-            var components = new List<ComponentData>();
-            foreach (var component in go.GetComponents<Component>())
-            {
-                if (component == null || component == t)
-                {
-                    continue;
-                }
+            var isInstanceRoot = PrefabInstanceProbe.IsInstanceRoot(go);
 
-                components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef));
+            // A prefab-instance ROOT reads as one opaque unit: its internal components are never
+            // enumerated (the whole instance is one unit; see PrefabInstanceProbe / research.md b5-t2).
+            var components = new List<ComponentData>();
+            if (!isInstanceRoot)
+            {
+                // Read every component EXCEPT the GameObject's own transform (handled separately
+                // above, and excluded from Components[] by the Core model). Missing scripts (null)
+                // are skipped.
+                foreach (var component in go.GetComponents<Component>())
+                {
+                    if (component == null || component == t)
+                    {
+                        continue;
+                    }
+
+                    components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef));
+                }
+            }
+
+            string? sourcePrefabGuid = null;
+            PrefabInstanceKey? prefabKey = null;
+            ValueNode.Unsupported? opaqueOverrides = null;
+            if (isInstanceRoot)
+            {
+                var instance = PrefabInstanceProbe.ReadInstanceRoot(go);
+                sourcePrefabGuid = instance.SourcePrefabGuid;
+                prefabKey = instance.Key;
+                opaqueOverrides = instance.Overrides;
             }
 
             return new SnapshotNode
@@ -103,7 +132,10 @@ namespace SceneBuilder.Editor
                     DrivenChannels = DeriveDrivenChannels(go),
                 },
                 Components = components.ToArray(),
-                Children = children,
+                Children = isInstanceRoot ? Array.Empty<SnapshotNode>() : children,
+                SourcePrefabGuid = sourcePrefabGuid,
+                PrefabKey = prefabKey,
+                OpaqueOverrides = opaqueOverrides,
             };
         }
 

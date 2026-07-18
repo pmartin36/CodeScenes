@@ -233,5 +233,89 @@ namespace SceneBuilder.Core.Tests
             Assert.Empty(plan.Ops.OfType<CreateObject>());
             Assert.True(remapped.IsManaged("goid-root"));
         }
+
+        // b5-t3 BLOCKER 2: the prior pool must include Kind="PrefabInstance" (not just
+        // "GameObject") so a rebuilt instance inherits its prior GlobalObjectId/PrefabKey/
+        // SourcePrefabGuid instead of orphaning the prior entry and re-creating a duplicate.
+        [Fact]
+        public void Remap_PrefabInstanceNode_MatchesPriorPrefabInstanceEntry_InheritsKeyAndGuid_SingleEntry()
+        {
+            var prior = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "enemy-1",
+                        GlobalObjectId = "goid-enemy",
+                        Kind = "PrefabInstance",
+                        Name = "Enemy",
+                        SiblingIndex = 0,
+                        PrefabKey = new PrefabInstanceKey { TargetPrefabId = 111, TargetObjectId = 222 },
+                        SourcePrefabGuid = "abc123guid",
+                    },
+                },
+            };
+
+            var current = new SceneModel
+            {
+                Roots = new GameObjectNode[]
+                {
+                    new PrefabInstanceNode
+                    {
+                        LogicalId = "enemy-2",
+                        Name = "Enemy",
+                        SourcePrefab = new AssetRef { Guid = "abc123guid", DisplayPath = "Assets/Enemy.prefab" },
+                    },
+                },
+            };
+
+            var remapped = IdentityRemapper.Remap(current, prior);
+
+            var entry = Assert.Single(remapped.Entries, e => e.LogicalId == "enemy-2");
+            Assert.Equal("PrefabInstance", entry.Kind);
+            Assert.Equal("goid-enemy", entry.GlobalObjectId);
+            Assert.NotNull(entry.PrefabKey);
+            Assert.Equal(111UL, entry.PrefabKey!.TargetPrefabId);
+            Assert.Equal(222UL, entry.PrefabKey!.TargetObjectId);
+            Assert.Equal("abc123guid", entry.SourcePrefabGuid);
+
+            // The prior entry must be CONSUMED by the match, not left behind as an orphan
+            // duplicate (BLOCKER 2a: prior pool excluding PrefabInstance would leave this).
+            Assert.DoesNotContain(remapped.Entries, e => e.LogicalId == "enemy-1");
+        }
+
+        // b5-t3 regression guard: a plain GameObject sibling of a PrefabInstanceNode must stay
+        // byte-stable — Kind="GameObject", null PrefabKey/SourcePrefabGuid.
+        [Fact]
+        public void Remap_PlainGameObjectAlongsidePrefabInstance_StaysGameObjectKindWithNullPrefabFields()
+        {
+            var prior = new IdentityMap { Scene = "Assets/Scenes/Demo.unity" };
+
+            var current = new SceneModel
+            {
+                Roots = new GameObjectNode[]
+                {
+                    new GameObjectNode { LogicalId = "plain-1", Name = "Plain" },
+                    new PrefabInstanceNode
+                    {
+                        LogicalId = "enemy-1",
+                        Name = "Enemy",
+                        SourcePrefab = new AssetRef { Guid = "abc123guid", DisplayPath = "Assets/Enemy.prefab" },
+                    },
+                },
+            };
+
+            var remapped = IdentityRemapper.Remap(current, prior);
+
+            var plainEntry = Assert.Single(remapped.Entries, e => e.LogicalId == "plain-1");
+            Assert.Equal("GameObject", plainEntry.Kind);
+            Assert.Null(plainEntry.PrefabKey);
+            Assert.Null(plainEntry.SourcePrefabGuid);
+
+            var instanceEntry = Assert.Single(remapped.Entries, e => e.LogicalId == "enemy-1");
+            Assert.Equal("PrefabInstance", instanceEntry.Kind);
+        }
     }
 }

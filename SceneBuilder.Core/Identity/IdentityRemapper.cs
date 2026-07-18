@@ -13,7 +13,10 @@ namespace SceneBuilder.Core.Identity
 
         public static IdentityMap Remap(SceneModel current, IdentityMap prior)
         {
-            var priorGameObjects = prior.Entries.Where(e => e.Kind == "GameObject").ToList();
+            // b5-t3: a prior PrefabInstance entry is a first-class node kind alongside GameObject —
+            // both live in the same match pool so a rebuilt instance inherits its prior
+            // GlobalObjectId/PrefabKey/SourcePrefabGuid instead of orphaning the prior entry.
+            var priorGameObjects = prior.Entries.Where(e => e.Kind == "GameObject" || e.Kind == "PrefabInstance").ToList();
             var priorRoots = priorGameObjects.Where(e => e.ParentLogicalId == null).ToList();
 
             var priorChildrenByParent = new Dictionary<string, List<IdentityMapEntry>>();
@@ -81,16 +84,19 @@ namespace SceneBuilder.Core.Identity
             {
                 var node = currentNodes[i];
                 var match = matches[i];
+                var isPrefabInstance = node is PrefabInstanceNode;
 
                 output.Add(new IdentityMapEntry
                 {
                     LogicalId = node.LogicalId,
                     GlobalObjectId = match?.GlobalObjectId ?? "",
-                    Kind = "GameObject",
+                    Kind = isPrefabInstance ? "PrefabInstance" : "GameObject",
                     ComponentType = null,
                     ParentLogicalId = currentParentLogicalId,
                     Name = node.Name,
                     SiblingIndex = i,
+                    PrefabKey = isPrefabInstance ? match?.PrefabKey : null,
+                    SourcePrefabGuid = isPrefabInstance ? match?.SourcePrefabGuid : null,
                 });
 
                 var priorComponents = match != null && priorComponentsByOwner.TryGetValue(match.LogicalId, out var components)

@@ -92,10 +92,18 @@ namespace SceneBuilder.Editor
             SnapshotNode BuildNode(GameObject go)
             {
                 var t = go.transform;
-                var children = new SnapshotNode[t.childCount];
-                for (var i = 0; i < t.childCount; i++)
+                SnapshotNode[] children;
+                if (PrefabInstanceProbe.IsInstanceRoot(go))
                 {
-                    children[i] = BuildNode(t.GetChild(i).gameObject);
+                    children = System.Array.Empty<SnapshotNode>();
+                }
+                else
+                {
+                    children = new SnapshotNode[t.childCount];
+                    for (var i = 0; i < t.childCount; i++)
+                    {
+                        children[i] = BuildNode(t.GetChild(i).gameObject);
+                    }
                 }
 
                 var entityId = go.GetEntityId();
@@ -127,6 +135,14 @@ namespace SceneBuilder.Editor
         {
             nodeByGoEntityId[go.GetEntityId()] = node;
 
+            // A prefab-instance ROOT's node.Children is always empty (its internals are never
+            // enumerated) — do not descend into the live hierarchy under it, or node.Children[i]
+            // indexes out of range.
+            if (PrefabInstanceProbe.IsInstanceRoot(go))
+            {
+                return;
+            }
+
             var t = go.transform;
             for (var i = 0; i < t.childCount; i++)
             {
@@ -141,6 +157,15 @@ namespace SceneBuilder.Editor
             void Walk(GameObject go)
             {
                 result.Add(go);
+
+                // Never warm ids for a prefab instance's internals (never enumerated by the reader,
+                // and would be a per-keystroke GetGlobalObjectIdSlow cost — CLAUDE.md sync-performance
+                // constraint).
+                if (PrefabInstanceProbe.IsInstanceRoot(go))
+                {
+                    return;
+                }
+
                 var t = go.transform;
                 for (var i = 0; i < t.childCount; i++)
                 {

@@ -52,7 +52,12 @@ namespace SceneBuilder.Core.Reconcile
             {
                 foreach (var group in siblings.GroupBy(n => n.Name))
                 {
-                    var positional = group.Where(n => IsPositional(n, parentLogicalId)).ToArray();
+                    // Prefab instances are identity-keyed by their persisted
+                    // (TargetPrefabId, TargetObjectId) pair-key (spec 07), not by sibling name/position,
+                    // so they are exempt from the positional-sibling ambiguity rule (spec 16). This
+                    // exemption lives HERE (the one shared chokepoint) so both DuplicateNameConflicts
+                    // (build-refusal) and DetectAmbiguousReorders inherit it uniformly.
+                    var positional = group.Where(n => n is not PrefabInstanceNode && IsPositional(n, parentLogicalId)).ToArray();
                     if (positional.Length >= 2)
                     {
                         results.Add((parentLogicalId, group.Key, positional));

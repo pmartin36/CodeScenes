@@ -217,6 +217,44 @@ namespace SceneBuilder.Editor
             }
 
             /// <summary>
+            /// b5-t3: the Core <c>PrefabRefLowering</c> delegate — resolves a
+            /// <c>PrefabInstanceNode.SourcePrefab</c> display path to its <c>(guid, fileId, typeHint)</c>,
+            /// harvesting a <see cref="AssetEntry"/> with <c>TypeHint="Prefab"</c> (NOT the generic
+            /// <c>main.GetType().Name</c> = "GameObject" <see cref="Resolve"/> records — a .prefab and an
+            /// .fbx both load as GameObject, so the sidecar needs the asset-KIND hint). Throws the same
+            /// located messages as <see cref="Resolve"/> on a missing path / deleted GUID; returns null on
+            /// an empty path. <paramref name="subName"/> is unused — a prefab instance source is always
+            /// the main asset.
+            /// </summary>
+            public (string guid, long fileId, string typeHint)? ResolvePrefabSource(string displayPath, string? subName)
+            {
+                var probe = TryResolve(displayPath);
+                switch (probe.Kind)
+                {
+                    case PathProbeKind.Empty:
+                        return null;
+
+                    case PathProbeKind.ContainerPath:
+                        BuiltinRefValidator.ThrowContainerPath(displayPath, location: null);
+                        return null; // unreachable — ThrowContainerPath always throws.
+
+                    case PathProbeKind.MissingPath:
+                        throw new InvalidOperationException(
+                            $"[SceneBuilder] Asset not found at path '{displayPath}' (referenced via Instance(\"{displayPath}\")). " +
+                            "The asset is missing or not imported — fix the path or restore the asset.");
+
+                    case PathProbeKind.DeletedGuid:
+                        throw new InvalidOperationException(
+                            $"[SceneBuilder] Asset {probe.Guid} (was '{displayPath}') not found — the asset was deleted. " +
+                            "Restore it or remove the reference.");
+
+                    default:
+                        _harvested.Add(new AssetEntry { Guid = probe.Guid, LastKnownPath = probe.CurrentPath, TypeHint = "Prefab" });
+                        return (probe.Guid, probe.FileId, "Prefab");
+                }
+            }
+
+            /// <summary>
             /// b3-t4: the sub-object scan atom shared by <see cref="ResolveSubObjectOrThrow"/> (the
             /// throwing Build/backstop wrapper) and <see cref="UnityResolutionProvider"/> (the
             /// collect-all headless-validation seam) — ONE scan, two surfaces; never hand-sync a
