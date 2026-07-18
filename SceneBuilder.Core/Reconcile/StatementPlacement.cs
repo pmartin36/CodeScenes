@@ -102,7 +102,10 @@ namespace SceneBuilder.Core.Reconcile
                 return false;
             }
 
-            return kind == PeerKind.Component ? firstCall == "Component" : firstCall == "Add";
+            // Child peers are every child-node-producing call under this receiver — `.Add(...)` (a
+            // plain GameObject) and `.Instance(...)` (a prefab instance) both feed the SAME ordered
+            // child list (m6-b4-t2); only they compete for a child sibling index.
+            return kind == PeerKind.Component ? firstCall == "Component" : (firstCall == "Add" || firstCall == "Instance");
         }
 
         // ---- Declaration order ------------------------------------------------------------------

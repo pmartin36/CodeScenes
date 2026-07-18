@@ -40,13 +40,42 @@ namespace SceneBuilder.Core.Reconcile
             List<IdentityMapEntry> addedEntries,
             List<string> removedLogicalIds,
             List<Conflict> conflicts,
-            List<AssetEntry> addedAssets)
+            List<AssetEntry> addedAssets,
+            // m6-b4-1: source-prefab GUID -> last-known asset path (identityMap.Assets), used to
+            // re-derive the `.Instance(path)` argument for a snapshot-only prefab-instance root.
+            IReadOnlyDictionary<string, string> prefabPathByGuid)
         {
             // The array position IS the scene sibling index (FlattenSnapshot keys SnapshotEntry off the
             // same index), and it is what a created node's statement must be placed at.
             for (var siblingIndex = 0; siblingIndex < nodes.Length; siblingIndex++)
             {
                 var node = nodes[siblingIndex];
+
+                // m6-b4-t1: a prefab-instance root is handled entirely by HandleInstanceNode and
+                // NEVER recursed into — its children are the prefab's internal hierarchy, out of
+                // scope until M10 — regardless of whether it is already mapped.
+                if (node.SourcePrefabGuid != null)
+                {
+                    HandleInstanceNode(
+                        node,
+                        siblingIndex,
+                        parentLogicalId,
+                        parentIsMapped,
+                        expected,
+                        goidToLogicalId,
+                        modelByLogicalId,
+                        reserved,
+                        prefabPathByGuid,
+                        resolveOwnerHandle,
+                        nextIndexByParentKey,
+                        edits,
+                        addedEntries,
+                        conflicts,
+                        nodes);
+
+                    continue;
+                }
+
                 string? mappedLogicalId = null;
                 var isMapped = !string.IsNullOrEmpty(node.GlobalObjectId)
                     && goidToLogicalId.TryGetValue(node.GlobalObjectId, out mappedLogicalId);
@@ -71,7 +100,8 @@ namespace SceneBuilder.Core.Reconcile
                         addedEntries,
                         removedLogicalIds,
                         conflicts,
-                        addedAssets);
+                        addedAssets,
+                        prefabPathByGuid);
 
                     continue;
                 }
@@ -207,7 +237,8 @@ namespace SceneBuilder.Core.Reconcile
                         addedEntries,
                         removedLogicalIds,
                         conflicts,
-                        addedAssets);
+                        addedAssets,
+                        prefabPathByGuid);
 
                     continue;
                 }
@@ -230,7 +261,8 @@ namespace SceneBuilder.Core.Reconcile
                     addedEntries,
                     removedLogicalIds,
                     conflicts,
-                    addedAssets);
+                    addedAssets,
+                    prefabPathByGuid);
             }
         }
     }

@@ -77,6 +77,12 @@ namespace SceneBuilder.Core.Reconcile
         // true => the (currently handle-less) parent statement must be rewritten to declare
         // ParentHandle before the child is appended (b2-t2 reconcile / b3-t3 apply).
         public bool IntroduceParentHandle { get; init; }
+
+        // m6-b4-t1: non-null => this append is a prefab-instance root; render as
+        // `<receiver>.Instance(SourcePrefabPath)` instead of `<receiver>.Add(Name)`, suppressing
+        // Tag/Layer/Active/IsStatic (InstanceHandle exposes no such calls). Path re-derived from
+        // SourcePrefabGuid via identityMap.Assets at emit time (Reconciler), not rendered here.
+        public string? SourcePrefabPath { get; init; }
     }
 
     public sealed record RemoveStatement : SourceEdit

@@ -84,9 +84,13 @@ namespace SceneBuilder.Core.Parsing
         };
 
         // Mirrors the plain-GameObject IdentityMapEntry construction in CollectIdentityEntries,
-        // but with Kind="PrefabInstance" and no ComponentType/PrefabKey/SourcePrefabGuid — those
-        // are unresolved at parse time (filled in by b2-t3 lowering / b5-t3 build).
-        private static IdentityMapEntry BuildInstanceIdentityEntry(NodeBuilder node, string? parentLogicalId, int siblingIndex, Dictionary<string, string> globalObjectIdByLogicalId) => new()
+        // but with Kind="PrefabInstance". PrefabKey/SourcePrefabGuid are unresolved at parse time
+        // (filled in by b2-t3 lowering / b5-t3 build) UNLESS `existingEntry` (this LogicalId's entry
+        // in the map passed into BuilderParser.Parse) already carries them — a re-parse after a
+        // structural move (b4-t2) rebuilds every entry from scratch, so those fields must be
+        // re-fetched from the prior map the same way GlobalObjectId already is, or a moved-but-not-
+        // renamed instance loses its prefab identity on every syncback pass.
+        private static IdentityMapEntry BuildInstanceIdentityEntry(NodeBuilder node, string? parentLogicalId, int siblingIndex, Dictionary<string, string> globalObjectIdByLogicalId, IdentityMapEntry? existingEntry) => new()
         {
             LogicalId = node.LogicalId,
             GlobalObjectId = globalObjectIdByLogicalId.TryGetValue(node.LogicalId, out var globalObjectId) ? globalObjectId : "",
@@ -95,8 +99,8 @@ namespace SceneBuilder.Core.Parsing
             ParentLogicalId = parentLogicalId,
             Name = node.Name,
             SiblingIndex = siblingIndex,
-            PrefabKey = null,
-            SourcePrefabGuid = null,
+            PrefabKey = existingEntry?.PrefabKey,
+            SourcePrefabGuid = existingEntry?.SourcePrefabGuid,
         };
     }
 }

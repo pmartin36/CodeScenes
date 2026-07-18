@@ -67,8 +67,13 @@ namespace SceneBuilder.Core.Reconcile
 
         private static string BuildAppendStatementText(AppendStatement edit, string receiver)
         {
-            var nameLiteral = SyntaxFactory.Literal(edit.Name).ToString();
-            var chain = $"{receiver}.Add({nameLiteral})";
+            // m6-b4-t1: a prefab-instance root renders `<receiver>.Instance(<path>)` instead of
+            // `<receiver>.Add(Name)` — InstanceHandle (b2-t1) exposes no Tag/Layer/Active/Static
+            // calls, so those fields are always null for an instance and the tail below is
+            // skipped entirely for clarity/safety (the plain path stays byte-identical to today).
+            var chain = edit.SourcePrefabPath != null
+                ? $"{receiver}.Instance({SourceExpr.StringLiteral(edit.SourcePrefabPath)})"
+                : $"{receiver}.Add({SyntaxFactory.Literal(edit.Name).ToString()})";
 
             if (edit.Transform != null)
             {
@@ -96,24 +101,27 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
-            if (edit.Tag != null)
+            if (edit.SourcePrefabPath == null)
             {
-                chain += $".Tag({SourceExpr.StringLiteral(edit.Tag)})";
-            }
+                if (edit.Tag != null)
+                {
+                    chain += $".Tag({SourceExpr.StringLiteral(edit.Tag)})";
+                }
 
-            if (edit.Layer != null)
-            {
-                chain += $".Layer({SourceExpr.IntLiteral(edit.Layer.Value)})";
-            }
+                if (edit.Layer != null)
+                {
+                    chain += $".Layer({SourceExpr.IntLiteral(edit.Layer.Value)})";
+                }
 
-            if (edit.Active != null)
-            {
-                chain += $".Active({(edit.Active.Value ? "true" : "false")})";
-            }
+                if (edit.Active != null)
+                {
+                    chain += $".Active({(edit.Active.Value ? "true" : "false")})";
+                }
 
-            if (edit.IsStatic == true)
-            {
-                chain += ".Static()";
+                if (edit.IsStatic == true)
+                {
+                    chain += ".Static()";
+                }
             }
 
             return edit.Handle != null

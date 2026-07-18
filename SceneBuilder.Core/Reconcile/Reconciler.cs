@@ -28,15 +28,27 @@ namespace SceneBuilder.Core.Reconcile
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
             var logicalIdToGlobalObjectId = identityMap.Entries
-                .Where(e => e.Kind == "GameObject" && !string.IsNullOrEmpty(e.GlobalObjectId))
+                .Where(e => (e.Kind == "GameObject" || e.Kind == "PrefabInstance") && !string.IsNullOrEmpty(e.GlobalObjectId))
                 .ToDictionary(e => e.LogicalId, e => e.GlobalObjectId);
 
             var globalObjectIdToLogicalId = logicalIdToGlobalObjectId
                 .GroupBy(kv => kv.Value)
                 .ToDictionary(g => g.Key, g => g.First().Key);
 
+            // m6-b4-t1: source-prefab GUID -> last-known asset path, re-deriving the
+            // `.Instance(path)` argument for a snapshot-only prefab-instance root. First-wins on a
+            // (shouldn't-happen) duplicate guid, skips entries with no guid.
+            var prefabPathByGuid = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var asset in identityMap.Assets)
+            {
+                if (!string.IsNullOrEmpty(asset.Guid) && !prefabPathByGuid.ContainsKey(asset.Guid))
+                {
+                    prefabPathByGuid[asset.Guid] = asset.LastKnownPath;
+                }
+            }
+
             var logicalIdToParentLogicalId = identityMap.Entries
-                .Where(e => e.Kind == "GameObject")
+                .Where(e => e.Kind == "GameObject" || e.Kind == "PrefabInstance")
                 .ToDictionary(e => e.LogicalId, e => e.ParentLogicalId);
 
             var snapshotByGoid = new Dictionary<string, SnapshotEntry>();
@@ -151,13 +163,15 @@ namespace SceneBuilder.Core.Reconcile
                 }
 
                 removedLogicalIds.Add(oldId);
-                addedEntries.Add(new IdentityMapEntry
-                {
-                    LogicalId = newId,
-                    GlobalObjectId = logicalIdToGlobalObjectId.GetValueOrDefault(oldId, string.Empty),
-                    Kind = "GameObject",
-                    ParentLogicalId = newParentLogicalId,
-                });
+                var source = identityMap.Entries.FirstOrDefault(e => e.LogicalId == oldId
+                    && (e.Kind == "GameObject" || e.Kind == "PrefabInstance"));
+                addedEntries.Add((source ?? new IdentityMapEntry { LogicalId = oldId, Kind = "GameObject" })
+                    with
+                    {
+                        LogicalId = newId,
+                        GlobalObjectId = logicalIdToGlobalObjectId.GetValueOrDefault(oldId, string.Empty),
+                        ParentLogicalId = newParentLogicalId,
+                    });
 
                 foreach (var component in identityMap.Entries)
                 {
@@ -469,7 +483,8 @@ namespace SceneBuilder.Core.Reconcile
                 addedEntries,
                 removedLogicalIds,
                 conflicts,
-                addedAssets);
+                addedAssets,
+                prefabPathByGuid);
 
             // THE write-path chokepoint for duplicate sibling names.
             //
@@ -670,13 +685,13 @@ namespace SceneBuilder.Core.Reconcile
             List<Conflict> conflicts)
         {
             var dependentsByOwner = identityMap.Entries
-                .Where(e => (e.Kind == "GameObject" || e.Kind == "Component") && e.ParentLogicalId != null)
+                .Where(e => (e.Kind == "GameObject" || e.Kind == "Component" || e.Kind == "PrefabInstance") && e.ParentLogicalId != null)
                 .GroupBy(e => e.ParentLogicalId!)
                 .ToDictionary(g => g.Key, g => g.ToArray());
 
             foreach (var entry in identityMap.Entries)
             {
-                if (entry.Kind != "GameObject" || string.IsNullOrEmpty(entry.GlobalObjectId))
+                if ((entry.Kind != "GameObject" && entry.Kind != "PrefabInstance") || string.IsNullOrEmpty(entry.GlobalObjectId))
                 {
                     continue;
                 }
@@ -690,9 +705,10 @@ namespace SceneBuilder.Core.Reconcile
                     ? found
                     : Array.Empty<IdentityMapEntry>();
 
-                // Only a GameObject dependent can survive its owner (components are never snapshot nodes).
+                // Only a GameObject or PrefabInstance dependent can survive its owner (components
+                // are never snapshot nodes).
                 var hasSurvivingChild = dependents.Any(d =>
-                    d.Kind == "GameObject"
+                    (d.Kind == "GameObject" || d.Kind == "PrefabInstance")
                     && !string.IsNullOrEmpty(d.GlobalObjectId)
                     && snapshotByGoid.ContainsKey(d.GlobalObjectId));
 

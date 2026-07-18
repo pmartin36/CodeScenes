@@ -631,17 +631,26 @@ namespace SceneBuilder.Core.Parsing
 
         // Builds one IdentityMapEntry per parsed node, pre-order (document/declared order),
         // carrying over each node's GlobalObjectId from `existingMap` when its resolved
-        // LogicalId matches a persisted entry (so a re-parse never wipes saved ids).
+        // LogicalId matches a persisted entry (so a re-parse never wipes saved ids). A
+        // PrefabInstance node also carries over its PrefabKey/SourcePrefabGuid the same way (m6-b4-t2):
+        // a moved-but-not-renamed instance (authored handle, LogicalId unchanged) is rebuilt from
+        // scratch by CollectIdentityEntries on every parse, so those fields must be re-fetched from
+        // `existingMap`, not just GlobalObjectId.
         private static IdentityMap BuildIdentityMap(List<NodeBuilder> roots, IdentityMap? existingMap)
         {
             var globalObjectIdByLogicalId = existingMap?.Entries
                 .ToDictionary(e => e.LogicalId, e => e.GlobalObjectId)
                 ?? new Dictionary<string, string>();
 
+            var existingInstanceEntriesByLogicalId = existingMap?.Entries
+                .Where(e => e.Kind == "PrefabInstance")
+                .ToDictionary(e => e.LogicalId)
+                ?? new Dictionary<string, IdentityMapEntry>();
+
             var entries = new List<IdentityMapEntry>();
             for (var i = 0; i < roots.Count; i++)
             {
-                CollectIdentityEntries(roots[i], null, i, globalObjectIdByLogicalId, entries);
+                CollectIdentityEntries(roots[i], null, i, globalObjectIdByLogicalId, existingInstanceEntriesByLogicalId, entries);
             }
 
             return new IdentityMap
@@ -653,15 +662,16 @@ namespace SceneBuilder.Core.Parsing
             };
         }
 
-        private static void CollectIdentityEntries(NodeBuilder node, string? parentLogicalId, int siblingIndex, Dictionary<string, string> globalObjectIdByLogicalId, List<IdentityMapEntry> entries)
+        private static void CollectIdentityEntries(NodeBuilder node, string? parentLogicalId, int siblingIndex, Dictionary<string, string> globalObjectIdByLogicalId, Dictionary<string, IdentityMapEntry> existingInstanceEntriesByLogicalId, List<IdentityMapEntry> entries)
         {
             if (node.IsInstance)
             {
-                entries.Add(BuildInstanceIdentityEntry(node, parentLogicalId, siblingIndex, globalObjectIdByLogicalId));
+                var existingInstanceEntry = existingInstanceEntriesByLogicalId.GetValueOrDefault(node.LogicalId);
+                entries.Add(BuildInstanceIdentityEntry(node, parentLogicalId, siblingIndex, globalObjectIdByLogicalId, existingInstanceEntry));
 
                 for (var i = 0; i < node.Children.Count; i++)
                 {
-                    CollectIdentityEntries(node.Children[i], node.LogicalId, i, globalObjectIdByLogicalId, entries);
+                    CollectIdentityEntries(node.Children[i], node.LogicalId, i, globalObjectIdByLogicalId, existingInstanceEntriesByLogicalId, entries);
                 }
 
                 return;
@@ -692,7 +702,7 @@ namespace SceneBuilder.Core.Parsing
 
             for (var i = 0; i < node.Children.Count; i++)
             {
-                CollectIdentityEntries(node.Children[i], node.LogicalId, i, globalObjectIdByLogicalId, entries);
+                CollectIdentityEntries(node.Children[i], node.LogicalId, i, globalObjectIdByLogicalId, existingInstanceEntriesByLogicalId, entries);
             }
         }
 
