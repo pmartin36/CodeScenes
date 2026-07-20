@@ -205,7 +205,9 @@ namespace SceneBuilder.Authoring
             float? bestAny = null;
             Transform bestAnyTf = null;
 
-            var renderers = Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            // Unity 6000.5 deprecated EVERY FindObjectsByType overload that takes FindObjectsSortMode;
+            // the fallback scan picks the nearest surface by distance, so sort order is irrelevant.
+            var renderers = Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
             foreach (var other in renderers)
             {
                 var otherTf = other.transform;
