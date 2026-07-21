@@ -75,8 +75,11 @@ author instance tweaks in code and edits made on an instance in Unity round-trip
 
 ## Out of scope
 - Whole-prefab instantiation, presence detection, source-prefab GUID resolution — owned by **M6**.
-- Nested-prefab *authoring* (creating prefab-in-prefab structures); M10 only *addresses* nested
-  targets via `PrefabId` so overrides on them round-trip. Structural nested-prefab editing → deferred.
+- **Nested-target overrides — DEFERRED to `M-nested-props` (out of scope this pass).** Any override,
+  add, or remove targeting an object BELOW the instance root (a nested child / component, including one
+  inside a nested prefab) is not modelled or round-tripped here; it stays **read-as-opaque-and-preserved**
+  (the current M6 behavior), never dropped (§7). This pass round-trips **ROOT-target** overrides only.
+  Nested-prefab *authoring* (creating prefab-in-prefab structures) is likewise out of scope.
 - Variant prefabs as a distinct authored concept (a variant's own mods are still `PropertyModification`s
   and covered, but "author a new variant asset" is not).
 - Reverting the entire instance / "apply all to source" bulk operations as authoring verbs.
@@ -98,10 +101,11 @@ author instance tweaks in code and edits made on an instance in Unity round-trip
    `PropertyOverride[]` where each `target` lowers to an `OverrideTarget(PrefabId, ObjectId)`, and the
    writer produces the identical `PropertyModification` list back (round-trip is byte-stable after
    canonicalization). `PropertyModification` has **exactly** these four members — no others are emitted.
-2. **Pair-key mapping.** Two overrides that share a `PropertyPath` but target different objects inside
-   the prefab (different `ObjectId`), or the same object reached through different nested prefabs
-   (different `PrefabId`), are distinct entries and never collapse. A lookup keyed on `ObjectId` alone
-   MUST NOT match across differing `PrefabId`.
+2. **Pair-key mapping (root scope).** Two separate scene INSTANCES of the same prefab share the same
+   `ObjectId` (the prefab root's source-object fileID) but differ in `PrefabId` (per-instance); their
+   root overrides are distinct entries and never collapse. A lookup keyed on `ObjectId` alone MUST NOT
+   match across differing `PrefabId`. (Distinguishing different objects *inside* one prefab, or the same
+   object reached through different nested prefabs, is nested scope → deferred to `M-nested-props`.)
 3. **Added component.** A component present on the instance but absent from the source prefab lowers to
    an `AddedComponent{Target, Component:ComponentData}`; materialize adds it; reconcile appends
    `.AddComponent<T>()` to the instance's source statement.
@@ -174,8 +178,8 @@ scene.Instance("Assets/Prefabs/Enemy.prefab")
 1. `PropertyModification` list (with `target`, `propertyPath`, `value`, `objectReference`) reads into
    `PropertyOverride[]` and writes back to a byte-identical list after canonicalization.
 2. `objectReference`-type modification lowers to `AssetRef` (asset) and `ObjectRef` (in-scene) and back.
-3. Pair-key: same `PropertyPath`, different `ObjectId` → two entries; different `PrefabId`, same
-   `ObjectId` → two entries; `ObjectId`-only lookup does not cross `PrefabId`.
+3. Pair-key (root scope): two instances of the same prefab (same `ObjectId`, different `PrefabId`) →
+   two distinct entries; `ObjectId`-only lookup does not cross `PrefabId`.
 4. Added component on instance ↔ `AddedComponent`; materialize plan contains the add; reconcile patch
    appends `.AddComponent<T>()`.
 5. Removed component ↔ `RemovedComponents`; round-trips as `.RemoveComponent<T>()`.
@@ -211,8 +215,9 @@ scene.Instance("Assets/Prefabs/Enemy.prefab")
 - **M5** — `ObjectRef` (override values that reference in-scene objects).
 
 ## Risks/notes
-- Nested prefabs make the `PrefabId` half of the key load-bearing; addressing-only support is in scope,
-  structural nested editing is not.
+- Nested prefabs make the `PrefabId` half of the key load-bearing even at root scope (it distinguishes
+  two instances of the same prefab). Nested-*target* addressing (objects below the root) is deferred to
+  `M-nested-props`; this pass round-trips root-target overrides only.
 - `GetRemovedGameObjects` availability varies by Unity version; when absent, removed-GO detection is
   flagged unsupported (never silently dropped), per §7.
 - `PropertyModification` value vs `objectReference` are mutually exclusive per entry; the model must not
