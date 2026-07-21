@@ -122,5 +122,113 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(json, roundTripJson);
             Assert.IsType<PrefabInstanceNode>(back.Roots[0]);
         }
+
+        [Fact]
+        public void OverrideTarget_Equality_ByPair()
+        {
+            var a = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 };
+            var b = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 };
+            var differentPrefab = new OverrideTarget { PrefabId = "otherguid:200200", ObjectId = 100100 };
+            var differentObject = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 999999 };
+
+            Assert.Equal(a, b);
+            Assert.Equal(a.GetHashCode(), b.GetHashCode());
+            Assert.NotEqual(a, differentPrefab);
+            Assert.NotEqual(a, differentObject);
+        }
+
+        [Fact]
+        public void PrefabInstanceNode_PopulatedOverrideCollections_RoundTrip_ByteIdentical()
+        {
+            var target1 = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 };
+            var target2 = new OverrideTarget { PrefabId = "abc123def456:200200", ObjectId = 200200 };
+
+            var instance = SampleInstance() with
+            {
+                Overrides = new[]
+                {
+                    new PropertyOverride
+                    {
+                        Target = target1,
+                        PropertyPath = "m_LocalPosition.x",
+                        Value = ValueNode.Primitive.Float(3.5f),
+                    },
+                    new PropertyOverride
+                    {
+                        Target = target2,
+                        PropertyPath = "m_Materials.Array.data[0]",
+                        Value = new ValueNode.AssetRef(new AssetRef { Guid = "matguid", FileId = 2100000 }),
+                        ObjectReference = new ValueNode.AssetRef(new AssetRef { Guid = "matguid", FileId = 2100000 }),
+                        BaseValue = new ValueNode.AssetRef(new AssetRef { Guid = "defaultmatguid", FileId = 2100000 }),
+                    },
+                },
+                AddedComponents = new[]
+                {
+                    new AddedComponent
+                    {
+                        Target = target1,
+                        Component = new ComponentData { LogicalId = "Root/Added", Type = new TypeRef("UnityEngine.BoxCollider") },
+                    },
+                },
+                RemovedComponents = new[] { target2 },
+                AddedGameObjects = new[] { new GameObjectNode { LogicalId = "Root/NewChild", Name = "NewChild" } },
+                RemovedGameObjects = new[] { target1 },
+            };
+
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+
+            var json = SceneModelSerializer.Serialize(model);
+            var back = SceneModelSerializer.Deserialize(json);
+            var roundTripJson = SceneModelSerializer.Serialize(back);
+
+            Assert.Equal(json, roundTripJson);
+
+            var backInstance = Assert.IsType<PrefabInstanceNode>(back.Roots[0]);
+            Assert.Equal(2, backInstance.Overrides.Length);
+            Assert.Single(backInstance.AddedComponents);
+            Assert.Single(backInstance.RemovedComponents);
+            Assert.Single(backInstance.AddedGameObjects);
+            Assert.Single(backInstance.RemovedGameObjects);
+        }
+
+        [Fact]
+        public void PropertyOverride_NullObjectReferenceAndBaseValue_OmitKeys()
+        {
+            var instance = SampleInstance() with
+            {
+                Overrides = new[]
+                {
+                    new PropertyOverride
+                    {
+                        Target = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 },
+                        PropertyPath = "m_LocalPosition.x",
+                        Value = ValueNode.Primitive.Float(3.5f),
+                    },
+                },
+            };
+
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var json = SceneModelSerializer.Serialize(model);
+
+            Assert.DoesNotContain("objectReference", json);
+            Assert.DoesNotContain("baseValue", json);
+        }
+
+        [Fact]
+        public void PrefabInstanceNode_EmptyOverrideCollections_EmitAsEmptyArrays()
+        {
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { SampleInstance() } };
+            var json = SceneModelSerializer.Serialize(model);
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement.GetProperty("roots")[0];
+
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("overrides").ValueKind);
+            Assert.Equal(0, root.GetProperty("overrides").GetArrayLength());
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("addedComponents").ValueKind);
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("removedComponents").ValueKind);
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("addedGameObjects").ValueKind);
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("removedGameObjects").ValueKind);
+        }
     }
 }

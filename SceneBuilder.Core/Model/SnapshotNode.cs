@@ -27,5 +27,11 @@ namespace SceneBuilder.Core.Model
         public PrefabInstanceKey? PrefabKey { get; init; } = null;
 
         public ValueNode.Unsupported? OpaqueOverrides { get; init; } = null;
+
+        public PropertyOverride[] Overrides { get; init; } = Array.Empty<PropertyOverride>();
+
+        public AddedComponent[] AddedComponents { get; init; } = Array.Empty<AddedComponent>();
+
+        public OverrideTarget[] RemovedComponents { get; init; } = Array.Empty<OverrideTarget>();
     }
 }
