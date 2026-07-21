@@ -172,37 +172,22 @@ namespace SceneBuilder.Core.Diff
             EmitComponentEdits(node, snapshot, identityMap, ops);
         }
 
-        // b3-t1: channel-masked transform diff. A channel present in the SNAPSHOT's DrivenChannels
-        // (the live, enabled FitSize/SurfaceSnap mask) holds the snapshot's own value in the effective
-        // transform, contributing no diff on that channel; free channels (and rotation, never driven)
-        // still diff normally against the desired value. Emits a SetTransform iff the effective
-        // transform actually differs from the snapshot; a driven-only drift emits nothing. Mask None
-        // (the common case) makes effective == desired field-wise, preserving today's whole-transform
-        // behavior byte-for-byte.
+        // b1-t1: unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
+        // The scene->code direction (Reconciler.MaskDriven / SceneSnapshotReader.DeriveDrivenChannels)
+        // is the ONLY place a driven FitSize/SurfaceSnap channel is held back from source; here, the
+        // code->scene direction always emits the full authored transform when it drifts from the live
+        // snapshot on ANY channel, so FitSize/SurfaceSnap re-drive from the authored start every sync.
         private static void EmitTransformEdit(GameObjectNode node, SnapshotNode snapshot, List<ChangeOp> ops)
         {
-            var driven = snapshot.Transform.DrivenChannels;
             var desired = node.Transform;
             var actual = snapshot.Transform;
 
-            var position = new Vec3(
-                (driven & ChannelMask.PositionX) != 0 ? actual.Position.X : desired.Position.X,
-                (driven & ChannelMask.PositionY) != 0 ? actual.Position.Y : desired.Position.Y,
-                (driven & ChannelMask.PositionZ) != 0 ? actual.Position.Z : desired.Position.Z);
-
-            var scale = new Vec3(
-                (driven & ChannelMask.ScaleX) != 0 ? actual.Scale.X : desired.Scale.X,
-                (driven & ChannelMask.ScaleY) != 0 ? actual.Scale.Y : desired.Scale.Y,
-                (driven & ChannelMask.ScaleZ) != 0 ? actual.Scale.Z : desired.Scale.Z);
-
-            var effective = desired with { Position = position, Scale = scale, DrivenChannels = driven };
-
-            if (effective.Position == actual.Position && effective.Rotation == actual.Rotation && effective.Scale == actual.Scale)
+            if (desired.Position == actual.Position && desired.Rotation == actual.Rotation && desired.Scale == actual.Scale)
             {
                 return;
             }
 
-            ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = effective });
+            ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = desired });
         }
 
         // Diffs components on a matched GameObject (b4-t1). Component correspondence between

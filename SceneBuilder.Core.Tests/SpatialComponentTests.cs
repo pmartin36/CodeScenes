@@ -780,6 +780,71 @@ public class EmptySpatialScene : ISceneDefinition
             Assert.Equal("(5f, 0f, 0f)", pos.NewExpr);
         }
 
+        // b1-t1 / Resolved #1: an authored `.Transform(scale:)` co-existing with `.FitSize` on the
+        // same node must never re-emit the driven scale as a `.Transform(scale:)` patch, even when
+        // the scene-write side no longer suppresses the channel (this task removes that suppression
+        // on the WRITE side only — the code-emit direction, exercised here, is untouched).
+        [Fact]
+        public void Reconcile_AuthoredTransformScaleAndFitSize_DrivenScaleNotReEmitted()
+        {
+            var sizerFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
+            });
+
+            var model = new SceneModel
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new GameObjectNode
+                    {
+                        LogicalId = "sizer-1",
+                        Name = "Crate",
+                        Transform = new TransformData { Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.Scale },
+                        Components = new[]
+                        {
+                            new ComponentData { LogicalId = "sizer-1/" + SpatialComponents.FitSizeTypeName + "#0", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = sizerFields },
+                        },
+                    },
+                },
+            };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "sizer-1", GlobalObjectId = "goid-sizer", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = "sizer-1/" + SpatialComponents.FitSizeTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.FitSizeTypeName, ParentLogicalId = "sizer-1" },
+                },
+            };
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-sizer",
+                        Name = "Crate",
+                        // Solved geometry scale far from the authored (2,2,2) — must never reach
+                        // source as a `.Transform(scale:)` patch.
+                        Transform = new TransformData { DrivenChannels = ChannelMask.Scale, Scale = new Vec3(4f, 4f, 4f) },
+                        Components = new[]
+                        {
+                            new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = sizerFields },
+                        },
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            Assert.Empty(result.Patch.Edits.OfType<PatchArgument>().Where(e => e.ArgName == "scale"));
+            Assert.Empty(result.Conflicts);
+        }
+
         [Fact]
         public void RoundTrip_FitSizeSurfaceSnap_Idempotent()
         {

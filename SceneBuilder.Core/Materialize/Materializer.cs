@@ -76,13 +76,11 @@ namespace SceneBuilder.Core.Materialize
                         passB.Add(new SetStatic { LogicalId = setStatic.LogicalId, IsStatic = setStatic.IsStatic });
                         break;
                     case Change.SetTransform setTransform:
-                        const ChannelMask positionMask = ChannelMask.PositionX | ChannelMask.PositionY | ChannelMask.PositionZ;
                         passB.Add(new SetField
                         {
                             LogicalId = setTransform.LogicalId,
                             Path = "m_LocalPosition",
                             Value = new ValueNode.Vec3(setTransform.Transform.Position),
-                            DrivenChannels = setTransform.Transform.DrivenChannels & positionMask,
                         });
                         passB.Add(new SetField
                         {
@@ -95,7 +93,6 @@ namespace SceneBuilder.Core.Materialize
                             LogicalId = setTransform.LogicalId,
                             Path = "m_LocalScale",
                             Value = new ValueNode.Vec3(setTransform.Transform.Scale),
-                            DrivenChannels = setTransform.Transform.DrivenChannels & ChannelMask.Scale,
                         });
                         break;
                     case Change.AddComponent addComponent:

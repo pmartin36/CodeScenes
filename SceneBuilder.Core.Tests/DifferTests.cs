@@ -402,10 +402,14 @@ namespace SceneBuilder.Core.Tests
             Assert.Contains(reorders, r => r.ComponentLogicalId == "root-1/UnityEngine.BoxCollider#0" && r.ToIndex == 1);
         }
 
-        // ---- b3-t1: channel-masked transform diff (FitSize/SurfaceSnap driven-channel suppression) ----
+        // ---- b1-t1: scene-write transform suppression REMOVED. A driven-channel drift in the
+        // snapshot (component solve) is no longer held back — Differ emits the FULL authored
+        // transform unmasked whenever ANY channel differs, so the scene write re-authors it in
+        // full and the component re-drives from there. (The code-emit / scene->code suppression
+        // is a separate mechanism — Reconciler.MaskDriven — untouched by this task.) ----
 
         [Fact]
-        public void Diff_FitSizeNode_ScaleDriftInSnapshot_ProducesNoScaleOp()
+        public void Diff_FitSizeNode_ScaleDriftInSnapshot_ProducesScaleOp()
         {
             var desiredTransform = new TransformData { Position = new Vec3(0, 0, 0), Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.Scale };
             var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
@@ -422,11 +426,12 @@ namespace SceneBuilder.Core.Tests
 
             var changeSet = Differ.Diff(model, snapshot, map);
 
-            Assert.DoesNotContain(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            var setTransform = Assert.Single(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            Assert.Equal(new Vec3(2, 2, 2), setTransform.Transform.Scale);
         }
 
         [Fact]
-        public void Diff_SurfaceSnapDownNode_PositionYDrift_ProducesNoPositionYOp_ButXZStillDiff()
+        public void Diff_SurfaceSnapDownNode_PositionYDrift_ProducesPositionYOp()
         {
             var map = new IdentityMap
             {
@@ -437,15 +442,17 @@ namespace SceneBuilder.Core.Tests
             var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
             var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
 
-            // Y-only drift: fully suppressed, no op at all.
+            // Y-only drift: no longer suppressed — the full authored transform is emitted (Y == 2,
+            // the authored value, overwriting the component's solved 99, not preserving it).
             var snapshotYOnly = new TransformData { Position = new Vec3(1, 99, 3), DrivenChannels = ChannelMask.PositionY };
             var snapshotRootYOnly = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotYOnly };
             var sceneYOnly = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRootYOnly } };
 
             var changeSetYOnly = Differ.Diff(model, sceneYOnly, map);
-            Assert.DoesNotContain(changeSetYOnly.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            var setTransformYOnly = Assert.Single(changeSetYOnly.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            Assert.Equal(new Vec3(1, 2, 3), setTransformYOnly.Transform.Position);
 
-            // X and Z also drift: those still diff back to the desired value; Y holds the snapshot's own value.
+            // X and Z also drift: the full authored transform is still emitted (all axes == desired).
             var snapshotAll = new TransformData { Position = new Vec3(50, 99, 60), DrivenChannels = ChannelMask.PositionY };
             var snapshotRootAll = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotAll };
             var sceneAll = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRootAll } };
@@ -453,12 +460,12 @@ namespace SceneBuilder.Core.Tests
             var changeSetAll = Differ.Diff(model, sceneAll, map);
             var setTransform = Assert.Single(changeSetAll.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
             Assert.Equal(1f, setTransform.Transform.Position.X);
-            Assert.Equal(99f, setTransform.Transform.Position.Y);
+            Assert.Equal(2f, setTransform.Transform.Position.Y);
             Assert.Equal(3f, setTransform.Transform.Position.Z);
         }
 
         [Fact]
-        public void Diff_SurfaceSnapBackNode_PositionZDrift_ProducesNoPositionZOp_ButXYStillDiff()
+        public void Diff_SurfaceSnapBackNode_PositionZDrift_ProducesPositionZOp()
         {
             var desiredTransform = new TransformData { Position = new Vec3(1, 2, 3), DrivenChannels = ChannelMask.PositionZ };
             var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
@@ -475,10 +482,11 @@ namespace SceneBuilder.Core.Tests
 
             var changeSet = Differ.Diff(model, snapshot, map);
 
+            // Full authored transform emitted — Z == 3 (authored), not 999 (the component solve).
             var setTransform = Assert.Single(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
             Assert.Equal(1f, setTransform.Transform.Position.X);
             Assert.Equal(2f, setTransform.Transform.Position.Y);
-            Assert.Equal(999f, setTransform.Transform.Position.Z);
+            Assert.Equal(3f, setTransform.Transform.Position.Z);
         }
 
         [Fact]

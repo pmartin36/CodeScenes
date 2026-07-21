@@ -879,14 +879,17 @@ public class RoundTripSpatialTests
         }
     }
 
-    // ---- b6-t1: write-seam per-axis skip (PlanExecutor.ApplyTransformField) -----------------------
-    // A SetField op carrying DrivenChannels must skip writing ONLY the driven axes (component-owned,
-    // left at whatever the transform already holds), while free axes still write the op's value —
-    // per-axis, not whole-vector, so a down-SurfaceSnap still lets X/Z write from source.
+    // ---- b1-t1: write-seam full-vector write (PlanExecutor.ApplyTransformField) --------------------
+    // The per-axis driven-channel skip is removed: a SetField op writes the whole authored vector
+    // unconditionally. The scene write always re-authors the full transform; FitSize/SurfaceSnap
+    // re-drive their channel from there on the next evaluate.
 
     [Test]
-    public void PlanExecutor_MaskedSetField_SkipsDrivenAxes_WritesFreeAxes()
+    public void PlanExecutor_TransformSetField_WritesFullVector()
     {
+        // b1-t1: the scene-write suppression is removed — PlanExecutor writes the whole
+        // authored vector unconditionally, never holding a channel back to its current
+        // (component-owned) value.
         var prevIgnore = LogAssert.ignoreFailingMessages;
         LogAssert.ignoreFailingMessages = true;
         var scene = SceneManager.GetActiveScene();
@@ -894,20 +897,18 @@ public class RoundTripSpatialTests
         {
             Ops = new PlanOp[]
             {
-                new CreateObject { LogicalId = "n1", Name = "MaskedWriteNode" },
+                new CreateObject { LogicalId = "n1", Name = "FullWriteNode" },
                 new SetField
                 {
                     LogicalId = "n1",
                     Path = "m_LocalScale",
                     Value = new ValueNode.Vec3(new Vec3(9f, 9f, 9f)),
-                    DrivenChannels = ChannelMask.Scale,
                 },
                 new SetField
                 {
                     LogicalId = "n1",
                     Path = "m_LocalPosition",
                     Value = new ValueNode.Vec3(new Vec3(9f, 9f, 9f)),
-                    DrivenChannels = ChannelMask.PositionY,
                 },
             },
         };
@@ -916,14 +917,11 @@ public class RoundTripSpatialTests
         try
         {
             PlanExecutor.Execute(plan, new IdentityMap(), scene);
-            go = GameObject.Find("MaskedWriteNode");
+            go = GameObject.Find("FullWriteNode");
 
-            Assert.IsNotNull(go, "MaskedWriteNode was not created by PlanExecutor.Execute.");
-            Assert.AreEqual(Vector3.one, go.transform.localScale,
-                "A fully-driven Scale mask must leave localScale untouched by the op's value (component-owned).");
-            Assert.AreEqual(9f, go.transform.localPosition.x, Tol, "Free X axis must still be written from the plan.");
-            Assert.AreEqual(0f, go.transform.localPosition.y, Tol, "Driven Y axis must be left untouched, not overwritten to the op's value.");
-            Assert.AreEqual(9f, go.transform.localPosition.z, Tol, "Free Z axis must still be written from the plan.");
+            Assert.IsNotNull(go, "FullWriteNode was not created by PlanExecutor.Execute.");
+            Assert.AreEqual(new Vector3(9f, 9f, 9f), go.transform.localScale, "SetField must write the whole authored scale vector.");
+            Assert.AreEqual(new Vector3(9f, 9f, 9f), go.transform.localPosition, "SetField must write the whole authored position vector.");
         }
         finally
         {

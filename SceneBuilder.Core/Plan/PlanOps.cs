@@ -54,13 +54,6 @@ namespace SceneBuilder.Core.Plan
 
         [JsonPropertyOrder(2)]
         public ValueNode Value { get; init; } = ValueNode.Primitive.Int(0);
-
-        // b3-t1: carries the mask to the write seam (b6-t1's ApplyTransformField) so a CREATE-path
-        // per-axis driven channel can be skipped even though there is no snapshot to compare against.
-        // In-memory only; no plan-JSON change, no SchemaVersion bump. Default None means every
-        // existing non-spatial SetField writes all channels exactly as today.
-        [JsonIgnore]
-        public ChannelMask DrivenChannels { get; init; } = ChannelMask.None;
     }
 
     public sealed record AddComponent : PlanOp
