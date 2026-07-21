@@ -10,7 +10,7 @@ Build succeeded.
     0 Warning(s)
     0 Error(s)
 
-Time Elapsed 00:00:00.70
+Time Elapsed 00:00:00.72
   Determining projects to restore...
   All projects are up-to-date for restore.
   SceneBuilder.Core -> /home/paul/Source/CodeScenesUnity/SceneBuilder.Core/bin/Debug/netstandard2.1/SceneBuilder.Core.dll
@@ -21,7 +21,7 @@ VSTest version 17.11.1 (x64)
 Starting test execution, please wait...
 A total of 1 test files matched the specified pattern.
 
-Passed!  - Failed:     0, Passed:   580, Skipped:     0, Total:   580, Duration: 396 ms - SceneBuilder.Core.Tests.dll (net8.0)
+Passed!  - Failed:     0, Passed:   582, Skipped:     0, Total:   582, Duration: 379 ms - SceneBuilder.Core.Tests.dll (net8.0)
 == Unity EditMode gate: real editor behavior ==
-GATE PASS: Core + Unity EditMode green (passed=290 failed=0 skipped=0)
+GATE PASS: Core + Unity EditMode green (passed=292 failed=0 skipped=0)
 REALEXIT=0

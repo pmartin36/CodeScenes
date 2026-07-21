@@ -217,10 +217,12 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
             "Driven scale must never leak into the Crate's source as a .Transform(scale:) write.\n" + rewritten);
     }
 
-    // 12. Snapped axis re-snaps, free axis persists: dragging the object off the floor on Y (driven)
-    //     and to a new X (free) must re-snap Y geometrically and keep the free X. After Sync, the
-    //     driven Y literal must not leak into the rewritten .Transform(pos:) call, and a rebuild from
-    //     the rewritten source must still resolve to the dragged free-X and still re-snap Y correctly.
+    // 12. Snapped axis re-snaps, free axis persists: dragging the object off the floor on Y (driven,
+    //     WITHIN SurfaceSnap's default captureThreshold of 2.5 units — the baseline flush Y is 1.5, so
+    //     a 2-unit displacement to 3.5 is a within-threshold drag, not a sticky-detach) and to a new X
+    //     (free) must re-snap Y geometrically and keep the free X. After Sync, the driven Y literal
+    //     must not leak into the rewritten .Transform(pos:) call, and a rebuild from the rewritten
+    //     source must still resolve to the dragged free-X and still re-snap Y correctly.
     [Test]
     public void SceneToCode_DraggedSnappedAxis_ReSnapsY_FreeXPersists()
     {
@@ -237,7 +239,8 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         snapper.Evaluate(); // baseline snap: bottom face flush on the floor (world Y top == 0.5)
 
         const float draggedX = 3f;
-        crate.transform.position = new Vector3(draggedX, 10f, 0f); // drag: Y off-floor, X to a new free value
+        const float draggedY = 3.5f; // baseline Y is 1.5; a 2-unit drag stays within captureThreshold (2.5)
+        crate.transform.position = new Vector3(draggedX, draggedY, 0f); // drag: Y off-floor (within threshold), X to a new free value
         snapper.Evaluate(); // re-snap
 
         var bounds = crate.GetComponent<Renderer>().bounds;
@@ -250,7 +253,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         var rewritten = File.ReadAllText(_builderPath);
         var posCall = ExtractTransformPosCall(rewritten);
         Assert.IsNotNull(posCall, "Expected a .Transform(pos: ...) call in the rewritten source for the free-X drag.\n" + rewritten);
-        StringAssert.DoesNotContain("10f", posCall, "The raw un-snapped drag value (Y=10) must never leak into the pos: argument.\n" + posCall);
+        StringAssert.DoesNotContain("3.5f", posCall, "The raw un-snapped drag value (Y=3.5) must never leak into the pos: argument.\n" + posCall);
         StringAssert.DoesNotContain("1.5f", posCall, "The resolved driven-Y snap value (1.5) must never leak into the pos: argument.\n" + posCall);
         StringAssert.Contains("3f", posCall, "The free X drag value must be present in the pos: argument.\n" + posCall);
 

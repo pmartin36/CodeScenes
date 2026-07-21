@@ -20,6 +20,7 @@ namespace SceneBuilder.Authoring
         private const float RayMargin = 0.05f;
         private const float RayMaxDistance = 10000f;
         private const float SideEpsilon = 1e-3f;
+        private const float MoveEpsilon = 1e-3f;
 
         // Per-axis enum fields — the live write/read/dispatch contract (SpatialComponents.
         // SurfaceSnapFields.Vertical/Horizontal/Depth + SurfaceSnapEnums mirror these type
@@ -35,6 +36,11 @@ namespace SceneBuilder.Authoring
 
         public Transform target;
 
+        /// <summary>World-unit drag distance (measured on snapped axes only) beyond which a manual move
+        /// is treated as an intentional detach rather than a re-snap. Sticky: once detached the component
+        /// disables itself (see <see cref="Evaluate"/>) until re-enabled.</summary>
+        public float captureThreshold = 2.5f;
+
         private bool _loggedError;
 
         /// <summary>The last surface this component snapped against — used only to gate recompute
@@ -42,12 +48,33 @@ namespace SceneBuilder.Authoring
         private Transform _lastSurface;
         private bool _needsSnap = true;
 
+        /// <summary>The last position WE wrote — used to discriminate our own writes from a manual
+        /// drag. Sentinel (NaN.x) means "never written".</summary>
+        private Vector3 _lastWritten = new Vector3(float.NaN, float.NaN, float.NaN);
+
+        private bool HasWrittenBefore => !float.IsNaN(_lastWritten.x);
+
         private void Update()
         {
             if (_needsSnap || transform.hasChanged || (_lastSurface != null && _lastSurface.hasChanged))
             {
                 Evaluate();
             }
+        }
+
+        private void OnEnable() => ResetBaseline();
+
+        /// <summary>Forgets the last-self-write baseline (NaN sentinel) and forces a fresh snap on the
+        /// next <see cref="Evaluate"/>. Called on enable, and by <c>PlanExecutor</c> (code-&gt;scene)
+        /// right after it writes <c>m_LocalPosition</c> directly on this object's <see cref="Transform"/>
+        /// (materialize always writes the full authored transform per spec 23, including a frozen
+        /// driven-channel placeholder — that write is the plugin's own, not a user drag, so it must not
+        /// count toward <see cref="captureThreshold"/>; the very next Evaluate() re-derives from this
+        /// fresh baseline instead of sticky-detaching off a stale in-memory baseline).</summary>
+        public void ResetBaseline()
+        {
+            _lastWritten = new Vector3(float.NaN, float.NaN, float.NaN);
+            _needsSnap = true;
         }
 
         private void OnValidate()
@@ -76,6 +103,33 @@ namespace SceneBuilder.Authoring
                 return;
             }
 
+            bool axis0Snapped = horizontal != Horizontal.None;
+            bool axis1Snapped = vertical != Vertical.None;
+            bool axis2Snapped = depth != Depth.None;
+
+            if (HasWrittenBefore)
+            {
+                Vector3 current = transform.position;
+                float dx = axis0Snapped ? current.x - _lastWritten.x : 0f;
+                float dy = axis1Snapped ? current.y - _lastWritten.y : 0f;
+                float dz = axis2Snapped ? current.z - _lastWritten.z : 0f;
+                float dragSq = dx * dx + dy * dy + dz * dz;
+
+                if (dragSq > MoveEpsilon * MoveEpsilon)
+                {
+                    if (dragSq > captureThreshold * captureThreshold)
+                    {
+                        // Sticky detach: leave the object where it was dragged and stop driving it.
+                        enabled = false;
+                        _needsSnap = false;
+                        transform.hasChanged = false;
+                        return;
+                    }
+
+                    // Within threshold: fall through and re-snap (constraint wins).
+                }
+            }
+
             Physics.SyncTransforms();
 
             Bounds bounds = r.bounds;
@@ -90,6 +144,7 @@ namespace SceneBuilder.Authoring
             if (depth == Depth.Back) ResolveAndApplyAxis(bounds, 2, -1, ref pos, ref lastSurface);
 
             transform.position = pos;
+            _lastWritten = pos;
             if (lastSurface != null) _lastSurface = lastSurface;
             _needsSnap = false;
             transform.hasChanged = false;
