@@ -134,6 +134,11 @@ namespace SceneBuilder.Core.Parsing
 
                 var name = arg.NameColon.Name.Identifier.Text;
                 var span = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
+                // The enum-axis field renders as an AUTHORING keyword whose text encodes the member
+                // (down->up is a keyword swap, not just a value swap), so a member-flip patch must own
+                // the WHOLE `down: true` argument, not the `true` value alone. target: keeps the
+                // value-only span (its keyword never changes; only the ObjectRef handle is patched).
+                var argSpan = new SourceSpan(arg.SpanStart, arg.Span.Length);
 
                 if (name == SpatialComponents.SurfaceSnapFields.Target)
                 {
@@ -147,7 +152,7 @@ namespace SceneBuilder.Core.Parsing
                     throw Fail(arg, $"Unknown SurfaceSnap argument '{name}'");
                 }
 
-                var set = ApplyAxisFlag(arg.Expression, name, fieldKey, enumTypeName, member, span, fields, spans);
+                var set = ApplyAxisFlag(arg.Expression, name, fieldKey, enumTypeName, member, span, argSpan, fields, spans);
                 switch (name)
                 {
                     case "up": up = set; break;
@@ -210,12 +215,13 @@ namespace SceneBuilder.Core.Parsing
         // ORIGINAL bool keyword (intent not silently dropped, never materialized/driven) — returns false.
         private static bool ApplyAxisFlag(
             ExpressionSyntax expr, string keyword, string fieldKey, string enumTypeName, string member, SourceSpan span,
-            List<KeyValuePair<string, ValueNode>> fields, List<KeyValuePair<string, SourceSpan>> spans)
+            SourceSpan argSpan, List<KeyValuePair<string, ValueNode>> fields, List<KeyValuePair<string, SourceSpan>> spans)
         {
             if (expr.IsKind(SyntaxKind.TrueLiteralExpression))
             {
                 fields.Add(new KeyValuePair<string, ValueNode>(fieldKey, new ValueNode.Enum(enumTypeName, new[] { member }, false)));
-                spans.Add(new KeyValuePair<string, SourceSpan>(fieldKey, span));
+                // Whole-argument span (`down: true`) — a member flip rewrites the keyword too.
+                spans.Add(new KeyValuePair<string, SourceSpan>(fieldKey, argSpan));
                 return true;
             }
 

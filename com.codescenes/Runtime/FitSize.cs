@@ -44,6 +44,17 @@ namespace SceneBuilder.Authoring
 
         private void Update() => Evaluate();
 
+        private void OnEnable() => ResetBaseline();
+
+        /// <summary>Forgets the last-self-write baseline (NaN sentinel) so the NEXT <see cref="Evaluate"/>
+        /// re-derives <c>localScale</c> from the intent instead of mistaking a fresh write for a manual
+        /// rescale. Called on enable, and by <c>PlanExecutor</c> (code-&gt;scene) right after it writes
+        /// <c>m_LocalScale</c> directly on this object's <see cref="Transform"/> (materialize always
+        /// writes the full authored transform per spec 23 — that write is the plugin's own, not a user
+        /// drag, so it must not be back-solved into source as a wrong <see cref="value"/>/<see cref="size"/>;
+        /// mirrors <c>SurfaceSnap.ResetBaseline</c> for the m_LocalPosition case).</summary>
+        public void ResetBaseline() => _lastWritten = new Vector3(float.NaN, float.NaN, float.NaN);
+
         private void OnValidate()
         {
             _loggedError = false;

@@ -262,11 +262,19 @@ namespace SceneBuilder.Core.Reconcile
                             && fieldArgumentSpans.TryGetValue(sourceComp.LogicalId, out var compSpans)
                             && compSpans.TryGetValue(fieldKey, out var valueSpan))
                         {
+                            // A spatial enum-axis flip (SurfaceSnap vertical/horizontal/depth: Down->Up)
+                            // patches the WHOLE-argument span (see BuilderParser.Spatial) with the
+                            // authoring keyword form `up: true` via RenderKeyValue — the keyword itself
+                            // carries the member, so the value-only ValueNodeLiteral would splice an
+                            // invalid `SurfaceSnap+Vertical.Up` FQN into the `down:` slot.
+                            var patchExpr = SpatialComponentSource.IsSpatial(sourceComp.Type.FullName) && snapVal is ValueNode.Enum
+                                ? SpatialComponentSource.RenderKeyValue(fieldKey, snapVal, string.Empty)
+                                : RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits);
                             edits.Add(new PatchComponentField
                             {
                                 Anchor = sourceComp.LogicalId,
                                 ValueSpan = valueSpan,
-                                NewExpr = RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits),
+                                NewExpr = patchExpr,
                             });
 
                             CollectAssetEntries(snapVal, addedAssets);

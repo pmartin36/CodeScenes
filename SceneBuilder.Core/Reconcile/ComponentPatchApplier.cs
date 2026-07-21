@@ -142,7 +142,11 @@ namespace SceneBuilder.Core.Reconcile
             var textSpan = TextSpan.FromBounds(edit.ValueSpan.Start, edit.ValueSpan.Start + edit.ValueSpan.Length);
             var target = root.FindNode(textSpan, getInnermostNodeForTie: true);
 
-            if (target is not ExpressionSyntax || target.Span != textSpan)
+            // Two span shapes: a value-only span (`2.3457f`) replaces just the expression; a
+            // whole-argument span (`down: true`, used when a spatial enum-axis flip rewrites the
+            // KEYWORD as well as the value — NewExpr is then `up: true`) replaces the whole argument.
+            var isArgument = target is ArgumentSyntax && target.Span == textSpan;
+            if (!isArgument && (target is not ExpressionSyntax || target.Span != textSpan))
             {
                 throw Fail(root, $"Could not resolve value span for component field patch on '{edit.Anchor}'.");
             }
@@ -151,7 +155,9 @@ namespace SceneBuilder.Core.Reconcile
             appliers.Add(currentRoot =>
             {
                 var current = currentRoot.GetCurrentNode(target)!;
-                var replacement = SyntaxFactory.ParseExpression(edit.NewExpr).WithTriviaFrom(current);
+                SyntaxNode replacement = isArgument
+                    ? SyntaxFactory.ParseArgumentList("(" + edit.NewExpr + ")").Arguments[0].WithTriviaFrom(current)
+                    : SyntaxFactory.ParseExpression(edit.NewExpr).WithTriviaFrom(current);
                 return currentRoot.ReplaceNode(current, replacement);
             });
         }

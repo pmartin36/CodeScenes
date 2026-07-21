@@ -842,6 +842,78 @@ public class EmptySpatialScene : ISceneDefinition
             Assert.Equal("(5f, 0f, 0f)", pos.NewExpr);
         }
 
+        // Scope-FINAL regression #2: re-authoring an EXISTING SurfaceSnap axis in-scene (flip the
+        // Vertical member Down -> Up, e.g. via the b5-t2 inspector dropdown) is a field-VALUE diff
+        // whose keyword itself carries the member — so the patch must replace the WHOLE `down: true`
+        // argument with the authoring form `up: true`, NEVER splice the enum literal
+        // `SceneBuilder.Authoring.SurfaceSnap+Vertical.Up` into the `down:` slot (invalid C# — the
+        // '+' nested-type separator — violating "Generated C# must compile").
+        [Fact]
+        public void Reconcile_SurfaceSnapAxisMemberFlip_DownToUp_EmitsUpTrue_NotEnumLiteral()
+        {
+            var parsed = BuilderParser.Parse(SurfaceSnapDownOnlySource);
+            var crate = Assert.Single(parsed.Model.Roots);
+            var snapper = Assert.Single(crate.Components);
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = crate.LogicalId, GlobalObjectId = "goid-crate", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = snapper.LogicalId,
+                        GlobalObjectId = "",
+                        Kind = "Component",
+                        ComponentType = SpatialComponents.SurfaceSnapTypeName,
+                        ParentLogicalId = crate.LogicalId,
+                    },
+                },
+            };
+
+            var editedFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.SurfaceSnapFields.Vertical,
+                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Up }, false)),
+            });
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-crate",
+                        Name = "Crate",
+                        Transform = new TransformData { DrivenChannels = ChannelMask.PositionY },
+                        Components = new[]
+                        {
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = editedFields },
+                        },
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(
+                parsed.Model,
+                snapshot,
+                map,
+                parsed.Anchors,
+                componentAnchors: parsed.ComponentAnchors,
+                fieldArgumentSpans: parsed.FieldArgumentSpans);
+
+            Assert.Empty(result.Conflicts);
+            var patch = Assert.IsType<PatchComponentField>(Assert.Single(result.Patch.Edits));
+            Assert.Equal("up: true", patch.NewExpr);
+
+            var applied = SourcePatchApplier.Apply(SurfaceSnapDownOnlySource, result.Patch, parsed.Anchors);
+            Assert.Contains(".SurfaceSnap(up: true)", applied);
+            Assert.DoesNotContain("Vertical", applied);
+            Assert.DoesNotContain("SurfaceSnap+", applied);
+        }
+
         // b1-t1 / Resolved #1: an authored `.Transform(scale:)` co-existing with `.FitSize` on the
         // same node must never re-emit the driven scale as a `.Transform(scale:)` patch, even when
         // the scene-write side no longer suppresses the channel (this task removes that suppression

@@ -217,6 +217,48 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
             "Driven scale must never leak into the Crate's source as a .Transform(scale:) write.\n" + rewritten);
     }
 
+    // 11b. Scope-FINAL regression #1 (silent source corruption): rebuilding a PERSISTED FitSize object
+    //      must NOT corrupt its authored intent. Run is "reconcile-into-existing, never wipe", so the
+    //      SAME FitSize instance survives a rebuild with its in-memory _lastWritten (the last scale it
+    //      drove, 2,2,2). Since spec 23 removed scene-write suppression, materialize re-writes the FULL
+    //      authored scale (the source's default 1,1,1 — CrateBody has no .Transform(scale:)) onto that
+    //      live instance every sync. Without PlanExecutor resetting FitSize's baseline (the twin of the
+    //      m_LocalPosition/SurfaceSnap reset), that plugin-own write diverges from _lastWritten and is
+    //      misread as a manual rescale, back-solving a WRONG value (2 -> ~1) that scene->code would emit
+    //      into source. The fix resets the baseline at the central m_LocalScale write site, so the next
+    //      Evaluate re-derives from the authored value (2) and both value and world height stay 2.
+    [Test]
+    public void Rebuild_PersistedFitSize_DoesNotBackSolveWrongValue()
+    {
+        File.WriteAllText(_builderPath, Source(FloorBody + CrateBody));
+
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        RunBuild(scene);
+
+        var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
+        Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
+        var fitSize = crate.GetComponent<FitSize>();
+        fitSize.Evaluate(); // baseline: drives localScale to solve height 2, sets _lastWritten
+        Assert.AreEqual(2f, fitSize.value, Tol, "Baseline FitSize.value must equal the authored height 2.");
+        Assert.AreEqual(2f, crate.GetComponent<Renderer>().bounds.size.y, Tol, "Baseline world height must be 2.");
+
+        // Rebuild in place: reconciles onto the SAME persisted FitSize instance and re-writes the full
+        // authored (default 1,1,1) scale via PlanExecutor's m_LocalScale case — the corruption seam.
+        RunBuild(EditorSceneManager.GetActiveScene());
+
+        var rebuiltCrate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
+        Assert.IsNotNull(rebuiltCrate, "Crate disappeared after the in-place rebuild.");
+        var rebuiltFitSize = rebuiltCrate.GetComponent<FitSize>();
+        rebuiltFitSize.Evaluate();
+
+        Assert.AreEqual(2f, rebuiltFitSize.value, Tol,
+            "REGRESSION: the rebuild's own m_LocalScale write must not be misread as a manual rescale — " +
+            "FitSize.value must stay the authored 2, not back-solve to ~1 (silent source corruption).");
+        Assert.AreEqual(2f, rebuiltCrate.GetComponent<Renderer>().bounds.size.y, Tol,
+            "World height must remain 2 after the in-place rebuild (the crate must not shrink).");
+    }
+
     // 12. Snapped axis re-snaps, free axis persists: dragging the object off the floor on Y (driven,
     //     WITHIN SurfaceSnap's default captureThreshold of 2.5 units — the baseline flush Y is 1.5, so
     //     a 2-unit displacement to 3.5 is a within-threshold drag, not a sticky-detach) and to a new X
