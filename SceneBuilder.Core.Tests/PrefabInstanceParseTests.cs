@@ -35,6 +35,134 @@ public class NestedChildScene : ISceneDefinition
 }
 ";
 
+        // b2-t2: .Override/.AddComponent/.RemoveComponent parse fixtures.
+        private const string OverrideSelectorSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .Override(e => e.Set((Health x) => x.health, 50));
+    }
+}
+";
+
+        private const string OverrideStringPathSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .Override(e => e.Set<BoxCollider>(""m_Center.x"", 1.0f));
+    }
+}
+";
+
+        private const string OverrideAssetRefSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .Override(e => e.Set((Light x) => x.cookie, Asset(""Assets/Textures/Cookie.png"")));
+    }
+}
+";
+
+        private const string OverrideNodeHandleRefSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var target = scene.Add(""Target"");
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .Override(e => e.Set((AI x) => x.target, target));
+    }
+}
+";
+
+        private const string OverrideBlockMultiSetSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .Override(e =>
+             {
+                 e.Set((Health x) => x.health, 50);
+                 e.Set((Health x) => x.maxHealth, 100);
+             });
+    }
+}
+";
+
+        private const string OverrideFluentMultiSetSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .Override(e => e.Set((Health x) => x.health, 50).Set((Health x) => x.maxHealth, 100));
+    }
+}
+";
+
+        private const string AddComponentNoConfigSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .AddComponent<Light>();
+    }
+}
+";
+
+        private const string AddComponentWithClosureSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .AddComponent<Light>(c => c.Set(""m_Intensity"", 2.5f));
+    }
+}
+";
+
+        private const string TwoAddComponentsSameTypeSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .AddComponent<Light>()
+             .AddComponent<Light>();
+    }
+}
+";
+
+        private const string RemoveComponentSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .RemoveComponent<BoxCollider>();
+    }
+}
+";
+
+        private const string UntypedOverrideSelectorSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .Override(e => e.Set(x => x.health, 50));
+    }
+}
+";
+
         [Fact]
         public void Parse_SceneInstance_YieldsPrefabInstanceNodeWithUnresolvedSourcePrefab()
         {
@@ -113,6 +241,134 @@ public class NestedChildScene : ISceneDefinition
 
             var child = Assert.IsType<GameObjectNode>(Assert.Single(instance.Children));
             Assert.Equal("Child", child.Name);
+        }
+
+        [Fact]
+        public void Parse_InstanceOverrideSelector_YieldsPropertyOverride()
+        {
+            var result = BuilderParser.Parse(OverrideSelectorSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var propertyOverride = Assert.Single(instance.Overrides);
+
+            Assert.Equal("type:Health", propertyOverride.Target.PrefabId);
+            Assert.Equal(0, propertyOverride.Target.ObjectId);
+            Assert.Equal("member:health", propertyOverride.PropertyPath);
+            Assert.Equal(ValueNode.Primitive.Int(50), propertyOverride.Value);
+            Assert.Null(propertyOverride.ObjectReference);
+            Assert.Null(propertyOverride.BaseValue);
+        }
+
+        [Fact]
+        public void Parse_InstanceOverrideStringPath_UsesVerbatimSerializedPath()
+        {
+            var result = BuilderParser.Parse(OverrideStringPathSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var propertyOverride = Assert.Single(instance.Overrides);
+
+            Assert.Equal("type:BoxCollider", propertyOverride.Target.PrefabId);
+            Assert.Equal("m_Center.x", propertyOverride.PropertyPath);
+            Assert.Equal(ValueNode.Primitive.Float(1.0f), propertyOverride.Value);
+        }
+
+        [Fact]
+        public void Parse_InstanceOverrideRefValue_LandsInObjectReferenceNotValue()
+        {
+            var assetResult = BuilderParser.Parse(OverrideAssetRefSource);
+            var assetInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(assetResult.Model.Roots));
+            var assetOverride = Assert.Single(assetInstance.Overrides);
+
+            Assert.Equal(new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/Textures/Cookie.png" }), assetOverride.ObjectReference);
+            Assert.Equal(new ValueNode.Unsupported(""), assetOverride.Value);
+
+            var handleResult = BuilderParser.Parse(OverrideNodeHandleRefSource);
+            var handleInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(handleResult.Model.Roots.OfType<PrefabInstanceNode>()));
+            var handleOverride = Assert.Single(handleInstance.Overrides);
+
+            Assert.Equal(new ValueNode.ObjectRef("target"), handleOverride.ObjectReference);
+            Assert.Equal(new ValueNode.Unsupported(""), handleOverride.Value);
+        }
+
+        [Fact]
+        public void Parse_InstanceOverrideMultipleSets_OneEntryEach()
+        {
+            var blockResult = BuilderParser.Parse(OverrideBlockMultiSetSource);
+            var blockInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(blockResult.Model.Roots));
+            Assert.Equal(2, blockInstance.Overrides.Length);
+            Assert.Equal("member:health", blockInstance.Overrides[0].PropertyPath);
+            Assert.Equal("member:maxHealth", blockInstance.Overrides[1].PropertyPath);
+
+            var fluentResult = BuilderParser.Parse(OverrideFluentMultiSetSource);
+            var fluentInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(fluentResult.Model.Roots));
+            Assert.Equal(2, fluentInstance.Overrides.Length);
+            Assert.Equal("member:health", fluentInstance.Overrides[0].PropertyPath);
+            Assert.Equal("member:maxHealth", fluentInstance.Overrides[1].PropertyPath);
+        }
+
+        [Fact]
+        public void Parse_AddComponent_NoConfig_YieldsAddedComponentWithLogicalId()
+        {
+            var result = BuilderParser.Parse(AddComponentNoConfigSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var added = Assert.Single(instance.AddedComponents);
+
+            Assert.Equal(new OverrideTarget(), added.Target);
+            Assert.Equal("Light", added.Component.Type.FullName);
+            Assert.Empty(added.Component.Fields);
+            Assert.Equal($"{instance.LogicalId}/Light#0", added.Component.LogicalId);
+        }
+
+        [Fact]
+        public void Parse_AddComponent_WithClosure_PopulatesFields()
+        {
+            var result = BuilderParser.Parse(AddComponentWithClosureSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var added = Assert.Single(instance.AddedComponents);
+
+            Assert.Equal(ValueNode.Primitive.Float(2.5f), added.Component.Fields["m_Intensity"]);
+        }
+
+        [Fact]
+        public void Parse_TwoAddComponentsSameType_DistinctOrdinalLogicalIds()
+        {
+            var result = BuilderParser.Parse(TwoAddComponentsSameTypeSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            Assert.Equal(2, instance.AddedComponents.Length);
+            Assert.Equal($"{instance.LogicalId}/Light#0", instance.AddedComponents[0].Component.LogicalId);
+            Assert.Equal($"{instance.LogicalId}/Light#1", instance.AddedComponents[1].Component.LogicalId);
+        }
+
+        [Fact]
+        public void Parse_RemoveComponent_YieldsTypeSigilRemovedTarget()
+        {
+            var result = BuilderParser.Parse(RemoveComponentSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var removed = Assert.Single(instance.RemovedComponents);
+
+            Assert.Equal("type:BoxCollider", removed.PrefabId);
+            Assert.Equal(0, removed.ObjectId);
+        }
+
+        [Fact]
+        public void Parse_InstanceWithoutVerbs_CollectionsEmpty()
+        {
+            var result = BuilderParser.Parse(ArenaSceneSource);
+
+            var enemy0 = Assert.IsType<PrefabInstanceNode>(result.Model.Roots[0]);
+            Assert.Empty(enemy0.Overrides);
+            Assert.Empty(enemy0.AddedComponents);
+            Assert.Empty(enemy0.RemovedComponents);
+        }
+
+        [Fact]
+        public void Parse_UntypedOverrideSelector_FailsLoud()
+        {
+            Assert.Throws<ParseException>(() => BuilderParser.Parse(UntypedOverrideSelectorSource));
         }
     }
 }

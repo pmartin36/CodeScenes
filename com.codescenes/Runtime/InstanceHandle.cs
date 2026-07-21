@@ -12,9 +12,10 @@ namespace SceneBuilder.Authoring
     /// these methods return handles for chaining but perform no work at runtime.
     /// </remarks>
     /// <remarks>
-    /// A prefab instance is handled as one whole unit in v1 (M6): this handle deliberately has no
-    /// <c>Component&lt;T&gt;()</c> or field-setter methods — per-property overrides are out of scope
-    /// until M10, and the absence of those members is a compile-time guarantee, not just a convention.
+    /// A prefab instance is handled as one whole unit for its hierarchy (M6): child GameObjects are
+    /// not authored under an instance. Root-level property overrides and added/removed components are
+    /// authored via <see cref="Override"/>, <see cref="AddComponent{T}()"/> and
+    /// <see cref="RemoveComponent{T}"/> (M10).
     /// </remarks>
     public sealed class InstanceHandle
     {
@@ -37,5 +38,29 @@ namespace SceneBuilder.Authoring
             configure?.Invoke(handle);
             return handle;
         }
+
+        /// <summary>
+        /// Author property overrides on the instance root's own components, e.g.
+        /// <c>.Override(e =&gt; e.Set((Health x) =&gt; x.health, 50))</c>. Targets are the instance
+        /// root only — nested targets (including inside a nested prefab) are not authored here.
+        /// </summary>
+        public InstanceHandle Override(Action<OverrideHandle> configure)
+        {
+            configure?.Invoke(new OverrideHandle());
+            return this;
+        }
+
+        /// <summary>Add a component of type <typeparamref name="T"/> to the instance root with no field overrides.</summary>
+        public InstanceHandle AddComponent<T>() => this;
+
+        /// <summary>Add a component of type <typeparamref name="T"/> to the instance root and set its serialized fields in a closure.</summary>
+        public InstanceHandle AddComponent<T>(Action<ComponentHandle<T>> configure)
+        {
+            configure?.Invoke(new ComponentHandle<T>());
+            return this;
+        }
+
+        /// <summary>Remove a component of type <typeparamref name="T"/> from the instance root (must exist on the source prefab).</summary>
+        public InstanceHandle RemoveComponent<T>() => this;
     }
 }

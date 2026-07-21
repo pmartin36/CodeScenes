@@ -947,6 +947,13 @@ namespace SceneBuilder.Core.Parsing
             public string? SourcePrefabPath;
             public readonly List<NodeBuilder> Children = new();
             public readonly List<ComponentBuilder> Components = new();
+
+            // b2-t2: instance-only override collections (`.Override`/`.AddComponent`/
+            // `.RemoveComponent`), carried until BuildInstanceNode maps them onto
+            // PrefabInstanceNode.{Overrides,AddedComponents,RemovedComponents}.
+            public readonly List<PropertyOverride> Overrides = new();
+            public readonly List<ComponentBuilder> AddedComponents = new();
+            public readonly List<string> RemovedComponentTypes = new();
         }
 
         private sealed class ComponentBuilder
