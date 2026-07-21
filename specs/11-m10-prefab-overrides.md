@@ -1,5 +1,25 @@
 # M10 — Prefab-instance override round-trip (both directions)
 
+> ## v0 scope decisions (banked 2026-07-21 — authoritative, override the body below where they conflict)
+> This spec describes the full override vision; **this pass ships a bounded v0**:
+> 1. **ROOT-ONLY this pass.** Overrides target the instance **root's own components** only. Addressing an
+>    object **inside** the prefab (a nested child / component below the root) is **deferred to a separate
+>    milestone `M-nested-props`** (flagged critical), written after a focused grounding pass on Unity's
+>    nested-prefab target addressing + a rename/dup-sibling-safe handle for objects the user never authored
+>    (reuse the LogicalId/structural-fingerprint model, spec 16). Until then, nested-target overrides are
+>    **read as opaque and preserved/flagged** (the current M6 behavior), never dropped (§7).
+> 2. **`PropertyOverride.Value` fidelity: one override per Unity `PropertyModification`.** Unity stores each
+>    modification's value as a **string**, and a structured value (e.g. a Vec3) is **three** separate mods
+>    (`.x/.y/.z`). So a `PropertyOverride` maps 1:1 to a single Unity mod (scalar/string value) — drop any
+>    reading of the type table that implies a single `PropertyOverride` carries a whole `Vec3`/`Color`.
+> 3. **Root name + transform are NOT `.Override(...)` calls.** They are already first-class fields on the
+>    M6 `PrefabInstanceNode` (`Name`, `Transform`), so those edits round-trip through **those** fields —
+>    overriding them is fully supported, just not double-encoded as an override. Unity bookkeeping mods
+>    (`m_RootOrder` / sibling index — handled by structural reorder sync) are **skipped**.
+> 4. **Stale-override detection needs a recorded base value** the current sidecar section omits: persist,
+>    per authored override, the prefab-default value it was written against, so drift ("prefab default
+>    changed under the override") is detectable per behavior #9. Add this to the sidecar (see §IdentityMap).
+
 ### Additions to the contract
 
 M10 introduces the following types. They extend the `PrefabInstanceNode` established by M6; all

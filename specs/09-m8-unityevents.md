@@ -1,5 +1,21 @@
 # M8 — UnityEvents / OnClick wiring
 
+> ## Target-model decision (banked 2026-07-21 — authoritative)
+> A persistent listener's target is the **specific component**, not the owning GameObject (Unity stores
+> `m_Target` as the exact `Object`; two components on one GameObject can share a method name). So:
+> - **The listener target is an EXPLICIT component handle**, not a GameObject handle with the component
+>   inferred from the method's declaring type. M8 introduces a way to capture a component as a handle
+>   (e.g. `var opener = door.Component<DoorOpener>(…)` yielding a component handle) and pass **that** as the
+>   `.OnClick(...)` / `.OnEvent(...)` target. The examples in the body that pass a GameObject handle
+>   (`.OnClick(door, …)`) are superseded by the component-handle form.
+> - **`ObjectRef` must be able to address a component's `LogicalId`.** Core's authored `ObjectRef` today
+>   only ever targets GameObjects (handles are GameObject-only); M8 extends the handle model + `ObjectRef`
+>   resolution so a component `LogicalId` (the IdentityMap already has `Kind=="Component"` entries) is a
+>   valid target. A method on the GameObject itself (e.g. `GameObject.SetActive`) still targets the GO.
+> - **Emitted method refs are fully-qualified `nameof(...)`** (e.g. `nameof(Game.Door.Open)`), consistent
+>   with existing FQ type emission; no general `using`-injection is added. An unchanged listener's authored
+>   token is preserved verbatim (span-local reconcile); only new appends use the FQ form.
+
 ### Additions to the contract
 This milestone introduces new types/ops not in `00-foundation.md`. They are flagged here per §3's rule.
 

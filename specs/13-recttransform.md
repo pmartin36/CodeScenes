@@ -62,6 +62,17 @@ lives on a RectTransform under a Canvas.
   `m_LocalPosition.x/y` from anchors+pivot+anchoredPosition). `Position.z`, `Rotation`, and `Scale`
   continue to sync via M1/M2 unchanged. This prevents a `.Transform(pos:)` vs `.RectTransform(anchoredPos:)`
   fight over the same pixels.
+- **Driven fields are excluded from sync (reuse `DrivenChannels`).** A RectTransform field that Unity
+  *drives* — a component overwrites it every layout pass and greys it out in the Inspector — is not
+  author intent and can change with no user action, so it is **never synced** (neither diffed into a
+  `SetRectTransform` nor written back to source). Two cases matter: (1) the **root `Canvas`'s own
+  RectTransform**, whose `sizeDelta` the `Canvas` component drives to the current render resolution (it
+  flips with the Game-view aspect); (2) children under a `LayoutGroup`/`ContentSizeFitter`, whose
+  `anchoredPosition`/`sizeDelta` the layout component recomputes from sibling count/content. This reuses
+  the existing `DrivenChannels`/`ChannelMask` mechanism (spec 19/23, FitSize/SurfaceSnap) extended to the
+  five RectTransform fields — **not** a new concept. Ordinary anchored elements are unaffected: their
+  stored anchors/pivot/anchoredPos/sizeDelta are author-controlled and stable (the on-screen rect
+  recomputes on resize, but the *serialized* values do not), so they sync normally.
 
 ## Out of scope
 - **Canvas / EventSystem creation** — documented as a **dependency**, not built here (see Dependencies +
@@ -105,6 +116,11 @@ lives on a RectTransform under a Canvas.
 - **X/Y double-authority suppressed.** For a `RectTransform` node, a snapshot difference confined to
   `m_LocalPosition.x/y` (with equal anchoredPosition) produces **no** `SetTransform` op — only
   `AnchoredPosition` drives X/Y; `Position.z`/`Rotation`/`Scale` still diff normally.
+- **Driven RectTransform fields suppressed.** A snapshot difference confined to a RectTransform field the
+  adapter marked driven (via the object's `DrivenChannels`) produces **no** `SetRectTransform` op and no
+  write-back — identical to how a driven Transform axis is masked (spec 19/23). A root `Canvas` whose
+  `sizeDelta` changes with the Game-view resolution, and a layout-group child whose `anchoredPosition` is
+  recomputed, both yield **no** op. Non-driven fields on the same object still diff normally.
 - **Materialize lowers to constrained SetField.** `SetRectTransform` lowers to `SetField` ops on paths
   `m_AnchoredPosition`/`m_SizeDelta`/`m_AnchorMin`/`m_AnchorMax`/`m_Pivot` **only** — never the three
   Transform paths, never an arbitrary path; one `SetField` per changed field.
@@ -121,6 +137,10 @@ lives on a RectTransform under a Canvas.
   with only `.Transform(…)` but the live object is now a RectTransform (e.g. a UI component was added in
   the editor, promoting Transform→RectTransform), Reconcile appends a `.RectTransform(…)` call to that
   node's statement rather than fighting the promotion — the Kind change is represented, not dropped.
+  **Guarded by driven-detection:** a node whose five RectTransform fields are **all driven** (the archetype
+  is a root `Canvas`, whose RectTransform the Canvas component fully drives) gets **no** appended
+  `.RectTransform(…)` — there is no author-controlled layout to capture, so appending resolution-dependent
+  driven values would be pure churn. Only non-driven fields ever produce an append.
 - **f-suffixed floats via SourceExpr.** Every emitted RectTransform literal (append or patch) formats
   through the shared `SourceExpr.Float`/`Vec2Literal`, identical to M2b's Vec3 emission
   (`(10f, 20f)`), invariant culture, shortest round-trippable form.
@@ -147,6 +167,11 @@ lives on a RectTransform under a Canvas.
   RectTransform API or `SerializedObject` at `m_AnchoredPosition`/`m_SizeDelta`/`m_AnchorMin`/`m_AnchorMax`/
   `m_Pivot`) into the `TransformData` UI fields, stamping the object's `GlobalObjectId`. A plain Transform
   reads `Kind=="Transform"` and no UI fields.
+- **Driven-field detection.** For a RectTransform, mark each of the five fields driven when Unity reports
+  it so (`RectTransform.drivenByObject != null` and/or the field appears in the driven-properties set),
+  populating the object's `DrivenChannels` for the RectTransform fields exactly as the Transform reader
+  populates them for position/scale (spec 19/23). Core (not the adapter) then masks driven fields out of
+  the diff/write — the adapter stays logic-light (§2).
 - **Write.** Execute the five RectTransform `SetField` ops **in place** on the existing RectTransform via
   `SerializedObject` + `ApplyModifiedProperties` (or the typed RectTransform properties), resolving the
   target through the IdentityMap `GlobalObjectId → object` (§2 responsibility #4). No mode/diff logic in
@@ -202,6 +227,10 @@ public class HudScene : ISceneDefinition {
 - `Diff_ChangedAnchoredPosition_ProducesSingleSetRectTransform`.
 - `Diff_EqualRectTransformLayout_ProducesNoOp` (idempotent).
 - `Diff_RectTransform_LocalPositionXYDrift_ProducesNoSetTransform` (double-authority suppressed).
+- `Diff_DrivenRectField_ProducesNoSetRectTransform` (a field marked driven via `DrivenChannels` yields no
+  op even when its value differs; a non-driven field on the same object still diffs).
+- `Reconcile_AllFieldsDriven_DoesNotAppendRectTransform` (a Canvas-archetype node with all five fields
+  driven appends no `.RectTransform(…)`).
 - `Materialize_SetRectTransform_LowersToConstrainedRectFieldPaths` (the five `m_*` only, never the three
   Transform paths).
 - `Reconcile_MovedRect_ProducesAnchoredPosArgumentPatch_FSuffixed`.
@@ -234,6 +263,10 @@ public class HudScene : ISceneDefinition {
 8. In Unity, create a **new** UI GameObject under the Canvas (it gets a RectTransform) → Sync.
    *Expected:* a `.Add("…").RectTransform(…)` statement appears under the Canvas handle, compiles, and a
    second Sync is a no-op.
+9. **Driven fields don't churn.** With the Canvas present, change the Game view's resolution/aspect (the
+   Canvas RectTransform's `sizeDelta` changes) and Sync; then add/remove a child under a `LayoutGroup` and
+   Sync. *Expected:* the Canvas gains **no** `.RectTransform(…)`, layout-driven child positions are **not**
+   written to source, and `git diff` of the builder is clean beyond genuine author edits.
 
 ## Dependencies
 - **M0** — harness, Plan, sidecar, layout.
@@ -261,10 +294,14 @@ public class HudScene : ISceneDefinition {
   `AnchoredPosition` for RectTransform nodes) is load-bearing — without it, M1/M2's `Position` and this
   milestone's `AnchoredPosition` would emit competing ops for the same pixels. Tests pin that a pure
   `m_LocalPosition.x/y` drift on a RectTransform produces no `SetTransform`.
-- **Runtime-driven RectTransforms.** A RectTransform under a `LayoutGroup`/`ContentSizeFitter` is mutated
-  by Unity at layout time; those derived values are noise for scene→code. Treat layout-driven RectTransform
-  mutation as not a user edit (out of scope here); if it causes churn it is surfaced, not silently
-  written — refine under M7 robustness if it appears.
+- **Driven RectTransforms are excluded via `DrivenChannels` (decided, not deferred).** A RectTransform the
+  Canvas component drives (root Canvas: `sizeDelta` == render resolution, flips with Game-view aspect) or a
+  child a `LayoutGroup`/`ContentSizeFitter` drives (`anchoredPosition`/`sizeDelta` recomputed from
+  siblings/content) has Unity-owned, self-changing values that are **not** user edits. The adapter marks
+  such fields driven; Core masks them out of diff and write-back. This reuses the existing
+  `DrivenChannels`/`ChannelMask` mechanism (spec 19/23) — it is **not** punted to M7. Ordinary anchored
+  elements have author-controlled, stable serialized values and sync normally; the on-screen rect
+  recomputing on resize does **not** change what is stored, so it is not churn.
 - **offsetMin/offsetMax as a single source of truth.** Storing both the five fields and offsets would
   double-encode the same rect and invite drift; offsets remain derived. If an author needs offset-style
   layout, it is expressed through `anchorMin/anchorMax/anchoredPosition/sizeDelta/pivot`.
