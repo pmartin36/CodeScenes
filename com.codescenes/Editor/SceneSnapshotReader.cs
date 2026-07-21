@@ -164,7 +164,9 @@ namespace SceneBuilder.Editor
                 if (snapper.isActiveAndEnabled)
                 {
                     mask |= SpatialComponents.SurfaceSnapMask(
-                        snapper.up, snapper.down, snapper.left, snapper.right, snapper.forward, snapper.back);
+                        snapper.vertical != SurfaceSnap.Vertical.None,
+                        snapper.horizontal != SurfaceSnap.Horizontal.None,
+                        snapper.depth != SurfaceSnap.Depth.None);
                 }
             }
 

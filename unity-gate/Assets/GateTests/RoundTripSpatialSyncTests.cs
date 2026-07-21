@@ -284,7 +284,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
         Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
         crate.GetComponent<FitSize>().height = 3f;
-        crate.GetComponent<SurfaceSnap>().left = true;
+        crate.GetComponent<SurfaceSnap>().horizontal = SurfaceSnap.Horizontal.Left;
 
         var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "Editing FitSize.height and SurfaceSnap.left is a real scene change; Sync must report Changed.");
@@ -324,7 +324,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         created.AddComponent<MeshFilter>();
         created.AddComponent<MeshRenderer>();
         var snapper = created.AddComponent<SurfaceSnap>();
-        snapper.down = true;
+        snapper.vertical = SurfaceSnap.Vertical.Down;
 
         var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "A newly created object must be reported as a scene change.");

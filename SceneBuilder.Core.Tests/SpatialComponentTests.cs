@@ -75,15 +75,13 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("size", SpatialComponents.FitSizeFields.Size);
         }
 
+        // b2-t1: field constants migrated from 6 bool-direction keys to 3 per-axis enum keys.
         [Fact]
         public void SpatialComponents_SurfaceSnapFieldKeys_MatchExpectedLiterals()
         {
-            Assert.Equal("up", SpatialComponents.SurfaceSnapFields.Up);
-            Assert.Equal("down", SpatialComponents.SurfaceSnapFields.Down);
-            Assert.Equal("left", SpatialComponents.SurfaceSnapFields.Left);
-            Assert.Equal("right", SpatialComponents.SurfaceSnapFields.Right);
-            Assert.Equal("forward", SpatialComponents.SurfaceSnapFields.Forward);
-            Assert.Equal("back", SpatialComponents.SurfaceSnapFields.Back);
+            Assert.Equal("vertical", SpatialComponents.SurfaceSnapFields.Vertical);
+            Assert.Equal("horizontal", SpatialComponents.SurfaceSnapFields.Horizontal);
+            Assert.Equal("depth", SpatialComponents.SurfaceSnapFields.Depth);
             Assert.Equal("target", SpatialComponents.SurfaceSnapFields.Target);
         }
 
@@ -280,6 +278,9 @@ public class SurfaceSnapTargetScene : ISceneDefinition
 }
 ";
 
+        // A set axis is now carried as ValueNode.Enum(<axisTypeFullName>, [<MemberName>], false) — the
+        // EXACT shape SerializedFieldBridge.ReadEnum yields, so reconcile diffs by value-equality and
+        // stays idempotent (research.md's REFINED finding: Primitive.Int would churn every sync).
         [Fact]
         public void Parse_SurfaceSnapDownLeft_SetsFlagsAndDrivenPositionXY()
         {
@@ -289,12 +290,13 @@ public class SurfaceSnapTargetScene : ISceneDefinition
             var component = Assert.Single(node.Components);
 
             Assert.Equal(SpatialComponents.SurfaceSnapTypeName, component.Type.FullName);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Down]);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Left]);
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Up));
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Right));
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Forward));
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Back));
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false),
+                component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.HorizontalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Left }, false),
+                component.Fields[SpatialComponents.SurfaceSnapFields.Horizontal]);
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Depth));
             Assert.Equal(ChannelMask.PositionX | ChannelMask.PositionY, node.Transform.DrivenChannels);
         }
 
@@ -307,8 +309,24 @@ public class SurfaceSnapTargetScene : ISceneDefinition
             var component = Assert.Single(node.Components);
 
             Assert.Single(component.Fields);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Down]);
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false),
+                component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
             Assert.Equal(ChannelMask.PositionY, node.Transform.DrivenChannels);
+        }
+
+        // b2-t1 (Refined-finding pin): the exact ValueNode.Enum shape a `.SurfaceSnap(down:true)` parse
+        // produces must value-equal what SerializedFieldBridge.ReadEnum yields from the live component —
+        // this is what makes reconcile a no-op on an unchanged scene (see research.md ADVERSARIAL verdict).
+        [Fact]
+        public void Parse_SurfaceSnapDown_ProducesReaderShapedEnumValue()
+        {
+            var result = BuilderParser.Parse(SurfaceSnapDownOnlySource);
+            var component = Assert.Single(Assert.Single(result.Model.Roots).Components);
+
+            var expected = new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false);
+            Assert.Equal(expected, component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
+            Assert.IsType<ValueNode.Enum>(component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
         }
 
         [Theory]
@@ -346,7 +364,9 @@ public class SurfaceSnapTargetScene : ISceneDefinition
             var component = Assert.Single(node.Components);
 
             Assert.Single(component.Fields);
-            Assert.Equal(ValueNode.Primitive.Bool(true), component.Fields[SpatialComponents.SurfaceSnapFields.Back]);
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.DepthTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Back }, false),
+                component.Fields[SpatialComponents.SurfaceSnapFields.Depth]);
             Assert.Equal(ChannelMask.PositionZ, node.Transform.DrivenChannels);
         }
 
@@ -389,13 +409,19 @@ public class SurfaceSnapTargetScene : ISceneDefinition
             Assert.Equal("crate.FitSize(size: (2f, 1f, 0.5f));", text);
         }
 
+        // b2-t1: the emitted TEXT is byte-identical to the pre-migration bool-keyword form; only the
+        // underlying FieldMap construction (enum fields, not bool fields) changes.
         [Fact]
         public void Emit_SurfaceSnap_EmitsOnlySetFlags()
         {
             var fields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Left, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.SurfaceSnapFields.Vertical,
+                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.SurfaceSnapFields.Horizontal,
+                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.HorizontalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Left }, false)),
             });
 
             var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.SurfaceSnapTypeName, fields, null);
@@ -405,6 +431,8 @@ public class SurfaceSnapTargetScene : ISceneDefinition
             Assert.DoesNotContain("right:", text);
             Assert.DoesNotContain("forward:", text);
             Assert.DoesNotContain("back:", text);
+            Assert.DoesNotContain("vertical:", text);
+            Assert.DoesNotContain("horizontal:", text);
         }
 
         [Fact]
@@ -463,7 +491,9 @@ public class EmptySpatialScene : ISceneDefinition
 
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.SurfaceSnapFields.Vertical,
+                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
             });
 
             var snapshot = new SceneSnapshot
@@ -513,7 +543,9 @@ public class EmptySpatialScene : ISceneDefinition
             });
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.SurfaceSnapFields.Vertical,
+                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
             });
 
             var snapshot = new SceneSnapshot
@@ -717,12 +749,17 @@ public class EmptySpatialScene : ISceneDefinition
             Assert.Empty(result.Conflicts);
         }
 
+        // b2-t1 OWNS this rewrite (b1-t1 KEEPs the assertion; the fields it constructs move to the
+        // enum model): rebuilds the component from Fields[vertical]=Enum(Down) while preserving the
+        // free-axis-patched / driven-Y-not-patched assertion.
         [Fact]
         public void Reconcile_SurfaceSnapDownFreeAxisDrag_PatchesFreeAxisNotDrivenY()
         {
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.SurfaceSnapFields.Vertical,
+                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
             });
 
             var model = new SceneModel
@@ -884,7 +921,9 @@ public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
             });
             var snapperFieldsUnchanged = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.SurfaceSnapFields.Vertical,
+                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
                 new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
             });
 

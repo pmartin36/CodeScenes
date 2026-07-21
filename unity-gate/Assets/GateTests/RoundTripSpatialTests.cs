@@ -103,7 +103,7 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(1.5f, 5f, -2f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             snapper.Evaluate();
 
@@ -121,18 +121,18 @@ public class RoundTripSpatialTests
 
     // 5. The serialized field names ARE the write contract — they must literally match
     //    SpatialComponents.SurfaceSnapFields.* (subset check: internal book-keeping fields are permitted).
+    //    b2-t1: migrated to the per-axis enum fields; also pins the fragile Core-string<->runtime-type
+    //    contract the ValueNode.Enum idempotence depends on (research.md's REFINED finding) — the enum
+    //    type FullName + member names + None-is-index-0 must equal SpatialComponents.SurfaceSnapEnums.
     [Test]
     public void SurfaceSnap_SerializedFields_MatchSpatialComponentsFieldNameKeys()
     {
         var type = typeof(SurfaceSnap);
         string[] required =
         {
-            SpatialComponents.SurfaceSnapFields.Up,
-            SpatialComponents.SurfaceSnapFields.Down,
-            SpatialComponents.SurfaceSnapFields.Left,
-            SpatialComponents.SurfaceSnapFields.Right,
-            SpatialComponents.SurfaceSnapFields.Forward,
-            SpatialComponents.SurfaceSnapFields.Back,
+            SpatialComponents.SurfaceSnapFields.Vertical,
+            SpatialComponents.SurfaceSnapFields.Horizontal,
+            SpatialComponents.SurfaceSnapFields.Depth,
             SpatialComponents.SurfaceSnapFields.Target,
         };
 
@@ -144,6 +144,26 @@ public class RoundTripSpatialTests
 
         var targetField = type.GetField(SpatialComponents.SurfaceSnapFields.Target);
         Assert.AreEqual(typeof(Transform), targetField.FieldType, "SurfaceSnap.target must be a Transform.");
+
+        Assert.AreEqual(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, typeof(SurfaceSnap.Vertical).FullName,
+            "SurfaceSnap.Vertical's FullName must equal SpatialComponents.SurfaceSnapEnums.VerticalTypeName.");
+        Assert.AreEqual(SpatialComponents.SurfaceSnapEnums.HorizontalTypeName, typeof(SurfaceSnap.Horizontal).FullName,
+            "SurfaceSnap.Horizontal's FullName must equal SpatialComponents.SurfaceSnapEnums.HorizontalTypeName.");
+        Assert.AreEqual(SpatialComponents.SurfaceSnapEnums.DepthTypeName, typeof(SurfaceSnap.Depth).FullName,
+            "SurfaceSnap.Depth's FullName must equal SpatialComponents.SurfaceSnapEnums.DepthTypeName.");
+
+        CollectionAssert.AreEqual(
+            new[] { SpatialComponents.SurfaceSnapEnums.None, SpatialComponents.SurfaceSnapEnums.Up, SpatialComponents.SurfaceSnapEnums.Down },
+            System.Enum.GetNames(typeof(SurfaceSnap.Vertical)),
+            "SurfaceSnap.Vertical member names/order must equal SpatialComponents.SurfaceSnapEnums (None first == default == prunable).");
+        CollectionAssert.AreEqual(
+            new[] { SpatialComponents.SurfaceSnapEnums.None, SpatialComponents.SurfaceSnapEnums.Left, SpatialComponents.SurfaceSnapEnums.Right },
+            System.Enum.GetNames(typeof(SurfaceSnap.Horizontal)),
+            "SurfaceSnap.Horizontal member names/order must equal SpatialComponents.SurfaceSnapEnums (None first == default == prunable).");
+        CollectionAssert.AreEqual(
+            new[] { SpatialComponents.SurfaceSnapEnums.None, SpatialComponents.SurfaceSnapEnums.Forward, SpatialComponents.SurfaceSnapEnums.Back },
+            System.Enum.GetNames(typeof(SurfaceSnap.Depth)),
+            "SurfaceSnap.Depth member names/order must equal SpatialComponents.SurfaceSnapEnums (None first == default == prunable).");
     }
 
     // 6. No Renderer/mesh bounds to snap ⇒ a located error naming the node, never a silent no-op or an
@@ -157,7 +177,7 @@ public class RoundTripSpatialTests
             var originalPosition = new Vector3(3f, 4f, 5f);
             go.transform.position = originalPosition;
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoRendererSurfaceSnap"));
             snapper.Evaluate();
@@ -189,7 +209,7 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             SpatialBuildStripper.StripScene(go.scene);
 
@@ -222,7 +242,7 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             SpatialBuildStripper.StripScene(go.scene);
 
@@ -248,7 +268,7 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.height = 2f;
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             new SpatialBuildStripper().OnProcessScene(go.scene, null);
 
@@ -400,7 +420,7 @@ public class RoundTripSpatialTests
             foreach (var go in new[] { feet, centre, head })
             {
                 var snapper = go.AddComponent<SurfaceSnap>();
-                snapper.down = true;
+                snapper.vertical = SurfaceSnap.Vertical.Down;
                 snapper.Evaluate();
             }
 
@@ -437,7 +457,7 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(0f, 2f, 0f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.up = true;
+            snapper.vertical = SurfaceSnap.Vertical.Up;
 
             snapper.Evaluate();
 
@@ -469,8 +489,8 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(-1f, 5f, 0f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
-            snapper.left = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
+            snapper.horizontal = SurfaceSnap.Horizontal.Left;
 
             snapper.Evaluate();
 
@@ -502,7 +522,7 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.height = 1.2f;
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             sizer.Evaluate();
             snapper.Evaluate();
@@ -531,7 +551,7 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(0f, 5f, 0f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
             snapper.Evaluate();
 
             floor.transform.position = new Vector3(0f, 1f, 0f);
@@ -564,7 +584,7 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(0f, 5f, 0f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             snapper.Evaluate();
 
@@ -594,7 +614,7 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(0f, 2f, 0f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.up = true;
+            snapper.vertical = SurfaceSnap.Vertical.Up;
             snapper.target = ceiling.transform;
 
             snapper.Evaluate();
@@ -624,7 +644,7 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(0f, 0f, 2f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.back = true;
+            snapper.depth = SurfaceSnap.Depth.Back;
 
             snapper.Evaluate();
 
@@ -662,8 +682,8 @@ public class RoundTripSpatialTests
             // fallback scan (see item 4's fix for the same reasoning).
             go.transform.position = new Vector3(0f, 5f, 0f);
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
-            snapper.back = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
+            snapper.depth = SurfaceSnap.Depth.Back;
 
             snapper.Evaluate();
 
@@ -716,7 +736,7 @@ public class RoundTripSpatialTests
             floor.transform.position = Vector3.zero;
 
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
             snapper.enabled = false;
 
             var manualPosition = new Vector3(3f, 7f, 1f);
@@ -815,7 +835,7 @@ public class RoundTripSpatialTests
         try
         {
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);
             var node = FindNode(snapshot.Roots, "SurfaceSnapDownNode");
@@ -840,8 +860,8 @@ public class RoundTripSpatialTests
         try
         {
             var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.down = true;
-            snapper.left = true;
+            snapper.vertical = SurfaceSnap.Vertical.Down;
+            snapper.horizontal = SurfaceSnap.Horizontal.Left;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);
             var node = FindNode(snapshot.Roots, "SurfaceSnapDownLeftNode");

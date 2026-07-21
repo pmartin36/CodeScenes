@@ -21,12 +21,18 @@ namespace SceneBuilder.Authoring
         private const float RayMaxDistance = 10000f;
         private const float SideEpsilon = 1e-3f;
 
-        public bool up;
-        public bool down;
-        public bool left;
-        public bool right;
-        public bool forward;
-        public bool back;
+        // Per-axis enum fields — the live write/read/dispatch contract (SpatialComponents.
+        // SurfaceSnapFields.Vertical/Horizontal/Depth + SurfaceSnapEnums mirror these type
+        // FullNames/member names byte-for-byte). None MUST stay index 0 (default-value pruning
+        // on read relies on it).
+        public enum Vertical { None, Up, Down }
+        public enum Horizontal { None, Left, Right }
+        public enum Depth { None, Forward, Back }
+
+        public Vertical vertical;
+        public Horizontal horizontal;
+        public Depth depth;
+
         public Transform target;
 
         private bool _loggedError;
@@ -76,12 +82,12 @@ namespace SceneBuilder.Authoring
             Vector3 pos = transform.position;
             Transform lastSurface = null;
 
-            if (down) ResolveAndApplyAxis(bounds, 1, -1, ref pos, ref lastSurface);
-            if (up) ResolveAndApplyAxis(bounds, 1, 1, ref pos, ref lastSurface);
-            if (left) ResolveAndApplyAxis(bounds, 0, -1, ref pos, ref lastSurface);
-            if (right) ResolveAndApplyAxis(bounds, 0, 1, ref pos, ref lastSurface);
-            if (forward) ResolveAndApplyAxis(bounds, 2, 1, ref pos, ref lastSurface);
-            if (back) ResolveAndApplyAxis(bounds, 2, -1, ref pos, ref lastSurface);
+            if (vertical == Vertical.Down) ResolveAndApplyAxis(bounds, 1, -1, ref pos, ref lastSurface);
+            if (vertical == Vertical.Up) ResolveAndApplyAxis(bounds, 1, 1, ref pos, ref lastSurface);
+            if (horizontal == Horizontal.Left) ResolveAndApplyAxis(bounds, 0, -1, ref pos, ref lastSurface);
+            if (horizontal == Horizontal.Right) ResolveAndApplyAxis(bounds, 0, 1, ref pos, ref lastSurface);
+            if (depth == Depth.Forward) ResolveAndApplyAxis(bounds, 2, 1, ref pos, ref lastSurface);
+            if (depth == Depth.Back) ResolveAndApplyAxis(bounds, 2, -1, ref pos, ref lastSurface);
 
             transform.position = pos;
             if (lastSurface != null) _lastSurface = lastSurface;

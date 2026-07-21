@@ -24,7 +24,33 @@ namespace SceneBuilder.Core.Reconcile
             FieldMap fields,
             IReadOnlyDictionary<string, string>? fieldExpressions) =>
             string.Join(", ", fields.Select(kv =>
-                $"{kv.Key}: {RenderFieldValue(kv.Key, kv.Value, fieldExpressions)}"));
+                $"{RenderArgumentKeyValue(typeFullName, kv.Key, kv.Value, fieldExpressions)}"));
+
+        // A SurfaceSnap per-axis enum field (vertical/horizontal/depth holding a ValueNode.Enum)
+        // renders as its authoring bool keyword ("down: true"), the single reverse mapping shared
+        // with the parser via SpatialComponents.TryAxisFromEnumField. Every other field (target:,
+        // FitSize's width/height/depth/size, or a non-literal flag kept under its original bool
+        // keyword as Unsupported) renders via the generic "key: value" form, unchanged.
+        private static string RenderArgumentKeyValue(
+            string typeFullName, string key, ValueNode value, IReadOnlyDictionary<string, string>? fieldExpressions) =>
+            RenderKeyValue(key, value, RenderFieldValue(key, value, fieldExpressions));
+
+        // Shared by APPEND (RenderArguments, above) and by ComponentPatchApplier's spatial
+        // introduce-field arm (a scene-side field newly present, absent from source, patched into
+        // an EXISTING `.SurfaceSnap(...)` call) — same "enum field -> bool keyword" translation, so
+        // an introduced axis (e.g. horizontal=Left set live) renders "left: true", never
+        // "horizontal: <enum literal>".
+        internal static string RenderKeyValue(string key, ValueNode value, string valueExpr)
+        {
+            if (value is ValueNode.Enum(_, var members, _)
+                && members.Count == 1
+                && SpatialComponents.TryAxisFromEnumField(key, members[0], out var keyword))
+            {
+                return $"{keyword}: true";
+            }
+
+            return $"{key}: {valueExpr}";
+        }
 
         private static string MethodName(string typeFullName) =>
             typeFullName == SpatialComponents.FitSizeTypeName ? "FitSize" : "SurfaceSnap";

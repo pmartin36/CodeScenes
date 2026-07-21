@@ -129,32 +129,28 @@ namespace SceneBuilder.Core.Parsing
 
                 var name = arg.NameColon.Name.Identifier.Text;
                 var span = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
+
+                if (name == SpatialComponents.SurfaceSnapFields.Target)
+                {
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression)));
+                    spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SurfaceSnapFields.Target, span));
+                    continue;
+                }
+
+                if (!SpatialComponents.TryAxisKeyword(name, out var fieldKey, out var enumTypeName, out var member))
+                {
+                    throw Fail(arg, $"Unknown SurfaceSnap argument '{name}'");
+                }
+
+                var set = ApplyAxisFlag(arg.Expression, name, fieldKey, enumTypeName, member, span, fields, spans);
                 switch (name)
                 {
-                    case SpatialComponents.SurfaceSnapFields.Up:
-                        ApplyFlag(arg.Expression, name, span, ref up, fields, spans);
-                        break;
-                    case SpatialComponents.SurfaceSnapFields.Down:
-                        ApplyFlag(arg.Expression, name, span, ref down, fields, spans);
-                        break;
-                    case SpatialComponents.SurfaceSnapFields.Left:
-                        ApplyFlag(arg.Expression, name, span, ref left, fields, spans);
-                        break;
-                    case SpatialComponents.SurfaceSnapFields.Right:
-                        ApplyFlag(arg.Expression, name, span, ref right, fields, spans);
-                        break;
-                    case SpatialComponents.SurfaceSnapFields.Forward:
-                        ApplyFlag(arg.Expression, name, span, ref forward, fields, spans);
-                        break;
-                    case SpatialComponents.SurfaceSnapFields.Back:
-                        ApplyFlag(arg.Expression, name, span, ref back, fields, spans);
-                        break;
-                    case SpatialComponents.SurfaceSnapFields.Target:
-                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression)));
-                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SurfaceSnapFields.Target, span));
-                        break;
-                    default:
-                        throw Fail(arg, $"Unknown SurfaceSnap argument '{name}'");
+                    case "up": up = set; break;
+                    case "down": down = set; break;
+                    case "left": left = set; break;
+                    case "right": right = set; break;
+                    case "forward": forward = set; break;
+                    case "back": back = set; break;
                 }
             }
 
@@ -178,6 +174,10 @@ namespace SceneBuilder.Core.Parsing
                 throw Fail(invocation, "SurfaceSnap requires at least one snap axis (up/down/left/right/forward/back)");
             }
 
+            var verticalSet = up || down;
+            var horizontalSet = left || right;
+            var depthSet = forward || back;
+
             var memberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
             var anchorStart = memberAccess.OperatorToken.SpanStart;
             var cb = new ComponentBuilder
@@ -196,31 +196,33 @@ namespace SceneBuilder.Core.Parsing
             }
 
             node.Components.Add(cb);
-            node.DrivenChannels |= SpatialComponents.SurfaceSnapMask(up, down, left, right, forward, back);
+            node.DrivenChannels |= SpatialComponents.SurfaceSnapMask(verticalSet, horizontalSet, depthSet);
         }
 
-        // A bool axis flag: a literal `true` is stored `Bool(true)` and marks the axis SET (drives + contradiction).
-        // A literal `false` is NOT stored and does not set the axis. A non-literal value stays TOTAL: stored as
-        // Unsupported (intent not silently dropped) and does NOT set the axis.
-        private static void ApplyFlag(
-            ExpressionSyntax expr, string name, SourceSpan span, ref bool set,
+        // An axis keyword: a literal `true` builds the per-axis ValueNode.Enum field and marks the axis
+        // SET (drives + contradiction) — returns true. A literal `false` is NOT stored and does not set
+        // the axis — returns false. A non-literal value stays TOTAL: stored as Unsupported under the
+        // ORIGINAL bool keyword (intent not silently dropped, never materialized/driven) — returns false.
+        private static bool ApplyAxisFlag(
+            ExpressionSyntax expr, string keyword, string fieldKey, string enumTypeName, string member, SourceSpan span,
             List<KeyValuePair<string, ValueNode>> fields, List<KeyValuePair<string, SourceSpan>> spans)
         {
             if (expr.IsKind(SyntaxKind.TrueLiteralExpression))
             {
-                set = true;
-                fields.Add(new KeyValuePair<string, ValueNode>(name, ValueNode.Primitive.Bool(true)));
-                spans.Add(new KeyValuePair<string, SourceSpan>(name, span));
+                fields.Add(new KeyValuePair<string, ValueNode>(fieldKey, new ValueNode.Enum(enumTypeName, new[] { member }, false)));
+                spans.Add(new KeyValuePair<string, SourceSpan>(fieldKey, span));
+                return true;
             }
-            else if (expr.IsKind(SyntaxKind.FalseLiteralExpression))
+
+            if (expr.IsKind(SyntaxKind.FalseLiteralExpression))
             {
-                // not set, not stored (only set flags round-trip — spec §Emit "only the set flags emitted")
+                // not set, not stored (only set axes round-trip — spec §Emit "only the set flags emitted")
+                return false;
             }
-            else
-            {
-                fields.Add(new KeyValuePair<string, ValueNode>(name, new ValueNode.Unsupported(expr.ToString())));
-                spans.Add(new KeyValuePair<string, SourceSpan>(name, span));
-            }
+
+            fields.Add(new KeyValuePair<string, ValueNode>(keyword, new ValueNode.Unsupported(expr.ToString())));
+            spans.Add(new KeyValuePair<string, SourceSpan>(keyword, span));
+            return false;
         }
 
         private static bool TryCoerceFloat(ValueNode v, out float f)

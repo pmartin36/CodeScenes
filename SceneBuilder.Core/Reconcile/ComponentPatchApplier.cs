@@ -185,7 +185,7 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(invocation)!;
                     var existingArgsText = string.Join(", ", current.ArgumentList.Arguments.Select(a => a.ToString()));
-                    var newArgText = $"{edit.FieldKey}: {valueExpr}";
+                    var newArgText = SpatialComponentSource.RenderKeyValue(edit.FieldKey, edit.Value, valueExpr);
                     var combined = existingArgsText.Length > 0 ? $"{existingArgsText}, {newArgText}" : newArgText;
                     var newArgList = SyntaxFactory.ParseArgumentList($"({combined})");
                     return currentRoot.ReplaceNode(current, current.WithArgumentList(newArgList));
