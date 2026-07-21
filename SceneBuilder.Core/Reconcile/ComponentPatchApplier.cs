@@ -105,29 +105,38 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             var call = $"{receiver}.Component<{edit.TypeFullName}>";
+            return $"{call}{RenderComponentClosureArgs(edit.Fields, edit.FieldExpressions)};";
+        }
 
-            if (edit.Fields.Count == 0)
+        // m10-b4-t1: extracted from BuildComponentStatementText so AppendInstanceAddComponent
+        // (SourcePatchApplier.Instances.cs) renders its `.AddComponent<T>(...)` closure
+        // byte-identically to `.Component<T>(...)`'s — one renderer, two call sites.
+        // Returns the PARENTHESIZED argument list: `()`, `(c => c.Set("k", v))`, or
+        // `(c => { c.Set(...); ... })`.
+        private static string RenderComponentClosureArgs(FieldMap fields, IReadOnlyDictionary<string, string>? fieldExpressions)
+        {
+            if (fields.Count == 0)
             {
-                return $"{call}();";
+                return "()";
             }
 
             // b4-t3: FieldExpressions carries a pre-rendered override for a field SourceExpr
             // cannot format context-free (an ObjectRef handle argument) — consulted first, with
             // ValueNodeLiteral as the unchanged fallback for every other field.
             string Render(string key, ValueNode value) =>
-                edit.FieldExpressions != null && edit.FieldExpressions.TryGetValue(key, out var expr)
+                fieldExpressions != null && fieldExpressions.TryGetValue(key, out var expr)
                     ? expr
                     : SourceExpr.ValueNodeLiteral(value);
 
-            if (edit.Fields.Count == 1)
+            if (fields.Count == 1)
             {
-                var (key, value) = edit.Fields[0];
-                return $"{call}(c => c.Set({SourceExpr.StringLiteral(key)}, {Render(key, value)}));";
+                var (key, value) = fields[0];
+                return $"(c => c.Set({SourceExpr.StringLiteral(key)}, {Render(key, value)}))";
             }
 
-            var sets = string.Join(" ", edit.Fields.Select(kv =>
+            var sets = string.Join(" ", fields.Select(kv =>
                 $"c.Set({SourceExpr.StringLiteral(kv.Key)}, {Render(kv.Key, kv.Value)});"));
-            return $"{call}(c => {{ {sets} }});";
+            return $"(c => {{ {sets} }})";
         }
 
         // ---- PatchComponentField (b3-t2) ---------------------------------------------------

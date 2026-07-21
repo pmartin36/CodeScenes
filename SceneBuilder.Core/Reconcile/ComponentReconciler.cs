@@ -403,7 +403,7 @@ namespace SceneBuilder.Core.Reconcile
         // BOTH context-dependent (needs the handle table) and side-effecting (may need to introduce
         // a handle on the target) — neither belongs in a pure formatter, so this intercepts
         // ValueNode.ObjectRef before delegating everything else to ValueNodeLiteral unchanged.
-        private static string RenderFieldValue(
+        internal static string RenderFieldValue(
             ValueNode value,
             string typeFullName,
             System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,

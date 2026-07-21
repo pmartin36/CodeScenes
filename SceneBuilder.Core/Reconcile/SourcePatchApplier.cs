@@ -101,6 +101,18 @@ namespace SceneBuilder.Core.Reconcile
                     case IntroduceComponentField introduceComponentField:
                         ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers);
                         break;
+                    case AppendInstanceOverride appendInstanceOverride:
+                        ResolveAppendInstanceOverride(root, anchors, appendInstanceOverride, allTargets, appliers);
+                        break;
+                    case AppendInstanceAddComponent appendInstanceAddComponent:
+                        ResolveAppendInstanceAddComponent(root, anchors, appendInstanceAddComponent, allTargets, appliers);
+                        break;
+                    case AppendInstanceRemoveComponent appendInstanceRemoveComponent:
+                        ResolveAppendInstanceRemoveComponent(root, anchors, appendInstanceRemoveComponent, allTargets, appliers);
+                        break;
+                    case DropInstanceCall dropInstanceCall:
+                        ResolveDropInstanceCall(root, anchors, dropInstanceCall, allTargets, appliers);
+                        break;
                     default:
                         throw Fail(root, $"Unsupported SourceEdit kind '{edit.GetType().Name}'.");
                 }

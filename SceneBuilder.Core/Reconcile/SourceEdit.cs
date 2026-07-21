@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using SceneBuilder.Core.Model;
 
@@ -192,5 +193,54 @@ namespace SceneBuilder.Core.Reconcile
         // SourceExpr.ValueNodeLiteral (the pure, context-free formatter, which has NO ObjectRef
         // arm). Set at EMIT time for an ObjectRef field so the applier never has to render one.
         public string? NewExpr { get; init; }
+    }
+
+    // ---- m10-b4-t1: instance-root override authoring (append + revert) ------------------------
+
+    public enum InstanceCallKind { Override, AddComponent, RemoveComponent }
+
+    // Append `.Override(e => e.Set(a).Set(b))` onto the anchor's `scene.Instance(...)` chain.
+    public sealed record AppendInstanceOverride : SourceEdit
+    {
+        // Inherited Anchor = the instance's LogicalId.
+        public IReadOnlyList<OverrideSetSpec> Sets { get; init; } = Array.Empty<OverrideSetSpec>();
+    }
+
+    // One `.Set(...)` inside an Override closure. Value/ValueExpression mirror
+    // AppendComponentStatement.Fields/FieldExpressions: Value renders via SourceExpr.ValueNodeLiteral;
+    // ValueExpression (a pre-rendered ObjectRef handle expression) overrides it when non-null.
+    public sealed record OverrideSetSpec
+    {
+        public string TypeFullName { get; init; } = ""; // root component type the override targets.
+        // "member:<name>" => typed-selector form `(T x) => x.<name>`; else a raw serialized path => `Set<T>("path", ...)`.
+        public string PropertyPath { get; init; } = "";
+        public ValueNode Value { get; init; } = new ValueNode.Unsupported("");
+        public string? ValueExpression { get; init; }
+    }
+
+    // Append `.AddComponent<T>()` or `.AddComponent<T>(c => c.Set(...))` onto the instance chain.
+    public sealed record AppendInstanceAddComponent : SourceEdit
+    {
+        // Inherited Anchor = the instance's LogicalId.
+        public string TypeFullName { get; init; } = "";
+        public FieldMap Fields { get; init; } = FieldMap.Empty;
+        public IReadOnlyDictionary<string, string>? FieldExpressions { get; init; }
+    }
+
+    // Append `.RemoveComponent<T>()` onto the instance chain.
+    public sealed record AppendInstanceRemoveComponent : SourceEdit
+    {
+        // Inherited Anchor = the instance's LogicalId.
+        public string TypeFullName { get; init; } = "";
+    }
+
+    // Drop a previously-authored chained call (revert to prefab default): removes the WHOLE matching
+    // call from the instance's chain, leaving the rest intact.
+    public sealed record DropInstanceCall : SourceEdit
+    {
+        // Inherited Anchor = the instance's LogicalId.
+        public InstanceCallKind Kind { get; init; }
+        public string? TypeFullName { get; init; } // AddComponent/RemoveComponent: match the <T>.
+        public string? PropertyPath { get; init; } // Override: match the closure whose .Set targets this path; null => the sole Override.
     }
 }

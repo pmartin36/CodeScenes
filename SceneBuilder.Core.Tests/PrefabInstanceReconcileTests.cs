@@ -326,5 +326,284 @@ public class InstanceMoveScene : ISceneDefinition
             Assert.Empty(recon2.Patch.Edits);
             Assert.Empty(recon2.Conflicts);
         }
+
+        // ---- b4-t2: instance-root override reconcile (scene->code append / revert-drop) --------
+        // Snapshot is the live authority for THIS direction: a snapshot-only override/add/remove
+        // is appended as a chained call (#7); a model-authored one absent from the snapshot means
+        // the user reverted it in Unity, so the call is DROPPED (#9), never rewritten to a default.
+
+        private static OverrideTarget OverrideTargetFor(string typeFullName) =>
+            new() { PrefabId = "type:" + typeFullName, ObjectId = 0 };
+
+        private static (PrefabInstanceNode instance, SnapshotNode snapshotInstance, IdentityMap map) BuildMatchedInstance(
+            PropertyOverride[]? modelOverrides = null,
+            PropertyOverride[]? snapshotOverrides = null,
+            AddedComponent[]? modelAddedComponents = null,
+            AddedComponent[]? snapshotAddedComponents = null,
+            OverrideTarget[]? modelRemovedComponents = null,
+            OverrideTarget[]? snapshotRemovedComponents = null)
+        {
+            var instance = new PrefabInstanceNode
+            {
+                LogicalId = "instance-1",
+                Name = "Enemy",
+                SourcePrefab = new AssetRef { Guid = PrefabGuid, DisplayPath = PrefabPath },
+                Overrides = modelOverrides ?? System.Array.Empty<PropertyOverride>(),
+                AddedComponents = modelAddedComponents ?? System.Array.Empty<AddedComponent>(),
+                RemovedComponents = modelRemovedComponents ?? System.Array.Empty<OverrideTarget>(),
+            };
+
+            var snapshotInstance = new SnapshotNode
+            {
+                GlobalObjectId = "goid-instance-1",
+                Name = "Enemy",
+                SourcePrefabGuid = PrefabGuid,
+                Overrides = snapshotOverrides ?? System.Array.Empty<PropertyOverride>(),
+                AddedComponents = snapshotAddedComponents ?? System.Array.Empty<AddedComponent>(),
+                RemovedComponents = snapshotRemovedComponents ?? System.Array.Empty<OverrideTarget>(),
+            };
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "instance-1", GlobalObjectId = "goid-instance-1", Kind = "PrefabInstance",
+                        SourcePrefabGuid = PrefabGuid,
+                    },
+                },
+            };
+
+            return (instance, snapshotInstance, map);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyOverride_AppendsInstanceOverride_WithRootTypeAndPath()
+        {
+            var target = OverrideTargetFor("UnityEngine.BoxCollider");
+            var snapshotOverride = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotOverrides: new[] { snapshotOverride });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceOverride>());
+            Assert.Equal("instance-1", append.Anchor);
+            var set = Assert.Single(append.Sets);
+            Assert.Equal("UnityEngine.BoxCollider", set.TypeFullName);
+            Assert.Equal("m_Health", set.PropertyPath);
+            Assert.Equal(ValueNode.Primitive.Int(50), set.Value);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_AppendsInstanceAddComponent()
+        {
+            var target = OverrideTargetFor("UnityEngine.Light");
+            var added = new AddedComponent { Target = target, Component = new ComponentData { LogicalId = "light-1", Type = new TypeRef("UnityEngine.Light") } };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.Equal("instance-1", append.Anchor);
+            Assert.Equal("UnityEngine.Light", append.TypeFullName);
+            // Regression guard (m10-b4-t2 iteration 2): a fieldless snapshot component stays a
+            // bare `.AddComponent<T>()` — no Fields/FieldExpressions fabricated from nothing.
+            Assert.Empty(append.Fields);
+            Assert.Null(append.FieldExpressions);
+        }
+
+        // ---- m10-b4-t2 iteration 2: added-component field values must be carried into the
+        // reconciled AppendInstanceAddComponent (symmetric with materialize's EmitAddedComponents
+        // and with the plain-node AppendComponentStatement field-emit convention). Iteration 1
+        // shipped Anchor/TypeFullName only, silently dropping every authored/observed field value
+        // (scope/bucket-b4.md SEVERITY med finding).
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_ScalarField_CarriesFieldIntoAppend()
+        {
+            var target = OverrideTargetFor("UnityEngine.Light");
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("m_Intensity", ValueNode.Primitive.Float(2.5f)),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "light-1", Type = new TypeRef("UnityEngine.Light"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.Equal("UnityEngine.Light", append.TypeFullName);
+            Assert.Equal(ValueNode.Primitive.Float(2.5f), append.Fields["m_Intensity"]);
+            Assert.Null(append.FieldExpressions);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_AssetRefField_HarvestsAssetIntoAddedAssets()
+        {
+            var target = OverrideTargetFor("UnityEngine.MeshRenderer");
+            var assetValue = new ValueNode.AssetRef(new AssetRef { Guid = "mat-guid-added", DisplayPath = "Assets/Materials/Added.mat" });
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("m_Material", assetValue),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "renderer-1", Type = new TypeRef("UnityEngine.MeshRenderer"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.Equal(assetValue, append.Fields["m_Material"]);
+            var addedAsset = Assert.Single(result.AddedAssets, a => a.Guid == "mat-guid-added");
+            Assert.Equal("Assets/Materials/Added.mat", addedAsset.LastKnownPath);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_ObjectRefField_PreRendersFieldExpression_AndIntroducesHandle()
+        {
+            var target = OverrideTargetFor("Game.DoorOpener");
+            // "Door/0" is a synthesized-shape LogicalId (parent-less, sibling index 0) so
+            // ResolveOwnerHandle treats it as not-yet-authored and introduces a handle for it —
+            // exercising the same side-effecting IntroduceHandle path override/component-field
+            // reconcile already use (ComponentReconciler.RenderFieldValue).
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef("Door/0")),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.Equal(new ValueNode.ObjectRef("Door/0"), append.Fields["target"]);
+            Assert.NotNull(append.FieldExpressions);
+            Assert.True(append.FieldExpressions!.TryGetValue("target", out var renderedHandle));
+
+            var introduced = Assert.Single(result.Patch.Edits.OfType<IntroduceHandle>());
+            Assert.Equal("Door/0", introduced.Anchor);
+            Assert.Equal(introduced.Handle, renderedHandle);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyRemovedComponent_AppendsInstanceRemoveComponent()
+        {
+            var target = OverrideTargetFor("UnityEngine.BoxCollider");
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotRemovedComponents: new[] { target });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceRemoveComponent>());
+            Assert.Equal("instance-1", append.Anchor);
+            Assert.Equal("UnityEngine.BoxCollider", append.TypeFullName);
+        }
+
+        [Fact]
+        public void Reconcile_ModelOnlyOverride_AbsentFromSnapshot_DropsOverrideCall()
+        {
+            var target = OverrideTargetFor("UnityEngine.BoxCollider");
+            var modelOverride = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(modelOverrides: new[] { modelOverride });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var drop = Assert.Single(result.Patch.Edits.OfType<DropInstanceCall>());
+            Assert.Equal("instance-1", drop.Anchor);
+            Assert.Equal(InstanceCallKind.Override, drop.Kind);
+            Assert.Equal("m_Health", drop.PropertyPath);
+        }
+
+        [Fact]
+        public void Reconcile_ModelOnlyAddedComponent_AbsentFromSnapshot_DropsAddComponentCall()
+        {
+            var target = OverrideTargetFor("UnityEngine.Light");
+            var added = new AddedComponent { Target = target, Component = new ComponentData { LogicalId = "light-1", Type = new TypeRef("UnityEngine.Light") } };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(modelAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var drop = Assert.Single(result.Patch.Edits.OfType<DropInstanceCall>());
+            Assert.Equal("instance-1", drop.Anchor);
+            Assert.Equal(InstanceCallKind.AddComponent, drop.Kind);
+            Assert.Equal("UnityEngine.Light", drop.TypeFullName);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyObjectReferenceOverride_AppendsWithAssetExpression()
+        {
+            var target = OverrideTargetFor("UnityEngine.MeshRenderer");
+            var assetRefValue = new ValueNode.AssetRef(new AssetRef { Guid = "mat-guid-1", DisplayPath = "Assets/Materials/Enemy.mat" });
+            var snapshotOverride = new PropertyOverride
+            {
+                Target = target,
+                PropertyPath = "m_Material",
+                Value = new ValueNode.Unsupported(""),
+                ObjectReference = assetRefValue,
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotOverrides: new[] { snapshotOverride });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+            var anchors = new Dictionary<string, SourceSpan> { ["instance-1"] = new SourceSpan(0, 10) };
+
+            var result = Reconciler.Reconcile(model, snapshot, map, anchors);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceOverride>());
+            var set = Assert.Single(append.Sets);
+            Assert.Equal("m_Material", set.PropertyPath);
+            var rendered = set.ValueExpression ?? SourceExpr.ValueNodeLiteral(set.Value);
+            Assert.Equal("Asset(\"Assets/Materials/Enemy.mat\")", rendered);
+
+            var addedAsset = Assert.Single(result.AddedAssets);
+            Assert.Equal("mat-guid-1", addedAsset.Guid);
+        }
+
+        [Fact]
+        public void Reconcile_StaleOverride_SurfacesConflict_AndSuppressesAppendAndDrop()
+        {
+            var target = OverrideTargetFor("UnityEngine.BoxCollider");
+            var recordedBase = ValueNode.Primitive.Int(100);
+            var currentBase = ValueNode.Primitive.Int(75);
+            var modelOverride = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(100), BaseValue = recordedBase };
+            var snapshotOverride = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = currentBase, BaseValue = currentBase };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(
+                modelOverrides: new[] { modelOverride },
+                snapshotOverrides: new[] { snapshotOverride });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            Assert.Contains(result.Conflicts, c => c.Kind == ConflictKind.StaleOverride && c.LogicalId == "instance-1");
+            Assert.Empty(result.Patch.Edits.OfType<AppendInstanceOverride>());
+            Assert.Empty(result.Patch.Edits.OfType<DropInstanceCall>());
+        }
     }
 }

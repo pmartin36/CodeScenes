@@ -446,6 +446,23 @@ namespace SceneBuilder.Core.Reconcile
                     ? ownerModel.Components
                     : System.Array.Empty<ComponentData>();
 
+                // m10-b4-t2: a mapped PrefabInstance root has its own override membership diff
+                // (snapshot=truth append / model-only drop) — never the plain component pass, whose
+                // snapshot Components is always empty for an instance root anyway (b3-t2's finding).
+                if (ownerModel is PrefabInstanceNode instanceModel)
+                {
+                    ReconcileInstanceOverrides(
+                        instanceModel,
+                        snapshotEntry.Node,
+                        ownerLogicalId,
+                        anchors,
+                        ResolveOwnerHandle,
+                        edits,
+                        conflicts,
+                        addedAssets);
+                    continue;
+                }
+
                 ComponentReconciler.ReconcileComponents(
                     ownerLogicalId,
                     sourceComponents,
