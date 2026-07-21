@@ -283,7 +283,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
 
         var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
         Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
-        crate.GetComponent<FitSize>().height = 3f;
+        crate.GetComponent<FitSize>().value = 3f; // mode is already Height, materialized from source
         crate.GetComponent<SurfaceSnap>().horizontal = SurfaceSnap.Horizontal.Left;
 
         var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
@@ -366,6 +366,8 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
 
         var bounds = crate.GetComponent<Renderer>().bounds;
         Assert.AreEqual(4f, bounds.size.y, Tol, "The manually-set scale must stand (back-solve reads intent, never overwrites the manual scale).");
+        Assert.AreEqual(FitSize.Mode.Height, sizer.mode, "Back-solve must preserve the authored Height mode, not switch the discriminator.");
+        Assert.AreEqual(bounds.size.y, sizer.value, Tol, "The back-solved FitSize.value intent must equal the new observed world height.");
 
         var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "The back-solved height intent is a real source change; Sync must report Changed.");

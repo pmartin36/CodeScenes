@@ -28,7 +28,8 @@ public class RoundTripSpatialTests
         {
             go.transform.localScale = new Vector3(5f, 5f, 5f);
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
 
             sizer.Evaluate();
 
@@ -44,17 +45,17 @@ public class RoundTripSpatialTests
     }
 
     // 2. The serialized field names ARE the write contract (SerializedFieldBridge writes M3 field-map
-    //    keys by name) — they must literally match SpatialComponents.FitSizeFields.*. Subset check: an
-    //    internal discriminator/flag field is permitted in addition.
+    //    keys by name) — they must literally match SpatialComponents.FitSizeFields.*. b3-t1: migrated
+    //    from width/height/depth/size floats to mode(enum)/value/size; also pins the FQN + member-name
+    //    + None-is-index-0 reflection contract (mirrors SurfaceSnap_SerializedFields_... above).
     [Test]
     public void FitSize_SerializedFields_MatchSpatialComponentsFieldNameKeys()
     {
         var type = typeof(FitSize);
         string[] required =
         {
-            SpatialComponents.FitSizeFields.Width,
-            SpatialComponents.FitSizeFields.Height,
-            SpatialComponents.FitSizeFields.Depth,
+            SpatialComponents.FitSizeFields.Mode,
+            SpatialComponents.FitSizeFields.Value,
             SpatialComponents.FitSizeFields.Size,
         };
 
@@ -63,6 +64,21 @@ public class RoundTripSpatialTests
             var field = type.GetField(fieldName);
             Assert.IsNotNull(field, $"FitSize must expose a public field named '{fieldName}' (SpatialComponents.FitSizeFields).");
         }
+
+        Assert.AreEqual(SpatialComponents.FitSizeEnums.ModeTypeName, typeof(FitSize.Mode).FullName,
+            "FitSize.Mode's FullName must equal SpatialComponents.FitSizeEnums.ModeTypeName.");
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                SpatialComponents.FitSizeEnums.None,
+                SpatialComponents.FitSizeEnums.Width,
+                SpatialComponents.FitSizeEnums.Height,
+                SpatialComponents.FitSizeEnums.Depth,
+                SpatialComponents.FitSizeEnums.Explicit,
+            },
+            System.Enum.GetNames(typeof(FitSize.Mode)),
+            "FitSize.Mode member names/order must equal SpatialComponents.FitSizeEnums (None first == default == prunable/inert).");
     }
 
     // 3. No MeshFilter/mesh to size ⇒ a located error naming the node, never a silent no-op or an
@@ -75,7 +91,8 @@ public class RoundTripSpatialTests
         {
             go.transform.localScale = Vector3.one;
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
 
             LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoMeshFitSize"));
             sizer.Evaluate();
@@ -207,7 +224,8 @@ public class RoundTripSpatialTests
             go.transform.localScale = new Vector3(5f, 5f, 5f);
             go.transform.position = new Vector3(1.5f, 5f, -2f);
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
             var snapper = go.AddComponent<SurfaceSnap>();
             snapper.vertical = SurfaceSnap.Vertical.Down;
 
@@ -240,7 +258,8 @@ public class RoundTripSpatialTests
             go.transform.localScale = new Vector3(5f, 5f, 5f);
             go.transform.position = new Vector3(1.5f, 5f, -2f);
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
             var snapper = go.AddComponent<SurfaceSnap>();
             snapper.vertical = SurfaceSnap.Vertical.Down;
 
@@ -266,7 +285,8 @@ public class RoundTripSpatialTests
         try
         {
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
             var snapper = go.AddComponent<SurfaceSnap>();
             snapper.vertical = SurfaceSnap.Vertical.Down;
 
@@ -326,7 +346,8 @@ public class RoundTripSpatialTests
         try
         {
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
 
             sizer.Evaluate();
 
@@ -353,7 +374,8 @@ public class RoundTripSpatialTests
             child.transform.SetParent(parent.transform, worldPositionStays: false);
 
             var sizer = child.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
 
             sizer.Evaluate();
 
@@ -376,6 +398,7 @@ public class RoundTripSpatialTests
         try
         {
             var sizer = go.AddComponent<FitSize>();
+            sizer.mode = FitSize.Mode.Explicit;
             sizer.size = new Vector3(2f, 1f, 0.5f);
 
             sizer.Evaluate();
@@ -520,7 +543,8 @@ public class RoundTripSpatialTests
 
             go.transform.position = new Vector3(0f, 5f, 0f);
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 1.2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 1.2f;
             var snapper = go.AddComponent<SurfaceSnap>();
             snapper.vertical = SurfaceSnap.Vertical.Down;
 
@@ -708,7 +732,8 @@ public class RoundTripSpatialTests
         try
         {
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
             sizer.enabled = false;
 
             var manualScale = new Vector3(4f, 4f, 4f);
@@ -784,7 +809,8 @@ public class RoundTripSpatialTests
         try
         {
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);
             var node = FindNode(snapshot.Roots, "FitSizeNode");
@@ -809,7 +835,8 @@ public class RoundTripSpatialTests
         try
         {
             var sizer = go.AddComponent<FitSize>();
-            sizer.height = 2f;
+            sizer.mode = FitSize.Mode.Height;
+            sizer.value = 2f;
             sizer.enabled = false;
 
             var snapshot = SceneSnapshotReader.Read(go.scene);

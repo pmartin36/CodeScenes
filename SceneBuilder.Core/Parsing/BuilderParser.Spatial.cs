@@ -32,23 +32,28 @@ namespace SceneBuilder.Core.Parsing
 
                 var name = arg.NameColon.Name.Identifier.Text;
                 var span = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
-                switch (name)
+                if (SpatialComponents.TryFitAspectMode(name, out var member))
                 {
-                    case SpatialComponents.FitSizeFields.Width:
-                    case SpatialComponents.FitSizeFields.Height:
-                    case SpatialComponents.FitSizeFields.Depth:
-                        hasAspect = true;
-                        aspectCount++;
-                        fields.Add(new KeyValuePair<string, ValueNode>(name, ParseSpatialScalar(arg.Expression)));
-                        spans.Add(new KeyValuePair<string, SourceSpan>(name, span));
-                        break;
-                    case SpatialComponents.FitSizeFields.Size:
-                        hasExplicit = true;
-                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, ParseSpatialVec3(arg.Expression)));
-                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Size, span));
-                        break;
-                    default:
-                        throw Fail(arg, $"Unknown FitSize argument '{name}'");
+                    hasAspect = true;
+                    aspectCount++;
+                    fields.Add(new KeyValuePair<string, ValueNode>(
+                        SpatialComponents.FitSizeFields.Mode,
+                        new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { member }, false)));
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ParseSpatialScalar(arg.Expression)));
+                    spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Value, span));
+                }
+                else if (name == SpatialComponents.FitSizeFields.Size)
+                {
+                    hasExplicit = true;
+                    fields.Add(new KeyValuePair<string, ValueNode>(
+                        SpatialComponents.FitSizeFields.Mode,
+                        new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Explicit }, false)));
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, ParseSpatialVec3(arg.Expression)));
+                    spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Size, span));
+                }
+                else
+                {
+                    throw Fail(arg, $"Unknown FitSize argument '{name}'");
                 }
             }
 

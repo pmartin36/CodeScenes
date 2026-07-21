@@ -22,9 +22,42 @@ namespace SceneBuilder.Core.Reconcile
         internal static string RenderArguments(
             string typeFullName,
             FieldMap fields,
-            IReadOnlyDictionary<string, string>? fieldExpressions) =>
-            string.Join(", ", fields.Select(kv =>
+            IReadOnlyDictionary<string, string>? fieldExpressions)
+        {
+            if (typeFullName == SpatialComponents.FitSizeTypeName)
+            {
+                return RenderFitSizeArguments(fields, fieldExpressions);
+            }
+
+            return string.Join(", ", fields.Select(kv =>
                 $"{RenderArgumentKeyValue(typeFullName, kv.Key, kv.Value, fieldExpressions)}"));
+        }
+
+        // b3-t1: FitSize's `mode` field discriminates which of `value` (aspect: width/height/depth)
+        // or `size` (Explicit) is the authored dimension — the generic per-field renderer above can't
+        // express that coupling, so FitSize gets its own arm. Never emits a bare `mode:`/`value:`
+        // literal; always the authoring keyword (width/height/depth/size).
+        private static string RenderFitSizeArguments(FieldMap fields, IReadOnlyDictionary<string, string>? fieldExpressions)
+        {
+            var mode = fields[SpatialComponents.FitSizeFields.Mode];
+            if (mode is ValueNode.Enum(_, var members, _) && members.Count == 1)
+            {
+                var member = members[0];
+                if (SpatialComponents.TryFitAspectKeyword(member, out var keyword))
+                {
+                    var valueField = fields[SpatialComponents.FitSizeFields.Value];
+                    return $"{keyword}: {RenderFieldValue(SpatialComponents.FitSizeFields.Value, valueField, fieldExpressions)}";
+                }
+
+                if (member == SpatialComponents.FitSizeEnums.Explicit)
+                {
+                    var sizeField = fields[SpatialComponents.FitSizeFields.Size];
+                    return $"size: {RenderFieldValue(SpatialComponents.FitSizeFields.Size, sizeField, fieldExpressions)}";
+                }
+            }
+
+            throw new System.NotSupportedException($"FitSize field 'mode' has an unrenderable value: {mode}");
+        }
 
         // A SurfaceSnap per-axis enum field (vertical/horizontal/depth holding a ValueNode.Enum)
         // renders as its authoring bool keyword ("down: true"), the single reverse mapping shared

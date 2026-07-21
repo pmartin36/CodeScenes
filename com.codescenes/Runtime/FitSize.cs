@@ -17,14 +17,20 @@ namespace SceneBuilder.Authoring
     [DefaultExecutionOrder(-100)]
     public sealed class FitSize : MonoBehaviour
     {
-        /// <summary>Sentinel meaning "not authored" — never a legitimate aspect-locked dimension (must be &gt; 0).</summary>
-        private const float Unset = float.NaN;
-
         private const float Epsilon = 1e-4f;
 
-        public float width = Unset;
-        public float height = Unset;
-        public float depth = Unset;
+        /// <summary>The mode-enum discriminator for which dimension(s) drive <c>localScale</c>. None
+        /// MUST be index 0 (default == inert; <see cref="Evaluate"/> early-returns and a freshly-added
+        /// FitSize drives nothing).</summary>
+        public enum Mode { None, Width, Height, Depth, Explicit }
+
+        public Mode mode = Mode.None;
+
+        /// <summary>The single authored aspect-locked dimension when <see cref="mode"/> is
+        /// Width/Height/Depth. Unused (and unwritten) for Explicit/None.</summary>
+        public float value;
+
+        /// <summary>Explicit per-axis world size when <see cref="mode"/> is Explicit.</summary>
         public Vector3 size;
 
         /// <summary>The last <c>localScale</c> this component wrote — used to discriminate our own
@@ -33,8 +39,6 @@ namespace SceneBuilder.Authoring
 
         private bool _loggedError;
         private bool _loggedWarning;
-
-        private static bool IsSet(float v) => !float.IsNaN(v);
 
         private bool HasWrittenBefore => !float.IsNaN(_lastWritten.x);
 
@@ -54,6 +58,7 @@ namespace SceneBuilder.Authoring
         {
             if (Application.isPlaying) return;
             if (!isActiveAndEnabled) return;
+            if (mode == Mode.None) return;
 
             var mf = GetComponent<MeshFilter>();
             if (mf == null || mf.sharedMesh == null)
@@ -74,13 +79,13 @@ namespace SceneBuilder.Authoring
             {
                 // The user moved localScale directly since we last drove it — treat it as a manual
                 // edit and back-solve the authored intent field(s) from the new world size. The raw
-                // localScale channel is never written back to source; only width/height/depth/size are.
+                // localScale channel is never written back to source; only value/size are.
                 Vector3 lossy = transform.lossyScale;
                 Vector3 world = new Vector3(local.x * lossy.x, local.y * lossy.y, local.z * lossy.z);
 
                 if (drivingAxis >= 0)
                 {
-                    SetAxisField(drivingAxis, world[drivingAxis]);
+                    value = world[drivingAxis];
                 }
                 else
                 {
@@ -101,7 +106,7 @@ namespace SceneBuilder.Authoring
                     return;
                 }
 
-                float s = GetAxisField(drivingAxis) / denom;
+                float s = value / denom;
                 newScale = new Vector3(s, s, s);
             }
             else
@@ -127,35 +132,16 @@ namespace SceneBuilder.Authoring
         }
 
         /// <summary>Index of the single authored aspect-locked axis (0=width/x, 1=height/y, 2=depth/z),
-        /// or -1 when none is set (explicit <see cref="size"/> mode). Priority width &gt; height &gt;
-        /// depth if more than one is (mis-)authored.</summary>
-        private int DrivingAxis()
-        {
-            if (IsSet(width)) return 0;
-            if (IsSet(height)) return 1;
-            if (IsSet(depth)) return 2;
-            return -1;
-        }
-
-        private float GetAxisField(int axis)
-        {
-            switch (axis)
+        /// or -1 when <see cref="mode"/> is Explicit (or None, guarded by <see cref="Evaluate"/>'s
+        /// early-return above).</summary>
+        private int DrivingAxis() =>
+            mode switch
             {
-                case 0: return width;
-                case 1: return height;
-                default: return depth;
-            }
-        }
-
-        private void SetAxisField(int axis, float value)
-        {
-            switch (axis)
-            {
-                case 0: width = value; break;
-                case 1: height = value; break;
-                default: depth = value; break;
-            }
-        }
+                Mode.Width => 0,
+                Mode.Height => 1,
+                Mode.Depth => 2,
+                _ => -1,
+            };
 
         private void WarnDegenerate()
         {

@@ -10,7 +10,7 @@ using Xunit;
 
 namespace SceneBuilder.Core.Tests
 {
-    public class SpatialComponentTests
+    public partial class SpatialComponentTests
     {
         [Fact]
         public void ChannelMask_Scale_EqualsXYZScaleBits()
@@ -66,12 +66,12 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("SceneBuilder.Authoring.SurfaceSnap", SpatialComponents.SurfaceSnapTypeName);
         }
 
+        // b3-t1: field constants migrated from NaN-sentinel width/height/depth to mode/value/size.
         [Fact]
         public void SpatialComponents_FitSizeFieldKeys_MatchExpectedLiterals()
         {
-            Assert.Equal("width", SpatialComponents.FitSizeFields.Width);
-            Assert.Equal("height", SpatialComponents.FitSizeFields.Height);
-            Assert.Equal("depth", SpatialComponents.FitSizeFields.Depth);
+            Assert.Equal("mode", SpatialComponents.FitSizeFields.Mode);
+            Assert.Equal("value", SpatialComponents.FitSizeFields.Value);
             Assert.Equal("size", SpatialComponents.FitSizeFields.Size);
         }
 
@@ -147,8 +147,12 @@ public class TransformOnlyScene : ISceneDefinition
 
             Assert.Equal(SpatialComponents.FitSizeTypeName, component.Type.FullName);
             Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false),
+                component.Fields[SpatialComponents.FitSizeFields.Mode]);
+            Assert.Equal(
                 ValueNode.Primitive.Float(2f),
-                component.Fields[SpatialComponents.FitSizeFields.Height]);
+                component.Fields[SpatialComponents.FitSizeFields.Value]);
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.FitSizeFields.Size), "aspect-locked FitSize must not carry a size field");
             Assert.Equal(ChannelMask.Scale, node.Transform.DrivenChannels);
         }
 
@@ -162,8 +166,12 @@ public class TransformOnlyScene : ISceneDefinition
 
             Assert.Equal(SpatialComponents.FitSizeTypeName, component.Type.FullName);
             Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Explicit }, false),
+                component.Fields[SpatialComponents.FitSizeFields.Mode]);
+            Assert.Equal(
                 new ValueNode.Vec3(new Vec3(2f, 1f, 0.5f)),
                 component.Fields[SpatialComponents.FitSizeFields.Size]);
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.FitSizeFields.Value), "explicit FitSize must not carry a value field");
             Assert.Equal(ChannelMask.Scale, node.Transform.DrivenChannels);
         }
 
@@ -387,13 +395,18 @@ public class SurfaceSnapTargetScene : ISceneDefinition
         {
             var fields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.FitSizeFields.Mode,
+                    new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ValueNode.Primitive.Float(2f)),
             });
 
             var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.FitSizeTypeName, fields, null);
 
             Assert.Equal("crate.FitSize(height: 2f);", text);
             Assert.DoesNotContain(".Component<", text);
+            Assert.DoesNotContain("mode:", text);
+            Assert.DoesNotContain("value:", text);
         }
 
         [Fact]
@@ -401,12 +414,16 @@ public class SurfaceSnapTargetScene : ISceneDefinition
         {
             var fields = new FieldMap(new[]
             {
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.FitSizeFields.Mode,
+                    new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Explicit }, false)),
                 new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, new ValueNode.Vec3(new Vec3(2f, 1f, 0.5f))),
             });
 
             var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.FitSizeTypeName, fields, null);
 
             Assert.Equal("crate.FitSize(size: (2f, 1f, 0.5f));", text);
+            Assert.DoesNotContain("mode:", text);
         }
 
         // b2-t1: the emitted TEXT is byte-identical to the pre-migration bool-keyword form; only the
@@ -539,7 +556,10 @@ public class EmptySpatialScene : ISceneDefinition
 
             var sizerFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.FitSizeFields.Mode,
+                    new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ValueNode.Primitive.Float(2f)),
             });
             var snapperFields = new FieldMap(new[]
             {
@@ -613,13 +633,15 @@ public class EmptySpatialScene : ISceneDefinition
                 },
             };
 
-            // A non-terminating-decimal height (not a round test-author's number) so the
-            // dedicated renderer's 4dp-rounded SourceExpr.Float ("2.3457f") is DISTINGUISHABLE
-            // from the generic ValueNodeLiteral fallback's unrounded literal ("2.34567f") — a
-            // round value would happen to format identically under both paths and prove nothing.
+            // Non-terminating-decimal height so the dedicated renderer's rounded "2.3457f" is
+            // distinguishable from the generic fallback's "2.34567f". Mode is UNCHANGED (still
+            // Height) — only `value` differs, so this must diff/patch, not introduce.
             var editedFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2.34567f)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.FitSizeFields.Mode,
+                    new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ValueNode.Primitive.Float(2.34567f)),
             });
 
             var snapshot = new SceneSnapshot
@@ -665,7 +687,10 @@ public class EmptySpatialScene : ISceneDefinition
         {
             var sizerFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.FitSizeFields.Mode,
+                    new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ValueNode.Primitive.Float(2f)),
             });
             var snapperFields = new FieldMap(new[]
             {
@@ -826,7 +851,10 @@ public class EmptySpatialScene : ISceneDefinition
         {
             var sizerFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(2f)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.FitSizeFields.Mode,
+                    new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ValueNode.Primitive.Float(2f)),
             });
 
             var model = new SceneModel
@@ -917,7 +945,10 @@ public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
 
             var editedFitSizeFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Height, ValueNode.Primitive.Float(3f)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.FitSizeFields.Mode,
+                    new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ValueNode.Primitive.Float(3f)),
             });
             var snapperFieldsUnchanged = new FieldMap(new[]
             {
