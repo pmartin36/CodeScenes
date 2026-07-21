@@ -54,6 +54,12 @@ namespace SceneBuilder.Core.Reconcile
             // ResolveHandleIntroductions.
             ResolveHandleIntroductions(root, anchors, patch, allTargets, appliers);
 
+            // AppendInstanceOverride/AppendInstanceAddComponent/AppendInstanceRemoveComponent all
+            // splice onto the SAME anchor's chain expression; folded here — once per anchor — for
+            // the same reason transform args are folded above. See
+            // SourcePatchApplier.Instances.cs's ResolveInstanceChainedCallAppends.
+            var consumedChainedCallEdits = ResolveInstanceChainedCallAppends(root, anchors, patch, allTargets, appliers);
+
             foreach (var edit in patch.Edits)
             {
                 switch (edit)
@@ -101,14 +107,13 @@ namespace SceneBuilder.Core.Reconcile
                     case IntroduceComponentField introduceComponentField:
                         ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers);
                         break;
-                    case AppendInstanceOverride appendInstanceOverride:
-                        ResolveAppendInstanceOverride(root, anchors, appendInstanceOverride, allTargets, appliers);
-                        break;
-                    case AppendInstanceAddComponent appendInstanceAddComponent:
-                        ResolveAppendInstanceAddComponent(root, anchors, appendInstanceAddComponent, allTargets, appliers);
-                        break;
-                    case AppendInstanceRemoveComponent appendInstanceRemoveComponent:
-                        ResolveAppendInstanceRemoveComponent(root, anchors, appendInstanceRemoveComponent, allTargets, appliers);
+                    case AppendInstanceOverride or AppendInstanceAddComponent or AppendInstanceRemoveComponent:
+                        // Already folded into a combined chained-call append above.
+                        if (!consumedChainedCallEdits.Contains(edit))
+                        {
+                            throw Fail(root, $"Unresolved instance chained-call edit '{edit.GetType().Name}'.");
+                        }
+
                         break;
                     case DropInstanceCall dropInstanceCall:
                         ResolveDropInstanceCall(root, anchors, dropInstanceCall, allTargets, appliers);

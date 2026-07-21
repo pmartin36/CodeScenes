@@ -16,50 +16,80 @@ namespace SceneBuilder.Core.Reconcile
     {
         // ---- AppendInstanceOverride / AppendInstanceAddComponent / AppendInstanceRemoveComponent --
 
-        private static void ResolveAppendInstanceOverride(
+        /// <summary>
+        /// Pre-folds every AppendInstanceOverride / AppendInstanceAddComponent /
+        /// AppendInstanceRemoveComponent edit in this batch into ONE combined chained-call append
+        /// per anchor, mirroring ResolveTransformIntroductions (SourcePatchApplier.cs): a single
+        /// instance can carry an override AND an added component AND a removed component in one
+        /// Reconcile pass, and each targets the SAME anchor's chain expression. Resolving/applying
+        /// them as separate AppendChainedCall calls would have each applier's `ReplaceNode` retarget
+        /// the chain to a fresh, untracked node, orphaning the tracked node the next applier looks
+        /// up via `GetCurrentNode` (which then returns null). Folding into one applier — like
+        /// ResolveIntroduceTransformCall folds pos/rot/scale into one `.Transform(...)` — makes the
+        /// whole anchor's set of appends land via a single ReplaceNode. Returns the edits it
+        /// consumed so the main loop skips them.
+        /// </summary>
+        private static HashSet<SourceEdit> ResolveInstanceChainedCallAppends(
             CompilationUnitSyntax root,
             IReadOnlyDictionary<string, SourceSpan> anchors,
-            AppendInstanceOverride edit,
+            SourcePatch patch,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
-            var callText = RenderInstanceOverrideCall(edit.Sets);
-            AppendChainedCall(root, anchors, edit.Anchor, callText, allTargets, appliers);
-        }
+            var consumed = new HashSet<SourceEdit>();
+            var callTextsByAnchor = new Dictionary<string, List<string>>();
 
-        private static void ResolveAppendInstanceAddComponent(
-            CompilationUnitSyntax root,
-            IReadOnlyDictionary<string, SourceSpan> anchors,
-            AppendInstanceAddComponent edit,
-            List<SyntaxNode> allTargets,
-            List<Func<SyntaxNode, SyntaxNode>> appliers)
-        {
-            var callText = $"AddComponent<{edit.TypeFullName}>{RenderComponentClosureArgs(edit.Fields, edit.FieldExpressions)}";
-            AppendChainedCall(root, anchors, edit.Anchor, callText, allTargets, appliers);
-        }
+            void Collect(string anchor, string callText, SourceEdit edit)
+            {
+                if (!callTextsByAnchor.TryGetValue(anchor, out var list))
+                {
+                    list = new List<string>();
+                    callTextsByAnchor[anchor] = list;
+                }
 
-        private static void ResolveAppendInstanceRemoveComponent(
-            CompilationUnitSyntax root,
-            IReadOnlyDictionary<string, SourceSpan> anchors,
-            AppendInstanceRemoveComponent edit,
-            List<SyntaxNode> allTargets,
-            List<Func<SyntaxNode, SyntaxNode>> appliers)
-        {
-            var callText = $"RemoveComponent<{edit.TypeFullName}>()";
-            AppendChainedCall(root, anchors, edit.Anchor, callText, allTargets, appliers);
+                list.Add(callText);
+                consumed.Add(edit);
+            }
+
+            foreach (var edit in patch.Edits)
+            {
+                switch (edit)
+                {
+                    case AppendInstanceOverride appendOverride:
+                        Collect(appendOverride.Anchor, RenderInstanceOverrideCall(appendOverride.Sets), appendOverride);
+                        break;
+                    case AppendInstanceAddComponent appendAddComponent:
+                        Collect(
+                            appendAddComponent.Anchor,
+                            $"AddComponent<{appendAddComponent.TypeFullName}>{RenderComponentClosureArgs(appendAddComponent.Fields, appendAddComponent.FieldExpressions)}",
+                            appendAddComponent);
+                        break;
+                    case AppendInstanceRemoveComponent appendRemoveComponent:
+                        Collect(appendRemoveComponent.Anchor, $"RemoveComponent<{appendRemoveComponent.TypeFullName}>()", appendRemoveComponent);
+                        break;
+                }
+            }
+
+            foreach (var (anchor, callTexts) in callTextsByAnchor)
+            {
+                AppendChainedCalls(root, anchors, anchor, callTexts, allTargets, appliers);
+            }
+
+            return consumed;
         }
 
         /// <summary>
-        /// Splices a new `.<paramref name="callText"/>` onto the anchor's existing chain — the same
-        /// template as ResolveIntroduceFlagCall (SourcePatchApplier.cs), generalized to accept any
-        /// call text (generics/lambdas) since these calls aren't the fixed single-argument shape a
-        /// flag call is. Trailing trivia is preserved exactly as IntroduceFlagCall/RemoveFlagCall do.
+        /// Splices one or more new `.<c>callText</c>` calls onto the anchor's existing chain, ALL via
+        /// a single ReplaceNode — the same template as ResolveIntroduceFlagCall
+        /// (SourcePatchApplier.cs), generalized to accept any call text (generics/lambdas) since
+        /// these calls aren't the fixed single-argument shape a flag call is. Trailing trivia is
+        /// preserved exactly as IntroduceFlagCall/RemoveFlagCall do.
         /// </summary>
-        private static void AppendChainedCall(
+        private static void AppendChainedCalls(
             CompilationUnitSyntax root,
             IReadOnlyDictionary<string, SourceSpan> anchors,
             string anchor,
-            string callText,
+            IReadOnlyList<string> callTexts,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
@@ -73,7 +103,8 @@ namespace SceneBuilder.Core.Reconcile
             appliers.Add(currentRoot =>
             {
                 var current = currentRoot.GetCurrentNode(chainExpr)!;
-                var newExprText = current.WithoutTrailingTrivia().ToFullString() + "." + callText;
+                var newExprText = current.WithoutTrailingTrivia().ToFullString()
+                    + string.Concat(callTexts.Select(callText => "." + callText));
                 var newExpr = SyntaxFactory.ParseExpression(newExprText).WithTrailingTrivia(current.GetTrailingTrivia());
                 return currentRoot.ReplaceNode(current, newExpr);
             });
