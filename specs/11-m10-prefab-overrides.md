@@ -19,6 +19,19 @@
 > 4. **Stale-override detection needs a recorded base value** the current sidecar section omits: persist,
 >    per authored override, the prefab-default value it was written against, so drift ("prefab default
 >    changed under the override") is detectable per behavior #9. Add this to the sidecar (see §IdentityMap).
+> 5. **Added/Removed child-GameObject overrides — DEFERRED (out of scope this pass).** Property overrides
+>    and added/removed **components** on the root round-trip fully; adding or removing a child **GameObject**
+>    on the instance (`AddedGameObjects`/`RemovedGameObjects`, behavior #5, tests #6/#7) is **not** authored
+>    or round-tripped in v0 — it has no authoring surface yet and would collide with M6's
+>    `instance.Add`→`Children` semantics, which is its own deliberate design. Such edits stay
+>    **read-as-opaque-and-preserved** (M6 behavior), never dropped (§7). Deferred to the same follow-up as
+>    nested addressing. (The four override collections may still exist on the model for forward-compat, but
+>    only property overrides + added/removed components are authored/materialized/reconciled this pass.)
+> 6. **Materialize must REVERT, not just set** (fixes an omission in behavior #6). When the desired (code)
+>    model lacks a property override the live instance still carries (the user deleted a `.Override(...)`),
+>    Materialize emits a **revert-override** Plan op executed via the appropriate `PrefabUtility` revert
+>    call — NOT a `SetInstanceOverride` to the default value (which leaves a bold override in Unity).
+>    Symmetric with Reconcile's behavior #8. Applies to overridden properties and added/removed components.
 
 ### Additions to the contract
 
@@ -66,7 +79,8 @@ author instance tweaks in code and edits made on an instance in Unity round-trip
 
 ## In scope
 - Model `m_Modification.m_Modifications` as `PrefabInstanceNode.Overrides` (`PropertyOverride[]`).
-- Model added components / removed components / added GameObjects / removed GameObjects on an instance.
+- Model + round-trip added components / removed components on the root instance. (Added/removed
+  **GameObjects** are modelled for forward-compat but DEFERRED — not authored/round-tripped this pass; banner #5.)
 - Key every override on the `(PrefabId, ObjectId)` pair via `OverrideTarget`.
 - **Materialize** (code→scene): apply the authored override set onto an instantiated prefab instance.
 - **Reconcile** (scene→code): detect a user-made override / add / remove on an instance and patch source.
@@ -111,13 +125,16 @@ author instance tweaks in code and edits made on an instance in Unity round-trip
    `.AddComponent<T>()` to the instance's source statement.
 4. **Removed component.** A source component stripped on the instance lowers to a `RemovedComponents`
    entry (`OverrideTarget`); round-trips as a `.RemoveComponent<T>()` (or equivalent) authoring call.
-5. **Added / removed GameObject.** A child GO added under the instance lowers to an `AddedGameObjects`
-   `GameObjectNode`; a stripped source child lowers to a `RemovedGameObjects` `OverrideTarget`. Both
-   round-trip.
-6. **Materialize applies overrides.** `Materialize` on a `PrefabInstanceNode` with overrides produces
-   `Plan` ops that, after M6 instantiation, set each modified property, add/remove the listed
-   components, and add/remove the listed GameObjects — **in place**, preserving the instance's
-   `GlobalObjectId` (never re-instantiate to apply overrides).
+5. **Added / removed GameObject — DEFERRED (banner #5).** These collections are modelled, but the
+   authoring surface, materialize, and reconcile of child-GameObject overrides are out of scope this pass;
+   such edits are read-as-opaque-and-preserved (M6), never dropped. No added-/removed-child authoring verb
+   is introduced here.
+6. **Materialize applies AND reverts.** `Materialize` on a `PrefabInstanceNode` produces `Plan` ops that,
+   after M6 instantiation, set each authored property override and add/remove the listed components —
+   **in place**, preserving the instance's `GlobalObjectId` (never re-instantiate). Crucially, a property
+   override or added/removed component present on the LIVE instance but ABSENT from the desired model is
+   **reverted** via the appropriate `PrefabUtility` revert op (banner #6) — never left as a stale bold
+   override. (Child-GameObject add/remove is deferred, banner #5.)
 7. **Reconcile detects instance edits.** Given a `SceneSnapshot` whose prefab instance carries mods /
    adds / removes not present in the parsed `SceneModel`, `Reconcile` emits a `SourcePatch` adding the
    corresponding `.Override(...)` / `.AddComponent<T>()` / `.RemoveComponent<T>()` / child edits to the
@@ -183,8 +200,12 @@ scene.Instance("Assets/Prefabs/Enemy.prefab")
 4. Added component on instance ↔ `AddedComponent`; materialize plan contains the add; reconcile patch
    appends `.AddComponent<T>()`.
 5. Removed component ↔ `RemovedComponents`; round-trips as `.RemoveComponent<T>()`.
-6. Added child GO ↔ `AddedGameObjects`; removed source child ↔ `RemovedGameObjects`; both round-trip.
-7. Full round-trip: model → Plan → (simulated) snapshot with overrides → Reconcile → identical model.
+6. **Materialize revert (banner #6):** desired model lacks a property override / added component the live
+   snapshot still carries → Plan contains a **revert** op (a `PrefabUtility` revert), NOT a set-to-default;
+   after execute, the property is no longer a bold override. (Added/removed child-GameObject round-trip is
+   DEFERRED, banner #5 — not authored/tested this pass.)
+7. Full round-trip (property overrides + added/removed components; excludes child-GameObjects): model →
+   Plan → (simulated) snapshot with overrides → Reconcile → identical model. One test owns the whole loop.
 8. Materialize preserves instance identity: plan applies overrides in place, emits no re-instantiate op.
 9. Revert: snapshot missing a previously-authored override → Reconcile emits an override-removal patch.
 10. Stale-override conflict: prefab default changed under an authored override + instance value equals
