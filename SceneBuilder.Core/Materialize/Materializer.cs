@@ -125,6 +125,54 @@ namespace SceneBuilder.Core.Materialize
                             ToIndex = reorderComponent.ToIndex,
                         });
                         break;
+                    case Change.SetInstanceOverride setInstanceOverride:
+                        passB.Add(new SetInstanceOverride
+                        {
+                            LogicalId = setInstanceOverride.LogicalId,
+                            Target = setInstanceOverride.Target,
+                            PropertyPath = setInstanceOverride.PropertyPath,
+                            Value = setInstanceOverride.Value,
+                            ObjectReference = setInstanceOverride.ObjectReference,
+                        });
+                        break;
+                    case Change.AddInstanceComponent addInstanceComponent:
+                        passB.Add(new AddInstanceComponent
+                        {
+                            LogicalId = addInstanceComponent.LogicalId,
+                            Target = addInstanceComponent.Target,
+                            Component = addInstanceComponent.Component,
+                        });
+                        break;
+                    case Change.RemoveInstanceComponent removeInstanceComponent:
+                        passB.Add(new RemoveInstanceComponent
+                        {
+                            LogicalId = removeInstanceComponent.LogicalId,
+                            Target = removeInstanceComponent.Target,
+                        });
+                        break;
+                    case Change.RevertInstanceOverride revertInstanceOverride:
+                        passB.Add(new RevertInstanceOverride
+                        {
+                            LogicalId = revertInstanceOverride.LogicalId,
+                            Target = revertInstanceOverride.Target,
+                            PropertyPath = revertInstanceOverride.PropertyPath,
+                        });
+                        break;
+                    case Change.RevertAddedComponent revertAddedComponent:
+                        passB.Add(new RevertAddedComponent
+                        {
+                            LogicalId = revertAddedComponent.LogicalId,
+                            Target = revertAddedComponent.Target,
+                            ComponentLogicalId = revertAddedComponent.ComponentLogicalId,
+                        });
+                        break;
+                    case Change.RevertRemovedComponent revertRemovedComponent:
+                        passB.Add(new RevertRemovedComponent
+                        {
+                            LogicalId = revertRemovedComponent.LogicalId,
+                            Target = revertRemovedComponent.Target,
+                        });
+                        break;
                 }
             }
 
@@ -135,6 +183,7 @@ namespace SceneBuilder.Core.Materialize
                 Ops = passA.Concat(passB).ToArray(),
                 Skipped = skipped.ToArray(),
                 Diagnostics = changeSet.Diagnostics,
+                Conflicts = changeSet.Conflicts,
             };
         }
 

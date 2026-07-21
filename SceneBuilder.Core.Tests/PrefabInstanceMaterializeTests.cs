@@ -144,5 +144,183 @@ namespace SceneBuilder.Core.Tests
             var setParent = Assert.Single(plan.Ops.OfType<SetParent>(), op => op.LogicalId == "instance-1");
             Assert.Equal("parentB-1", setParent.ParentLogicalId);
         }
+
+        // b3-t2: instance-override diff + materialize. Target key is the (PrefabId, ObjectId) pair,
+        // independent of the instance's own LogicalId/SourcePrefab.
+        private static OverrideTarget Target() => new() { PrefabId = "prefab-guid-1", ObjectId = 12345 };
+
+        private static (PrefabInstanceNode instance, SnapshotNode snapshotInstance, IdentityMap map) BuildMatched(
+            PropertyOverride[]? desiredOverrides = null,
+            PropertyOverride[]? snapshotOverrides = null,
+            AddedComponent[]? desiredAddedComponents = null,
+            AddedComponent[]? snapshotAddedComponents = null,
+            OverrideTarget[]? desiredRemovedComponents = null,
+            OverrideTarget[]? snapshotRemovedComponents = null)
+        {
+            var transform = new TransformData { Position = new Vec3(1, 2, 3), Rotation = Quat.Identity, Scale = Vec3.One };
+            var instance = new PrefabInstanceNode
+            {
+                LogicalId = "instance-1",
+                Name = "Enemy",
+                Transform = transform,
+                SourcePrefab = new AssetRef { Guid = "prefab-guid-1" },
+                Overrides = desiredOverrides ?? System.Array.Empty<PropertyOverride>(),
+                AddedComponents = desiredAddedComponents ?? System.Array.Empty<AddedComponent>(),
+                RemovedComponents = desiredRemovedComponents ?? System.Array.Empty<OverrideTarget>(),
+            };
+
+            var snapshotInstance = new SnapshotNode
+            {
+                GlobalObjectId = "goid-instance",
+                Name = "Enemy",
+                Transform = transform,
+                SourcePrefabGuid = "prefab-guid-1",
+                Overrides = snapshotOverrides ?? System.Array.Empty<PropertyOverride>(),
+                AddedComponents = snapshotAddedComponents ?? System.Array.Empty<AddedComponent>(),
+                RemovedComponents = snapshotRemovedComponents ?? System.Array.Empty<OverrideTarget>(),
+            };
+
+            var map = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "instance-1", GlobalObjectId = "goid-instance", Kind = "PrefabInstance",
+                        SourcePrefabGuid = "prefab-guid-1",
+                    },
+                },
+            };
+
+            return (instance, snapshotInstance, map);
+        }
+
+        [Fact]
+        public void Materialize_AuthoredAddedComponent_AbsentFromSnapshot_EmitsAddInstanceComponent()
+        {
+            var target = Target();
+            var added = new AddedComponent { Target = target, Component = new ComponentData { LogicalId = "light-1", Type = new TypeRef("UnityEngine.Light") } };
+            var (instance, snapshotInstance, map) = BuildMatched(desiredAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var op = Assert.Single(plan.Ops.OfType<AddInstanceComponent>());
+            Assert.Equal(target, op.Target);
+            Assert.Equal("UnityEngine.Light", op.Component.Type.FullName);
+        }
+
+        [Fact]
+        public void Materialize_AuthoredRemovedComponent_AbsentFromSnapshot_EmitsRemoveInstanceComponent()
+        {
+            var target = Target();
+            var (instance, snapshotInstance, map) = BuildMatched(desiredRemovedComponents: new[] { target });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var op = Assert.Single(plan.Ops.OfType<RemoveInstanceComponent>());
+            Assert.Equal(target, op.Target);
+        }
+
+        [Fact]
+        public void Materialize_SnapshotOverride_AbsentFromDesired_EmitsRevert_NotSetToDefault()
+        {
+            var target = Target();
+            var snapshotOverride = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+            var (instance, snapshotInstance, map) = BuildMatched(snapshotOverrides: new[] { snapshotOverride });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var revert = Assert.Single(plan.Ops.OfType<RevertInstanceOverride>());
+            Assert.Equal(target, revert.Target);
+            Assert.Equal("m_Health", revert.PropertyPath);
+            Assert.Empty(plan.Ops.OfType<SetInstanceOverride>());
+        }
+
+        [Fact]
+        public void Materialize_SnapshotAddedComponent_AbsentFromDesired_EmitsRevertAddedComponent()
+        {
+            var target = Target();
+            var snapshotAdded = new AddedComponent { Target = target, Component = new ComponentData { LogicalId = "light-1", Type = new TypeRef("UnityEngine.Light") } };
+            var (instance, snapshotInstance, map) = BuildMatched(snapshotAddedComponents: new[] { snapshotAdded });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var revert = Assert.Single(plan.Ops.OfType<RevertAddedComponent>());
+            Assert.Equal(target, revert.Target);
+            Assert.Equal("light-1", revert.ComponentLogicalId);
+        }
+
+        [Fact]
+        public void Materialize_MatchedInstance_WithAuthoredOverride_EmitsNoInstantiatePrefab()
+        {
+            var target = Target();
+            var desired = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+            var (instance, snapshotInstance, map) = BuildMatched(desiredOverrides: new[] { desired });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            Assert.Empty(plan.Ops.OfType<InstantiatePrefab>());
+        }
+
+        [Fact]
+        public void Materialize_DesiredOverride_AbsentFromSnapshot_EmitsSetInstanceOverride_CarryingValue()
+        {
+            var target = Target();
+            var desired = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+            var (instance, snapshotInstance, map) = BuildMatched(desiredOverrides: new[] { desired });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var op = Assert.Single(plan.Ops.OfType<SetInstanceOverride>());
+            Assert.Equal(target, op.Target);
+            Assert.Equal("m_Health", op.PropertyPath);
+            Assert.Equal(ValueNode.Primitive.Int(50), op.Value);
+        }
+
+        [Fact]
+        public void Materialize_DesiredObjectReferenceOverride_CarriesObjectReferenceThrough()
+        {
+            var target = Target();
+            var assetRefValue = new ValueNode.AssetRef(new AssetRef { Guid = "mat-guid-1", DisplayPath = "Assets/Materials/Enemy.mat" });
+            var desired = new PropertyOverride { Target = target, PropertyPath = "m_Material", Value = new ValueNode.Unsupported(""), ObjectReference = assetRefValue };
+            var (instance, snapshotInstance, map) = BuildMatched(desiredOverrides: new[] { desired });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var op = Assert.Single(plan.Ops.OfType<SetInstanceOverride>());
+            Assert.Equal(assetRefValue, op.ObjectReference);
+        }
+
+        [Fact]
+        public void Materialize_DesiredOverride_MatchesSnapshotExactly_EmitsNoSetInstanceOverride()
+        {
+            var target = Target();
+            var matching = new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+            var (instance, snapshotInstance, map) = BuildMatched(
+                desiredOverrides: new[] { matching },
+                snapshotOverrides: new[] { matching });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            Assert.Empty(plan.Ops.OfType<SetInstanceOverride>());
+            Assert.Empty(plan.Ops.OfType<RevertInstanceOverride>());
+        }
     }
 }

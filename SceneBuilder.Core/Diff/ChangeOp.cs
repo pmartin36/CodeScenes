@@ -89,4 +89,44 @@ namespace SceneBuilder.Core.Diff
         public string ComponentLogicalId { get; init; } = "";
         public int ToIndex { get; init; }
     }
+
+    // b3-t2: instance-override ChangeOps. LogicalId (base) is the owning PrefabInstanceNode's
+    // LogicalId; Target identifies the nested prefab member the override/added/removed-component
+    // applies to (independent of the instance's own LogicalId). Names mirror the b3-t1 PlanOps
+    // 1:1, per the existing Change.X -> Plan.X convention.
+    public sealed record SetInstanceOverride : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+        public string PropertyPath { get; init; } = "";
+        public ValueNode Value { get; init; } = new ValueNode.Unsupported("");
+        public ValueNode? ObjectReference { get; init; }
+    }
+
+    public sealed record AddInstanceComponent : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+        public ComponentData Component { get; init; } = new();
+    }
+
+    public sealed record RemoveInstanceComponent : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+    }
+
+    public sealed record RevertInstanceOverride : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+        public string PropertyPath { get; init; } = "";
+    }
+
+    public sealed record RevertAddedComponent : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+        public string ComponentLogicalId { get; init; } = "";
+    }
+
+    public sealed record RevertRemovedComponent : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+    }
 }

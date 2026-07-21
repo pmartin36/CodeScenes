@@ -37,6 +37,36 @@ namespace SceneBuilder.Core.Model
             public static Primitive Float(float value) => new(PrimitiveKind.Float, value);
             public static Primitive Double(double value) => new(PrimitiveKind.Double, value);
             public static Primitive String(string value) => new(PrimitiveKind.String, value);
+
+            // Value is `object?` so it round-trips as whatever boxed CLR type the caller
+            // constructed it with; System.Text.Json deserializes an `object`-typed member as a
+            // boxed JsonElement, not the original boxed primitive, so default record equality
+            // (which compares Value by reference/EqualityComparer<object>.Default) breaks across
+            // a JSON round-trip. Normalize both sides against Kind before comparing — same
+            // rationale as this file's other hand-rolled Equals overrides (Enum, List).
+            public bool Equals(Primitive? other) =>
+                other is not null && Kind == other.Kind && Equals(Normalize(Kind, Value), Normalize(other.Kind, other.Value));
+
+            public override int GetHashCode() => HashCode.Combine(Kind, Normalize(Kind, Value));
+
+            private static object? Normalize(PrimitiveKind kind, object? raw)
+            {
+                if (raw is not System.Text.Json.JsonElement element)
+                {
+                    return raw;
+                }
+
+                return kind switch
+                {
+                    PrimitiveKind.Bool => element.GetBoolean(),
+                    PrimitiveKind.Int => element.GetInt32(),
+                    PrimitiveKind.Long => element.GetInt64(),
+                    PrimitiveKind.Float => element.GetSingle(),
+                    PrimitiveKind.Double => element.GetDouble(),
+                    PrimitiveKind.String => element.GetString(),
+                    _ => raw,
+                };
+            }
         }
 
         public sealed record Enum(string TypeFullName, IReadOnlyList<string> Members, bool IsFlags) : ValueNode

@@ -25,6 +25,14 @@ namespace SceneBuilder.Core.Plan
         [JsonIgnore]
         public System.Collections.Generic.IReadOnlyList<Diagnostic> Diagnostics { get; init; }
             = Array.Empty<Diagnostic>();
+
+        // b3-t3: located StaleOverride conflicts carried out of the Materializer. NOT persisted
+        // (JsonIgnore, like Diagnostics) and not drift-counted. Population (wiring
+        // changeSet.Conflicts through Materialize) is the code-writer's job; this is the data
+        // carrier stub only.
+        [JsonIgnore]
+        public System.Collections.Generic.IReadOnlyList<SceneBuilder.Core.Reconcile.Conflict> Conflicts { get; init; }
+            = Array.Empty<SceneBuilder.Core.Reconcile.Conflict>();
     }
 
     // A field the plan does NOT write, surfaced for preview: Reason "Unsupported" (the ValueNode
