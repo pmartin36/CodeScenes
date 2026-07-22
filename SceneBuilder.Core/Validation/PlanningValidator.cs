@@ -28,9 +28,12 @@ namespace SceneBuilder.Core.Validation
         {
             foreach (var conflict in parse.Ambiguities)
             {
-                var code = conflict.Kind == ConflictKind.DuplicateLogicalId
-                    ? DiagnosticCodes.DuplicateLogicalId
-                    : DiagnosticCodes.AmbiguousDuplicateSibling;
+                var code = conflict.Kind switch
+                {
+                    ConflictKind.DuplicateLogicalId => DiagnosticCodes.DuplicateLogicalId,
+                    ConflictKind.UnknownFacadeReference => DiagnosticCodes.UnknownFacadeReference,
+                    _ => DiagnosticCodes.AmbiguousDuplicateSibling,
+                };
 
                 var (line, col) = LocationOf(source, conflict.Location);
 

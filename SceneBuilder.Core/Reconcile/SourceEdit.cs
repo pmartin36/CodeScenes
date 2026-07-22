@@ -84,6 +84,13 @@ namespace SceneBuilder.Core.Reconcile
         // Tag/Layer/Active/IsStatic (InstanceHandle exposes no such calls). Path re-derived from
         // SourcePrefabGuid via identityMap.Assets at emit time (Reconciler), not rendered here.
         public string? SourcePrefabPath { get; init; }
+
+        // b4-t4 (stub — not yet consumed by StatementText): non-null => the FacadeCatalog
+        // Guid->PropertyName reverse lookup (Reconciler, via facadeCatalog) resolved this
+        // instance's SourcePrefabGuid to a façade entry. When set, rendering MUST prefer
+        // `<receiver>.Instance(Prefabs.<SourcePropertyName>)` over the SourcePrefabPath string
+        // form (SourcePrefabPath stays populated regardless, as the identity/fallback source).
+        public string? SourcePropertyName { get; init; }
     }
 
     public sealed record RemoveStatement : SourceEdit

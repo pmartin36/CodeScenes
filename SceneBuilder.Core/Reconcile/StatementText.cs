@@ -71,8 +71,14 @@ namespace SceneBuilder.Core.Reconcile
             // `<receiver>.Add(Name)` — InstanceHandle (b2-t1) exposes no Tag/Layer/Active/Static
             // calls, so those fields are always null for an instance and the tail below is
             // skipped entirely for clarity/safety (the plain path stays byte-identical to today).
+            // b4-t4: SourcePropertyName set (a FacadeCatalog hit) => emit the typed
+            // `Instance(Prefabs.X)` form instead of the string literal; the "is this an instance"
+            // gate below stays keyed on SourcePrefabPath (always non-null for an instance), never
+            // re-keyed on SourcePropertyName.
             var chain = edit.SourcePrefabPath != null
-                ? $"{receiver}.Instance({SourceExpr.StringLiteral(edit.SourcePrefabPath)})"
+                ? edit.SourcePropertyName != null
+                    ? $"{receiver}.Instance(Prefabs.{edit.SourcePropertyName})"
+                    : $"{receiver}.Instance({SourceExpr.StringLiteral(edit.SourcePrefabPath)})"
                 : $"{receiver}.Add({SyntaxFactory.Literal(edit.Name).ToString()})";
 
             if (edit.Transform != null)

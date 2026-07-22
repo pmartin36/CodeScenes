@@ -23,7 +23,8 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, FlagPresence>? flagPresence = null,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors = null,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans = null,
-            IReadOnlyDictionary<string, string>? handles = null)
+            IReadOnlyDictionary<string, string>? handles = null,
+            FacadeCatalog? facadeCatalog = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
@@ -501,7 +502,8 @@ namespace SceneBuilder.Core.Reconcile
                 removedLogicalIds,
                 conflicts,
                 addedAssets,
-                prefabPathByGuid);
+                prefabPathByGuid,
+                facadeCatalog);
 
             // THE write-path chokepoint for duplicate sibling names.
             //

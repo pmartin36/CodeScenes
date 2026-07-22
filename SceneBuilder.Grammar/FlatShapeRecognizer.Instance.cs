@@ -28,7 +28,7 @@ namespace SceneBuilder.Grammar
                 return;
             }
 
-            if (!IsStringLiteral(instanceArgs[0].Expression))
+            if (!IsStringLiteral(instanceArgs[0].Expression) && !IsPrefabsMemberAccess(instanceArgs[0].Expression))
             {
                 Report(ctx, instanceArgs[0].Expression, SB1001, "Expected a string literal");
             }
@@ -47,6 +47,9 @@ namespace SceneBuilder.Grammar
                     case "RemoveComponent":
                         ApplyRemoveComponent(call.Invocation, ctx);
                         break;
+                    case "On":
+                        ApplyScopedOn(call.Args, ctx);
+                        break;
                     default:
                         chainedCalls.Add(call);
                         break;
@@ -58,6 +61,35 @@ namespace SceneBuilder.Grammar
             if (handleName != null)
             {
                 ctx.Scope.Add(handleName);
+            }
+        }
+
+        // b4-t1: the typed façade form `Instance(Prefabs.Tank)` — shape-only (the recognizer is
+        // ns2.0 and cannot reference Core/FacadeCatalog for the semantic catalog lookup; that
+        // lives solely in BuilderParser.Instance.cs).
+        private static bool IsPrefabsMemberAccess(ExpressionSyntax expr) =>
+            expr is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "Prefabs" } };
+
+        // b4-t2: `.On(selector, closure)` — shape-only, mirroring BuilderParser.Facade.cs's
+        // ApplyScopedOn arg0 acceptance (SimpleLambda with a MemberAccess body, OR a string
+        // literal). The catalog resolution + miss-conflict live solely in the parser (this
+        // recognizer cannot reference Core/FacadeCatalog); arg1 (the closure) is unread by both
+        // arms — materialize is spec 24. MUST accept/reject the identical shape as the parser
+        // arm or RecognizerAgreementTests/RecognizerCompletenessTests break.
+        private static void ApplyScopedOn(ArgumentListSyntax args, RecognizerContext ctx)
+        {
+            if (args.Arguments.Count != 2)
+            {
+                Report(ctx, args, SB1001, "On(selector, closure) requires exactly two arguments");
+                return;
+            }
+
+            var arg0 = args.Arguments[0].Expression;
+            var isTypedSelector = arg0 is SimpleLambdaExpressionSyntax { Body: MemberAccessExpressionSyntax };
+
+            if (!isTypedSelector && !IsStringLiteral(arg0))
+            {
+                Report(ctx, arg0, SB1001, "On(...) requires a typed member-chain selector (e.g. `t => t.A.B`) or a string path");
             }
         }
 

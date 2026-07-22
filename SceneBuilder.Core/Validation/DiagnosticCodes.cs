@@ -7,6 +7,7 @@ namespace SceneBuilder.Core.Validation
         public const string AssetPathNotFound = "SB2101";
         public const string AmbiguousDuplicateSibling = "SB2201";
         public const string DuplicateLogicalId = "SB2202";
+        public const string UnknownFacadeReference = "SB2203";
         public const string PrefabOverridesNotModelled = "SB2301";
     }
 }

@@ -18,11 +18,17 @@ namespace SceneBuilder.Core.Parsing
     {
         private static readonly string[] TransformPositionalArgs = { "pos", "rot", "scale" };
 
-        public static ParseResult Parse(string source) => ParseCore(source, null);
+        public static ParseResult Parse(string source) => ParseCore(source, null, null);
 
-        public static ParseResult Parse(string source, IdentityMap? existingMap = null) => ParseCore(source, existingMap);
+        public static ParseResult Parse(string source, IdentityMap? existingMap = null) => ParseCore(source, existingMap, null);
 
-        private static ParseResult ParseCore(string source, IdentityMap? existingMap)
+        // b4-t1: the FacadeCatalog-aware overload — Instance(Prefabs.X) resolves X via the
+        // catalog straight to a Guid; an unknown entry (or a null catalog) is a located Conflict
+        // (never a throw, never a silent drop). See research.md.
+        public static ParseResult Parse(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog) =>
+            ParseCore(source, existingMap, facadeCatalog);
+
+        private static ParseResult ParseCore(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog)
         {
             var tree = CSharpSyntaxTree.ParseText(source);
             var root = (CompilationUnitSyntax)tree.GetRoot();
@@ -36,7 +42,7 @@ namespace SceneBuilder.Core.Parsing
 
             RecognizeOrThrow(tree, body, sceneParamName);
 
-            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap));
+            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap), facadeCatalog);
 
             foreach (var statement in body.Statements)
             {
@@ -88,6 +94,7 @@ namespace SceneBuilder.Core.Parsing
             // in list order.
             var ambiguities = ConflictDetector.DuplicateNameConflicts(model, anchors)
                 .Concat(ConflictDetector.DuplicateLogicalIdConflicts(nodeAnchors))
+                .Concat(ctx.FacadeConflicts)
                 .ToList();
 
             return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities, Usings = usings };
@@ -716,6 +723,7 @@ namespace SceneBuilder.Core.Parsing
             public ChannelMask DrivenChannels;
             public bool IsInstance;
             public string? SourcePrefabPath;
+            public string? SourcePrefabGuid;
             public readonly List<NodeBuilder> Children = new();
             public readonly List<ComponentBuilder> Components = new();
 
@@ -725,6 +733,10 @@ namespace SceneBuilder.Core.Parsing
             public readonly List<PropertyOverride> Overrides = new();
             public readonly List<ComponentBuilder> AddedComponents = new();
             public readonly List<string> RemovedComponentTypes = new();
+
+            // b4-t2: `.On(selector, ...)` resolved targets, carried until BuildInstanceNode maps
+            // them onto PrefabInstanceNode.ScopedOverrides.
+            public readonly List<ScopedOverride> ScopedOverrides = new();
         }
 
         private sealed class ComponentBuilder
@@ -738,16 +750,19 @@ namespace SceneBuilder.Core.Parsing
 
         private sealed class ParserContext
         {
-            public ParserContext(string sceneParamName, LogicalIdResolver resolver)
+            public ParserContext(string sceneParamName, LogicalIdResolver resolver, FacadeCatalog? facadeCatalog = null)
             {
                 SceneParamName = sceneParamName;
                 Resolver = resolver;
+                FacadeCatalog = facadeCatalog;
             }
 
             public string SceneParamName { get; }
             public LogicalIdResolver Resolver { get; }
+            public FacadeCatalog? FacadeCatalog { get; }
             public Dictionary<string, NodeBuilder> Handles { get; } = new();
             public List<NodeBuilder> Roots { get; } = new();
+            public List<Conflict> FacadeConflicts { get; } = new();
         }
     }
 }

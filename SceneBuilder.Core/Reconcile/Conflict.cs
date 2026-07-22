@@ -14,7 +14,12 @@ namespace SceneBuilder.Core.Reconcile
         // recorded BaseValue no longer matches the snapshot's current BaseValue) AND the live
         // instance value now equals the NEW default — ambiguous whether the user wants to keep the
         // override or adopt the new default. Neither silently kept nor dropped (spec #9).
-        StaleOverride
+        StaleOverride,
+
+        // b4-t1: Instance(Prefabs.X) where X is absent from the FacadeCatalog (or the catalog
+        // is null). Located over the `Prefabs.X` argument span. Never a throw, never a silent
+        // drop — the instance node is still produced.
+        UnknownFacadeReference
     }
 
     public sealed record Conflict

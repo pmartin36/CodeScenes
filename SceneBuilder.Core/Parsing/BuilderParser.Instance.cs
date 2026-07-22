@@ -41,11 +41,41 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
-            var path = EvalStringLiteral(instanceArgs[0].Expression);
-            var stem = Path.GetFileNameWithoutExtension(path);
+            var arg0 = instanceArgs[0].Expression;
+            NodeBuilder node;
 
-            var node = new NodeBuilder { Name = stem, IsInstance = true, SourcePrefabPath = path };
-            node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
+            if (arg0 is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "Prefabs" } } prefabsMemberAccess)
+            {
+                // b4-t1: typed façade form `Instance(Prefabs.X)` — resolve X via the catalog
+                // straight to a Guid (DisplayPath left empty). A catalog miss (or a null
+                // catalog) is a located Conflict, never a throw, never a silent drop.
+                var propertyName = prefabsMemberAccess.Name.Identifier.Text;
+                node = new NodeBuilder { Name = propertyName, IsInstance = true };
+                node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
+
+                if (ctx.FacadeCatalog != null && ctx.FacadeCatalog.TryGetGuid(propertyName, out var guid))
+                {
+                    node.SourcePrefabGuid = guid;
+                }
+                else
+                {
+                    var argSpan = new SourceSpan(arg0.Span.Start, arg0.Span.Length);
+                    ctx.FacadeConflicts.Add(new Conflict
+                    {
+                        Kind = ConflictKind.UnknownFacadeReference,
+                        Reason = $"Unknown facade reference 'Prefabs.{propertyName}'.",
+                        Location = argSpan,
+                    });
+                }
+            }
+            else
+            {
+                var path = EvalStringLiteral(arg0);
+                var stem = Path.GetFileNameWithoutExtension(path);
+
+                node = new NodeBuilder { Name = stem, IsInstance = true, SourcePrefabPath = path };
+                node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
+            }
 
             var chainedCalls = new List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
             foreach (var call in calls.Skip(1))
@@ -61,6 +91,10 @@ namespace SceneBuilder.Core.Parsing
                     case "RemoveComponent":
                         ApplyRemoveComponent(node, call.Invocation);
                         break;
+                    case "On":
+                        // b4-t2 (test-writer stub): real resolution lands in BuilderParser.Facade.cs.
+                        ApplyScopedOn(node, call.Args, ctx);
+                        break;
                     default:
                         chainedCalls.Add(call);
                         break;
@@ -71,7 +105,7 @@ namespace SceneBuilder.Core.Parsing
 
             var siblingIndex = targetList.Count;
             var parentLogicalId = parentNode?.LogicalId;
-            node.LogicalId = ctx.Resolver.Resolve(handleName, explicitId, parentLogicalId, stem, siblingIndex);
+            node.LogicalId = ctx.Resolver.Resolve(handleName, explicitId, parentLogicalId, node.Name, siblingIndex);
 
             targetList.Add(node);
             if (handleName != null)
@@ -104,13 +138,14 @@ namespace SceneBuilder.Core.Parsing
             },
             Components = System.Array.Empty<ComponentData>(),
             Children = builder.Children.Select(BuildNode).ToArray(),
-            SourcePrefab = new AssetRef { DisplayPath = builder.SourcePrefabPath ?? "" },
+            SourcePrefab = new AssetRef { DisplayPath = builder.SourcePrefabPath ?? "", Guid = builder.SourcePrefabGuid ?? "" },
             OpaqueOverrides = null,
             Overrides = builder.Overrides.ToArray(),
             AddedComponents = BuildAddedComponents(builder),
             RemovedComponents = builder.RemovedComponentTypes
                 .Select(typeFullName => new OverrideTarget { PrefabId = "type:" + typeFullName, ObjectId = 0 })
                 .ToArray(),
+            ScopedOverrides = builder.ScopedOverrides.Count == 0 ? null : builder.ScopedOverrides.ToArray(),
         };
 
         private static AddedComponent[] BuildAddedComponents(NodeBuilder builder)

@@ -43,7 +43,11 @@ namespace SceneBuilder.Core.Reconcile
             List<AssetEntry> addedAssets,
             // m6-b4-1: source-prefab GUID -> last-known asset path (identityMap.Assets), used to
             // re-derive the `.Instance(path)` argument for a snapshot-only prefab-instance root.
-            IReadOnlyDictionary<string, string> prefabPathByGuid)
+            IReadOnlyDictionary<string, string> prefabPathByGuid,
+            // b4-t4: optional Guid->PropertyName reverse lookup — non-null iff the caller
+            // threaded a manifest-backed FacadeCatalog; used by HandleInstanceNode to prefer the
+            // typed `Instance(Prefabs.X)` emission over the string fallback.
+            FacadeCatalog? facadeCatalog)
         {
             // The array position IS the scene sibling index (FlattenSnapshot keys SnapshotEntry off the
             // same index), and it is what a created node's statement must be placed at.
@@ -66,6 +70,7 @@ namespace SceneBuilder.Core.Reconcile
                         modelByLogicalId,
                         reserved,
                         prefabPathByGuid,
+                        facadeCatalog,
                         resolveOwnerHandle,
                         nextIndexByParentKey,
                         edits,
@@ -101,7 +106,8 @@ namespace SceneBuilder.Core.Reconcile
                         removedLogicalIds,
                         conflicts,
                         addedAssets,
-                        prefabPathByGuid);
+                        prefabPathByGuid,
+                        facadeCatalog);
 
                     continue;
                 }
@@ -238,7 +244,8 @@ namespace SceneBuilder.Core.Reconcile
                         removedLogicalIds,
                         conflicts,
                         addedAssets,
-                        prefabPathByGuid);
+                        prefabPathByGuid,
+                        facadeCatalog);
 
                     continue;
                 }
@@ -262,7 +269,8 @@ namespace SceneBuilder.Core.Reconcile
                     removedLogicalIds,
                     conflicts,
                     addedAssets,
-                    prefabPathByGuid);
+                    prefabPathByGuid,
+                    facadeCatalog);
             }
         }
     }

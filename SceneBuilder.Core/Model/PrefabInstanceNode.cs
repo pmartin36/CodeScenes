@@ -26,5 +26,11 @@ namespace SceneBuilder.Core.Model
 
         [JsonPropertyOrder(15)]
         public OverrideTarget[] RemovedGameObjects { get; init; } = Array.Empty<OverrideTarget>();
+
+        // b4-t2: `.On(selector, ...)` resolved targets. Nullable + omit-when-null so instances
+        // without `.On` serialize byte-identically to before this task.
+        [JsonPropertyOrder(16)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ScopedOverride[]? ScopedOverrides { get; init; }
     }
 }

@@ -27,6 +27,9 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, GameObjectNode> modelByLogicalId,
             HashSet<string> reserved,
             IReadOnlyDictionary<string, string> prefabPathByGuid,
+            // b4-t4: optional Guid->PropertyName reverse lookup. Present + a catalog hit => emit
+            // the typed `Instance(Prefabs.X)` form; absent or a miss => string fallback (unchanged).
+            FacadeCatalog? facadeCatalog,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             Dictionary<string, int> nextIndexByParentKey,
             List<SourceEdit> edits,
@@ -94,6 +97,14 @@ namespace SceneBuilder.Core.Reconcile
                 newLogicalId = LogicalIdResolver.Synthesize(parentHandle, node.Name, index);
             }
 
+            // b4-t4: SourcePrefabPath stays populated regardless (identity/fallback source);
+            // SourcePropertyName is the typed-emission preference layered on top, set only on a
+            // catalog hit.
+            string? sourcePropertyName = facadeCatalog != null
+                && facadeCatalog.TryGetPropertyName(node.SourcePrefabGuid, out var propertyName)
+                    ? propertyName
+                    : null;
+
             edits.Add(new AppendStatement
             {
                 NewLogicalId = newLogicalId,
@@ -101,6 +112,7 @@ namespace SceneBuilder.Core.Reconcile
                 NewSiblingIndex = siblingIndex,
                 Name = node.Name,
                 SourcePrefabPath = path,
+                SourcePropertyName = sourcePropertyName,
                 Transform = node.Transform != new TransformData() ? node.Transform : null,
                 Active = null,
                 Tag = null,
