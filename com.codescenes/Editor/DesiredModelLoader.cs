@@ -113,6 +113,15 @@ namespace SceneBuilder.Editor
             var prefabLowered = PrefabRefLowering.Lower(desired, assetResolver.ResolvePrefabSource);
             desired = prefabLowered.Model;
 
+            // M10 (b6-t2 rehydrate seam): thread each persisted InstanceOverrideRecord.BaseValue back
+            // onto the matching desired PropertyOverride.BaseValue, so DetectStaleOverrides sees a
+            // non-null desired BaseValue through the real adapter, not just hand-built Core POCOs.
+            // Guarded on existingMap != null: the first Build has no sidecar yet, nothing to rehydrate.
+            if (existingMap is not null)
+            {
+                desired = InstanceOverrideRehydrator.Rehydrate(desired, existingMap);
+            }
+
             return new Loaded(desired, parse, spans, assetResolver.Harvested);
         }
     }

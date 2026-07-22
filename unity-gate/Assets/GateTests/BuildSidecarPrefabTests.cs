@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Editor;
 using SceneBuilder.Core.Identity;
+using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Serialization;
 
 // b5-t3: build-side (code->scene) sidecar write path for prefab instances. After
@@ -295,5 +296,49 @@ public class BuildSidecarPrefabScene : ISceneDefinition
 
         Assert.AreEqual(firstOv.PrefabId, secondOv.PrefabId, "PrefabId changed across repeated builds");
         Assert.AreEqual(firstOv.ObjectId, secondOv.ObjectId, "ObjectId changed across repeated builds");
+    }
+
+    // b6-t2 (iteration 3, seam fix): the persisted InstanceOverrideRecord.BaseValue must be threaded
+    // back onto the DESIRED model's PropertyOverride.BaseValue by DesiredModelLoader.Load, so
+    // InstanceOverrideDiff.DetectStaleOverrides (which short-circuits on a null desired BaseValue)
+    // actually sees data on a real reload — not just hand-built Core POCO tests. Proves the LOAD-path
+    // wiring, not just the SAVE-side persistence (already covered above).
+    [Test]
+    public void Run_ThenReload_DesiredOverrideBaseValueRehydrated()
+    {
+        File.WriteAllText(_builderPath, Source($"        scene.Instance(\"{PrefabPath}\");"));
+        var setupResult = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsEmpty(setupResult.Diagnostics,
+            "Setup build reported diagnostics: " + string.Join("; ", setupResult.Diagnostics.Select(d => d.Message)));
+
+        var instanceRoot = FindRoot(EditorSceneManager.GetActiveScene(), "M6_Enemy");
+        Assert.IsNotNull(instanceRoot, "Setup: instance root was not created");
+        var collider = instanceRoot.GetComponent<BoxCollider>();
+        Assert.IsNotNull(collider, "Setup: prefab fixture has no root BoxCollider to override");
+        collider.isTrigger = true;
+        PrefabUtility.RecordPrefabInstancePropertyModifications(collider);
+
+        var overrideSource = Source(
+            $"        scene.Instance(\"{PrefabPath}\").Override(e => e.Set<UnityEngine.BoxCollider>(\"m_IsTrigger\", true));");
+        File.WriteAllText(_builderPath, overrideSource);
+        var result = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsEmpty(result.Diagnostics,
+            "Rebuild reported diagnostics against a live root-target override: "
+            + string.Join("; ", result.Diagnostics.Select(d => d.Message)));
+
+        var persistedMap = IdentityMapJson.Deserialize(File.ReadAllText(_sidecarPath));
+        var persistedOv = persistedMap.Entries.Single(e => e.Kind == "PrefabInstance")
+            .Overrides?.SingleOrDefault(o => o.PropertyPath == "m_IsTrigger");
+        Assert.IsNotNull(persistedOv, "Setup: sidecar did not persist the m_IsTrigger override record");
+        Assert.IsNotNull(persistedOv.BaseValue, "Setup: sidecar did not persist a BaseValue for m_IsTrigger");
+
+        // Re-parse the SAME authored source against the DESERIALIZED sidecar — this is the real
+        // load-path seam every Build/Sync call goes through (DesiredModelLoader.Load).
+        var loaded = DesiredModelLoader.Load(overrideSource, persistedMap);
+        var desiredInstance = (PrefabInstanceNode)loaded.Desired.Roots.Single(r => r.Name == "M6_Enemy");
+        var desiredOv = desiredInstance.Overrides.SingleOrDefault(o => o.PropertyPath == "m_IsTrigger");
+        Assert.IsNotNull(desiredOv, "Desired model has no m_IsTrigger override after reload");
+        Assert.IsNotNull(desiredOv.BaseValue,
+            "DesiredModelLoader.Load did not rehydrate the persisted BaseValue onto the desired override");
     }
 }
