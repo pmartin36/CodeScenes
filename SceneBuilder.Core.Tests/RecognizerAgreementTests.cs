@@ -237,7 +237,72 @@ public class SurfaceSnapNoneScene : ISceneDefinition
     }
 }
 ");
+
+            // ---- COMPLETENESS EXTENSION: one case per body-grammar throw site NOT already above,
+            // so acceptance-parity (recognizer flags IFF parser throws) is proven at EVERY throw
+            // the dedup removes. Each body wraps the offending statement in a valid Build shell.
+            foreach (var c in CompletenessCases())
+            {
+                yield return c;
+            }
         }
+
+        // Every remaining body-shape throw site in BuilderParser{,.Instance,.Spatial}.cs, keyed by a
+        // minimal triggering builder body. Shared with RecognizerCompletenessTests (the forward guard).
+        public static IEnumerable<object[]> CompletenessCases()
+        {
+            // BuilderParser.cs statement/chain/literal sites -----------------------------------------
+            yield return Body("LocalDecl_MultipleVariables", @"int a = 0, b = 0;");
+            yield return Body("LocalDecl_NoInitializer", @"int x;");
+            yield return Body("ExpressionStatement_NoCallChain", @"scene;");
+            yield return Body("SetterOnly_UnknownHandle", @"foo.Tag(""x"");");
+            yield return Body("Add_UnknownReceiver", @"foo.Add(""A"");");
+            yield return Body("Add_NoNameArgument", @"scene.Add();");
+            yield return Body("Add_NameNotStringLiteral", @"scene.Add(5);");
+            yield return Body("AddSecondArg_NotLambda", @"scene.Add(""A"", 5);");
+            yield return Body("Component_NoTypeArgument", @"scene.Add(""A"").Component(c => c.Set(""x"", 1f));");
+            yield return Body("ComponentClosure_NotLambda", @"scene.Add(""A"").Component<Rigidbody>(5);");
+            yield return Body("ComponentClosure_NonExpressionStatement", @"scene.Add(""A"").Component<Rigidbody>(c => { int z = 0; });");
+            yield return Body("ComponentSet_WrongArgCount", @"scene.Add(""A"").Component<Rigidbody>(c => c.Set(""x""));");
+            yield return Body("ComponentSet_UnsupportedKey", @"scene.Add(""A"").Component<Rigidbody>(c => c.Set(5, 1f));");
+            yield return Body("Unwrap_UnsupportedInvocationForm", @"Foo();");
+            yield return Body("Unwrap_UnsupportedReceiverExpression", @"this.Add(""A"");");
+            yield return Body("Transform_TooManyArguments", @"scene.Add(""A"").Transform((0,0,0),(0,0,0),(0,0,0),(0,0,0));");
+            yield return Body("Transform_NotA3Tuple", @"scene.Add(""A"").Transform(5);");
+            yield return Body("Transform_UnknownArgument", @"scene.Add(""A"").Transform(bogus: (0,0,0));");
+            yield return Body("Transform_ComponentNotNumeric", @"scene.Add(""A"").Transform((""x"",0,0));");
+            yield return Body("Tag_NotStringLiteral", @"scene.Add(""A"").Tag(5);");
+            yield return Body("Active_NotBoolLiteral", @"scene.Add(""A"").Active(5);");
+            yield return Body("Layer_NotNumericLiteral", @"scene.Add(""A"").Layer(""x"");");
+
+            // BuilderParser.Instance.cs sites --------------------------------------------------------
+            yield return Body("Instance_NoPathArgument", @"scene.Instance();");
+            yield return Body("Instance_PathNotStringLiteral", @"scene.Instance(5);");
+            yield return Body("Override_WrongArgCount", @"scene.Instance(""p.prefab"").Override();");
+            yield return Body("Override_ClosureNotLambda", @"scene.Instance(""p.prefab"").Override(5);");
+            yield return Body("Override_NonExpressionStatement", @"scene.Instance(""p.prefab"").Override(e => { int z = 0; });");
+            yield return Body("Override_UnknownReceiver", @"scene.Instance(""p.prefab"").Override(e => other.Set<Health>(""x"", 1f));");
+            yield return Body("Override_NonSetCall", @"scene.Instance(""p.prefab"").Override(e => e.Nope());");
+            yield return Body("OverrideSet_WrongArgCount", @"scene.Instance(""p.prefab"").Override(e => e.Set<Health>(""x""));");
+            yield return Body("OverrideSet_ParenthesizedUntypedSelector", @"scene.Instance(""p.prefab"").Override(e => e.Set((x) => x.member, 1f));");
+            yield return Body("OverrideSet_StringKeyNoGeneric", @"scene.Instance(""p.prefab"").Override(e => e.Set(""m_Path"", 1f));");
+            yield return Body("OverrideSet_UnsupportedKey", @"scene.Instance(""p.prefab"").Override(e => e.Set(5, 1f));");
+
+            // BuilderParser.Spatial.cs sites (the combinations not already in the corpus) ------------
+            yield return Body("FitSize_AspectPlusExplicit", @"scene.Add(""A"").FitSize(width: 2f, size: (1,1,1));");
+            yield return Body("SurfaceSnap_LeftRight", @"scene.Add(""A"").SurfaceSnap(left: true, right: true);");
+            yield return Body("SurfaceSnap_ForwardBack", @"scene.Add(""A"").SurfaceSnap(forward: true, back: true);");
+        }
+
+        private static object[] Body(string name, string statements) => Case(name, $@"
+public class {name}Scene : ISceneDefinition
+{{
+    public void Build(SceneRoot scene)
+    {{
+        {statements}
+    }}
+}}
+");
 
         private static object[] Case(string name, string source) => new object[] { name, source };
 

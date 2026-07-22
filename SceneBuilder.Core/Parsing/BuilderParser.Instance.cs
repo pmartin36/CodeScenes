@@ -32,13 +32,13 @@ namespace SceneBuilder.Core.Parsing
             }
             else
             {
-                throw Fail(receiver, $"Unknown receiver '{receiver.Identifier.Text}'");
+                throw Unreachable();
             }
 
             var instanceArgs = calls[0].Args.Arguments;
             if (instanceArgs.Count == 0)
             {
-                throw Fail(calls[0].Args, "Instance requires a prefab-path argument");
+                throw Unreachable();
             }
 
             var path = EvalStringLiteral(instanceArgs[0].Expression);
@@ -138,12 +138,12 @@ namespace SceneBuilder.Core.Parsing
         {
             if (args.Arguments.Count != 1)
             {
-                throw Fail(args, "Override(...) requires exactly one closure argument");
+                throw Unreachable();
             }
 
             if (args.Arguments[0].Expression is not SimpleLambdaExpressionSyntax lambda)
             {
-                throw Fail(args.Arguments[0].Expression, "Unsupported closure form; expected a lambda like `e => ...`");
+                throw Unreachable();
             }
 
             var paramName = lambda.Parameter.Identifier.Text;
@@ -155,7 +155,7 @@ namespace SceneBuilder.Core.Parsing
                     {
                         if (statement is not ExpressionStatementSyntax exprStatement)
                         {
-                            throw Fail(statement, "Unsupported statement in Override closure (expected .Set(...) calls)");
+                            throw Unreachable();
                         }
 
                         ApplyOverrideSetChain(exprStatement.Expression, paramName, node);
@@ -167,7 +167,7 @@ namespace SceneBuilder.Core.Parsing
                     break;
 
                 default:
-                    throw Fail(lambda.Body, "Unsupported lambda body");
+                    throw Unreachable();
             }
         }
 
@@ -176,14 +176,14 @@ namespace SceneBuilder.Core.Parsing
             var (receiver, calls) = UnwrapChain(expression);
             if (receiver.Identifier.Text != paramName)
             {
-                throw Fail(receiver, $"Unknown receiver '{receiver.Identifier.Text}' in Override closure");
+                throw Unreachable();
             }
 
             foreach (var (method, _, invocation) in calls)
             {
                 if (method != "Set")
                 {
-                    throw Fail(invocation, "Unsupported call in Override closure (expected .Set(...))");
+                    throw Unreachable();
                 }
 
                 node.Overrides.Add(ParseOverrideSet(invocation));
@@ -199,7 +199,7 @@ namespace SceneBuilder.Core.Parsing
             var args = setInvocation.ArgumentList.Arguments;
             if (args.Count != 2)
             {
-                throw Fail(setInvocation, "Set(...) requires exactly two arguments");
+                throw Unreachable();
             }
 
             string typeFullName;
@@ -208,7 +208,7 @@ namespace SceneBuilder.Core.Parsing
             var keyExpr = args[0].Expression;
             if (keyExpr is SimpleLambdaExpressionSyntax untypedLambda)
             {
-                throw Fail(untypedLambda.Parameter, "Override selector requires a typed parameter, e.g. `(Health x) => x.member` (component type is unrecoverable from an untyped selector)");
+                throw Unreachable();
             }
 
             if (keyExpr is ParenthesizedLambdaExpressionSyntax { Body: MemberAccessExpressionSyntax memberAccess } typedLambda)
@@ -216,7 +216,7 @@ namespace SceneBuilder.Core.Parsing
                 var parameter = typedLambda.ParameterList.Parameters.Single();
                 if (parameter.Type == null)
                 {
-                    throw Fail(parameter, "Override selector requires a typed parameter, e.g. `(Health x) => x.member`");
+                    throw Unreachable();
                 }
 
                 typeFullName = parameter.Type.ToString().Trim();
@@ -228,7 +228,7 @@ namespace SceneBuilder.Core.Parsing
                     setMemberAccess.Name is not GenericNameSyntax generic ||
                     generic.TypeArgumentList.Arguments.Count != 1)
                 {
-                    throw Fail(setInvocation, "Set(\"path\", value) requires a generic type argument, e.g. `.Set<BoxCollider>(...)`");
+                    throw Unreachable();
                 }
 
                 typeFullName = generic.TypeArgumentList.Arguments[0].ToString().Trim();
@@ -236,7 +236,7 @@ namespace SceneBuilder.Core.Parsing
             }
             else
             {
-                throw Fail(keyExpr, "Unsupported Override Set(...) key form (expected a typed selector or a string literal with `.Set<T>(...)`)");
+                throw Unreachable();
             }
 
             var value = ValueNodeParser.Parse(args[1].Expression);
@@ -257,7 +257,7 @@ namespace SceneBuilder.Core.Parsing
                 memberAccess.Name is not GenericNameSyntax generic ||
                 generic.TypeArgumentList.Arguments.Count != 1)
             {
-                throw Fail(invocation, "AddComponent<T>() requires exactly one type argument");
+                throw Unreachable();
             }
 
             var typeFullName = generic.TypeArgumentList.Arguments[0].ToString().Trim();
@@ -279,7 +279,7 @@ namespace SceneBuilder.Core.Parsing
                 memberAccess.Name is not GenericNameSyntax generic ||
                 generic.TypeArgumentList.Arguments.Count != 1)
             {
-                throw Fail(invocation, "RemoveComponent<T>() requires exactly one type argument");
+                throw Unreachable();
             }
 
             var typeFullName = generic.TypeArgumentList.Arguments[0].ToString().Trim();

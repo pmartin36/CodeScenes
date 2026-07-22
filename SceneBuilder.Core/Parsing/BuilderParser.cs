@@ -155,13 +155,13 @@ namespace SceneBuilder.Core.Parsing
                 case LocalDeclarationStatementSyntax local:
                     if (local.Declaration.Variables.Count != 1)
                     {
-                        throw Fail(local, "Unsupported local declaration (expected a single builder handle)");
+                        throw Unreachable();
                     }
 
                     var declarator = local.Declaration.Variables[0];
                     if (declarator.Initializer == null)
                     {
-                        throw Fail(local, "Unsupported local declaration (expected a builder call initializer)");
+                        throw Unreachable();
                     }
 
                     ProcessBuilderChain(declarator.Initializer.Value, declarator.Identifier.Text, ctx);
@@ -172,7 +172,7 @@ namespace SceneBuilder.Core.Parsing
                     break;
 
                 default:
-                    throw Fail(statement, $"Unsupported interleaved control flow ({statement.Kind()})");
+                    throw Unreachable();
             }
         }
 
@@ -182,7 +182,7 @@ namespace SceneBuilder.Core.Parsing
 
             if (calls.Count == 0)
             {
-                throw Fail(expression, "Expected a builder call chain");
+                throw Unreachable();
             }
 
             if (calls[0].Method == "Instance")
@@ -201,7 +201,7 @@ namespace SceneBuilder.Core.Parsing
             // `m => m.Transform(...)` where `m` is the node just created by the enclosing Add.
             if (receiver.Identifier.Text == ctx.SceneParamName || !ctx.Handles.TryGetValue(receiver.Identifier.Text, out var node))
             {
-                throw Fail(receiver, $"Unknown receiver '{receiver.Identifier.Text}'");
+                throw Unreachable();
             }
 
             var explicitId = ApplyChainedCalls(node, calls);
@@ -232,13 +232,13 @@ namespace SceneBuilder.Core.Parsing
             }
             else
             {
-                throw Fail(receiver, $"Unknown receiver '{receiver.Identifier.Text}'");
+                throw Unreachable();
             }
 
             var addArgs = calls[0].Args.Arguments;
             if (addArgs.Count == 0)
             {
-                throw Fail(calls[0].Args, "Add requires a name argument");
+                throw Unreachable();
             }
 
             var name = EvalStringLiteral(addArgs[0].Expression);
@@ -309,7 +309,7 @@ namespace SceneBuilder.Core.Parsing
                         ApplySurfaceSnap(node, args, invocation);
                         break;
                     default:
-                        throw Fail(args, $"Unsupported builder call '.{method}(...)'");
+                        throw Unreachable();
                 }
             }
 
@@ -320,7 +320,7 @@ namespace SceneBuilder.Core.Parsing
         {
             if (closureExpression is not SimpleLambdaExpressionSyntax lambda)
             {
-                throw Fail(closureExpression, "Unsupported closure form; expected a lambda like `m => ...`");
+                throw Unreachable();
             }
 
             var paramName = lambda.Parameter.Identifier.Text;
@@ -343,7 +343,7 @@ namespace SceneBuilder.Core.Parsing
                         break;
 
                     default:
-                        throw Fail(lambda.Body, "Unsupported lambda body");
+                        throw Unreachable();
                 }
             }
             finally
@@ -371,7 +371,7 @@ namespace SceneBuilder.Core.Parsing
                 memberAccess.Name is not GenericNameSyntax generic ||
                 generic.TypeArgumentList.Arguments.Count != 1)
             {
-                throw Fail(invocation, "Component<T>() requires exactly one type argument");
+                throw Unreachable();
             }
 
             var typeFullName = generic.TypeArgumentList.Arguments[0].ToString().Trim();
@@ -397,7 +397,7 @@ namespace SceneBuilder.Core.Parsing
         {
             if (closureExpression is not SimpleLambdaExpressionSyntax lambda)
             {
-                throw Fail(closureExpression, "Unsupported closure form; expected a lambda like `c => ...`");
+                throw Unreachable();
             }
 
             var paramName = lambda.Parameter.Identifier.Text;
@@ -409,7 +409,7 @@ namespace SceneBuilder.Core.Parsing
                     {
                         if (statement is not ExpressionStatementSyntax exprStatement)
                         {
-                            throw Fail(statement, "Unsupported statement in component closure (expected .Set(...) calls)");
+                            throw Unreachable();
                         }
 
                         ProcessComponentSetCall(exprStatement.Expression, paramName, cb);
@@ -421,7 +421,7 @@ namespace SceneBuilder.Core.Parsing
                     break;
 
                 default:
-                    throw Fail(lambda.Body, "Unsupported lambda body");
+                    throw Unreachable();
             }
         }
 
@@ -433,7 +433,7 @@ namespace SceneBuilder.Core.Parsing
                 setMemberAccess.Expression is not IdentifierNameSyntax setReceiver ||
                 setReceiver.Identifier.Text != paramName)
             {
-                throw Fail(expression, "Expected a `.Set(...)` call in component closure");
+                throw Unreachable();
             }
 
             var (key, value, valueSpan) = ParseSetCall(setInvocation);
@@ -451,7 +451,7 @@ namespace SceneBuilder.Core.Parsing
             var args = setInvocation.ArgumentList.Arguments;
             if (args.Count != 2)
             {
-                throw Fail(setInvocation, "Set(...) requires exactly two arguments");
+                throw Unreachable();
             }
 
             string key;
@@ -466,7 +466,7 @@ namespace SceneBuilder.Core.Parsing
             }
             else
             {
-                throw Fail(keyExpr, "Unsupported Set(...) key form (expected a string literal or `r => r.member`)");
+                throw Unreachable();
             }
 
             var valueExpr = args[1].Expression;
@@ -493,7 +493,7 @@ namespace SceneBuilder.Core.Parsing
                         continue;
                     }
 
-                    throw Fail(invocation, "Unsupported invocation form");
+                    throw Unreachable();
                 }
 
                 if (current is IdentifierNameSyntax identifier)
@@ -502,7 +502,7 @@ namespace SceneBuilder.Core.Parsing
                     return (identifier, calls);
                 }
 
-                throw Fail(current, "Unsupported receiver expression");
+                throw Unreachable();
             }
         }
 
@@ -524,12 +524,12 @@ namespace SceneBuilder.Core.Parsing
                 }
                 else
                 {
-                    throw Fail(arg, "Too many Transform arguments");
+                    throw Unreachable();
                 }
 
                 if (arg.Expression is not TupleExpressionSyntax tuple || tuple.Arguments.Count != 3)
                 {
-                    throw Fail(arg.Expression, $"Transform.{paramName} expects a 3-tuple");
+                    throw Unreachable();
                 }
 
                 var x = EvalFloat(tuple.Arguments[0].Expression);
@@ -548,7 +548,7 @@ namespace SceneBuilder.Core.Parsing
                         node.Scale = new Vec3(x, y, z);
                         break;
                     default:
-                        throw Fail(arg, $"Unknown Transform argument '{paramName}'");
+                        throw Unreachable();
                 }
             }
         }
@@ -562,7 +562,7 @@ namespace SceneBuilder.Core.Parsing
                 return literal.Token.ValueText;
             }
 
-            throw Fail(expression, "Expected a string literal");
+            throw Unreachable();
         }
 
         private static bool EvalBool(ExpressionSyntax expression)
@@ -580,7 +580,7 @@ namespace SceneBuilder.Core.Parsing
                 }
             }
 
-            throw Fail(expression, "Expected a boolean literal");
+            throw Unreachable();
         }
 
         private static float EvalFloat(ExpressionSyntax expression)
@@ -595,7 +595,7 @@ namespace SceneBuilder.Core.Parsing
                 return Convert.ToSingle(literal.Token.Value, System.Globalization.CultureInfo.InvariantCulture);
             }
 
-            throw Fail(expression, "Expected a numeric literal");
+            throw Unreachable();
         }
 
         // ---- Component LogicalId synthesis ------------------------------------------------
@@ -916,6 +916,10 @@ namespace SceneBuilder.Core.Parsing
 
         // ---- Fail-loud helper -----------------------------------------------------------
 
+        // Reserved for the pre-recognition discovery layer (FindBuildMethod / block-body check),
+        // which runs BEFORE RecognizeOrThrow and is NOT part of the flat-shape body grammar. Every
+        // body-shape rejection now originates SOLELY from SceneBuilder.Grammar.FlatShapeRecognizer
+        // (via RecognizeOrThrow) — the single grammar source — so the body walk no longer calls Fail.
         private static ParseException Fail(SyntaxNode node, string message)
         {
             var position = node.GetLocation().GetLineSpan().StartLinePosition;
@@ -923,6 +927,18 @@ namespace SceneBuilder.Core.Parsing
             var column = position.Character + 1;
             return new ParseException($"{message} at line {line}, column {column}.", line, column);
         }
+
+        // The flat-shape grammar lives in exactly ONE place: SceneBuilder.Grammar.FlatShapeRecognizer,
+        // run up front by RecognizeOrThrow, which fails loud on the first violation. By the time the
+        // body walk runs, the shape is already proven a recognized flat builder, so the extraction
+        // paths below only ever meet recognized constructs. An else/default reaching here would mean
+        // the recognizer accepted a shape the extraction cannot handle — recognizer/parser drift, not
+        // a user error. RecognizerAgreementTests + RecognizerCompletenessTests pin the two so this
+        // never fires; it exists only to keep the extraction total.
+        private static System.InvalidOperationException Unreachable() =>
+            new System.InvalidOperationException(
+                "BuilderParser reached a flat-shape construct that FlatShapeRecognizer (the single " +
+                "grammar source) did not reject; recognizer and parser have drifted.");
 
         // ---- Mutable intermediate tree ---------------------------------------------------
 

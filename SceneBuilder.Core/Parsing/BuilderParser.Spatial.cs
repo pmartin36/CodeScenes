@@ -27,7 +27,7 @@ namespace SceneBuilder.Core.Parsing
             {
                 if (arg.NameColon == null)
                 {
-                    throw Fail(arg, "FitSize arguments must be named (width:/height:/depth:/size:)");
+                    throw Unreachable();
                 }
 
                 var name = arg.NameColon.Name.Identifier.Text;
@@ -53,23 +53,23 @@ namespace SceneBuilder.Core.Parsing
                 }
                 else
                 {
-                    throw Fail(arg, $"Unknown FitSize argument '{name}'");
+                    throw Unreachable();
                 }
             }
 
             if (hasAspect && hasExplicit)
             {
-                throw Fail(invocation, "FitSize cannot combine aspect (width/height/depth) with explicit size");
+                throw Unreachable();
             }
 
             if (!hasAspect && !hasExplicit)
             {
-                throw Fail(invocation, "FitSize requires one of width/height/depth, or size");
+                throw Unreachable();
             }
 
             if (aspectCount > 1)
             {
-                throw Fail(invocation, "FitSize aspect-locked form takes exactly one of width/height/depth");
+                throw Unreachable();
             }
 
             var memberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
@@ -129,7 +129,7 @@ namespace SceneBuilder.Core.Parsing
             {
                 if (arg.NameColon == null)
                 {
-                    throw Fail(arg, "SurfaceSnap arguments must be named (up:/down:/left:/right:/forward:/back:/target:)");
+                    throw Unreachable();
                 }
 
                 var name = arg.NameColon.Name.Identifier.Text;
@@ -149,7 +149,7 @@ namespace SceneBuilder.Core.Parsing
 
                 if (!SpatialComponents.TryAxisKeyword(name, out var fieldKey, out var enumTypeName, out var member))
                 {
-                    throw Fail(arg, $"Unknown SurfaceSnap argument '{name}'");
+                    throw Unreachable();
                 }
 
                 var set = ApplyAxisFlag(arg.Expression, name, fieldKey, enumTypeName, member, span, argSpan, fields, spans);
@@ -166,22 +166,22 @@ namespace SceneBuilder.Core.Parsing
 
             if (up && down)
             {
-                throw Fail(invocation, "SurfaceSnap cannot combine up and down");
+                throw Unreachable();
             }
 
             if (left && right)
             {
-                throw Fail(invocation, "SurfaceSnap cannot combine left and right");
+                throw Unreachable();
             }
 
             if (forward && back)
             {
-                throw Fail(invocation, "SurfaceSnap cannot combine forward and back");
+                throw Unreachable();
             }
 
             if (!(up || down || left || right || forward || back))
             {
-                throw Fail(invocation, "SurfaceSnap requires at least one snap axis (up/down/left/right/forward/back)");
+                throw Unreachable();
             }
 
             var verticalSet = up || down;
