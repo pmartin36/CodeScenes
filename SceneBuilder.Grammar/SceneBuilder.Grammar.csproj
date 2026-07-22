@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Stage the freshly-built Grammar assembly into the Unity package's Plugins folder on every
+       build. Core now depends on Grammar at runtime (BuilderParser calls FlatShapeRecognizer), and
+       Unity consumes Core as a prebuilt DLL, so the editor must also resolve Grammar.dll from
+       Plugins/ or parsing throws FileNotFound/TypeLoad at sync time. Mirrors Core.csproj's
+       StageCoreDllToUnityPlugins target. -->
+  <Target Name="StageGrammarDllToUnityPlugins" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFiles="$(MSBuildProjectDirectory)/../com.codescenes/Plugins/SceneBuilder.Grammar.dll"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" />
+  </Target>
+
+</Project>

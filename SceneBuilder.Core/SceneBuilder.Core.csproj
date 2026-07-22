@@ -11,6 +11,10 @@
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../SceneBuilder.Grammar/SceneBuilder.Grammar.csproj" />
+  </ItemGroup>
+
   <!-- Stage the freshly-built Core assembly into the Unity package's Plugins folder on every
        build. Unity consumes Core as this prebuilt DLL (not the source project), so without this
        the DLL goes stale the moment Core changes and the editor compiles against missing types.

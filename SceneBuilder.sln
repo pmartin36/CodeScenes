@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SceneBuilder.Editor.Compile
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SceneBuilder.Validate", "SceneBuilder.Validate\SceneBuilder.Validate.csproj", "{7329BB97-981B-4561-A741-38F8DABC102F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SceneBuilder.Grammar", "SceneBuilder.Grammar\SceneBuilder.Grammar.csproj", "{EADB0CC7-7922-412F-A696-D768BBAD300C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,5 +38,9 @@ Global
 		{7329BB97-981B-4561-A741-38F8DABC102F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7329BB97-981B-4561-A741-38F8DABC102F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7329BB97-981B-4561-A741-38F8DABC102F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EADB0CC7-7922-412F-A696-D768BBAD300C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EADB0CC7-7922-412F-A696-D768BBAD300C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EADB0CC7-7922-412F-A696-D768BBAD300C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EADB0CC7-7922-412F-A696-D768BBAD300C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

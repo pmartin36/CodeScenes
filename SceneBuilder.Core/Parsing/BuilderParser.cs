@@ -34,6 +34,8 @@ namespace SceneBuilder.Core.Parsing
                 throw Fail(buildMethod, "Build method must have a block body");
             }
 
+            RecognizeOrThrow(tree, body, sceneParamName);
+
             var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap));
 
             foreach (var statement in body.Statements)
