@@ -46,7 +46,10 @@ PrefabHierarchyNode                   // one per GameObject inside the prefab
   Children      : PrefabHierarchyNode[]  // ordered by the prefab asset's child order
 
 FacadeCatalog                         // in-memory shape of the generated manifest (Prefabs.sbfacade.json).
-                                      //   The PARSER consumes it to resolve member chains; Unity-free.
+                                      //   The source GENERATOR consumes it (as an AdditionalFile) to emit
+                                      //   the façade types INTO the compilation, and the PARSER consumes it
+                                      //   to resolve member chains; Unity-free. Mirrors spec 26's
+                                      //   ProjectCatalogManifest (Core POCO manifest shape).
   Entries       : FacadeEntry[]      // one per project prefab; ordered by (PropertyName, Guid) Ordinal
 
 FacadeEntry
@@ -71,18 +74,26 @@ FacadeChild
                                       //   FacadeEntry when the source node has NestedPrefabGuid)
 ```
 
-**Generated artifacts (outside `Assets/`, IDE-only scaffolding — never compiled by Unity):**
-- The **façade sources** under `<ProjectRoot>/SceneBuilders/Generated/*.cs` — the `Prefabs` catalog plus
-  one per-prefab container of ref types. Injected into `Assembly-CSharp.csproj` by the EXISTING
-  `BuilderProjectInjector` (its `BuilderFiles()` already globs every `*.cs` recursively under the
-  builders dir), so the IDE type-checks them but Unity never compiles them and never domain-reloads.
+**Generated output (emitted INTO the compilation by a source generator on spec 26's toolkit framework —
+no written `.cs`, never compiled by Unity):**
+- The **façade types** — the `Prefabs` catalog plus one per-prefab container of ref types — are emitted
+  **directly into the IDE/gate compilation** by a **`PrefabFacadeGenerator` (`IIncrementalGenerator`)**
+  shipped in the `CodeScenes.Analyzers` package (spec 26) alongside its `CatalogSourceGenerator`. It reads
+  the façade manifest as an `AdditionalFile` and `AddSource`s the types (mirroring `CatalogSourceGenerator`'s
+  `RegisterSourceOutput` shape) — there are **NO** `SceneBuilders/Generated/*.cs` files to write, inject,
+  or manage, and Unity never sees them. No domain reload (the generator runs in the IDE csproj / the gate).
 - The **façade manifest** `<ProjectRoot>/SceneBuilders/Generated/Prefabs.sbfacade.json` — the serialized
-  `FacadeCatalog`, the parser's source of truth for `PropertyName → (Guid | RealName | LocalId)`.
+  `FacadeCatalog`, written by the editor with plain `File` IO. It is the generator's `AdditionalFile`
+  input AND the parser's source of truth for `PropertyName → (Guid | RealName | LocalId)`. It is the
+  **only** on-disk artifact, and the **only** injected thing — a second `<AdditionalFiles>` item beside
+  spec 26's `ProjectCatalog.sbcatalog.json` (the toolkit's `BuilderProjectInjector` extension already
+  performs `<AdditionalFiles>` injection).
 
-**Ledger (mirrors foundation §11):** `PrefabHierarchy`/`PrefabHierarchyNode` (adapter→generator input),
-`FacadeCatalog`/`FacadeEntry`/`FacadeNode`/`FacadeChild` (manifest model + parser resolution),
-`PrefabFacadeGenerator.Generate` (byte-stable codegen), the `Prefabs.X`/`.On(sel => sel.A.B, …)`
-member-chain parse, and the `Prefabs.sbfacade.json` manifest are all owned by **M-Facades**.
+**Ledger (mirrors foundation §11):** `PrefabHierarchy`/`PrefabHierarchyNode` (adapter→manifest input),
+`FacadeCatalog`/`FacadeEntry`/`FacadeNode`/`FacadeChild` (manifest model + parser resolution), the
+`PrefabFacadeGenerator` (`IIncrementalGenerator` built on spec 26's generator framework) and its
+byte-stable emit, the `Prefabs.X`/`.On(sel => sel.A.B, …)` member-chain parse, and the
+`Prefabs.sbfacade.json` manifest are all owned by **M-Facades**.
 
 ---
 
@@ -104,24 +115,32 @@ Roslyn parser reads the member chains exactly as it already reads `(Light l) => 
   GameObject tree: the root type exposes a typed property per child, recursively
   (`TankRef.Turret : TurretRef`, `TurretRef.Barrel : NodeRef`, …). `t.Turret.Barrel` parses to the child
   **path** and the durable prefab-internal id. Types carry NO runtime behavior.
-- **Injection** of the generated sources into `Assembly-CSharp.csproj` via the EXISTING
-  `BuilderProjectInjector`/`OnGeneratedCSProject` — no new IDE machinery, no domain reload.
+- **Emission** of the façade types **into the compilation** by the `PrefabFacadeGenerator` source
+  generator (spec 26's framework) — NOT written `.cs` files. The only injection is the façade **manifest**
+  as a second `<AdditionalFiles>` item (the toolkit's `BuilderProjectInjector` extension already injects
+  `<AdditionalFiles>` for `ProjectCatalog.sbcatalog.json`; the prefab manifest joins it) — no new IDE
+  machinery, no domain reload.
 - **Parse** of the two member chains from source text: `Prefabs.X` → catalog property name → GUID;
   `sel => sel.A.B` → property-name segments → (real child path, durable ids), resolved through the
   manifest. Downstream resolution (path → durable pair-key) is unchanged from the string approach.
-- **Deterministic / byte-stable generation** — identical prefab hierarchy ⇒ byte-identical façade
-  sources and manifest, on any machine, with no timestamps or ordering nondeterminism.
+- **Deterministic / byte-stable generation** — identical prefab hierarchy ⇒ byte-identical manifest and
+  emitted façade source, on any machine, with no timestamps or ordering nondeterminism. Reuses the
+  toolkit's already-tested byte-stable emit conventions (`CatalogSourceGenerator` / `CatalogEmit`,
+  spec 26) rather than a bespoke serializer.
 - **Regeneration on prefab structural change** — a child added/removed/renamed, or a new/deleted prefab,
-  regenerates the affected façade(s) + manifest. Fast: File IO under `SceneBuilders/` (outside `Assets/`)
-  + a csproj re-inject; **no domain reload**.
+  rewrites the affected `Prefabs.sbfacade.json` manifest; because the manifest is the generator's
+  `AdditionalFile`, the `IIncrementalGenerator` re-emits the touched façade type(s) automatically. Fast:
+  File IO under `SceneBuilders/` (outside `Assets/`), **no csproj re-inject of sources, no domain reload**.
 - **Duplicate-sibling disambiguation at codegen** — two children both named "Wheel" cannot both be a C#
   property, so the generator emits distinct, deterministic identifiers (`Wheel`, `Wheel2`, … keyed on the
   durable `LocalId`) — never a duplicate/ambiguous identifier — and records each one's `LocalId` so
-  resolution is not name-only. **This is the spec-16 hazard (name-path duplicate-blindness) caught at
+  resolution is not name-only. Uses the toolkit's deterministic `IdentifierAllocator` de-dup convention
+  (`CatalogEmit`, spec 26). **This is the spec-16 hazard (name-path duplicate-blindness) caught at
   COMPILE time, and surfaced as two distinct compiler-checked accessors — call it a feature.**
 - **C#-identifier sanitization** — spaces/symbols/keywords/leading-digits in object names become valid
   identifiers (`"Front Wheel"` → `FrontWheel`, `"2Fast"` → `_2Fast`, `event` → `@event`) **with the real
-  object name preserved in `FacadeChild.RealName`** so the child path re-derives to the true name.
+  object name preserved in `FacadeChild.RealName`** so the child path re-derives to the true name. Reuses
+  the toolkit's `CatalogEmit.SanitizeIdentifier` convention (spec 26).
 - **Nested-prefab façade composition** — a child that is itself a nested-prefab instance is typed with
   that nested prefab's own root ref type (its FacadeEntry composed in), so `t.Turret.Barrel` descends
   into the nested prefab's generated hierarchy; the nested tree is never duplicated inline.
@@ -155,10 +174,12 @@ Roslyn parser reads the member chains exactly as it already reads `(Light l) => 
 
 ### Functions / behaviors (testable contracts)
 
-1. **Façade generation is deterministic and byte-stable.** `PrefabFacadeGenerator.Generate(hierarchy)`
-   produces façade source (and `FacadeCatalog.Serialize()` the manifest) that is **byte-identical** for
-   the same `PrefabHierarchy` across repeated runs and input orderings — children emitted in `LocalId`
-   order, no timestamps, fixed formatting. (Same determinism bar as the canonical serializer, §8.)
+1. **Façade generation is deterministic and byte-stable.** The editor serializes the `FacadeCatalog` to
+   the manifest (`FacadeCatalog.Serialize()`) byte-identically for the same `PrefabHierarchy`, and the
+   `PrefabFacadeGenerator` emits façade source byte-identically from a given manifest — across repeated
+   runs and input orderings, children emitted in `LocalId` order, no timestamps, fixed formatting. Both
+   layers reuse the toolkit's already-tested byte-stable emit (`CatalogSourceGenerator` / `CatalogEmit`,
+   spec 26); this milestone adds no bespoke determinism machinery. (Same determinism bar as §8.)
 2. **`Prefabs.<X>` parses to the prefab GUID.** Given source containing `scene.Instance(Prefabs.Tank)`,
    the parser reads the member access `Prefabs.Tank`, looks `"Tank"` up in the `FacadeCatalog`, and
    yields the same `AssetRef { Guid }` that `scene.Instance("Assets/Prefabs/Tank.prefab")` yields. The
@@ -219,23 +240,29 @@ Roslyn parser reads the member chains exactly as it already reads `(Light l) => 
   node is a nested-prefab instance (`PrefabUtility.GetCorrespondingObjectFromSource` →
   `AssetDatabase.GUIDFromAssetPath`). Unloads contents when done. No façade LOGIC in the adapter — it
   fills the POCO and calls the Core generator.
-- **Write / inject the façades.** Run `PrefabFacadeGenerator.Generate` + `FacadeCatalog.Serialize`, write
-  the sources + manifest under `<ProjectRoot>/SceneBuilders/Generated/` with plain `File` IO (never
-  `AssetDatabase`, so no domain reload — §2), via `SceneBuilderPaths.WriteIfChanged` for byte-stable
-  no-ops. `BuilderProjectInjector` picks them up automatically (`BuilderFiles()` globs `*.cs` recursively
-  under the builders dir); the manifest `.json` is not `*.cs`, so it is never injected/compiled.
-- **Regen triggers.** An `AssetPostprocessor.OnPostprocessAllAssets` hook regenerates the affected
-  façade(s) + manifest when a prefab/model asset under the project is imported, moved, renamed, or
-  deleted (add/remove/rename of a prefab-internal object shows up as a re-import of that asset). Debounce
-  and regenerate only the touched prefabs where possible. Deleting a prefab drops its `FacadeEntry` and
-  its container source.
+- **Write the manifest (only).** An editor-side generator — mirroring spec 26's shipped
+  `ProjectCatalogGenerator` — builds the `FacadeCatalog` from the read `PrefabHierarchy`, serializes it
+  (`CanonicalJson`), and writes `<ProjectRoot>/SceneBuilders/Generated/Prefabs.sbfacade.json` with plain
+  `File` IO (never `AssetDatabase`, so no domain reload — §2) via `SceneBuilderPaths.WriteTextIfChanged`
+  (compare-before-write, byte-stable no-ops). **The editor writes NO `.cs`** — the `PrefabFacadeGenerator`
+  source generator emits the façade types into the compilation from this manifest `AdditionalFile`.
+  `BuilderProjectInjector` (its spec-26 extension) injects the manifest as a second `<AdditionalFiles>`
+  item beside `ProjectCatalog.sbcatalog.json`.
+- **Regen triggers.** An `AssetPostprocessor.OnPostprocessAllAssets` hook (mirroring
+  `ProjectCatalogGenerator`) rewrites the manifest when a prefab/model asset under the project is
+  imported, moved, renamed, or deleted (add/remove/rename of a prefab-internal object shows up as a
+  re-import of that asset). Debounce and regenerate only the touched prefabs where possible. Deleting a
+  prefab drops its `FacadeEntry` from the manifest; the incremental generator then stops emitting that
+  container. The manifest rewrite is what drives re-emission — there is no separate source-file lifecycle.
 - **Reference-patch on rename.** After regeneration, when a child's identifier changed but its `LocalId`
   did not, call `FacadeReferencePatcher.Patch` over every builder under `SceneBuilders/` and
   `WriteIfChanged` the result, so live builders keep compiling. A chain whose durable target vanished is
   left to fail the compile check (safety net), never guessed.
-- **Do NOT parse generated façades as scenes.** Only `ISceneDefinition` builder files are parsed into
-  `SceneModel`s; the generated `Generated/*.cs` are IDE-only scaffolding and are excluded from the
-  scene-builder discovery set (they declare no `ISceneDefinition`).
+- **No on-disk façade sources for scene discovery to trip over.** Because the façade types are emitted
+  into the compilation by the source generator (never written as `Generated/*.cs`), there is no façade
+  file for the scene-builder discovery set to accidentally parse as a `SceneModel` — the hazard the
+  written-`.cs` design had to guard is eliminated by the delivery reframe. Only `ISceneDefinition` builder
+  files are parsed.
 - **Resolve at build/sync.** `Prefabs.X` → GUID and selector segments → real child path + durable id come
   from the manifest (`FacadeCatalog`); the child-path → durable pair-key step is unchanged from the M6 /
   spec-24 addressing path.
@@ -286,7 +313,9 @@ public class ArenaScene : ISceneDefinition {
 - **New generated manifest, not a per-scene sidecar change.** `Prefabs.sbfacade.json` (the serialized
   `FacadeCatalog`) lives under `<ProjectRoot>/SceneBuilders/Generated/`. It is regenerated (never
   hand-edited), deterministic, byte-stable, and is the parser's source of truth for `PropertyName → Guid`
-  and selector-segment → `(RealName, LocalId)`. It is not injected into any csproj (it is `.json`).
+  and selector-segment → `(RealName, LocalId)`. Unlike a written source file it IS injected into the
+  builder csproj — as an `<AdditionalFiles>` item (not `<Compile>`), so the `PrefabFacadeGenerator` source
+  generator receives it as its `AdditionalFile` input, exactly as spec 26 injects `ProjectCatalog.sbcatalog.json`.
 - **Per-scene `*.sbmap.json` is unchanged in shape.** A prefab instance entry still stores
   `SourcePrefabGuid` + `PrefabKey` (M6); nested override records still key on the durable pair-key
   (spec 24). The typed accessor is purely an authoring-surface + parse concern — it resolves to the same
@@ -337,10 +366,13 @@ public class ArenaScene : ISceneDefinition {
 Each step is a real editor action against a live project with a multi-level Tank prefab (a Turret nested
 prefab containing a Barrel with a `Light`; a Chassis with two `"Wheel"` children and a `"Front Wheel"`).
 
-1. With the project's prefabs present, confirm `<ProjectRoot>/SceneBuilders/Generated/Prefabs.*.cs` +
-   `Prefabs.sbfacade.json` exist, are byte-stable across a second regen, and are injected into
-   `Assembly-CSharp.csproj` (present as `<Compile Include="SceneBuilders/Generated/…"/>`), so the IDE
-   type-checks them; Unity performed **no domain reload** for the write.
+1. With the project's prefabs present, confirm `<ProjectRoot>/SceneBuilders/Generated/Prefabs.sbfacade.json`
+   exists and is byte-stable across a second regen (NO `Generated/*.cs` is written), and that it is
+   injected into `Assembly-CSharp.csproj` as an `<AdditionalFiles Include="SceneBuilders/Generated/Prefabs.sbfacade.json"/>`
+   item (beside spec 26's `ProjectCatalog.sbcatalog.json`); confirm the façade types (`Prefabs.Tank`,
+   `t.Turret.Barrel`) are emitted by the `PrefabFacadeGenerator` INTO the compilation (a builder
+   referencing them compiles) rather than existing on disk. Unity performed **no domain reload** for the
+   manifest write.
 2. Author `scene.Instance(Prefabs.Tank).On(t => t.Turret.Barrel, b => b.Override(x => x.Set((Light l) =>
    l.intensity, 4f)))`, Build. **Expected:** the Tank instance appears; the Barrel shows the bold
    override; the instance keeps its `GlobalObjectId` (no re-instantiate). The typed and the equivalent
@@ -362,11 +394,31 @@ prefab containing a Barrel with a `Light`; a Chassis with two `"Wheel"` children
 
 ## Dependencies
 
+- **Spec 26 — CodeScenes.Analyzers toolkit (`specs/26-codescenes-analyzers-toolkit.md`), SHIPPED. HARD
+  dependency.** This milestone is a **second source generator on that toolkit's framework**, not a
+  written-`.cs` codegen. It reuses, verbatim: **(a)** the source-generator framework — `PrefabFacadeGenerator`
+  is an `IIncrementalGenerator` in the `CodeScenes.Analyzers` package alongside the shipped
+  `CatalogSourceGenerator`, following the same `AdditionalTextsProvider` → `RegisterSourceOutput` →
+  `AddSource` shape (emit INTO the compilation, no disk `.cs`); **(b)** the `AdditionalFiles` injection —
+  `BuilderProjectInjector`'s spec-26 extension already injects `<AdditionalFiles>` for
+  `ProjectCatalog.sbcatalog.json`; **this milestone adds a second `<AdditionalFiles>` item** for
+  `Prefabs.sbfacade.json` (the injector already supports it); **(c)** the byte-stable emit / sanitization /
+  `IdentifierAllocator` de-dup conventions (`CatalogEmit`) and the empty/missing-manifest fail-safe
+  (missing manifest ⇒ no `Prefabs` type ⇒ ordinary CS compile error at the reference, never a wrong
+  value); **(d)** the editor manifest producer pattern — `ProjectCatalogGenerator` (plain `File` IO to
+  `SceneBuilders/Generated/`, compare-before-write, no `AssetDatabase`, no domain reload) is the template
+  the prefab-manifest editor generator mirrors; the Core manifest POCO mirrors `ProjectCatalogManifest`.
+  The `SB1102` (`Instance("path")`) and `SB1103` (`.On("path")`) analyzer nudges are **already registered**
+  by the shipped toolkit and point at the typed forms (`Instance(Prefabs.X)`, `.On(sel => …)`) this
+  milestone generates — this spec does not re-register them.
 - **M6** (`specs/completed/07-m6-prefab-instances.md`) — `scene.Instance(...)`, `PrefabInstanceNode`,
   `PrefabInstanceKey`, prefab/model-prefab detection, GUID resolution, and the string `Instance("path")`
   form this milestone upgrades and retains as a fallback. Hard dependency.
-- **`BuilderProjectInjector` / `SceneBuilderPaths` (§2, §12)** — the existing csproj-injection mechanism
-  the generated façades reuse verbatim; `BuilderFiles()` already globs the `Generated/` sources.
+- **`BuilderProjectInjector` / `SceneBuilderPaths` (§2, §12), as extended by spec 26** — the csproj
+  injector already emits `<Analyzer>` (the toolkit dll) and `<AdditionalFiles>` (the project-catalog
+  manifest). This milestone reuses that path: the façade types come from the injected analyzer/generator
+  dll, and the prefab manifest is added as a second `<AdditionalFiles>` item — **no `<Compile>` injection
+  of generated sources.**
 - **Spec 16** (`specs/completed/16-duplicate-sibling-identity.md`) — the identity principle the
   disambiguator obeys: two same-named siblings must not silently mis-resolve. M-Facades turns that hazard
   into two distinct, compile-checked accessors keyed on the durable `LocalId` (not the name path).
@@ -414,9 +466,10 @@ prefab containing a Barrel with a `Light`; a Chassis with two `"Wheel"` children
   `TurretRef` at assembly scope; the generator MUST scope each prefab's ref types to a per-prefab
   container (nested types / a per-prefab class), so uniqueness is required only WITHIN a prefab. Test 12
   and the compile assertion pin this.
-- **Generated façades must never be parsed as scenes.** They declare no `ISceneDefinition`; the scene
-  discovery set must exclude `Generated/`. A regression here would try to reconcile a façade file as a
-  scene builder.
+- **The reframe removes the "façade parsed as a scene" hazard.** With façade types emitted into the
+  compilation (not written as `Generated/*.cs`), there is no façade source file for scene discovery to
+  reconcile as a builder — the write-`.cs` design's discovery-exclusion requirement no longer applies.
+  Only the manifest `.json` sits under `Generated/`, and it is never a `SceneModel` input.
 - **The manifest is generated truth, not user-editable.** A hand-edit to `Prefabs.sbfacade.json` is
   clobbered on the next regen (like the injected csproj, §2). It is disposable, deterministic output.
 - **Nested-prefab `LocalId` scope.** A composed nested-prefab node resolves its children's `LocalId`s in
