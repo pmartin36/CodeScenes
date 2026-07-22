@@ -373,14 +373,18 @@ prefab containing a Barrel with a `Light`; a Chassis with two `"Wheel"` children
    `t.Turret.Barrel`) are emitted by the `PrefabFacadeGenerator` INTO the compilation (a builder
    referencing them compiles) rather than existing on disk. Unity performed **no domain reload** for the
    manifest write.
-2. Author `scene.Instance(Prefabs.Tank).On(t => t.Turret.Barrel, b => b.Override(x => x.Set((Light l) =>
-   l.intensity, 4f)))`, Build. **Expected:** the Tank instance appears; the Barrel shows the bold
-   override; the instance keeps its `GlobalObjectId` (no re-instantiate). The typed and the equivalent
-   string builder produce the identical scene.
+2. Author `scene.Instance(Prefabs.Tank).On(t => t.Turret.Barrel, …)`, Build. **Expected:** the Tank
+   instance appears and the typed selector `t.Turret.Barrel` **resolves to the correct Barrel object**
+   (the compiler-checked ADDRESSING this milestone owns); the instance keeps its `GlobalObjectId` (no
+   re-instantiate); the typed and the equivalent string builder produce the identical scene. *(Whether the
+   Barrel then shows a bold OVERRIDE — the nested-override materialize/reconcile round-trip — is
+   **M-nested-props / spec 24** per this spec's Out-of-scope; spec 25 delivers the addressing surface only,
+   not override materialization.)*
 3. **Rename** the Turret child inside the Tank prefab `Turret → Cannon` in Unity. **Expected:** the
    façade regenerates (`t.Cannon…`), AND the reference-patch rewrites the live builder's `t.Turret` →
    `t.Cannon`; the builder still compiles (`BuilderCompileCheck` reports no errors) and re-Builds to the
-   same Barrel (durable id unchanged, override preserved).
+   same Barrel object (durable id unchanged; the accessor resolves to the same target — override
+   materialization itself is spec 24).
 4. **Safety net:** hand-edit the builder to reference `t.Turret` again (stale) WITHOUT syncing, then run
    the compile check. **Expected:** a **located CS error** at `t.Turret` (the accessor no longer exists
    on `TankRef` after the rename) — the mistake is caught at compile time, not silently mis-resolved.
