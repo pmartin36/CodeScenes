@@ -21,10 +21,14 @@ using SceneBuilder.Core.Serialization;
 // b6-t2 (specs/11-m10-prefab-overrides.md): the SAVE-side identity persistence for M10 root-target
 // instance overrides/added-components. The fixture prefab's root also carries a BoxCollider so a
 // root-target property override has something real to land on (FIXTURE NOTE, research.md b6-t2).
-// Independent of b7-t1 (no executor yet): each test PRE-APPLIES the component/override directly to
-// the live instance via PrefabUtility, then a SECOND SceneBuilderBuild.Run — whose builder source
-// authors the matching `.AddComponent<T>()` for the added-component case — re-reads the live
-// instance and persists identity/pair-key/BaseValue into the sidecar.
+// Each test PRE-APPLIES the component/override directly to the live instance via PrefabUtility to
+// seed real bold-override/added-component state, then a SECOND SceneBuilderBuild.Run — whose
+// builder source authors the MATCHING `.AddComponent<T>()` / `.Override(e => e.Set(...))` call —
+// re-reads the live instance and persists identity/pair-key/BaseValue into the sidecar. The
+// authored call must match the pre-applied state: since b7-t1 wired RevertInstanceOverride for
+// real, a build whose source does NOT author a matching override now correctly reverts any
+// un-authored live override before the sidecar is written (code-is-truth); a backdoor-only
+// mutation no longer survives a build.
 public class BuildSidecarPrefabTests
 {
     private const string FixturesDir = "Assets/GateTests/Fixtures_M6BuildSidecar";
@@ -225,6 +229,14 @@ public class BuildSidecarPrefabScene : ISceneDefinition
         collider.isTrigger = true;
         PrefabUtility.RecordPrefabInstancePropertyModifications(collider);
 
+        // The override must be authored in code (code-is-truth) or the rebuild's diff sees it as
+        // un-authored live state and reverts it (b7-t1: RevertInstanceOverride is now wired for real).
+        // Use the literal serialized-path Set<T>(path, value) overload (propertyPath == "m_IsTrigger")
+        // rather than the typed member selector, whose transient "member:isTrigger" form does not
+        // string-match the snapshot's real "m_IsTrigger" path (known b3-t2/b2-t2 gap, out of this
+        // task's scope) and would churn Set+Revert every build.
+        File.WriteAllText(_builderPath, Source(
+            $"        scene.Instance(\"{PrefabPath}\").Override(e => e.Set<UnityEngine.BoxCollider>(\"m_IsTrigger\", true));"));
         var result = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsEmpty(result.Diagnostics,
             "Rebuild reported diagnostics against a live root-target override: "
@@ -259,6 +271,13 @@ public class BuildSidecarPrefabScene : ISceneDefinition
         var collider = instanceRoot.GetComponent<BoxCollider>();
         collider.isTrigger = true;
         PrefabUtility.RecordPrefabInstancePropertyModifications(collider);
+
+        // The override must be authored in code (code-is-truth) or each rebuild's diff sees it as
+        // un-authored live state and reverts it (b7-t1: RevertInstanceOverride is now wired for real).
+        // Use the literal serialized-path Set<T>(path, value) overload — see the sibling test above
+        // for why the typed member selector form is unsafe here.
+        File.WriteAllText(_builderPath, Source(
+            $"        scene.Instance(\"{PrefabPath}\").Override(e => e.Set<UnityEngine.BoxCollider>(\"m_IsTrigger\", true));"));
 
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
         var firstOv = IdentityMapJson.Deserialize(File.ReadAllText(_sidecarPath))
