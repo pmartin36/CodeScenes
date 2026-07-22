@@ -30,6 +30,9 @@
 
   <ItemGroup>
     <ProjectReference Include="../CodeScenes.Analyzers/CodeScenes.Analyzers.csproj" />
+    <!-- b4-t1: drives the real Reconcile/SourcePatch emit path so EmittedCodeAnalyzerCleanTests
+         asserts against actual codegen output, never fabricated strings. -->
+    <ProjectReference Include="../SceneBuilder.Core/SceneBuilder.Core.csproj" />
   </ItemGroup>
 
 </Project>
