@@ -29,5 +29,12 @@ namespace SceneBuilder.Authoring
         /// distinct instances.
         /// </summary>
         public InstanceHandle Instance(string assetPath) => new InstanceHandle();
+
+        /// <summary>
+        /// Instantiate a root prefab instance from a generated typed ref (e.g. <c>Prefabs.Tank</c>).
+        /// Returns a typed handle so nested targets can be addressed via a compiler-checked selector,
+        /// e.g. <c>.On(t =&gt; t.Turret.Barrel, ...)</c>.
+        /// </summary>
+        public InstanceHandle<TRef> Instance<TRef>(TRef prefab) where TRef : PrefabRef => new InstanceHandle<TRef>();
     }
 }
