@@ -100,9 +100,6 @@ namespace SceneBuilder.Core.Plan
         public string? TargetLogicalId { get; init; }
     }
 
-    // b1-t3 stub: record exists so tests compile, but is NOT yet registered as a
-    // [JsonDerivedType] on PlanOp (see PlanOp.cs) — that registration is the task's
-    // deliverable, left for the code-writer.
     public sealed record InstantiatePrefab : PlanOp
     {
         [JsonPropertyOrder(1)]
