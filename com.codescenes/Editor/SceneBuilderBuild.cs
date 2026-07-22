@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,6 +9,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Materialize;
+using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
 using SceneBuilder.Core.Serialization;
 using SceneBuilder.Core.Validation;
@@ -182,7 +184,12 @@ namespace SceneBuilder.Editor
                 Assets = AssetCacheMerge.Merge(parse.IdentityMap.Assets, loaded.HarvestedAssets).Merged,
                 Entries = remapped.Entries.Where(e => currentLogicalIds.Contains(e.LogicalId)).ToArray(),
             };
-            var map = WithGlobalObjectIds(currentStructure, execution);
+
+            // M10 (b6-t2): the model's authored instance AddedComponents, keyed by owning instance
+            // LogicalId — threaded so WithGlobalObjectIds can correlate them to their LIVE counterparts
+            // (RootAddedComponents) and persist a stable GlobalObjectId per added component.
+            var desiredInstancesByLogicalId = CollectPrefabInstanceNodes(desired.Roots);
+            var map = WithGlobalObjectIds(currentStructure, execution, desiredInstancesByLogicalId);
 
             // Write-if-changed: a rebuild that produces an identical sidecar must not bump its mtime —
             // the file watcher driving code->scene would fire on it for nothing.
@@ -207,20 +214,27 @@ namespace SceneBuilder.Editor
             };
         }
 
-        private static IdentityMap WithGlobalObjectIds(IdentityMap map, PlanExecutor.ExecutionResult execution)
+        private static IdentityMap WithGlobalObjectIds(
+            IdentityMap map,
+            PlanExecutor.ExecutionResult execution,
+            IReadOnlyDictionary<string, PrefabInstanceNode> desiredInstancesByLogicalId)
         {
-            var entries = map.Entries.Select(e =>
+            var entries = new List<IdentityMapEntry>(map.Entries.Length);
+
+            foreach (var e in map.Entries)
             {
                 if (e.Kind == "GameObject"
                     && execution.GameObjectsByLogicalId.TryGetValue(e.LogicalId, out var go) && go != null)
                 {
-                    return e with { GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(go).ToString() };
+                    entries.Add(e with { GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(go).ToString() });
+                    continue;
                 }
 
                 if (e.Kind == "Component"
                     && execution.ComponentsByLogicalId.TryGetValue(e.LogicalId, out var comp) && comp != null)
                 {
-                    return e with { GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(comp).ToString() };
+                    entries.Add(e with { GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(comp).ToString() });
+                    continue;
                 }
 
                 // b5-t3: stamp the instance root's GlobalObjectId + the (TargetPrefabId, TargetObjectId)
@@ -230,19 +244,114 @@ namespace SceneBuilder.Editor
                 if (e.Kind == "PrefabInstance"
                     && execution.GameObjectsByLogicalId.TryGetValue(e.LogicalId, out var instanceGo) && instanceGo != null)
                 {
-                    var (sourceGuid, key, _) = PrefabInstanceProbe.ReadInstanceRoot(instanceGo);
-                    return e with
+                    var instanceRead = PrefabInstanceProbe.ReadInstanceRoot(instanceGo);
+
+                    // M10 (b6-t2): the instance's persisted root-target override targets + recorded
+                    // BaseValues, sorted (PrefabId, ObjectId, PropertyPath) for byte-stable output; null
+                    // (not empty) when there are none, so plain instances stay byte-identical.
+                    var overrideRecords = instanceRead.StructuredOverrides
+                        .Select(o => new InstanceOverrideRecord
+                        {
+                            PrefabId = o.Target.PrefabId,
+                            ObjectId = o.Target.ObjectId,
+                            PropertyPath = o.PropertyPath,
+                            BaseValue = AsString(o.BaseValue),
+                        })
+                        .OrderBy(r => r.PrefabId, StringComparer.Ordinal)
+                        .ThenBy(r => r.ObjectId)
+                        .ThenBy(r => r.PropertyPath, StringComparer.Ordinal)
+                        .ToArray();
+
+                    entries.Add(e with
                     {
                         GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(instanceGo).ToString(),
-                        PrefabKey = key,
-                        SourcePrefabGuid = sourceGuid ?? e.SourcePrefabGuid,
-                    };
+                        PrefabKey = instanceRead.Key,
+                        SourcePrefabGuid = instanceRead.SourcePrefabGuid ?? e.SourcePrefabGuid,
+                        Overrides = overrideRecords.Length > 0 ? overrideRecords : null,
+                    });
+
+                    // M10 (b6-t2): an added root component is a genuine new scene object — splice a
+                    // synthesized Kind="Component" entry immediately after the parent instance entry per
+                    // matched added component (model AddedComponents[] correlated to the LIVE root-target
+                    // added components by Type.FullName + ordinal). A model added component with no live
+                    // match yet (executor not applied, b7-t1) is skipped — no phantom entry.
+                    if (desiredInstancesByLogicalId.TryGetValue(e.LogicalId, out var instanceNode)
+                        && instanceNode.AddedComponents.Length > 0)
+                    {
+                        var liveAdded = PrefabInstanceProbe.RootAddedComponents(instanceGo);
+                        var claimed = new bool[liveAdded.Length];
+
+                        foreach (var addedModel in instanceNode.AddedComponents)
+                        {
+                            var modelToken = addedModel.Component.Type.FullName;
+                            for (var i = 0; i < liveAdded.Length; i++)
+                            {
+                                if (claimed[i] || !TypeTokenMatches(modelToken, liveAdded[i].GetType()))
+                                {
+                                    continue;
+                                }
+
+                                claimed[i] = true;
+                                entries.Add(new IdentityMapEntry
+                                {
+                                    LogicalId = addedModel.Component.LogicalId,
+                                    GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(liveAdded[i]).ToString(),
+                                    Kind = "Component",
+                                    ComponentType = liveAdded[i].GetType().FullName,
+                                    ParentLogicalId = e.LogicalId,
+                                });
+                                break;
+                            }
+                        }
+                    }
+
+                    continue;
                 }
 
-                return e;
-            }).ToArray();
+                entries.Add(e);
+            }
 
-            return map with { Entries = entries };
+            return map with { Entries = entries.ToArray() };
+        }
+
+        // M10 (b6-t2): matches an authored AddedComponent's (possibly short/unqualified — the
+        // instance-override collections are not run through ComponentTypeNormalizer's usings-aware
+        // qualification the way plain Components[] are) type token against a LIVE component's real
+        // Type: an already-qualified token compares by FullName, a bare (dot-free) token compares by
+        // the short Name — the same short-vs-qualified distinction ComponentTypeResolver draws.
+        private static bool TypeTokenMatches(string modelToken, Type liveType) =>
+            modelToken.Contains('.') ? liveType.FullName == modelToken : liveType.Name == modelToken;
+
+        // ValueNode.Primitive.Value is BaseValue's only shape produced by PrefabInstanceProbe
+        // (StringifyDefault, PrefabInstanceProbe.Overrides.cs) — objectReference overrides carry a null
+        // BaseValue and never reach here as a non-null ValueNode.
+        private static string? AsString(SceneBuilder.Core.Model.ValueNode? value) =>
+            value is SceneBuilder.Core.Model.ValueNode.Primitive p ? p.Value as string : null;
+
+        // M10 (b6-t2): every PrefabInstanceNode in the desired model, keyed by LogicalId — root-only v0,
+        // but instances may nest under plain GameObject ancestors, so the whole tree is walked.
+        private static IReadOnlyDictionary<string, PrefabInstanceNode> CollectPrefabInstanceNodes(GameObjectNode[] roots)
+        {
+            var result = new Dictionary<string, PrefabInstanceNode>();
+            void Walk(GameObjectNode node)
+            {
+                if (node is PrefabInstanceNode instance)
+                {
+                    result[instance.LogicalId] = instance;
+                }
+
+                foreach (var child in node.Children)
+                {
+                    Walk(child);
+                }
+            }
+
+            foreach (var root in roots)
+            {
+                Walk(root);
+            }
+
+            return result;
         }
     }
 }

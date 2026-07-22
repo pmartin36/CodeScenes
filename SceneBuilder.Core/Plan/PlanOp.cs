@@ -19,6 +19,12 @@ namespace SceneBuilder.Core.Plan
     [JsonDerivedType(typeof(SetAssetRef), "SetAssetRef")]
     [JsonDerivedType(typeof(SetReference), "SetReference")]
     [JsonDerivedType(typeof(InstantiatePrefab), "InstantiatePrefab")]
+    [JsonDerivedType(typeof(SetInstanceOverride), "SetInstanceOverride")]
+    [JsonDerivedType(typeof(AddInstanceComponent), "AddInstanceComponent")]
+    [JsonDerivedType(typeof(RemoveInstanceComponent), "RemoveInstanceComponent")]
+    [JsonDerivedType(typeof(RevertInstanceOverride), "RevertInstanceOverride")]
+    [JsonDerivedType(typeof(RevertAddedComponent), "RevertAddedComponent")]
+    [JsonDerivedType(typeof(RevertRemovedComponent), "RevertRemovedComponent")]
     public abstract record PlanOp
     {
         [JsonPropertyOrder(0)]

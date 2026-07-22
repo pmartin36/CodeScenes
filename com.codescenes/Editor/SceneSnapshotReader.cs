@@ -107,12 +107,18 @@ namespace SceneBuilder.Editor
             string? sourcePrefabGuid = null;
             PrefabInstanceKey? prefabKey = null;
             ValueNode.Unsupported? opaqueOverrides = null;
+            var overrides = Array.Empty<PropertyOverride>();
+            var addedComponents = Array.Empty<AddedComponent>();
+            var removedComponents = Array.Empty<OverrideTarget>();
             if (isInstanceRoot)
             {
-                var instance = PrefabInstanceProbe.ReadInstanceRoot(go);
+                var instance = PrefabInstanceProbe.ReadInstanceRoot(go, resolveSceneRef);
                 sourcePrefabGuid = instance.SourcePrefabGuid;
                 prefabKey = instance.Key;
-                opaqueOverrides = instance.Overrides;
+                opaqueOverrides = instance.OpaqueOverrides;
+                overrides = instance.StructuredOverrides;
+                addedComponents = instance.AddedComponents;
+                removedComponents = instance.RemovedComponents;
             }
 
             return new SnapshotNode
@@ -136,6 +142,9 @@ namespace SceneBuilder.Editor
                 SourcePrefabGuid = sourcePrefabGuid,
                 PrefabKey = prefabKey,
                 OpaqueOverrides = opaqueOverrides,
+                Overrides = overrides,
+                AddedComponents = addedComponents,
+                RemovedComponents = removedComponents,
             };
         }
 

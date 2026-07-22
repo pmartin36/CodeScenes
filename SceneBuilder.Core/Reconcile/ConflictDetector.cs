@@ -222,6 +222,24 @@ namespace SceneBuilder.Core.Reconcile
                 Location = location,
             };
 
+        // b3-t3: the source prefab's default for an overridden property drifted since the override
+        // was recorded, and the live instance value now sits at the NEW default. Named
+        // "instance > target > propertyPath" per #9/checklist #6. The detection logic itself lives
+        // in InstanceOverrideDiff.DetectStaleOverrides, which calls this factory.
+        public static Conflict StaleOverride(
+            string? instanceLogicalId, OverrideTarget target, string propertyPath,
+            ValueNode recordedBase, ValueNode currentBase, SourceSpan? location = null) =>
+            new()
+            {
+                Kind = ConflictKind.StaleOverride,
+                LogicalId = instanceLogicalId,
+                Reason = $"Stale override '{instanceLogicalId} > {target.PrefabId}:{target.ObjectId} > {propertyPath}': " +
+                    $"the source prefab's default changed (recorded '{recordedBase}', now '{currentBase}') and the " +
+                    "instance value now equals the new default. Not silently kept or dropped — confirm whether to " +
+                    "keep the override or accept the new default.",
+                Location = location,
+            };
+
         public static Conflict UnanchorableComponentEdit(string componentLogicalId, string editKind) =>
             new()
             {

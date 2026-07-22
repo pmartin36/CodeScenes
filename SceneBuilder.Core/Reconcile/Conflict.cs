@@ -8,7 +8,13 @@ namespace SceneBuilder.Core.Reconcile
         DuplicateLogicalId,
         // A source handle's target vanished from the scene (Detection 1), or a snapshot target
         // resolves to nothing live (Detection 2) — see ComponentReconciler's FIELD-VALUE DIFF pass.
-        DanglingReference
+        DanglingReference,
+
+        // b3-t3: the source prefab's default for an overridden property drifted (the override's
+        // recorded BaseValue no longer matches the snapshot's current BaseValue) AND the live
+        // instance value now equals the NEW default — ambiguous whether the user wants to keep the
+        // override or adopt the new default. Neither silently kept nor dropped (spec #9).
+        StaleOverride
     }
 
     public sealed record Conflict

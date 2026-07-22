@@ -7,9 +7,13 @@ using Xunit;
 
 namespace SceneBuilder.Core.Tests
 {
-    // b3-t2: opaque overrides are never diffed into an op; a matched instance carrying nonempty
-    // snapshot overrides yields an EMPTY plan plus an informational diagnostic flagging
-    // "overrides preserved, not modelled (M10)". No overrides ⇒ no false-positive flag.
+    // b3-t2: OpaqueOverrides (nested/deferred residue, M10 banner) is never diffed into an op; a
+    // matched instance carrying a nonempty OpaqueOverrides token yields an EMPTY plan plus an
+    // informational diagnostic flagging "overrides preserved, not modelled (M10)". No opaque
+    // overrides ⇒ no false-positive flag. This is DISTINCT from structured root-target overrides
+    // (SnapshotNode.Overrides/AddedComponents/RemovedComponents) which ARE diffed into ops — see
+    // Materialize_MatchedInstance_WithStructuredOverride_EmitsRevertOp_NotOpaqueFlag below, and
+    // PrefabInstanceMaterializeTests.cs for the full structured-override diff coverage.
     public class PrefabInstanceOverrideTests
     {
         private static (SceneModel model, SceneSnapshot snapshot, IdentityMap map) BuildMatchedInstance(ValueNode.Unsupported? overrides)
@@ -85,6 +89,34 @@ namespace SceneBuilder.Core.Tests
             Assert.DoesNotContain(plan.Ops, op =>
                 op is SceneBuilder.Core.Plan.SetField setField
                 && (setField.Path.Contains("Modification") || setField.Path.Contains("override", System.StringComparison.OrdinalIgnoreCase)));
+        }
+
+        [Fact]
+        public void Materialize_MatchedInstance_WithStructuredOverride_EmitsRevertOp_NotOpaqueFlag()
+        {
+            var (model, snapshot, map) = BuildMatchedInstance(overrides: null);
+            var target = new OverrideTarget { PrefabId = "prefab-guid-1", ObjectId = 12345 };
+            var snapshotWithOverride = snapshot with
+            {
+                Roots = new[]
+                {
+                    snapshot.Roots[0] with
+                    {
+                        Overrides = new[]
+                        {
+                            new PropertyOverride { Target = target, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) },
+                        },
+                    },
+                },
+            };
+
+            var plan = Materializer.Materialize(model, snapshotWithOverride, map);
+
+            Assert.NotEmpty(plan.Ops);
+            var revert = Assert.Single(plan.Ops.OfType<SceneBuilder.Core.Plan.RevertInstanceOverride>());
+            Assert.Equal(target, revert.Target);
+            Assert.Equal("m_Health", revert.PropertyPath);
+            Assert.Empty(plan.Diagnostics);
         }
     }
 }

@@ -1,5 +1,38 @@
 # M10 — Prefab-instance override round-trip (both directions)
 
+> ## v0 scope decisions (banked 2026-07-21 — authoritative, override the body below where they conflict)
+> This spec describes the full override vision; **this pass ships a bounded v0**:
+> 1. **ROOT-ONLY this pass.** Overrides target the instance **root's own components** only. Addressing an
+>    object **inside** the prefab (a nested child / component below the root) is **deferred to a separate
+>    milestone `M-nested-props`** (flagged critical), written after a focused grounding pass on Unity's
+>    nested-prefab target addressing + a rename/dup-sibling-safe handle for objects the user never authored
+>    (reuse the LogicalId/structural-fingerprint model, spec 16). Until then, nested-target overrides are
+>    **read as opaque and preserved/flagged** (the current M6 behavior), never dropped (§7).
+> 2. **`PropertyOverride.Value` fidelity: one override per Unity `PropertyModification`.** Unity stores each
+>    modification's value as a **string**, and a structured value (e.g. a Vec3) is **three** separate mods
+>    (`.x/.y/.z`). So a `PropertyOverride` maps 1:1 to a single Unity mod (scalar/string value) — drop any
+>    reading of the type table that implies a single `PropertyOverride` carries a whole `Vec3`/`Color`.
+> 3. **Root name + transform are NOT `.Override(...)` calls.** They are already first-class fields on the
+>    M6 `PrefabInstanceNode` (`Name`, `Transform`), so those edits round-trip through **those** fields —
+>    overriding them is fully supported, just not double-encoded as an override. Unity bookkeeping mods
+>    (`m_RootOrder` / sibling index — handled by structural reorder sync) are **skipped**.
+> 4. **Stale-override detection needs a recorded base value** the current sidecar section omits: persist,
+>    per authored override, the prefab-default value it was written against, so drift ("prefab default
+>    changed under the override") is detectable per behavior #9. Add this to the sidecar (see §IdentityMap).
+> 5. **Added/Removed child-GameObject overrides — DEFERRED (out of scope this pass).** Property overrides
+>    and added/removed **components** on the root round-trip fully; adding or removing a child **GameObject**
+>    on the instance (`AddedGameObjects`/`RemovedGameObjects`, behavior #5, tests #6/#7) is **not** authored
+>    or round-tripped in v0 — it has no authoring surface yet and would collide with M6's
+>    `instance.Add`→`Children` semantics, which is its own deliberate design. Such edits stay
+>    **read-as-opaque-and-preserved** (M6 behavior), never dropped (§7). Deferred to the same follow-up as
+>    nested addressing. (The four override collections may still exist on the model for forward-compat, but
+>    only property overrides + added/removed components are authored/materialized/reconciled this pass.)
+> 6. **Materialize must REVERT, not just set** (fixes an omission in behavior #6). When the desired (code)
+>    model lacks a property override the live instance still carries (the user deleted a `.Override(...)`),
+>    Materialize emits a **revert-override** Plan op executed via the appropriate `PrefabUtility` revert
+>    call — NOT a `SetInstanceOverride` to the default value (which leaves a bold override in Unity).
+>    Symmetric with Reconcile's behavior #8. Applies to overridden properties and added/removed components.
+
 ### Additions to the contract
 
 M10 introduces the following types. They extend the `PrefabInstanceNode` established by M6; all
@@ -46,7 +79,8 @@ author instance tweaks in code and edits made on an instance in Unity round-trip
 
 ## In scope
 - Model `m_Modification.m_Modifications` as `PrefabInstanceNode.Overrides` (`PropertyOverride[]`).
-- Model added components / removed components / added GameObjects / removed GameObjects on an instance.
+- Model + round-trip added components / removed components on the root instance. (Added/removed
+  **GameObjects** are modelled for forward-compat but DEFERRED — not authored/round-tripped this pass; banner #5.)
 - Key every override on the `(PrefabId, ObjectId)` pair via `OverrideTarget`.
 - **Materialize** (code→scene): apply the authored override set onto an instantiated prefab instance.
 - **Reconcile** (scene→code): detect a user-made override / add / remove on an instance and patch source.
@@ -55,8 +89,11 @@ author instance tweaks in code and edits made on an instance in Unity round-trip
 
 ## Out of scope
 - Whole-prefab instantiation, presence detection, source-prefab GUID resolution — owned by **M6**.
-- Nested-prefab *authoring* (creating prefab-in-prefab structures); M10 only *addresses* nested
-  targets via `PrefabId` so overrides on them round-trip. Structural nested-prefab editing → deferred.
+- **Nested-target overrides — DEFERRED to `M-nested-props` (out of scope this pass).** Any override,
+  add, or remove targeting an object BELOW the instance root (a nested child / component, including one
+  inside a nested prefab) is not modelled or round-tripped here; it stays **read-as-opaque-and-preserved**
+  (the current M6 behavior), never dropped (§7). This pass round-trips **ROOT-target** overrides only.
+  Nested-prefab *authoring* (creating prefab-in-prefab structures) is likewise out of scope.
 - Variant prefabs as a distinct authored concept (a variant's own mods are still `PropertyModification`s
   and covered, but "author a new variant asset" is not).
 - Reverting the entire instance / "apply all to source" bulk operations as authoring verbs.
@@ -78,22 +115,26 @@ author instance tweaks in code and edits made on an instance in Unity round-trip
    `PropertyOverride[]` where each `target` lowers to an `OverrideTarget(PrefabId, ObjectId)`, and the
    writer produces the identical `PropertyModification` list back (round-trip is byte-stable after
    canonicalization). `PropertyModification` has **exactly** these four members — no others are emitted.
-2. **Pair-key mapping.** Two overrides that share a `PropertyPath` but target different objects inside
-   the prefab (different `ObjectId`), or the same object reached through different nested prefabs
-   (different `PrefabId`), are distinct entries and never collapse. A lookup keyed on `ObjectId` alone
-   MUST NOT match across differing `PrefabId`.
+2. **Pair-key mapping (root scope).** Two separate scene INSTANCES of the same prefab share the same
+   `ObjectId` (the prefab root's source-object fileID) but differ in `PrefabId` (per-instance); their
+   root overrides are distinct entries and never collapse. A lookup keyed on `ObjectId` alone MUST NOT
+   match across differing `PrefabId`. (Distinguishing different objects *inside* one prefab, or the same
+   object reached through different nested prefabs, is nested scope → deferred to `M-nested-props`.)
 3. **Added component.** A component present on the instance but absent from the source prefab lowers to
    an `AddedComponent{Target, Component:ComponentData}`; materialize adds it; reconcile appends
    `.AddComponent<T>()` to the instance's source statement.
 4. **Removed component.** A source component stripped on the instance lowers to a `RemovedComponents`
    entry (`OverrideTarget`); round-trips as a `.RemoveComponent<T>()` (or equivalent) authoring call.
-5. **Added / removed GameObject.** A child GO added under the instance lowers to an `AddedGameObjects`
-   `GameObjectNode`; a stripped source child lowers to a `RemovedGameObjects` `OverrideTarget`. Both
-   round-trip.
-6. **Materialize applies overrides.** `Materialize` on a `PrefabInstanceNode` with overrides produces
-   `Plan` ops that, after M6 instantiation, set each modified property, add/remove the listed
-   components, and add/remove the listed GameObjects — **in place**, preserving the instance's
-   `GlobalObjectId` (never re-instantiate to apply overrides).
+5. **Added / removed GameObject — DEFERRED (banner #5).** These collections are modelled, but the
+   authoring surface, materialize, and reconcile of child-GameObject overrides are out of scope this pass;
+   such edits are read-as-opaque-and-preserved (M6), never dropped. No added-/removed-child authoring verb
+   is introduced here.
+6. **Materialize applies AND reverts.** `Materialize` on a `PrefabInstanceNode` produces `Plan` ops that,
+   after M6 instantiation, set each authored property override and add/remove the listed components —
+   **in place**, preserving the instance's `GlobalObjectId` (never re-instantiate). Crucially, a property
+   override or added/removed component present on the LIVE instance but ABSENT from the desired model is
+   **reverted** via the appropriate `PrefabUtility` revert op (banner #6) — never left as a stale bold
+   override. (Child-GameObject add/remove is deferred, banner #5.)
 7. **Reconcile detects instance edits.** Given a `SceneSnapshot` whose prefab instance carries mods /
    adds / removes not present in the parsed `SceneModel`, `Reconcile` emits a `SourcePatch` adding the
    corresponding `.Override(...)` / `.AddComponent<T>()` / `.RemoveComponent<T>()` / child edits to the
@@ -154,13 +195,17 @@ scene.Instance("Assets/Prefabs/Enemy.prefab")
 1. `PropertyModification` list (with `target`, `propertyPath`, `value`, `objectReference`) reads into
    `PropertyOverride[]` and writes back to a byte-identical list after canonicalization.
 2. `objectReference`-type modification lowers to `AssetRef` (asset) and `ObjectRef` (in-scene) and back.
-3. Pair-key: same `PropertyPath`, different `ObjectId` → two entries; different `PrefabId`, same
-   `ObjectId` → two entries; `ObjectId`-only lookup does not cross `PrefabId`.
+3. Pair-key (root scope): two instances of the same prefab (same `ObjectId`, different `PrefabId`) →
+   two distinct entries; `ObjectId`-only lookup does not cross `PrefabId`.
 4. Added component on instance ↔ `AddedComponent`; materialize plan contains the add; reconcile patch
    appends `.AddComponent<T>()`.
 5. Removed component ↔ `RemovedComponents`; round-trips as `.RemoveComponent<T>()`.
-6. Added child GO ↔ `AddedGameObjects`; removed source child ↔ `RemovedGameObjects`; both round-trip.
-7. Full round-trip: model → Plan → (simulated) snapshot with overrides → Reconcile → identical model.
+6. **Materialize revert (banner #6):** desired model lacks a property override / added component the live
+   snapshot still carries → Plan contains a **revert** op (a `PrefabUtility` revert), NOT a set-to-default;
+   after execute, the property is no longer a bold override. (Added/removed child-GameObject round-trip is
+   DEFERRED, banner #5 — not authored/tested this pass.)
+7. Full round-trip (property overrides + added/removed components; excludes child-GameObjects): model →
+   Plan → (simulated) snapshot with overrides → Reconcile → identical model. One test owns the whole loop.
 8. Materialize preserves instance identity: plan applies overrides in place, emits no re-instantiate op.
 9. Revert: snapshot missing a previously-authored override → Reconcile emits an override-removal patch.
 10. Stale-override conflict: prefab default changed under an authored override + instance value equals
@@ -191,8 +236,9 @@ scene.Instance("Assets/Prefabs/Enemy.prefab")
 - **M5** — `ObjectRef` (override values that reference in-scene objects).
 
 ## Risks/notes
-- Nested prefabs make the `PrefabId` half of the key load-bearing; addressing-only support is in scope,
-  structural nested editing is not.
+- Nested prefabs make the `PrefabId` half of the key load-bearing even at root scope (it distinguishes
+  two instances of the same prefab). Nested-*target* addressing (objects below the root) is deferred to
+  `M-nested-props`; this pass round-trips root-target overrides only.
 - `GetRemovedGameObjects` availability varies by Unity version; when absent, removed-GO detection is
   flagged unsupported (never silently dropped), per §7.
 - `PropertyModification` value vs `objectReference` are mutually exclusive per entry; the model must not

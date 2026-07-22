@@ -28,6 +28,9 @@ namespace SceneBuilder.Core.Serialization
             };
 
             options.Converters.Add(new FieldMapJsonConverter());
+            options.Converters.Add(new PropertyOverrideArrayConverter());
+            options.Converters.Add(new AddedComponentArrayConverter());
+            options.Converters.Add(new OverrideTargetArrayConverter());
 
             if (converters != null)
             {

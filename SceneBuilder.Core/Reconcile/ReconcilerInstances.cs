@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using SceneBuilder.Core.Diff;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
@@ -121,5 +122,240 @@ namespace SceneBuilder.Core.Reconcile
                 PrefabKey = node.PrefabKey,
             });
         }
+
+        // m10-b4-t2: scene->code membership diff for a MAPPED PrefabInstance root's override
+        // collections. Reversed-role mirror of InstanceOverrideDiff.Emit (b3-t2, materialize
+        // direction): here the SNAPSHOT is truth. snapshot-only entries append the matching b4-t1
+        // SourceEdit; model-only entries (reverted in Unity) DROP the authored call — never a
+        // value-edit-to-default. Stale keys (InstanceOverrideDiff.DetectStaleOverrides) are excluded
+        // from both.
+        private static void ReconcileInstanceOverrides(
+            PrefabInstanceNode model,
+            SnapshotNode snapshot,
+            string instanceLogicalId,
+            IReadOnlyDictionary<string, SourceSpan>? anchors,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<SourceEdit> edits,
+            List<Conflict> conflicts,
+            List<AssetEntry> addedAssets)
+        {
+            if (anchors != null && !anchors.ContainsKey(instanceLogicalId))
+            {
+                conflicts.Add(ConflictDetector.MissingAnchor(instanceLogicalId, snapshot.GlobalObjectId));
+                return;
+            }
+
+            var staleKeys = new HashSet<(OverrideTarget Target, string PropertyPath)>();
+            InstanceOverrideDiff.DetectStaleOverrides(model, snapshot, conflicts, staleKeys);
+
+            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, resolveOwnerHandle, edits, conflicts, addedAssets);
+            ReconcileAddedComponents(model, snapshot, instanceLogicalId, resolveOwnerHandle, edits, addedAssets);
+            ReconcileRemovedComponents(model, snapshot, instanceLogicalId, edits);
+        }
+
+        private static void ReconcileOverrides(
+            PrefabInstanceNode model,
+            SnapshotNode snapshot,
+            string instanceLogicalId,
+            HashSet<(OverrideTarget Target, string PropertyPath)> staleKeys,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<SourceEdit> edits,
+            List<Conflict> conflicts,
+            List<AssetEntry> addedAssets)
+        {
+            var modelByKey = new Dictionary<(OverrideTarget Target, string PropertyPath), PropertyOverride>();
+            foreach (var modelOverride in model.Overrides)
+            {
+                modelByKey[(modelOverride.Target, modelOverride.PropertyPath)] = modelOverride;
+            }
+
+            var snapshotKeys = new HashSet<(OverrideTarget Target, string PropertyPath)>();
+            var sets = new List<OverrideSetSpec>();
+
+            foreach (var snapshotOverride in snapshot.Overrides)
+            {
+                var key = (snapshotOverride.Target, snapshotOverride.PropertyPath);
+                snapshotKeys.Add(key);
+
+                if (staleKeys.Contains(key) || modelByKey.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                sets.Add(BuildOverrideSetSpec(snapshotOverride, resolveOwnerHandle, edits, addedAssets));
+            }
+
+            if (sets.Count > 0)
+            {
+                edits.Add(new AppendInstanceOverride { Anchor = instanceLogicalId, Sets = sets });
+            }
+
+            foreach (var modelOverride in model.Overrides)
+            {
+                var key = (modelOverride.Target, modelOverride.PropertyPath);
+                if (staleKeys.Contains(key) || snapshotKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                edits.Add(new DropInstanceCall
+                {
+                    Anchor = instanceLogicalId,
+                    Kind = InstanceCallKind.Override,
+                    PropertyPath = modelOverride.PropertyPath,
+                });
+            }
+        }
+
+        private static void ReconcileAddedComponents(
+            PrefabInstanceNode model,
+            SnapshotNode snapshot,
+            string instanceLogicalId,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<SourceEdit> edits,
+            List<AssetEntry> addedAssets)
+        {
+            var modelKeys = new HashSet<(OverrideTarget Target, string TypeFullName)>();
+            foreach (var modelComponent in model.AddedComponents)
+            {
+                modelKeys.Add((modelComponent.Target, modelComponent.Component.Type.FullName));
+            }
+
+            var snapshotKeys = new HashSet<(OverrideTarget Target, string TypeFullName)>();
+            foreach (var snapshotComponent in snapshot.AddedComponents)
+            {
+                var typeFullName = snapshotComponent.Component.Type.FullName;
+                var key = (snapshotComponent.Target, typeFullName);
+                snapshotKeys.Add(key);
+
+                if (modelKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                edits.Add(BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets));
+            }
+
+            foreach (var modelComponent in model.AddedComponents)
+            {
+                var typeFullName = modelComponent.Component.Type.FullName;
+                var key = (modelComponent.Target, typeFullName);
+                if (snapshotKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                edits.Add(new DropInstanceCall
+                {
+                    Anchor = instanceLogicalId,
+                    Kind = InstanceCallKind.AddComponent,
+                    TypeFullName = typeFullName,
+                });
+            }
+        }
+
+        private static void ReconcileRemovedComponents(
+            PrefabInstanceNode model,
+            SnapshotNode snapshot,
+            string instanceLogicalId,
+            List<SourceEdit> edits)
+        {
+            var modelTargets = new HashSet<OverrideTarget>(model.RemovedComponents);
+            var snapshotTargets = new HashSet<OverrideTarget>(snapshot.RemovedComponents);
+
+            foreach (var target in snapshot.RemovedComponents)
+            {
+                if (modelTargets.Contains(target))
+                {
+                    continue;
+                }
+
+                edits.Add(new AppendInstanceRemoveComponent
+                {
+                    Anchor = instanceLogicalId,
+                    TypeFullName = StripTypeSigil(target.PrefabId),
+                });
+            }
+
+            foreach (var target in model.RemovedComponents)
+            {
+                if (snapshotTargets.Contains(target))
+                {
+                    continue;
+                }
+
+                edits.Add(new DropInstanceCall
+                {
+                    Anchor = instanceLogicalId,
+                    Kind = InstanceCallKind.RemoveComponent,
+                    TypeFullName = StripTypeSigil(target.PrefabId),
+                });
+            }
+        }
+
+        private static OverrideSetSpec BuildOverrideSetSpec(
+            PropertyOverride snapshotOverride,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<SourceEdit> edits,
+            List<AssetEntry> addedAssets)
+        {
+            var renderedValue = snapshotOverride.ObjectReference ?? snapshotOverride.Value;
+            var typeFullName = StripTypeSigil(snapshotOverride.Target.PrefabId);
+
+            ComponentReconciler.CollectAssetEntries(renderedValue, addedAssets);
+
+            return new OverrideSetSpec
+            {
+                TypeFullName = typeFullName,
+                PropertyPath = snapshotOverride.PropertyPath,
+                Value = snapshotOverride.Value,
+                ValueExpression = ComponentReconciler.RenderFieldValue(renderedValue, typeFullName, resolveOwnerHandle, edits),
+            };
+        }
+
+        // m10-b4-t2 (iteration 2): the added-component twin of BuildOverrideSetSpec — carries the
+        // snapshot component's FULL field set into the append, symmetric with materialize's
+        // InstanceOverrideDiff.EmitAddedComponents. Scalars/AssetRef stay in Fields (rendered via
+        // SourceExpr.ValueNodeLiteral at apply time); each ObjectRef field is pre-rendered into
+        // FieldExpressions via ComponentReconciler.RenderFieldValue (same renderer BuildOverrideSetSpec
+        // and AppendComponentStatement already use) since ValueNodeLiteral has no ObjectRef arm. Every
+        // field's referenced assets are harvested via ComponentReconciler.CollectAssetEntries.
+        private static AppendInstanceAddComponent BuildAddInstanceComponent(
+            AddedComponent snapshotComponent,
+            string instanceLogicalId,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<SourceEdit> edits,
+            List<AssetEntry> addedAssets)
+        {
+            var component = snapshotComponent.Component;
+            var typeFullName = component.Type.FullName;
+
+            Dictionary<string, string>? fieldExpressions = null;
+            foreach (var (fieldKey, value) in component.Fields)
+            {
+                if (value is ValueNode.ObjectRef)
+                {
+                    fieldExpressions ??= new Dictionary<string, string>();
+                    fieldExpressions[fieldKey] = ComponentReconciler.RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits);
+                }
+
+                ComponentReconciler.CollectAssetEntries(value, addedAssets);
+            }
+
+            return new AppendInstanceAddComponent
+            {
+                Anchor = instanceLogicalId,
+                TypeFullName = typeFullName,
+                Fields = component.Fields,
+                FieldExpressions = fieldExpressions,
+            };
+        }
+
+        // The parser's own encoding for a resolved override/added-component/removed-component
+        // target — BuilderParser.Instance.cs:112,243 writes `Target.PrefabId = "type:<FullName>"`
+        // when it cannot resolve a real (GUID:fileID) pair. StripTypeSigil is the inverse: reconcile
+        // renders `<T>` from the same convention, never a new one.
+        private static string StripTypeSigil(string prefabId) =>
+            prefabId.StartsWith("type:", StringComparison.Ordinal) ? prefabId.Substring("type:".Length) : prefabId;
     }
 }

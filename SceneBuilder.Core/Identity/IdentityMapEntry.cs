@@ -33,5 +33,14 @@ namespace SceneBuilder.Core.Identity
         [JsonPropertyOrder(8)]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? SourcePrefabGuid { get; init; }
+
+        /// <summary>
+        /// M10 (b6-t2): the instance's persisted root-target override targets + recorded BaseValues.
+        /// Instance-only — MUST stay null (never empty array) on every GameObject/Component/plain
+        /// entry so those stay byte-identical (write-if-changed depends on it).
+        /// </summary>
+        [JsonPropertyOrder(9)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public InstanceOverrideRecord[]? Overrides { get; init; }
     }
 }

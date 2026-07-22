@@ -17,8 +17,11 @@ using SceneBuilder.Core.Validation;
 // temp scene). Five tests, one per checklist step: (1) one instance connects + stamps the sidecar,
 // (2) two same-prefab instances share SourcePrefabGuid + TargetObjectId with distinct TargetPrefabId,
 // (3) an in-scene move+reparent updates the source without recreating the instance, (4) a live
-// property override survives a rebuild and surfaces the SB2301 "not modelled" flag, (5) deleting the
-// instance removes its statement.
+// NESTED-target property override (below the instance root) survives a rebuild and surfaces the
+// SB2301 "not modelled" flag — under M10 (b6-t1) a ROOT-target override is instead MODELLED into
+// structured Overrides[] and reconciled (SB2301 no longer applies to it; that full round trip is
+// b8-t1's PrefabInstanceOverrideRoundTripTests.cs, gated on b7-t1's executor) — this test keeps the
+// still-opaque nested case, (5) deleting the instance removes its statement.
 public class RoundTripPrefabInstanceTests
 {
     private const string FixturesDir = "Assets/GateTests/Fixtures_M6RoundTrip";
@@ -58,6 +61,9 @@ public class RoundTripPrefabInstanceScene : ISceneDefinition
 
         var source = new GameObject("M6_RoundTripEnemy_Source");
         source.AddComponent<BoxCollider>();
+        var child = new GameObject("Child");
+        child.transform.SetParent(source.transform);
+        child.AddComponent<BoxCollider>();
         PrefabUtility.SaveAsPrefabAsset(source, PrefabPath);
         UnityEngine.Object.DestroyImmediate(source);
         AssetDatabase.SaveAssets();
@@ -202,11 +208,14 @@ public class RoundTripPrefabInstanceScene : ISceneDefinition
             "A follow-up rebuild changed GlobalObjectId — identity not stable across rebuild");
     }
 
-    // 4. A genuine live property override (non-root-transform) survives a rebuild — never reverted —
-    //    and the rebuild surfaces the SB2301 "overrides preserved, not modelled (M10)" info flag on
-    //    BuildResult.Flags. The builder source gains no override authoring (out of scope until M10).
+    // 4. A genuine live NESTED-target property override (on a component below the instance root)
+    //    survives a rebuild — never reverted — and the rebuild surfaces the SB2301 "overrides
+    //    preserved, not modelled (M10)" info flag on BuildResult.Flags. The builder source gains no
+    //    override authoring (out of scope until M10). A ROOT-target override is a DIFFERENT case
+    //    under M10 (b6-t1): it is read into structured Overrides[] and reconciled, so SB2301 does not
+    //    fire for it — that full round trip is b8-t1's PrefabInstanceOverrideRoundTripTests.cs.
     [Test]
-    public void Override_PreservedAndFlagged_RebuildDoesNotRevert()
+    public void Override_NestedTarget_PreservedAndFlagged_RebuildDoesNotRevert()
     {
         File.WriteAllText(_builderPath, Source($"        scene.Instance(\"{PrefabPath}\");"));
 
@@ -217,8 +226,10 @@ public class RoundTripPrefabInstanceScene : ISceneDefinition
 
         var root = FindRoot(EditorSceneManager.GetActiveScene(), InstanceName);
         Assert.IsNotNull(root, "Setup: instance root was not created");
-        var collider = root.GetComponent<BoxCollider>();
-        Assert.IsNotNull(collider, "Setup: prefab fixture has no BoxCollider to override");
+        var childTransform = root.transform.Find("Child");
+        Assert.IsNotNull(childTransform, "Setup: prefab fixture has no nested Child to override");
+        var collider = childTransform.GetComponent<BoxCollider>();
+        Assert.IsNotNull(collider, "Setup: nested Child has no BoxCollider to override");
 
         var overriddenCenter = new Vector3(9f, 9f, 9f);
         collider.center = overriddenCenter;
@@ -228,12 +239,14 @@ public class RoundTripPrefabInstanceScene : ISceneDefinition
         var rebuildResult = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
 
         Assert.IsTrue(rebuildResult.Flags.Any(d => d.Code == DiagnosticCodes.PrefabOverridesNotModelled),
-            "Rebuild against a live property override did not surface SB2301 on BuildResult.Flags");
+            "Rebuild against a live NESTED-target property override did not surface SB2301 on BuildResult.Flags");
 
         var liveRoot = FindRoot(EditorSceneManager.GetActiveScene(), InstanceName);
         Assert.IsNotNull(liveRoot, "Instance root disappeared across rebuild");
-        Assert.AreEqual(overriddenCenter, liveRoot.GetComponent<BoxCollider>().center,
-            "Rebuild reverted the live property override");
+        var liveChild = liveRoot.transform.Find("Child");
+        Assert.IsNotNull(liveChild, "Nested Child disappeared across rebuild");
+        Assert.AreEqual(overriddenCenter, liveChild.GetComponent<BoxCollider>().center,
+            "Rebuild reverted the live nested-target property override");
 
         var rewritten = File.ReadAllText(_builderPath);
         StringAssert.DoesNotContain("BoxCollider", rewritten,

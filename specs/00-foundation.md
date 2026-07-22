@@ -387,7 +387,9 @@ agents into reporting a failed gate as green. Never report a gate as passed on a
   events, retargeting), **animation FSM / AnimatorController state machines** (phased: a simple v0
   set — states, transitions, parameters, conditions — promotable to a milestone after M11, then an
   advanced v1 set — layers, sub-state machines, blend trees), **multi/additive scenes**, **headless
-  CI generation**, **live per-keystroke sync**.
+  CI generation**, **live per-keystroke sync**, **UI Toolkit (UIElements) support** (disjoint from the
+  GameObject/`GlobalObjectId` model — UXML/USS text round-trip + no serialized event surface; uGUI is the
+  first UI track).
 
 ---
 

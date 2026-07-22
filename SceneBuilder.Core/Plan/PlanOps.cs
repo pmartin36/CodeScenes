@@ -114,4 +114,59 @@ namespace SceneBuilder.Core.Plan
         [JsonPropertyOrder(3)]
         public int SiblingIndex { get; init; }
     }
+
+    public sealed record SetInstanceOverride : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+
+        [JsonPropertyOrder(2)]
+        public string PropertyPath { get; init; } = "";
+
+        [JsonPropertyOrder(3)]
+        public ValueNode Value { get; init; } = new ValueNode.Unsupported("");
+
+        [JsonPropertyOrder(4)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ValueNode? ObjectReference { get; init; }
+    }
+
+    public sealed record AddInstanceComponent : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+
+        [JsonPropertyOrder(2)]
+        public ComponentData Component { get; init; } = new();
+    }
+
+    public sealed record RemoveInstanceComponent : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+    }
+
+    public sealed record RevertInstanceOverride : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+
+        [JsonPropertyOrder(2)]
+        public string PropertyPath { get; init; } = "";
+    }
+
+    public sealed record RevertAddedComponent : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+
+        [JsonPropertyOrder(2)]
+        public string ComponentLogicalId { get; init; } = "";
+    }
+
+    public sealed record RevertRemovedComponent : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+    }
 }

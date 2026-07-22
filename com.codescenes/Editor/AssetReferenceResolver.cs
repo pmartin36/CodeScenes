@@ -436,6 +436,19 @@ namespace SceneBuilder.Editor
                     : new ValueNode.AssetRef(null);
             }
 
+            return ReadObjectReferenceValue(obj, resolveSceneRef, p);
+        }
+
+        /// <summary>
+        /// b6-t1: the non-null object→<see cref="ValueNode"/> classification (asset/builtin/scene),
+        /// extracted from <see cref="ReadObjectReference"/> so <see cref="PrefabInstanceProbe"/> can
+        /// lower a <c>PropertyModification.objectReference</c> — a raw <see cref="UnityEngine.Object"/>,
+        /// not a <see cref="SerializedProperty"/> — through the SAME classification (anti-dup; the M10
+        /// blueprint's reuse check). <paramref name="p"/> is optional, used only to LOCATE a
+        /// <see cref="BuiltinRefValidator.ThrowUnknownBuiltinId"/> error when read from a live property.
+        /// </summary>
+        internal static ValueNode ReadObjectReferenceValue(UnityEngine.Object obj, Func<UnityEngine.Object, string?>? resolveSceneRef, SerializedProperty? p = null)
+        {
             // A reference to a scene GameObject/Component (not a project asset) resolves via the
             // injected identity resolver (M5) when one was supplied; otherwise (the build read path,
             // which never consumes scene refs) it stays Unsupported exactly as pre-M5.

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Reconcile;
 using SceneBuilder.Core.Validation;
 
 namespace SceneBuilder.Core.Diff
@@ -26,8 +27,9 @@ namespace SceneBuilder.Core.Diff
             var visitedGoids = new HashSet<string>();
             var ops = new List<ChangeOp>();
             var diagnostics = new List<Diagnostic>();
+            var conflicts = new List<Conflict>();
 
-            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics);
+            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics, conflicts);
 
             foreach (var kv in snapshotByGoid)
             {
@@ -45,7 +47,7 @@ namespace SceneBuilder.Core.Diff
                 ops.Add(new RemoveNode { LogicalId = logicalId });
             }
 
-            return new ChangeSet { Ops = ops.ToArray(), Diagnostics = diagnostics };
+            return new ChangeSet { Ops = ops.ToArray(), Diagnostics = diagnostics, Conflicts = conflicts };
         }
 
         private static void FlattenSnapshot(SnapshotNode[] nodes, string? parentGoid, Dictionary<string, SnapshotEntry> snapshotByGoid)
@@ -70,7 +72,8 @@ namespace SceneBuilder.Core.Diff
             HashSet<string> visitedGoids,
             IdentityMap identityMap,
             List<ChangeOp> ops,
-            List<Diagnostic> diagnostics)
+            List<Diagnostic> diagnostics,
+            List<Conflict> conflicts)
         {
             // b6-t1: siblingIndex counts only nodes MATCHED to a live snapshot entry, not raw source
             // position. A desired node absent from the live snapshot (EmitCreate below — either
@@ -87,6 +90,14 @@ namespace SceneBuilder.Core.Diff
                 {
                     visitedGoids.Add(goid);
                     EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, ops);
+
+                    // b3-t2: matched PrefabInstanceNode ⇒ diff its structured override collections
+                    // (Overrides/AddedComponents/RemovedComponents) against the matched snapshot's.
+                    // All in-place (pass-B) — never re-instantiates.
+                    if (node is PrefabInstanceNode instanceNode)
+                    {
+                        InstanceOverrideDiff.Emit(instanceNode, entry.Node, ops, conflicts);
+                    }
 
                     // b3-t2: OpaqueOverrides is READ-ONLY (M10) — never diffed into an op, only
                     // flagged. Diffing it would emit a spurious SetField and corrupt the preserved
@@ -113,7 +124,7 @@ namespace SceneBuilder.Core.Diff
                     EmitCreate(node, parentLogicalId, identityMap, ops);
                 }
 
-                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics);
+                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics, conflicts);
             }
         }
 

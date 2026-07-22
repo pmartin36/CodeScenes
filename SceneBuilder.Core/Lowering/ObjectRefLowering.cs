@@ -18,10 +18,34 @@ namespace SceneBuilder.Core.Lowering
 
         private static GameObjectNode LowerGameObject(GameObjectNode go, Func<string, string?> resolveHandle)
         {
-            return go with
+            var lowered = go with
             {
                 Components = go.Components.Select(c => LowerComponent(c, resolveHandle)).ToArray(),
                 Children = go.Children.Select(c => LowerGameObject(c, resolveHandle)).ToArray(),
+            };
+
+            if (lowered is PrefabInstanceNode instance)
+            {
+                return instance with
+                {
+                    Overrides = instance.Overrides.Select(o => LowerPropertyOverride(o, resolveHandle)).ToArray(),
+                    AddedComponents = instance.AddedComponents
+                        .Select(a => a with { Component = LowerComponent(a.Component, resolveHandle) })
+                        .ToArray(),
+                };
+            }
+
+            return lowered;
+        }
+
+        private static PropertyOverride LowerPropertyOverride(PropertyOverride @override, Func<string, string?> resolveHandle)
+        {
+            return @override with
+            {
+                Value = LowerNode(@override.Value, resolveHandle),
+                ObjectReference = @override.ObjectReference is null
+                    ? null
+                    : LowerNode(@override.ObjectReference, resolveHandle),
             };
         }
 

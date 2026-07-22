@@ -252,6 +252,24 @@ namespace SceneBuilder.Editor
                         }
 
                         break;
+                    case SetInstanceOverride setInstanceOverride:
+                        InstanceOverrideExecutor.Apply(setInstanceOverride, result, map, scene);
+                        break;
+                    case AddInstanceComponent addInstanceComponent:
+                        InstanceOverrideExecutor.Apply(addInstanceComponent, result, map, scene);
+                        break;
+                    case RemoveInstanceComponent removeInstanceComponent:
+                        InstanceOverrideExecutor.Apply(removeInstanceComponent, result);
+                        break;
+                    case RevertInstanceOverride revertInstanceOverride:
+                        InstanceOverrideExecutor.Apply(revertInstanceOverride, result);
+                        break;
+                    case RevertAddedComponent revertAddedComponent:
+                        InstanceOverrideExecutor.Apply(revertAddedComponent, result);
+                        break;
+                    case RevertRemovedComponent revertRemovedComponent:
+                        InstanceOverrideExecutor.Apply(revertRemovedComponent, result);
+                        break;
                 }
             }
 
