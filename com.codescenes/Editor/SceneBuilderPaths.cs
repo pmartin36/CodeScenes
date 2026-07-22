@@ -1,5 +1,6 @@
 #nullable enable
 using System.IO;
+using UnityEditor.PackageManager;
 using UnityEngine;
 
 namespace SceneBuilder.Editor
@@ -36,6 +37,37 @@ namespace SceneBuilder.Editor
         /// <summary>Absolute path of the identity sidecar for <paramref name="builderName"/>.</summary>
         public static string Sidecar(string builderName) => Path.Combine(BuildersDirectory, builderName + ".sbmap.json");
 
+        /// <summary>Folder, directly under <see cref="BuildersDirectory"/>, holding tool-generated (never hand-authored) files.</summary>
+        public const string GeneratedFolderName = "Generated";
+
+        /// <summary>File name of the generated project catalog manifest (tags/layers) under <see cref="GeneratedDirectory"/>.</summary>
+        public const string ProjectCatalogFileName = "ProjectCatalog.sbcatalog.json";
+
+        /// <summary>Absolute path of the generated-files folder. May not exist yet — see <see cref="EnsureGeneratedDirectory"/>.</summary>
+        public static string GeneratedDirectory => Path.Combine(BuildersDirectory, GeneratedFolderName);
+
+        /// <summary>Absolute path of the generated project catalog manifest.</summary>
+        public static string ProjectCatalogManifestPath => Path.Combine(GeneratedDirectory, ProjectCatalogFileName);
+
+        /// <summary>Folder, inside the package, holding the shipped analyzer toolkit dlls.</summary>
+        public const string AnalyzersFolderName = "Analyzers~";
+
+        /// <summary>File name of the shipped diagnostics analyzer assembly.</summary>
+        public const string AnalyzerAssemblyFileName = "CodeScenes.Analyzers.dll";
+
+        /// <summary>File name of the shipped grammar assembly the analyzer assembly depends on.</summary>
+        public const string GrammarAssemblyFileName = "SceneBuilder.Grammar.dll";
+
+        /// <summary>
+        /// Absolute, on-disk root of this package (embedded, <c>Packages/</c>, or
+        /// <c>Library/PackageCache</c>), or null when the package cannot be resolved.
+        /// </summary>
+        public static string? PackageRootPath => PackageInfo.FindForAssembly(typeof(SceneBuilderPaths).Assembly)?.resolvedPath;
+
+        /// <summary>Absolute path of <see cref="AnalyzersFolderName"/> under the package root, or null when the package cannot be resolved.</summary>
+        public static string? AnalyzersDirectory =>
+            PackageRootPath == null ? null : Path.Combine(PackageRootPath, AnalyzersFolderName);
+
         /// <summary>
         /// Creates the builders folder if missing and returns it. Idempotent, and safe to call before
         /// every read/write so a fresh project never fails for want of the directory.
@@ -44,6 +76,35 @@ namespace SceneBuilder.Editor
         {
             Directory.CreateDirectory(BuildersDirectory);
             return BuildersDirectory;
+        }
+
+        /// <summary>
+        /// Creates the generated-files folder if missing and returns it. Idempotent, and safe to call
+        /// before every generated-file write so a fresh project never fails for want of the directory.
+        /// </summary>
+        public static string EnsureGeneratedDirectory()
+        {
+            Directory.CreateDirectory(GeneratedDirectory);
+            return GeneratedDirectory;
+        }
+
+        /// <summary>
+        /// Pure compare-before-write: writes <paramref name="contents"/> to <paramref name="path"/>
+        /// ONLY when it differs from what is already on disk. Returns true when a write actually
+        /// happened. Unlike <see cref="WriteIfChanged"/>, this does NOT record the write with
+        /// <see cref="SuppressionScope"/> — it is the primitive for callers whose output is not a
+        /// builder source/sidecar the code-&gt;scene file watcher needs to drop as a self-echo (e.g.
+        /// tool-generated manifests it never watches).
+        /// </summary>
+        public static bool WriteTextIfChanged(string path, string contents)
+        {
+            if (File.Exists(path) && string.Equals(File.ReadAllText(path), contents, System.StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            File.WriteAllText(path, contents);
+            return true;
         }
 
         /// <summary>
@@ -60,12 +121,11 @@ namespace SceneBuilder.Editor
         /// </remarks>
         public static bool WriteIfChanged(string path, string contents)
         {
-            if (File.Exists(path) && string.Equals(File.ReadAllText(path), contents, System.StringComparison.Ordinal))
+            if (!WriteTextIfChanged(path, contents))
             {
                 return false;
             }
 
-            File.WriteAllText(path, contents);
             SuppressionScope.RecordWrite(path, SuppressionScope.ComputeContentHash(contents));
             return true;
         }

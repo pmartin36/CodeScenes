@@ -23,4 +23,14 @@
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" />
   </Target>
 
+  <!-- Also stage Grammar into the Unity package's Analyzers~ folder: the shipped analyzer assembly
+       depends on Grammar at load time, and the `~` folder keeps Unity's importer from touching it.
+       Kept alongside (not replacing) StageGrammarDllToUnityPlugins, which Core's runtime dependency
+       still needs. -->
+  <Target Name="StageGrammarDllToUnityAnalyzers" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFiles="$(MSBuildProjectDirectory)/../com.codescenes/Analyzers~/SceneBuilder.Grammar.dll"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" />
+  </Target>
+
 </Project>

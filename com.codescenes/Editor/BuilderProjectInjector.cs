@@ -85,7 +85,8 @@ namespace SceneBuilder.Editor
                     content,
                     Path.GetFileNameWithoutExtension(path),
                     SceneBuilderPaths.ProjectRoot,
-                    BuilderFiles());
+                    BuilderFiles(),
+                    SceneBuilderPaths.AnalyzersDirectory);
 
                 // Reference equality: Inject returns the SAME instance when it changed nothing, so this
                 // warns only when source was actually added to a project that cannot resolve its types.
@@ -163,11 +164,19 @@ namespace SceneBuilder.Editor
         /// </param>
         /// <param name="projectDirectory">The folder the csproj lives in (the Unity project root).</param>
         /// <param name="builderFiles">Absolute paths of the builder sources to inject.</param>
+        /// <param name="analyzersDirectory">
+        /// Absolute path of the package's shipped analyzer toolkit (<c>Analyzers~/</c>), or null to skip
+        /// wiring it. When supplied (and builders are present), two <c>&lt;Analyzer /&gt;</c> items and one
+        /// <c>&lt;AdditionalFiles /&gt;</c> item (the project catalog manifest) are injected alongside the
+        /// builder <c>&lt;Compile /&gt;</c> items. Null behaves byte-identically to the original 4-arg
+        /// contract.
+        /// </param>
         public static string Inject(
             string csprojContent,
             string csprojProjectName,
             string projectDirectory,
-            IReadOnlyList<string> builderFiles)
+            IReadOnlyList<string> builderFiles,
+            string? analyzersDirectory = null)
         {
             if (!string.Equals(csprojProjectName, DonorProjectName, StringComparison.Ordinal))
             {
@@ -188,31 +197,31 @@ namespace SceneBuilder.Editor
             var items = new StringBuilder();
             foreach (var builderFile in builderFiles)
             {
-                var include = SecurityElement.Escape(RelativePath(projectDirectory, builderFile));
-
-                // Idempotence: Unity regenerates from scratch so this normally never trips, but a hook
-                // must never double-inject if it sees its own output (e.g. another postprocessor, or a
-                // future generator that preserves content).
-                if (csprojContent.IndexOf($"Include=\"{include}\"", StringComparison.Ordinal) >= 0)
-                {
-                    continue;
-                }
-
-                items.Append("    <Compile Include=\"").Append(include).Append('"');
+                var include = RelativePath(projectDirectory, builderFile);
 
                 // <Link> controls where the IDE shows the file in the solution tree. It is only needed
                 // when the file sits OUTSIDE the csproj's folder, where MSBuild would otherwise display
                 // a "..\..\" path. It normally does NOT: Unity generates csprojs into the project root
                 // and the builders folder is a child of it, so the include is already a clean
                 // "SceneBuilders/Foo.cs" that displays correctly on its own.
-                if (include.StartsWith("..", StringComparison.Ordinal))
-                {
-                    var link = SecurityElement.Escape(
-                        SceneBuilderPaths.BuildersFolderName + Path.DirectorySeparatorChar + Path.GetFileName(builderFile));
-                    items.Append(" Link=\"").Append(link).Append('"');
-                }
+                var link = include.StartsWith("..", StringComparison.Ordinal)
+                    ? SceneBuilderPaths.BuildersFolderName + Path.DirectorySeparatorChar + Path.GetFileName(builderFile)
+                    : null;
 
-                items.AppendLine(" />");
+                AppendItemIfAbsent(items, csprojContent, "Compile", include, link);
+            }
+
+            if (analyzersDirectory != null)
+            {
+                AppendItemIfAbsent(items, csprojContent, "Analyzer", analyzersDirectory + "/" + SceneBuilderPaths.AnalyzerAssemblyFileName);
+                AppendItemIfAbsent(items, csprojContent, "Analyzer", analyzersDirectory + "/" + SceneBuilderPaths.GrammarAssemblyFileName);
+
+                var manifestPath = Path.Combine(
+                    projectDirectory,
+                    SceneBuilderPaths.BuildersFolderName,
+                    SceneBuilderPaths.GeneratedFolderName,
+                    SceneBuilderPaths.ProjectCatalogFileName);
+                AppendItemIfAbsent(items, csprojContent, "AdditionalFiles", RelativePath(projectDirectory, manifestPath));
             }
 
             if (items.Length == 0)
@@ -230,6 +239,36 @@ namespace SceneBuilder.Editor
                 .ToString();
 
             return csprojContent.Insert(closingTag, itemGroup);
+        }
+
+        /// <summary>
+        /// Appends a single <c>&lt;<paramref name="itemName"/> Include="…" [Link="…"] /&gt;</c> line to
+        /// <paramref name="items"/> — escaped, and skipped when <paramref name="csprojContent"/> already
+        /// contains that exact <c>Include="…"</c> (idempotence: a hook must never double-inject if it
+        /// sees its own output).
+        /// </summary>
+        private static void AppendItemIfAbsent(
+            StringBuilder items,
+            string csprojContent,
+            string itemName,
+            string include,
+            string? link = null)
+        {
+            include = SecurityElement.Escape(include);
+
+            if (csprojContent.IndexOf($"Include=\"{include}\"", StringComparison.Ordinal) >= 0)
+            {
+                return;
+            }
+
+            items.Append("    <").Append(itemName).Append(" Include=\"").Append(include).Append('"');
+
+            if (link != null)
+            {
+                items.Append(" Link=\"").Append(SecurityElement.Escape(link)).Append('"');
+            }
+
+            items.AppendLine(" />");
         }
 
         /// <summary>

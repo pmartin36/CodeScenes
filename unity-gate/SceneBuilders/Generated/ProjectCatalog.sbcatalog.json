@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "tags": [
+    "Untagged",
+    "Respawn",
+    "Finish",
+    "EditorOnly",
+    "MainCamera",
+    "Player",
+    "GameController"
+  ],
+  "layers": [
+    {
+      "index": 0,
+      "name": "Default"
+    },
+    {
+      "index": 1,
+      "name": "TransparentFX"
+    },
+    {
+      "index": 2,
+      "name": "Ignore Raycast"
+    },
+    {
+      "index": 4,
+      "name": "Water"
+    },
+    {
+      "index": 5,
+      "name": "UI"
+    }
+  ]
+}

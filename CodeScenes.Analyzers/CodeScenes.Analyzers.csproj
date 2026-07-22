@@ -20,4 +20,14 @@
     <ProjectReference Include="../SceneBuilder.Grammar/SceneBuilder.Grammar.csproj" />
   </ItemGroup>
 
+  <!-- Stage the freshly-built analyzer assembly into the Unity package's Analyzers~ folder on every
+       build. The `~` suffix keeps Unity's importer from touching it; the editor's <Analyzer> csproj
+       injection (b5-t2) points the donor project at this staged dll. Mirrors Core.csproj's
+       StageCoreDllToUnityPlugins target. -->
+  <Target Name="StageAnalyzerDllToUnityAnalyzers" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFiles="$(MSBuildProjectDirectory)/../com.codescenes/Analyzers~/CodeScenes.Analyzers.dll"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" />
+  </Target>
+
 </Project>
