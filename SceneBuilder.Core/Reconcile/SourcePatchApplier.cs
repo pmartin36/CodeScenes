@@ -563,8 +563,15 @@ namespace SceneBuilder.Core.Reconcile
             allTargets.Add(statement);
             appliers.Add(currentRoot =>
             {
-                var current = currentRoot.GetCurrentNode(statement)!;
-                return currentRoot.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;
+                // A prior RemoveStatement in this same batch may have already deleted this node: an
+                // owner removal takes the WHOLE `var x = ...Component<A>()...Component<B>()` statement,
+                // and the cascade's per-component RemoveStatements (Reconciler.DetectRemovals) then
+                // anchor into inline components that lived inside that now-gone statement. Their goal —
+                // node absent — is already met, so skip. Without this guard GetCurrentNode returns null
+                // and RemoveNode(null) throws NullReferenceException, aborting the whole sync (deleting
+                // an object with inline components is the everyday case: DemoScene's beacon/floor/Crate).
+                var current = currentRoot.GetCurrentNode(statement);
+                return current == null ? currentRoot : currentRoot.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;
             });
         }
 

@@ -321,6 +321,55 @@ public class RoundTripScene : ISceneDefinition
             "Builder source still references the removed `box` handle.\n" + rewritten);
     }
 
+    // 7b. Same as (7), but the components are INLINE in the object's chain rather than on separate
+    //     statements — the everyday authoring shape (DemoScene's beacon/floor/Crate all look like
+    //     this). Deletion makes DetectRemovals emit a RemoveStatement for the owner AND one per
+    //     component, and for inline components every anchor resolves to the SAME physical statement.
+    //     The applier must remove that statement once and skip the now-detached per-component removes;
+    //     the un-guarded path threw NullReferenceException (GetCurrentNode on an already-removed node).
+    [Test]
+    public void SceneToCode_RemovedObjectWithInlineComponents_RemovesWholeStatementNoCrash()
+    {
+        // Phase 1: build the object alone so it is mapped in the sidecar.
+        File.WriteAllText(_builderPath, Source("        var box = scene.Add(\"Box\");"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        // Phase 2: author the components INLINE in the chain and rebuild (maps the components).
+        File.WriteAllText(_builderPath, Source(
+            "        var box = scene.Add(\"Box\")\n" +
+            "            .Component<UnityEngine.Rigidbody>(c => c.Set(r => r.mass, 5f))\n" +
+            "            .Component<UnityEngine.BoxCollider>();"));
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        var box = FindRoot(EditorSceneManager.GetActiveScene(), "Box");
+        Assert.IsNotNull(box, "Box was not created by SceneBuilderBuild.Run");
+        Assert.IsNotNull(box.GetComponent<Rigidbody>(), "Authored Rigidbody was not materialized on Box");
+        Assert.IsNotNull(box.GetComponent<BoxCollider>(), "Authored BoxCollider was not materialized on Box");
+
+        // The user deletes the whole object in the scene.
+        Object.DestroyImmediate(box);
+
+        // Must not throw, and the emitted source must compile with the whole `var box = ...` chain gone.
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsTrue(result.Changed, "Sync reported no change despite a deleted GameObject");
+
+        var rewritten = File.ReadAllText(_builderPath);
+        StringAssert.DoesNotContain("scene.Add(\"Box\")", rewritten,
+            "Builder source still declares the deleted Box.\n" + rewritten);
+        StringAssert.DoesNotContain(".Component<UnityEngine.Rigidbody>", rewritten,
+            "Builder source kept the deleted object's inline Rigidbody.\n" + rewritten);
+        StringAssert.DoesNotContain(".Component<UnityEngine.BoxCollider>", rewritten,
+            "Builder source kept the deleted object's inline BoxCollider.\n" + rewritten);
+        StringAssert.DoesNotContain("box", rewritten,
+            "Builder source still references the removed `box` handle.\n" + rewritten);
+
+        // Convergence: a second sync against the same (already-consistent) scene is a no-op.
+        var second = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsFalse(second.Changed, "Second sync mutated the builder — deletion did not converge.");
+    }
+
     // 8. Component + field (code->scene): authoring a typed setter materializes the real component with
     //    the field value applied (member selector `r => r.mass` resolved to the serialized path m_Mass by
     //    the adapter's AuthoredPathResolver). Two-phase build: the object is built first, then the
