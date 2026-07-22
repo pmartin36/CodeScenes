@@ -201,7 +201,7 @@ namespace CodeScenes.Analyzers
         /// <see cref="string"/>, <see cref="double"/>, <see cref="bool"/> or null (JSON null).
         /// Throws <see cref="FormatException"/> on any structural error.
         /// </summary>
-        private static class MiniJson
+        internal static class MiniJson
         {
             public static object? Parse(string json)
             {

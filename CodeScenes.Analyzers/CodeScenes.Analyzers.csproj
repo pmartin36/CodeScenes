@@ -16,6 +16,12 @@
     </PackageReference>
   </ItemGroup>
 
+  <!-- b3-t1: SceneBuilder.Analyzers.Tests calls internal FacadeEmit.TryEmitFacades directly
+       (mirrors how the rest of this assembly stays internal; parity with CatalogEmit). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="SceneBuilder.Analyzers.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../SceneBuilder.Grammar/SceneBuilder.Grammar.csproj" />
   </ItemGroup>
