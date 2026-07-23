@@ -155,7 +155,11 @@ namespace SceneBuilder.Core.Tests
             AddedComponent[]? desiredAddedComponents = null,
             AddedComponent[]? snapshotAddedComponents = null,
             OverrideTarget[]? desiredRemovedComponents = null,
-            OverrideTarget[]? snapshotRemovedComponents = null)
+            OverrideTarget[]? snapshotRemovedComponents = null,
+            AddedGameObject[]? desiredAddedGameObjects = null,
+            AddedGameObject[]? snapshotAddedGameObjects = null,
+            OverrideTarget[]? desiredRemovedGameObjects = null,
+            OverrideTarget[]? snapshotRemovedGameObjects = null)
         {
             var transform = new TransformData { Position = new Vec3(1, 2, 3), Rotation = Quat.Identity, Scale = Vec3.One };
             var instance = new PrefabInstanceNode
@@ -167,6 +171,8 @@ namespace SceneBuilder.Core.Tests
                 Overrides = desiredOverrides ?? System.Array.Empty<PropertyOverride>(),
                 AddedComponents = desiredAddedComponents ?? System.Array.Empty<AddedComponent>(),
                 RemovedComponents = desiredRemovedComponents ?? System.Array.Empty<OverrideTarget>(),
+                AddedGameObjects = desiredAddedGameObjects ?? System.Array.Empty<AddedGameObject>(),
+                RemovedGameObjects = desiredRemovedGameObjects ?? System.Array.Empty<OverrideTarget>(),
             };
 
             var snapshotInstance = new SnapshotNode
@@ -178,6 +184,8 @@ namespace SceneBuilder.Core.Tests
                 Overrides = snapshotOverrides ?? System.Array.Empty<PropertyOverride>(),
                 AddedComponents = snapshotAddedComponents ?? System.Array.Empty<AddedComponent>(),
                 RemovedComponents = snapshotRemovedComponents ?? System.Array.Empty<OverrideTarget>(),
+                AddedGameObjects = snapshotAddedGameObjects ?? System.Array.Empty<AddedGameObject>(),
+                RemovedGameObjects = snapshotRemovedGameObjects ?? System.Array.Empty<OverrideTarget>(),
             };
 
             var map = new IdentityMap
@@ -321,6 +329,57 @@ namespace SceneBuilder.Core.Tests
 
             Assert.Empty(plan.Ops.OfType<SetInstanceOverride>());
             Assert.Empty(plan.Ops.OfType<RevertInstanceOverride>());
+        }
+
+        // b3-t3: added/removed child-GameObject routing (spec #9 materialize side, behavior #8).
+        [Fact]
+        public void Materialize_AuthoredAddedChild_AbsentFromSnapshot_EmitsAddInstanceChild_NotCreateOrInstantiate()
+        {
+            var parentTarget = new OverrideTarget { SubKey = new PrefabInstanceKey { TargetObjectId = 12345 } };
+            var childNode = new GameObjectNode { LogicalId = "instance-1/Turret", Name = "Turret" };
+            var added = new AddedGameObject { Parent = parentTarget, Node = childNode };
+            var (instance, snapshotInstance, map) = BuildMatched(desiredAddedGameObjects: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var op = Assert.Single(plan.Ops.OfType<AddInstanceChild>());
+            Assert.Equal(parentTarget, op.Target);
+            Assert.Equal(childNode, op.Node);
+            Assert.Empty(plan.Ops.OfType<CreateObject>());
+            Assert.Empty(plan.Ops.OfType<InstantiatePrefab>());
+        }
+
+        [Fact]
+        public void Materialize_SnapshotAddedChild_AbsentFromDesired_EmitsRevertAddedChild()
+        {
+            var parentTarget = new OverrideTarget { SubKey = new PrefabInstanceKey { TargetObjectId = 12345 } };
+            var childNode = new GameObjectNode { LogicalId = "instance-1/Turret", Name = "Turret" };
+            var snapshotAdded = new AddedGameObject { Parent = parentTarget, Node = childNode };
+            var (instance, snapshotInstance, map) = BuildMatched(snapshotAddedGameObjects: new[] { snapshotAdded });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var revert = Assert.Single(plan.Ops.OfType<RevertAddedChild>());
+            Assert.Equal(parentTarget, revert.Target);
+            Assert.Equal("instance-1/Turret", revert.ChildLogicalId);
+        }
+
+        [Fact]
+        public void Materialize_SnapshotRemovedChild_AbsentFromDesired_EmitsRevertRemovedChild()
+        {
+            var removedTarget = new OverrideTarget { SubKey = new PrefabInstanceKey { TargetObjectId = 777 } };
+            var (instance, snapshotInstance, map) = BuildMatched(snapshotRemovedGameObjects: new[] { removedTarget });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var plan = Materializer.Materialize(model, snapshot, map);
+
+            var revert = Assert.Single(plan.Ops.OfType<RevertRemovedChild>());
+            Assert.Equal(removedTarget, revert.Target);
         }
     }
 }

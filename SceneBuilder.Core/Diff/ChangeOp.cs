@@ -129,4 +129,31 @@ namespace SceneBuilder.Core.Diff
     {
         public OverrideTarget Target { get; init; } = new();
     }
+
+    // b3-t1: added/removed child GameObject ChangeOps, mirroring the AddInstanceComponent/
+    // RemoveInstanceComponent/RevertAddedComponent shape. LogicalId (base) is the owning
+    // PrefabInstanceNode's LogicalId.
+    public sealed record AddInstanceChild : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+        public GameObjectNode Node { get; init; } = new();
+    }
+
+    public sealed record RemoveInstanceChild : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+    }
+
+    public sealed record RevertAddedChild : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+        public string ChildLogicalId { get; init; } = "";
+    }
+
+    // b3-t2: emitted when a snapshot-only RemovedGameObjects entry is absent from desired — the
+    // matching revert for the RemoveInstanceChild direction, mirroring RevertRemovedComponent.
+    public sealed record RevertRemovedChild : ChangeOp
+    {
+        public OverrideTarget Target { get; init; } = new();
+    }
 }

@@ -166,4 +166,37 @@ namespace SceneBuilder.Core.Plan
         [JsonPropertyOrder(1)]
         public OverrideTarget Target { get; init; } = new();
     }
+
+    // b3-t1: added/removed child GameObject PlanOps, mirroring the AddInstanceComponent/
+    // RemoveInstanceComponent/RevertAddedComponent shape.
+    public sealed record AddInstanceChild : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+
+        [JsonPropertyOrder(2)]
+        public GameObjectNode Node { get; init; } = new();
+    }
+
+    public sealed record RemoveInstanceChild : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+    }
+
+    public sealed record RevertAddedChild : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+
+        [JsonPropertyOrder(2)]
+        public string ChildLogicalId { get; init; } = "";
+    }
+
+    // b3-t2: mirrors RevertRemovedComponent.
+    public sealed record RevertRemovedChild : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public OverrideTarget Target { get; init; } = new();
+    }
 }

@@ -25,6 +25,10 @@ namespace SceneBuilder.Core.Plan
     [JsonDerivedType(typeof(RevertInstanceOverride), "RevertInstanceOverride")]
     [JsonDerivedType(typeof(RevertAddedComponent), "RevertAddedComponent")]
     [JsonDerivedType(typeof(RevertRemovedComponent), "RevertRemovedComponent")]
+    [JsonDerivedType(typeof(AddInstanceChild), "AddInstanceChild")]
+    [JsonDerivedType(typeof(RemoveInstanceChild), "RemoveInstanceChild")]
+    [JsonDerivedType(typeof(RevertAddedChild), "RevertAddedChild")]
+    [JsonDerivedType(typeof(RevertRemovedChild), "RevertRemovedChild")]
     public abstract record PlanOp
     {
         [JsonPropertyOrder(0)]

@@ -5,6 +5,7 @@ using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
 using SceneBuilder.Core.Plan;
 using SceneBuilder.Core.Reconcile;
+using SceneBuilder.Core.Serialization;
 using Xunit;
 
 namespace SceneBuilder.Core.Tests
@@ -153,6 +154,110 @@ public class RoundTripScene : ISceneDefinition
 
             var reconciledRemoved = Assert.Single(reconciledInstance.RemovedComponents);
             Assert.Equal(removedTarget, reconciledRemoved);
+        }
+
+        // b3-t3 / spec #11 (materialize side; the reconcile/source-emit side lands in b4/b7 —
+        // see research.md SCOPING NOTE): a below-root nested PropertyOverride + nested
+        // AddedComponent + RemovedComponents entry, plus an added child and a removed child,
+        // materialize onto a vanilla snapshot; simulating every emitted op's effect back onto the
+        // snapshot's collections reproduces the desired collections byte-for-byte, and no
+        // InstantiatePrefab is emitted (in-place, no re-instantiate).
+        [Fact]
+        public void FullLoop_NestedOverrides_And_ChildEdits_RoundTrip()
+        {
+            var parsedBase = BuilderParser.Parse(RoundTripFixture);
+            var baseInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(parsedBase.Model.Roots));
+
+            var map = new IdentityMap
+            {
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "enemy", GlobalObjectId = "goid-enemy", Kind = "PrefabInstance",
+                        SourcePrefabGuid = PrefabGuid,
+                    },
+                },
+                Assets = new[] { new AssetEntry { Guid = PrefabGuid, LastKnownPath = PrefabPath, TypeHint = "GameObject" } },
+            };
+
+            var nestedSubKey = new PrefabInstanceKey { TargetObjectId = 555555 };
+            var nestedPropertyTarget = new OverrideTarget { ComponentType = "UnityEngine.BoxCollider", SubKey = nestedSubKey };
+            var nestedOverride = new PropertyOverride { Target = nestedPropertyTarget, PropertyPath = "member:health", Value = ValueNode.Primitive.Int(50) };
+
+            var nestedComponentTarget = new OverrideTarget { SubKey = nestedSubKey };
+            var nestedAddedComponent = new AddedComponent
+            {
+                Target = nestedComponentTarget,
+                Component = new ComponentData { LogicalId = "enemy/nested/UnityEngine.Light#0", Type = new TypeRef("UnityEngine.Light") },
+            };
+
+            var nestedRemovedTarget = new OverrideTarget { ComponentType = "UnityEngine.AudioSource", SubKey = nestedSubKey };
+
+            var addedChildParent = new OverrideTarget { SubKey = new PrefabInstanceKey { TargetObjectId = 12345 } };
+            var addedChildNode = new GameObjectNode { LogicalId = "enemy/Turret", Name = "Turret" };
+            var addedChild = new AddedGameObject { Parent = addedChildParent, Node = addedChildNode };
+
+            var removedChildTarget = new OverrideTarget { SubKey = new PrefabInstanceKey { TargetObjectId = 777777 } };
+
+            var desiredInstance = baseInstance with
+            {
+                Overrides = new[] { nestedOverride },
+                AddedComponents = new[] { nestedAddedComponent },
+                RemovedComponents = new[] { nestedRemovedTarget },
+                AddedGameObjects = new[] { addedChild },
+                RemovedGameObjects = new[] { removedChildTarget },
+            };
+            var desiredModel = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { desiredInstance } };
+
+            var vanillaSnapshotNode = new SnapshotNode
+            {
+                GlobalObjectId = "goid-enemy",
+                Name = "Enemy",
+                SourcePrefabGuid = PrefabGuid,
+            };
+            var snapshotBeforeApply = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { vanillaSnapshotNode } };
+
+            var plan = Materializer.Materialize(desiredModel, snapshotBeforeApply, map);
+
+            Assert.Empty(plan.Ops.OfType<InstantiatePrefab>());
+            Assert.Single(plan.Ops.OfType<SetInstanceOverride>());
+            Assert.Single(plan.Ops.OfType<AddInstanceComponent>());
+            Assert.Single(plan.Ops.OfType<RemoveInstanceComponent>());
+            Assert.Single(plan.Ops.OfType<AddInstanceChild>());
+            Assert.Single(plan.Ops.OfType<RemoveInstanceChild>());
+
+            var simulatedOverrides = plan.Ops.OfType<SetInstanceOverride>()
+                .Select(op => new PropertyOverride { Target = op.Target, PropertyPath = op.PropertyPath, Value = op.Value, ObjectReference = op.ObjectReference })
+                .ToArray();
+            var simulatedAddedComponents = plan.Ops.OfType<AddInstanceComponent>()
+                .Select(op => new AddedComponent { Target = op.Target, Component = op.Component })
+                .ToArray();
+            var simulatedRemovedComponents = plan.Ops.OfType<RemoveInstanceComponent>()
+                .Select(op => op.Target)
+                .ToArray();
+            var simulatedAddedGameObjects = plan.Ops.OfType<AddInstanceChild>()
+                .Select(op => new AddedGameObject { Parent = op.Target, Node = op.Node })
+                .ToArray();
+            var simulatedRemovedGameObjects = plan.Ops.OfType<RemoveInstanceChild>()
+                .Select(op => op.Target)
+                .ToArray();
+
+            var simulatedSnapshotNode = vanillaSnapshotNode with
+            {
+                Overrides = simulatedOverrides,
+                AddedComponents = simulatedAddedComponents,
+                RemovedComponents = simulatedRemovedComponents,
+                AddedGameObjects = simulatedAddedGameObjects,
+                RemovedGameObjects = simulatedRemovedGameObjects,
+            };
+
+            Assert.Equal(CanonicalJson.Serialize(desiredInstance.Overrides), CanonicalJson.Serialize(simulatedSnapshotNode.Overrides));
+            Assert.Equal(CanonicalJson.Serialize(desiredInstance.AddedComponents), CanonicalJson.Serialize(simulatedSnapshotNode.AddedComponents));
+            Assert.Equal(CanonicalJson.Serialize(desiredInstance.RemovedComponents), CanonicalJson.Serialize(simulatedSnapshotNode.RemovedComponents));
+            Assert.Equal(CanonicalJson.Serialize(desiredInstance.AddedGameObjects), CanonicalJson.Serialize(simulatedSnapshotNode.AddedGameObjects));
+            Assert.Equal(CanonicalJson.Serialize(desiredInstance.RemovedGameObjects), CanonicalJson.Serialize(simulatedSnapshotNode.RemovedGameObjects));
         }
     }
 }

@@ -33,5 +33,12 @@ namespace SceneBuilder.Core.Model
         public AddedComponent[] AddedComponents { get; init; } = Array.Empty<AddedComponent>();
 
         public OverrideTarget[] RemovedComponents { get; init; } = Array.Empty<OverrideTarget>();
+
+        // b3-t2: live-instance authority for child-GO diff (AddedGameObjects/RemovedGameObjects).
+        // Populated by the adapter READ side (b5-t2); here so the headless diff can compile/exercise
+        // fixture-built snapshots.
+        public AddedGameObject[] AddedGameObjects { get; init; } = Array.Empty<AddedGameObject>();
+
+        public OverrideTarget[] RemovedGameObjects { get; init; } = Array.Empty<OverrideTarget>();
     }
 }

@@ -170,6 +170,36 @@ namespace SceneBuilder.Core.Materialize
                             Target = revertRemovedComponent.Target,
                         });
                         break;
+                    case Change.AddInstanceChild addInstanceChild:
+                        passB.Add(new AddInstanceChild
+                        {
+                            LogicalId = addInstanceChild.LogicalId,
+                            Target = addInstanceChild.Target,
+                            Node = addInstanceChild.Node,
+                        });
+                        break;
+                    case Change.RemoveInstanceChild removeInstanceChild:
+                        passB.Add(new RemoveInstanceChild
+                        {
+                            LogicalId = removeInstanceChild.LogicalId,
+                            Target = removeInstanceChild.Target,
+                        });
+                        break;
+                    case Change.RevertAddedChild revertAddedChild:
+                        passB.Add(new RevertAddedChild
+                        {
+                            LogicalId = revertAddedChild.LogicalId,
+                            Target = revertAddedChild.Target,
+                            ChildLogicalId = revertAddedChild.ChildLogicalId,
+                        });
+                        break;
+                    case Change.RevertRemovedChild revertRemovedChild:
+                        passB.Add(new RevertRemovedChild
+                        {
+                            LogicalId = revertRemovedChild.LogicalId,
+                            Target = revertRemovedChild.Target,
+                        });
+                        break;
                 }
             }
 

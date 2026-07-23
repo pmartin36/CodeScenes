@@ -22,6 +22,8 @@ namespace SceneBuilder.Core.Diff
             EmitOverrides(desired, snapshot, ops, staleKeys);
             EmitAddedComponents(desired, snapshot, ops);
             EmitRemovedComponents(desired, snapshot, ops);
+            EmitAddedGameObjects(desired, snapshot, ops);
+            EmitRemovedGameObjects(desired, snapshot, ops);
         }
 
         // b3-t3: direction-agnostic stale-override detector shared by materialize (Emit, above) and
@@ -179,6 +181,77 @@ namespace SceneBuilder.Core.Diff
                 if (!desiredTargets.Contains(target))
                 {
                     ops.Add(new RevertRemovedComponent { LogicalId = logicalId, Target = target });
+                }
+            }
+        }
+
+        // b3-t2: mirrors EmitAddedComponents. Key is (Parent, Node child's Name); a GO Parent's
+        // ComponentType is "" so this is effectively (Parent.SubKey, Name) per research.
+        private static void EmitAddedGameObjects(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops)
+        {
+            var logicalId = desired.LogicalId;
+
+            var snapshotByKey = new Dictionary<(OverrideTarget Parent, string Name), AddedGameObject>();
+            foreach (var snapshotAdded in snapshot.AddedGameObjects)
+            {
+                snapshotByKey[(snapshotAdded.Parent, snapshotAdded.Node.Name)] = snapshotAdded;
+            }
+
+            var desiredKeys = new HashSet<(OverrideTarget Parent, string Name)>();
+            foreach (var desiredAdded in desired.AddedGameObjects)
+            {
+                var key = (desiredAdded.Parent, desiredAdded.Node.Name);
+                desiredKeys.Add(key);
+
+                if (!snapshotByKey.ContainsKey(key))
+                {
+                    ops.Add(new AddInstanceChild
+                    {
+                        LogicalId = logicalId,
+                        Target = desiredAdded.Parent,
+                        Node = desiredAdded.Node,
+                    });
+                }
+            }
+
+            foreach (var snapshotAdded in snapshot.AddedGameObjects)
+            {
+                var key = (snapshotAdded.Parent, snapshotAdded.Node.Name);
+                if (desiredKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                ops.Add(new RevertAddedChild
+                {
+                    LogicalId = logicalId,
+                    Target = snapshotAdded.Parent,
+                    ChildLogicalId = snapshotAdded.Node.LogicalId,
+                });
+            }
+        }
+
+        // b3-t2: mirrors EmitRemovedComponents.
+        private static void EmitRemovedGameObjects(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops)
+        {
+            var logicalId = desired.LogicalId;
+
+            var snapshotTargets = new HashSet<OverrideTarget>(snapshot.RemovedGameObjects);
+            var desiredTargets = new HashSet<OverrideTarget>(desired.RemovedGameObjects);
+
+            foreach (var target in desired.RemovedGameObjects)
+            {
+                if (!snapshotTargets.Contains(target))
+                {
+                    ops.Add(new RemoveInstanceChild { LogicalId = logicalId, Target = target });
+                }
+            }
+
+            foreach (var target in snapshot.RemovedGameObjects)
+            {
+                if (!desiredTargets.Contains(target))
+                {
+                    ops.Add(new RevertRemovedChild { LogicalId = logicalId, Target = target });
                 }
             }
         }

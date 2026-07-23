@@ -203,6 +203,81 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void AddInstanceChild_RoundTrips()
+        {
+            var op = new AddInstanceChild
+            {
+                LogicalId = "Instance1",
+                Target = SampleTarget,
+                Node = new GameObjectNode
+                {
+                    LogicalId = "MuzzleFlash",
+                    Name = "MuzzleFlash",
+                    Components = new[]
+                    {
+                        new ComponentData
+                        {
+                            LogicalId = "Light1",
+                            Type = new TypeRef("UnityEngine.Light"),
+                            Fields = new FieldMap(new[]
+                            {
+                                new KeyValuePair<string, ValueNode>("intensity", ValueNode.Primitive.Float(1.5f)),
+                            }),
+                        },
+                    },
+                },
+            };
+
+            var json = PlanJson.Serialize(PlanWith(op));
+            var back = PlanJson.Deserialize(json);
+
+            Assert.Contains("\"op\":\"AddInstanceChild\"", json.Replace(" ", ""));
+            var roundTripped = Assert.IsType<AddInstanceChild>(Assert.Single(back.Ops));
+            Assert.Equal(op.LogicalId, roundTripped.LogicalId);
+            Assert.Equal(op.Target, roundTripped.Target);
+            Assert.Equal(op.Node.LogicalId, roundTripped.Node.LogicalId);
+            Assert.Equal(op.Node.Name, roundTripped.Node.Name);
+            Assert.Single(roundTripped.Node.Components);
+            Assert.Equal(op.Node.Components[0], roundTripped.Node.Components[0]);
+        }
+
+        [Fact]
+        public void RemoveInstanceChild_RoundTrips()
+        {
+            var op = new RemoveInstanceChild { LogicalId = "Instance1", Target = SampleTarget };
+
+            var json = PlanJson.Serialize(PlanWith(op));
+            var back = PlanJson.Deserialize(json);
+
+            Assert.Contains("\"op\":\"RemoveInstanceChild\"", json.Replace(" ", ""));
+            Assert.Equal(op, Assert.IsType<RemoveInstanceChild>(Assert.Single(back.Ops)));
+        }
+
+        [Fact]
+        public void RevertAddedChild_RoundTrips()
+        {
+            var op = new RevertAddedChild { LogicalId = "Instance1", Target = SampleTarget, ChildLogicalId = "MuzzleFlash" };
+
+            var json = PlanJson.Serialize(PlanWith(op));
+            var back = PlanJson.Deserialize(json);
+
+            Assert.Contains("\"op\":\"RevertAddedChild\"", json.Replace(" ", ""));
+            Assert.Equal(op, Assert.IsType<RevertAddedChild>(Assert.Single(back.Ops)));
+        }
+
+        [Fact]
+        public void RevertRemovedChild_RoundTrips()
+        {
+            var op = new RevertRemovedChild { LogicalId = "Instance1", Target = SampleTarget };
+
+            var json = PlanJson.Serialize(PlanWith(op));
+            var back = PlanJson.Deserialize(json);
+
+            Assert.Contains("\"op\":\"RevertRemovedChild\"", json.Replace(" ", ""));
+            Assert.Equal(op, Assert.IsType<RevertRemovedChild>(Assert.Single(back.Ops)));
+        }
+
+        [Fact]
         public void Plan_MixingInstanceOps_DeserializesEachToRightConcreteType()
         {
             var plan = new Plan.Plan
