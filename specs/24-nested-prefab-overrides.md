@@ -1,15 +1,17 @@
 # M-nested-props — Nested-target prefab overrides + added/removed child GameObjects
 
-> **⚠ Addressing shape (updated 2026-07-22): nested targets use TYPED accessors, not string paths.**
-> This spec's body currently shows the string-path form (`.On("Turret/Barrel", …)`) as originally drafted.
-> That is **superseded** by the compiler-checked typed form
-> (`scene.Instance(Prefabs.Tank).On(t => t.Turret.Barrel, …)`) enabled by the new **typed-prefab-façades**
-> milestone (`specs/25-typed-prefab-facades.md`), which is a **HARD PREREQUISITE and builds FIRST**.
+> **Addressing shape: nested targets are addressed by the SHIPPED compiler-checked TYPED selectors, not string paths.**
+> Nested targets are addressed with the typed member-chain selector
+> `scene.Instance(Prefabs.Tank).On(sel => sel.Turret.Barrel, …)` delivered by the **typed-prefab-façades**
+> milestone (`specs/25-typed-prefab-facades.md`, **SHIPPED** — a **HARD dependency** this milestone consumes).
 > Rationale (the project's core principle): a string path is not compiler-checked — a typo or a stale path
-> after a Unity rename slips past the compiler, which is unacceptable. The typed façade makes the path
-> compiler-verified and makes a rename **auto-sync or fail to compile**. Only the nested ADDRESSING changes
-> to the typed member-chain form; the identity model (durable pair-key in the sidecar, `ChildPath`
-> re-derived) is unchanged. This spec's authoring examples get rewritten to the typed form once spec 25 lands.
+> after a Unity rename slips past the compiler, which is unacceptable. The typed façade makes the address
+> compiler-verified and makes a rename **auto-sync or fail to compile**. Only the nested ADDRESSING form is
+> typed; the identity model (durable pair-key in the sidecar, `ChildPath` re-derived) is unchanged — the
+> typed selector resolves (through the façade manifest, spec 25) to the SAME durable target the string form
+> did, and spec 25 lowers the typed and string forms identically. The string `.On("Turret/Barrel", …)` form
+> is retained as a supported fallback (spec 25 behavior 10); the typed selector is the preferred form and is
+> what codegen/Reconcile emit.
 
 > This milestone finishes the two things **M10** (`specs/11-m10-prefab-overrides.md`) explicitly
 > deferred in its v0 banner:
@@ -154,11 +156,11 @@ GlobalObjectId or GUID into the clean C# source.
    prefab* (adapter uses `GetCorrespondingObjectFromSourceAtPath`, below). Round-trip is byte-stable.
 4. **Nested added component.** A component present on a nested instance child but absent from the source
    prefab lowers to `AddedComponent{Target.SubKey = <child key>, Component}`; materialize adds it on that
-   child; reconcile appends `.On("<childPath>", x => x.AddComponent<T>())` (find-or-create the sub-object's
-   `.On` block, see behavior #10).
+   child; reconcile appends `.On(sel => sel.<Child>, x => x.AddComponent<T>())` (find-or-create the
+   sub-object's `.On` block, see behavior #10).
 5. **Nested removed component.** A source component stripped on a nested child lowers to a
    `RemovedComponents` entry whose `SubKey` names the child; round-trips as
-   `.On("<childPath>", x => x.RemoveComponent<T>())`.
+   `.On(sel => sel.<Child>, x => x.RemoveComponent<T>())`.
 6. **Added child GameObject ↔ `AddedGameObjects`.** A scene child under an instance that is not part of
    the source prefab lowers to an `AddedGameObjects` `GameObjectNode` with `Parent.SubKey` = the
    in-instance parent's key; materialize creates it under that parent and reconciles/preserves it in
@@ -180,16 +182,19 @@ GlobalObjectId or GUID into the clean C# source.
    appropriate `PrefabUtility` revert op (M10 banner #6), never left as a stale bold override.
 10. **Reconcile detects nested instance edits, grouping per sub-object under one `.On`.** A snapshot whose
     instance carries nested mods / adds / removes not present in the parsed `SceneModel` emits a
-    `SourcePatch` scoping each below-root edit under `.On("<path>", x => x.<ops>)` on the instance's source
-    statement, span-local; child-adds / child-removes stay top-level as `.AddChild(...)` /
+    `SourcePatch` scoping each below-root edit under a typed `.On(sel => sel.<Child>, x => x.<ops>)` on the
+    instance's source statement, span-local; child-adds / child-removes stay top-level as `.AddChild(...)` /
     `.RemoveChild("<path>")`. **Multiple nested edits on the SAME sub-object MUST be emitted as ONE
-    `.On("<path>", x => x.op1().op2())` block, never as repeated `.On("<path>", …)` calls for the same
-    path.** The SourceEdit machinery FINDS-OR-CREATES the `.On("<path>", …)` closure for a sub-object and
-    appends each op INSIDE that closure (more Roslyn work than M10's flat appends: locate an existing
-    matching-path `.On` invocation in the span, descend into its lambda body, and append the op there;
-    only when no such `.On` exists is a new one created). Revert (snapshot no longer carries an authored
-    nested override) drops the corresponding op from inside its `.On` block, and drops the now-empty `.On`
-    call entirely when its last op is removed (M10 behavior #8, extended to nested + child verbs).
+    `.On(sel => sel.<Child>, x => x.op1().op2())` block, never as repeated `.On(sel => sel.<Child>, …)`
+    calls for the same target.** The SourceEdit machinery FINDS-OR-CREATES the `.On(sel => …, …)` closure
+    for a sub-object — matching on the selector's RESOLVED target (the durable child, via the façade
+    manifest, spec 25), not on the literal selector text — and appends each op INSIDE that closure (more
+    Roslyn work than M10's flat appends: locate an existing `.On` invocation whose selector resolves to the
+    same sub-object in the span, descend into its closure lambda body, and append the op there; only when no
+    such `.On` exists is a new one created). Revert (snapshot no longer carries an authored nested override)
+    drops the corresponding op from inside its `.On` block, and drops the now-empty `.On` call entirely when
+    its last op is removed (M10 behavior #8, extended to nested + child verbs). The emitted selector is the
+    typed form; a string `.On("<path>", …)` already present in source is matched as a fallback (spec 25).
 11. **Depth-safe determinism.** Canonical serialization orders nested `Overrides` by
     `(SubKey.TargetPrefabId, SubKey.TargetObjectId, ComponentType, PropertyPath)`, `AddedGameObjects` by
     `(Parent.SubKey, Name)`, `RemovedGameObjects` by `SubKey`, so repeated round-trips at any depth are
@@ -241,18 +246,23 @@ GlobalObjectId or GUID into the clean C# source.
 
 ## Authoring API added
 
-Extends M6's `scene.Instance(path)` handle and M10's root `.Override(...)`. **Root-target ops stay the
-direct M10 verbs on the instance handle, unchanged** (`.Override(cfg)`, `.AddComponent<T>([cfg])`,
-`.RemoveComponent<T>()`). **Below-root (nested) ops are authored by SCOPING to the sub-object** with
-`.On(childPath, closure)` — a `childPath` is a `"/"`-joined **name path** from the instance root to the
-sub-object, and the closure receives a scoped handle on which nested ops are stacked. **The path is
-authoring/display convenience only; identity is the sidecar pair-key** (§4, spec-16 principle: no
-GlobalObjectId/GUID in clean source). A rename re-derives the path; the sidecar key is unchanged.
+Extends M6's `scene.Instance(...)` handle and M10's root `.Override(...)`, and consumes spec 25's typed
+`Instance(Prefabs.X)` overload + typed `.On` selector overload (`InstanceHandle<TRef>.On<TNode>`). **Root-target
+ops stay the direct M10 verbs on the instance handle, unchanged** (`.Override(cfg)`, `.AddComponent<T>([cfg])`,
+`.RemoveComponent<T>()`). **Below-root (nested) ops are authored by SCOPING to the sub-object** with the
+SHIPPED typed selector `.On(selector, closure)` — `selector` is a compiler-checked member chain
+`sel => sel.Turret.Barrel` (spec 25) from the instance's typed root ref to the sub-object, and the closure
+receives a scoped handle on which nested ops are stacked. **The selector is authoring/display convenience
+only; identity is the sidecar pair-key** (§4, spec-16 principle: no GlobalObjectId/GUID in clean source).
+The selector resolves through the façade manifest (spec 25) to the same durable child the string path did;
+a rename auto-rewrites the accessor (spec 25 reference-patch) or fails to compile, and the sidecar key is
+unchanged. The string `.On("childPath", closure)` form is retained as a supported fallback (spec 25
+behavior 10); typed is preferred.
 
 ```csharp
 public class ArenaScene : ISceneDefinition {
     public void Build(SceneRoot scene) {
-        scene.Instance("Assets/Prefabs/Tank.prefab")
+        scene.Instance(Prefabs.Tank)                       // typed prefab ref (spec 25); "path" still works
              .Transform(pos: (3, 0, 5))
 
              // root (M10) — unchanged
@@ -260,11 +270,11 @@ public class ArenaScene : ISceneDefinition {
              .AddComponent<AudioSource>()
              .RemoveComponent<Rigidbody>()
 
-             // nested — scope once, stack ops
-             .On("Turret/Barrel", barrel => barrel
+             // nested — scope once (typed selector, spec 25), stack ops
+             .On(sel => sel.Turret.Barrel, barrel => barrel
                  .Override(b => b.Set((Light l) => l.intensity, 4f))
                  .AddComponent<AudioSource>())
-             .On("Turret/Antenna", a => a.RemoveComponent<MeshRenderer>())
+             .On(sel => sel.Turret.Antenna, a => a.RemoveComponent<MeshRenderer>())
 
              // structural children — top-level
              .AddChild("Turret", "MuzzleFlash", mf => mf.Component<Light>(l => l.Set(x => x.range, 5f)))
@@ -273,12 +283,13 @@ public class ArenaScene : ISceneDefinition {
 }
 ```
 
-- `.On(childPath, x => …)` scopes to the sub-object named by `childPath` and runs the closure against a
-  scoped handle `x`. `x` exposes the same override verbs as the root handle — `.Override(cfg)`,
+- `.On(sel => sel.A.B, x => …)` scopes to the sub-object named by the typed selector and runs the closure
+  against a scoped handle `x`. `x` exposes the same override verbs as the root handle — `.Override(cfg)`,
   `.AddComponent<T>([cfg])`, `.RemoveComponent<T>()` — each returning `x` for chaining, so multiple ops on
-  the SAME sub-object stack inside ONE `.On(...)` block. Every op lowered under `.On("<path>", …)` gets
-  `Target.SubKey` = the child's pair-key (resolved by the adapter on build/save) and
-  `Target.ChildPath` = `childPath`.
+  the SAME sub-object stack inside ONE `.On(...)` block. Every op lowered under `.On(sel => …, …)` gets
+  `Target.SubKey` = the child's pair-key (resolved by the adapter on build/save, from the selector's
+  manifest-resolved durable child, spec 25) and `Target.ChildPath` = the re-derived name path. The string
+  `.On("<path>", …)` fallback lowers identically (spec 25 behavior 10).
 - **Root ops stay direct, not scoped.** `.Override(cfg)` / `.AddComponent<T>([cfg])` /
   `.RemoveComponent<T>()` called straight on the instance handle (no `.On`) are the root case
   (`ChildPath == ""`), exactly the M10 verbs.
@@ -290,16 +301,18 @@ public class ArenaScene : ISceneDefinition {
   spelling.
 - `.RemoveChild(childPath)` lowers to a `RemovedGameObjects` entry; also top-level on the instance handle.
 
-**First-author path→key bootstrap (load-bearing).** A nested override authored by hand
-(`.On("Turret/Barrel", …)`) has **no sidecar `SubKey` yet** — the path is the ONLY identity
-information available. So the direction is asymmetric by lifecycle: on the FIRST build/save of a
-new authored nested target, the adapter resolves `childPath` → the live sub-object (walk the name path
-from the instance root) → its `(TargetPrefabId, TargetObjectId)` pair-key, then **persists that key to
-the sidecar**; from then on the key is authoritative and the path is re-derived (never re-resolved from
-source). A `childPath` that resolves to no live sub-object at first author is a **located conflict**
-(§7) naming the instance + path — never a silent drop, never a guessed key. (This is the one place the
-path is read *into* a key; the "path re-derived from key, never the reverse" rule holds for every
-already-mapped override.)
+**First-author selector→key bootstrap (load-bearing).** A nested override authored by hand
+(`.On(sel => sel.Turret.Barrel, …)`) has **no sidecar `SubKey` yet** — the typed selector, resolved
+through the façade manifest (spec 25) to a child path + the sub-object's durable prefab-internal id, is the
+only identity information available. So the direction is asymmetric by lifecycle: on the FIRST build/save
+of a new authored nested target, the adapter resolves that manifest-derived child path → the live
+sub-object (walk the name path from the instance root) → its `(TargetPrefabId, TargetObjectId)` pair-key,
+then **persists that key to the sidecar**; from then on the key is authoritative and the selector/path are
+re-derived (never re-resolved from source). A selector that resolves to no live sub-object at first author
+is a **located conflict** (§7) naming the instance + path — never a silent drop, never a guessed key. (This
+is the one place the address is read *into* a key; the "address re-derived from key, never the reverse"
+rule holds for every already-mapped override. The typed selector itself is compiler-checked against the
+façade, so a stale accessor fails to compile before it can ever reach this path — spec 25's safety net.)
 
 ## IdentityMap / sidecar changes
 
@@ -329,9 +342,9 @@ already-mapped override.)
    round-trips (model → Plan → simulated snapshot → Reconcile → identical model), byte-stable.
 4. `NestedAddedComponent_RoundTrips` — added component on a nested child ↔ `AddedComponent{SubKey=child}`;
    materialize plan contains the add on the child; reconcile appends
-   `.On("Turret/Barrel", x => x.AddComponent<T>())`.
+   `.On(sel => sel.Turret.Barrel, x => x.AddComponent<T>())`.
 5. `NestedRemovedComponent_RoundTrips` — source component removed on a nested child ↔ `RemovedComponents`
-   with the child `SubKey`; round-trips as `.On("Turret/Wheel", x => x.RemoveComponent<T>())`.
+   with the child `SubKey`; round-trips as `.On(sel => sel.Turret.Wheel, x => x.RemoveComponent<T>())`.
 6. `AddedChildGameObject_RoundTrips` — a non-prefab child under the instance ↔ `AddedGameObjects` node
    with `Parent.SubKey` = parent key; materialize creates it under that parent (no re-instantiate);
    reconcile appends `.AddChild("Turret", "MuzzleFlash", …)`.
@@ -360,10 +373,12 @@ already-mapped override.)
     (§13).
 15. `Reconcile_TwoEditsSameSubObject_GroupUnderOneOn` — a snapshot whose instance carries TWO nested edits
     on the SAME sub-object (e.g. an override on `Turret/Barrel`'s `Light.intensity` AND an added
-    `AudioSource` on `Turret/Barrel`) emits a SINGLE `.On("Turret/Barrel", x => x.Override(…).AddComponent<AudioSource>())`
-    block — NOT two separate `.On("Turret/Barrel", …)` calls. Reconciling a second edit onto a sub-object
-    that ALREADY has an `.On` block in source appends the op inside the existing closure (find-or-create),
-    leaving exactly one `.On` for that path. *(Guards the closure-merge behavior, behavior #10.)*
+    `AudioSource` on `Turret/Barrel`) emits a SINGLE typed
+    `.On(sel => sel.Turret.Barrel, x => x.Override(…).AddComponent<AudioSource>())`
+    block — NOT two separate `.On(sel => sel.Turret.Barrel, …)` calls. Reconciling a second edit onto a
+    sub-object that ALREADY has an `.On` block in source (typed or string fallback) appends the op inside
+    the existing closure (find-or-create, matched on the selector's manifest-resolved target, not literal
+    text), leaving exactly one `.On` for that target. *(Guards the closure-merge behavior, behavior #10.)*
 
 ## Unity confirmation checklist (⇒ EditMode tests in `unity-gate/Assets/GateTests/`)
 
@@ -372,17 +387,20 @@ containing a nested Turret prefab, itself containing a Barrel with a `Light`).
 
 1. Instantiate `Tank.prefab`; in the Inspector, override `Barrel`'s `Light.intensity` (a **nested**
    target, shown bold). Sync. **Expected:** the instance's source statement gains
-   `.On("Turret/Barrel", b => b.Override(x => x.Set((Light l) => l.intensity, …)))`; the sidecar records
-   the override under the Barrel's `SubKey` (no GUID/fileID in the `.cs`).
-2. Author that same nested `.On(...)` override in code, Build. **Expected:** the live Barrel shows the
-   bold override; the instance and every sub-object keep their `GlobalObjectId` (no re-instantiate).
-3. **Rename** the `Turret` child of the instance, then Sync. **Expected:** the source `.On` path
-   updates to the new name (e.g. `.On("Cannon/Barrel", …)`); the override is NOT dropped and
-   re-added — the sidecar `SubKey` is unchanged and the `Light` stays overridden.
+   `.On(sel => sel.Turret.Barrel, b => b.Override(x => x.Set((Light l) => l.intensity, …)))` (the typed
+   selector, spec 25); the sidecar records the override under the Barrel's `SubKey` (no GUID/fileID in the
+   `.cs`).
+2. Author that same nested typed `.On(sel => sel.Turret.Barrel, …)` override in code, Build. **Expected:**
+   the live Barrel shows the bold override; the instance and every sub-object keep their `GlobalObjectId`
+   (no re-instantiate).
+3. **Rename** the `Turret` child so the façade regenerates (spec 25), then Sync. **Expected:** the typed
+   selector's accessor auto-rewrites via spec 25's reference-patch — `.On(sel => sel.Turret.Barrel, …)`
+   becomes `.On(sel => sel.Cannon.Barrel, …)` — and the builder still compiles; the override is NOT dropped
+   and re-added — the sidecar `SubKey` is unchanged and the `Light` stays overridden.
 4. Add a `Light` component to the **nested** `Barrel` (Add Component on the child), Sync. **Expected:**
-   source gains `.On("Turret/Barrel", x => x.AddComponent<Light>())` (or, if the Barrel already has an
-   `.On` block, the `.AddComponent<Light>()` op is appended INSIDE that existing block — one `.On` per
-   path); a subsequent Build applies it to the same child; Sync converges (a second Sync is a no-op).
+   source gains `.On(sel => sel.Turret.Barrel, x => x.AddComponent<Light>())` (or, if the Barrel already
+   has an `.On` block, the `.AddComponent<Light>()` op is appended INSIDE that existing block — one `.On`
+   per target); a subsequent Build applies it to the same child; Sync converges (a second Sync is a no-op).
 5. Drag a **new** empty child GameObject under the instance's `Turret` in the Hierarchy, Sync.
    **Expected:** source gains `.AddChild("Turret", "<name>", …)` (an `AddedGameObjects` override — NOT a
    top-level `scene.Add`); it compiles; Build re-creates it under the same parent without re-instantiating
@@ -398,8 +416,8 @@ containing a nested Turret prefab, itself containing a Barrel with a `Light`).
    instance-scoped-query fallback still resolves each target correctly (the test must exercise the
    fallback, not skip). *(This test MUST exist and pass before Core relies on bare-pair matching.)*
 8. Right-click the nested override → **Revert**, Sync. **Expected:** the reverted op is dropped from
-   inside the `.On("Turret/Barrel", …)` block; if it was that block's last op, the whole `.On(...)` call
-   is dropped from source; no stale call remains (M10 behavior #8, nested).
+   inside the `.On(sel => sel.Turret.Barrel, …)` block; if it was that block's last op, the whole
+   `.On(...)` call is dropped from source; no stale call remains (M10 behavior #8, nested).
 
 ## Dependencies
 
@@ -407,6 +425,18 @@ containing a nested Turret prefab, itself containing a Barrel with a `Light`).
   `OverrideTarget` / `AddedComponent`, materialize-revert, stale-override conflict, deterministic
   serialization, and the `PrefabInstanceProbe` / `SceneSnapshotReader` override read path this milestone
   extends. Hard dependency.
+- **Spec 25 — Typed prefab façades (`specs/25-typed-prefab-facades.md`), SHIPPED. HARD dependency.** The
+  typed addressing surface this milestone consumes: `scene.Instance(Prefabs.X)` and the typed selector
+  overload `.On(sel => sel.A.B, closure)` (`InstanceHandle<TRef>.On<TNode>`), the `FacadeCatalog` manifest
+  + parser resolution (`BuilderParser.Facade.cs`: selector member-chain → child path + durable `LocalId`),
+  the byte-stable façade generator, and the `FacadeReferencePatcher` rename auto-rewrite. Spec 25 lowers
+  the typed and string `.On` forms IDENTICALLY, so the durable-pair-key identity below is unchanged — the
+  typed selector is only how the address is WRITTEN and compiler-checked. This milestone owns the deep
+  nested-override materialize/reconcile/revert semantics on top of that addressing surface.
+- **Spec 26 — CodeScenes.Analyzers toolkit (`specs/26-codescenes-analyzers-toolkit.md`), SHIPPED. HARD
+  dependency.** The source-generator framework + `<AdditionalFiles>` injection that spec 25's
+  `PrefabFacadeGenerator` and façade manifest ride on, plus the `SB1103` (`.On("path")`) analyzer nudge
+  toward the typed selector. Consumed transitively via spec 25.
 - **M6** (`specs/completed/07-m6-prefab-instances.md`) — `PrefabInstanceNode`, `PrefabInstanceKey` (the
   pair-key reused as the durable sub-object identity), instance detection, and the `instance.Add`→
   `Children` semantics this milestone deliberately re-routes (behavior #8).
@@ -420,9 +450,12 @@ containing a nested Turret prefab, itself containing a Barrel with a `Light`).
 
 ## Risks/notes
 
-- **Rejected: name-path-as-identity.** A `"Turret/Barrel"` path is duplicate-blind and reorder/rename
-  fragile — the spec-16 data-loss shape. It is display + authoring convenience only; identity is the
-  `(SubKey, ComponentType)` pair. Every ordering/equality/lookup keys on the pair, never the path.
+- **Rejected: name-path-as-identity.** A `"Turret/Barrel"` path (whether written as a string or re-derived
+  from a typed selector) is duplicate-blind and reorder/rename fragile — the spec-16 data-loss shape. It is
+  display + authoring convenience only; identity is the `(SubKey, ComponentType)` pair. Every
+  ordering/equality/lookup keys on the pair, never the path. The typed selector (spec 25) is
+  compiler-checked and disambiguates duplicate siblings at codegen, but it too resolves TO the durable id,
+  never becomes it.
 - **Rejected: LogicalId / structural-fingerprint as the primary sub-object key.** Its Name tier is
   duplicate-blind (spec-16 defect 1) and, critically, sub-prefab objects have **no** `var`/`.Id(...)`
   handle a user can attach — so the spec-16 self-heal (inject a handle) is impossible for them. The
@@ -446,13 +479,14 @@ containing a nested Turret prefab, itself containing a Barrel with a `Light`).
 - **`GetRemovedGameObjects`** is 2022.2+ and present in the project's 6000.5 — used directly, not gated;
   only flag-as-unsupported if a future target lacks it (§7), never silently drop.
 - **Closure-merge Roslyn complexity (scoped `.On` emission).** The scoped authoring shape means a
-  sub-object's nested edits all live inside ONE `.On("<path>", x => x.op1().op2())` block, so Reconcile's
-  SourceEdit machinery must FIND-OR-CREATE that closure — locate an existing matching-path `.On`
-  invocation in the instance's span, descend into its lambda body, and append the op there, creating a new
+  sub-object's nested edits all live inside ONE `.On(sel => sel.<Child>, x => x.op1().op2())` block, so
+  Reconcile's SourceEdit machinery must FIND-OR-CREATE that closure — locate an existing `.On` invocation
+  whose selector RESOLVES to the same sub-object (via the façade manifest, spec 25 — typed selector or a
+  string-path fallback), descend into its closure lambda body, and append the op there, creating a new
   `.On` only when none exists — and on revert must remove an op from inside the closure and drop the `.On`
   call when its last op goes. This is strictly more Roslyn work than M10's flat statement-appends (which
   never had to reach inside an existing call's lambda). Getting the find-or-create match keyed on the
-  child path (not on span order) is load-bearing: a miss re-emits a duplicate `.On` for the same path,
-  which behavior #10 and test #15 forbid.
+  resolved durable child (not on the selector's literal text or span order) is load-bearing: a miss
+  re-emits a duplicate `.On` for the same target, which behavior #10 and test #15 forbid.
 - **Value vs objectReference** on a nested `PropertyModification` stays mutually exclusive per entry
   (M10 invariant), unchanged.
