@@ -78,6 +78,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             var chainedCalls = new List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
+            var addChildCalls = new List<(ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
             foreach (var call in calls.Skip(1))
             {
                 switch (call.Method)
@@ -94,6 +95,14 @@ namespace SceneBuilder.Core.Parsing
                     case "On":
                         // b4-t2 (test-writer stub): real resolution lands in BuilderParser.Facade.cs.
                         ApplyScopedOn(node, call.Args, ctx);
+                        break;
+                    case "RemoveChild":
+                        ApplyRemoveChild(node, call.Args);
+                        break;
+                    case "AddChild":
+                        // Deferred: the added child's LogicalId is parented on `node.LogicalId`,
+                        // which is only final after resolution below.
+                        addChildCalls.Add((call.Args, call.Invocation));
                         break;
                     default:
                         chainedCalls.Add(call);
@@ -112,6 +121,11 @@ namespace SceneBuilder.Core.Parsing
             {
                 ctx.Handles[handleName] = node;
                 node.Handle = handleName;
+            }
+
+            foreach (var (args, invocation) in addChildCalls)
+            {
+                ApplyAddChild(node, args, invocation, ctx);
             }
         }
 
@@ -137,15 +151,23 @@ namespace SceneBuilder.Core.Parsing
                 DrivenChannels = builder.DrivenChannels,
             },
             Components = System.Array.Empty<ComponentData>(),
-            Children = builder.Children.Select(BuildNode).ToArray(),
+            Children = builder.Children.Where(c => c.IsInstance).Select(BuildNode).ToArray(),
             SourcePrefab = new AssetRef { DisplayPath = builder.SourcePrefabPath ?? "", Guid = builder.SourcePrefabGuid ?? "" },
             OpaqueOverrides = null,
             Overrides = builder.Overrides.ToArray(),
             AddedComponents = BuildAddedComponents(builder),
-            RemovedComponents = builder.RemovedComponentTypes
-                .Select(typeFullName => new OverrideTarget { ComponentType = typeFullName })
-                .ToArray(),
+            RemovedComponents = builder.RemovedComponents.ToArray(),
             ScopedOverrides = builder.ScopedOverrides.Count == 0 ? null : builder.ScopedOverrides.ToArray(),
+            AddedGameObjects = builder.AddedGameObjects.Select(a => new AddedGameObject
+            {
+                Parent = a.ParentPath == "" ? new OverrideTarget() : new OverrideTarget { ChildPath = a.ParentPath },
+                Node = BuildNode(a.Node),
+            }).Concat(builder.Children.Where(c => !c.IsInstance).Select(c => new AddedGameObject
+            {
+                Parent = new OverrideTarget(),
+                Node = BuildNode(c),
+            })).ToArray(),
+            RemovedGameObjects = builder.RemovedGameObjects.ToArray(),
         };
 
         private static AddedComponent[] BuildAddedComponents(NodeBuilder builder)
@@ -160,7 +182,10 @@ namespace SceneBuilder.Core.Parsing
                 ordinalByType[cb.TypeFullName] = ordinal + 1;
                 cb.LogicalId = $"{builder.LogicalId}/{cb.TypeFullName}#{ordinal}";
 
-                result[i] = new AddedComponent { Target = new OverrideTarget(), Component = BuildComponent(cb) };
+                var target = cb.ChildPath == ""
+                    ? new OverrideTarget()
+                    : new OverrideTarget { ComponentType = cb.TypeFullName, ChildPath = cb.ChildPath };
+                result[i] = new AddedComponent { Target = target, Component = BuildComponent(cb) };
             }
 
             return result;
@@ -169,7 +194,7 @@ namespace SceneBuilder.Core.Parsing
         // `.Override(e => ...)` — closure body is a block of `e.Set(...)` statements or a fluent
         // chain `e.Set(a).Set(b)`; both forms unwrap uniformly through UnwrapChain (a lone
         // `.Set(...)` call unwraps to a single-element chain).
-        private static void ApplyOverride(NodeBuilder node, ArgumentListSyntax args)
+        private static void ApplyOverride(NodeBuilder node, ArgumentListSyntax args, string childPath = "")
         {
             if (args.Arguments.Count != 1)
             {
@@ -193,12 +218,12 @@ namespace SceneBuilder.Core.Parsing
                             throw Unreachable();
                         }
 
-                        ApplyOverrideSetChain(exprStatement.Expression, paramName, node);
+                        ApplyOverrideSetChain(exprStatement.Expression, paramName, node, childPath);
                     }
                     break;
 
                 case ExpressionSyntax exprBody:
-                    ApplyOverrideSetChain(exprBody, paramName, node);
+                    ApplyOverrideSetChain(exprBody, paramName, node, childPath);
                     break;
 
                 default:
@@ -206,7 +231,7 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
-        private static void ApplyOverrideSetChain(ExpressionSyntax expression, string paramName, NodeBuilder node)
+        private static void ApplyOverrideSetChain(ExpressionSyntax expression, string paramName, NodeBuilder node, string childPath = "")
         {
             var (receiver, calls) = UnwrapChain(expression);
             if (receiver.Identifier.Text != paramName)
@@ -221,7 +246,7 @@ namespace SceneBuilder.Core.Parsing
                     throw Unreachable();
                 }
 
-                node.Overrides.Add(ParseOverrideSet(invocation));
+                node.Overrides.Add(ParseOverrideSet(invocation, childPath));
             }
         }
 
@@ -229,7 +254,7 @@ namespace SceneBuilder.Core.Parsing
         // lowering reuses ValueNodeParser.Parse verbatim (b3-t2, total). A reference value
         // (AssetRef/ObjectRef) lands in ObjectReference, leaving Value at its model default;
         // every other value lands in Value, leaving ObjectReference null.
-        private static PropertyOverride ParseOverrideSet(InvocationExpressionSyntax setInvocation)
+        private static PropertyOverride ParseOverrideSet(InvocationExpressionSyntax setInvocation, string childPath = "")
         {
             var args = setInvocation.ArgumentList.Arguments;
             if (args.Count != 2)
@@ -275,7 +300,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             var value = ValueNodeParser.Parse(args[1].Expression);
-            var target = new OverrideTarget { ComponentType = typeFullName };
+            var target = new OverrideTarget { ComponentType = typeFullName, ChildPath = childPath };
 
             return value is ValueNode.AssetRef or ValueNode.ObjectRef
                 ? new PropertyOverride { Target = target, PropertyPath = propertyPath, ObjectReference = value }
@@ -286,7 +311,7 @@ namespace SceneBuilder.Core.Parsing
         // reuses ProcessComponentClosure verbatim for the `c => c.Set(...)` closure. The owner
         // (instance root) and this component's ordinal LogicalId are resolved later, in
         // BuildInstanceNode.
-        private static void ApplyAddComponent(NodeBuilder node, InvocationExpressionSyntax invocation, ArgumentListSyntax args)
+        private static void ApplyAddComponent(NodeBuilder node, InvocationExpressionSyntax invocation, ArgumentListSyntax args, string childPath = "")
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
                 memberAccess.Name is not GenericNameSyntax generic ||
@@ -296,7 +321,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             var typeFullName = generic.TypeArgumentList.Arguments[0].ToString().Trim();
-            var cb = new ComponentBuilder { TypeFullName = typeFullName };
+            var cb = new ComponentBuilder { TypeFullName = typeFullName, ChildPath = childPath };
 
             if (args.Arguments.Count > 0)
             {
@@ -306,9 +331,10 @@ namespace SceneBuilder.Core.Parsing
             node.AddedComponents.Add(cb);
         }
 
-        // `.RemoveComponent<T>()` — records a root target (SubKey defaults to (0,0));
-        // the adapter resolves it to the real (GUID:fileID, ObjectId) pair before diff.
-        private static void ApplyRemoveComponent(NodeBuilder node, InvocationExpressionSyntax invocation)
+        // `.RemoveComponent<T>()` — records a root target (SubKey defaults to (0,0)) unless
+        // `childPath` is non-empty (nested, via `.On`); the adapter resolves SubKey to the real
+        // (GUID:fileID, ObjectId) pair before diff.
+        private static void ApplyRemoveComponent(NodeBuilder node, InvocationExpressionSyntax invocation, string childPath = "")
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
                 memberAccess.Name is not GenericNameSyntax generic ||
@@ -318,7 +344,36 @@ namespace SceneBuilder.Core.Parsing
             }
 
             var typeFullName = generic.TypeArgumentList.Arguments[0].ToString().Trim();
-            node.RemovedComponentTypes.Add(typeFullName);
+            node.RemovedComponents.Add(new OverrideTarget { ComponentType = typeFullName, ChildPath = childPath });
+        }
+
+        // `.AddChild(parentPath, name, cfg?)` — deferred (see ProcessInstanceChain) until the
+        // instance's own LogicalId is final, since the added child is parented on it. Builds a
+        // child NodeBuilder and reuses ProcessClosure verbatim for the optional closure — the
+        // full NodeHandle authoring grammar (components/fields/nested children).
+        private static void ApplyAddChild(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
+        {
+            var parentPath = EvalStringLiteral(args.Arguments[0].Expression);
+            var name = EvalStringLiteral(args.Arguments[1].Expression);
+
+            var child = new NodeBuilder { Name = name };
+            child.AnchorSpan = new SourceSpan(invocation.Span.Start, invocation.Span.Length);
+            child.LogicalId = ctx.Resolver.Resolve(null, null, node.LogicalId, name, node.AddedGameObjects.Count);
+
+            if (args.Arguments.Count > 2)
+            {
+                ProcessClosure(args.Arguments[2].Expression, child, ctx);
+            }
+
+            node.AddedGameObjects.Add((parentPath, child));
+        }
+
+        // `.RemoveChild(childPath)` — inline (no LogicalId needed, the target is identified by
+        // ChildPath only; the adapter resolves SubKey before diff, same as RemovedComponents).
+        private static void ApplyRemoveChild(NodeBuilder node, ArgumentListSyntax args)
+        {
+            var childPath = EvalStringLiteral(args.Arguments[0].Expression);
+            node.RemovedGameObjects.Add(new OverrideTarget { ChildPath = childPath });
         }
 
         // Mirrors the plain-GameObject IdentityMapEntry construction in CollectIdentityEntries,

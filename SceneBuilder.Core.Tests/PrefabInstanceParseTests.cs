@@ -1,6 +1,7 @@
 using System.Linq;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
+using SceneBuilder.Core.Reconcile;
 using Xunit;
 
 namespace SceneBuilder.Core.Tests
@@ -31,6 +32,19 @@ public class NestedChildScene : ISceneDefinition
     {
         var e = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
         e.Add(""Child"");
+    }
+}
+";
+
+        // b2-t3 spec #9: a scene.Instance/handle.Instance child under an instance stays a nested
+        // instance node — must NOT be re-routed into AddedGameObjects like a plain instance.Add child.
+        private const string NestedInstanceChildSource = @"
+public class NestedInstanceChildScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var e = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        e.Instance(""Assets/Prefabs/Coin.prefab"");
     }
 }
 ";
@@ -163,6 +177,207 @@ public class OverrideScene : ISceneDefinition
 }
 ";
 
+        // b2-t2: .AddChild/.RemoveChild parse fixtures.
+        private const string AddChildSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Tank.prefab"")
+             .AddChild(""Turret"", ""MuzzleFlash"", mf => mf.Component<UnityEngine.Light>(l => l.Set(""m_Range"", 5f)));
+    }
+}
+";
+
+        private const string AddChildAtRootSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Tank.prefab"")
+             .AddChild("""", ""Beacon"");
+    }
+}
+";
+
+        private const string RemoveChildSource = @"
+public class OverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Tank.prefab"")
+             .RemoveChild(""Turret/Antenna"");
+    }
+}
+";
+
+        // b2-t1: `.On(selector, closure)` closure-body parsing — mirrors FacadeParseTests's
+        // CatalogWithTurretAndChassis (Turret carries Barrel + Antenna children).
+        private const string NestedTankGuid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        private const long NestedTurretLocalId = 7;
+        private const long NestedBarrelLocalId = 42;
+        private const long NestedAntennaLocalId = 43;
+
+        private static FacadeCatalog CatalogWithTurret() => new FacadeCatalog
+        {
+            Entries = new[]
+            {
+                new FacadeEntry
+                {
+                    PropertyName = "Tank",
+                    Guid = NestedTankGuid,
+                    Root = new FacadeNode
+                    {
+                        Children = new[]
+                        {
+                            new FacadeChild
+                            {
+                                PropertyName = "Turret",
+                                RealName = "Turret",
+                                LocalId = NestedTurretLocalId,
+                                Node = new FacadeNode
+                                {
+                                    Children = new[]
+                                    {
+                                        new FacadeChild { PropertyName = "Barrel", RealName = "Barrel", LocalId = NestedBarrelLocalId },
+                                        new FacadeChild { PropertyName = "Antenna", RealName = "Antenna", LocalId = NestedAntennaLocalId },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+
+        private const string NestedOverrideTypedSource = @"
+public class NestedScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(Prefabs.Tank)
+             .On(sel => sel.Turret.Barrel, b => b.Override(x => x.Set((Light l) => l.intensity, 4f)));
+    }
+}
+";
+
+        private const string NestedOverrideStringSource = @"
+public class NestedScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(Prefabs.Tank)
+             .On(""Turret/Barrel"", b => b.Override(x => x.Set((Light l) => l.intensity, 4f)));
+    }
+}
+";
+
+        private const string NestedAddComponentSource = @"
+public class NestedScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(Prefabs.Tank)
+             .On(sel => sel.Turret.Barrel, b => b.AddComponent<AudioSource>());
+    }
+}
+";
+
+        private const string NestedRemoveComponentSource = @"
+public class NestedScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(Prefabs.Tank)
+             .On(sel => sel.Turret.Antenna, b => b.RemoveComponent<MeshRenderer>());
+    }
+}
+";
+
+        private const string NestedMultipleOpsSource = @"
+public class NestedScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(Prefabs.Tank)
+             .On(sel => sel.Turret.Barrel, b => b.Override(x => x.Set((Light l) => l.intensity, 4f)).AddComponent<AudioSource>());
+    }
+}
+";
+
+        [Fact]
+        public void NestedOverride_LowersToPairKey_NotNamePath()
+        {
+            var result = BuilderParser.Parse(NestedOverrideTypedSource, null, CatalogWithTurret());
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var propertyOverride = Assert.Single(instance.Overrides);
+
+            Assert.Equal("Turret/Barrel", propertyOverride.Target.ChildPath);
+            Assert.Equal("Light", propertyOverride.Target.ComponentType);
+            Assert.Equal(new PrefabInstanceKey(), propertyOverride.Target.SubKey);
+            Assert.Equal("member:intensity", propertyOverride.PropertyPath);
+
+            // Identity (equality/hash) ignores ChildPath (spec-16 guard): two targets sharing
+            // SubKey+ComponentType are equal even with different display paths.
+            var key = new PrefabInstanceKey { TargetPrefabId = 1, TargetObjectId = 2 };
+            var a = new OverrideTarget { SubKey = key, ComponentType = "Light", ChildPath = "Turret/Barrel" };
+            var b = new OverrideTarget { SubKey = key, ComponentType = "Light", ChildPath = "X/Y" };
+            Assert.Equal(a, b);
+            Assert.Equal(a.GetHashCode(), b.GetHashCode());
+        }
+
+        [Fact]
+        public void NestedAddedComponent_ParsesToChildTarget()
+        {
+            var result = BuilderParser.Parse(NestedAddComponentSource, null, CatalogWithTurret());
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var added = Assert.Single(instance.AddedComponents);
+
+            Assert.Equal("Turret/Barrel", added.Target.ChildPath);
+            Assert.Equal("AudioSource", added.Target.ComponentType);
+            Assert.NotEqual(new OverrideTarget(), added.Target);
+        }
+
+        [Fact]
+        public void NestedRemovedComponent_ParsesToChildTarget()
+        {
+            var result = BuilderParser.Parse(NestedRemoveComponentSource, null, CatalogWithTurret());
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var removed = Assert.Single(instance.RemovedComponents);
+
+            Assert.Equal("Turret/Antenna", removed.ChildPath);
+            Assert.Equal("MeshRenderer", removed.ComponentType);
+        }
+
+        [Fact]
+        public void NestedClosure_MultipleOps_StackOnSameChildPath()
+        {
+            var result = BuilderParser.Parse(NestedMultipleOpsSource, null, CatalogWithTurret());
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var propertyOverride = Assert.Single(instance.Overrides);
+            var added = Assert.Single(instance.AddedComponents);
+
+            Assert.Equal("Turret/Barrel", propertyOverride.Target.ChildPath);
+            Assert.Equal("Turret/Barrel", added.Target.ChildPath);
+        }
+
+        [Fact]
+        public void TypedAndStringOn_Closure_LowersIdentically()
+        {
+            var typedResult = BuilderParser.Parse(NestedOverrideTypedSource, null, CatalogWithTurret());
+            var stringResult = BuilderParser.Parse(NestedOverrideStringSource, null, CatalogWithTurret());
+
+            var typedInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(typedResult.Model.Roots));
+            var stringInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(stringResult.Model.Roots));
+
+            Assert.NotEmpty(typedInstance.Overrides);
+            Assert.Equal(typedInstance.Overrides, stringInstance.Overrides);
+        }
+
         [Fact]
         public void Parse_SceneInstance_YieldsPrefabInstanceNodeWithUnresolvedSourcePrefab()
         {
@@ -231,16 +446,37 @@ public class OverrideScene : ISceneDefinition
             Assert.Equal("pickups", coinEntry.ParentLogicalId);
         }
 
+        // b2-t3 spec #8: instance.Add(non-prefab) lowers to AddedGameObjects, NOT Children.
+        // Supersedes the shipped M6 behavior asserted by the old
+        // Parse_PlainChildAddedViaInstanceHandle_YieldsOrdinaryGameObjectChild test.
         [Fact]
-        public void Parse_PlainChildAddedViaInstanceHandle_YieldsOrdinaryGameObjectChild()
+        public void InstanceAdd_NonPrefabChild_LowersToAddedGameObject_NotChildren()
         {
             var result = BuilderParser.Parse(NestedPlainChildSource);
 
             var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
             Assert.Equal("e", instance.LogicalId);
 
-            var child = Assert.IsType<GameObjectNode>(Assert.Single(instance.Children));
-            Assert.Equal("Child", child.Name);
+            Assert.Empty(instance.Children);
+
+            var added = Assert.Single(instance.AddedGameObjects);
+            Assert.Equal("Child", added.Node.Name);
+            Assert.Equal("", added.Parent.ChildPath);
+        }
+
+        // b2-t3 spec #9: a nested scene.Instance/handle.Instance child under an instance is
+        // unaffected by the AddedGameObjects re-route above — it stays a PrefabInstanceNode child.
+        [Fact]
+        public void InstanceAdd_NestedInstanceChild_StaysNestedInstance()
+        {
+            var result = BuilderParser.Parse(NestedInstanceChildSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+
+            var child = Assert.IsType<PrefabInstanceNode>(Assert.Single(instance.Children));
+            Assert.Equal("Assets/Prefabs/Coin.prefab", child.SourcePrefab.DisplayPath);
+
+            Assert.Empty(instance.AddedGameObjects);
         }
 
         [Fact]
@@ -369,6 +605,49 @@ public class OverrideScene : ISceneDefinition
         public void Parse_UntypedOverrideSelector_FailsLoud()
         {
             Assert.Throws<ParseException>(() => BuilderParser.Parse(UntypedOverrideSelectorSource));
+        }
+
+        [Fact]
+        public void AddedChildGameObject_RoundTrips()
+        {
+            var result = BuilderParser.Parse(AddChildSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var added = Assert.Single(instance.AddedGameObjects);
+
+            Assert.Equal("Turret", added.Parent.ChildPath);
+            Assert.Equal(new PrefabInstanceKey(), added.Parent.SubKey);
+            Assert.Equal("", added.Parent.ComponentType);
+
+            Assert.Equal("MuzzleFlash", added.Node.Name);
+            var light = Assert.Single(added.Node.Components);
+            Assert.Equal("UnityEngine.Light", light.Type.FullName);
+            Assert.Equal(ValueNode.Primitive.Float(5f), light.Fields["m_Range"]);
+        }
+
+        [Fact]
+        public void AddedChildGameObject_AtRoot_ParentIsDefaultTarget()
+        {
+            var result = BuilderParser.Parse(AddChildAtRootSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var added = Assert.Single(instance.AddedGameObjects);
+
+            Assert.Equal(new OverrideTarget(), added.Parent);
+            Assert.Equal("Beacon", added.Node.Name);
+        }
+
+        [Fact]
+        public void RemovedChildGameObject_RoundTrips()
+        {
+            var result = BuilderParser.Parse(RemoveChildSource);
+
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
+            var removed = Assert.Single(instance.RemovedGameObjects);
+
+            Assert.Equal("Turret/Antenna", removed.ChildPath);
+            Assert.Equal("", removed.ComponentType);
+            Assert.Equal(new PrefabInstanceKey(), removed.SubKey);
         }
     }
 }

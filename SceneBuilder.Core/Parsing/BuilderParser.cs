@@ -732,17 +732,23 @@ namespace SceneBuilder.Core.Parsing
             // PrefabInstanceNode.{Overrides,AddedComponents,RemovedComponents}.
             public readonly List<PropertyOverride> Overrides = new();
             public readonly List<ComponentBuilder> AddedComponents = new();
-            public readonly List<string> RemovedComponentTypes = new();
+            public readonly List<OverrideTarget> RemovedComponents = new();
 
             // b4-t2: `.On(selector, ...)` resolved targets, carried until BuildInstanceNode maps
             // them onto PrefabInstanceNode.ScopedOverrides.
             public readonly List<ScopedOverride> ScopedOverrides = new();
+
+            // b2-t2: `.AddChild`/`.RemoveChild`, carried until BuildInstanceNode maps them onto
+            // PrefabInstanceNode.{AddedGameObjects,RemovedGameObjects}.
+            public readonly List<(string ParentPath, NodeBuilder Node)> AddedGameObjects = new();
+            public readonly List<OverrideTarget> RemovedGameObjects = new();
         }
 
         private sealed class ComponentBuilder
         {
             public string TypeFullName = "";
             public string LogicalId = "";
+            public string ChildPath = "";
             public SourceSpan AnchorSpan;
             public readonly List<KeyValuePair<string, ValueNode>> Fields = new();
             public readonly List<KeyValuePair<string, SourceSpan>> FieldValueSpans = new();

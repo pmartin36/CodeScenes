@@ -50,6 +50,12 @@ namespace SceneBuilder.Grammar
                     case "On":
                         ApplyScopedOn(call.Args, ctx);
                         break;
+                    case "AddChild":
+                        ApplyAddChild(call.Args, ctx);
+                        break;
+                    case "RemoveChild":
+                        ApplyRemoveChild(call.Args, ctx);
+                        break;
                     default:
                         chainedCalls.Add(call);
                         break;
@@ -70,12 +76,13 @@ namespace SceneBuilder.Grammar
         private static bool IsPrefabsMemberAccess(ExpressionSyntax expr) =>
             expr is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.Text: "Prefabs" } };
 
-        // b4-t2: `.On(selector, closure)` — shape-only, mirroring BuilderParser.Facade.cs's
-        // ApplyScopedOn arg0 acceptance (SimpleLambda with a MemberAccess body, OR a string
-        // literal). The catalog resolution + miss-conflict live solely in the parser (this
-        // recognizer cannot reference Core/FacadeCatalog); arg1 (the closure) is unread by both
-        // arms — materialize is spec 24. MUST accept/reject the identical shape as the parser
-        // arm or RecognizerAgreementTests/RecognizerCompletenessTests break.
+        // `.On(selector, closure)` — shape-only, mirroring BuilderParser.Facade.cs's ApplyScopedOn
+        // arg0 acceptance (SimpleLambda with a MemberAccess body, OR a string literal). The
+        // catalog resolution + miss-conflict live solely in the parser (this recognizer cannot
+        // reference Core/FacadeCatalog). arg1 (the closure) IS walked (b2-t1), mirroring the
+        // parser's ParseScopedClosure dispatch, so the recognizer flags the same unsupported verb
+        // the parser would `Unreachable()` on — MUST accept/reject the identical shape as the
+        // parser arm or RecognizerAgreementTests/RecognizerCompletenessTests break.
         private static void ApplyScopedOn(ArgumentListSyntax args, RecognizerContext ctx)
         {
             if (args.Arguments.Count != 2)
@@ -90,6 +97,81 @@ namespace SceneBuilder.Grammar
             if (!isTypedSelector && !IsStringLiteral(arg0))
             {
                 Report(ctx, arg0, SB1001, "On(...) requires a typed member-chain selector (e.g. `t => t.A.B`) or a string path");
+            }
+
+            ProcessScopedClosure(args.Arguments[1].Expression, ctx);
+        }
+
+        // `.On(..., b => b.<ops>)` closure body — mirrors ApplyOverride's Block/fluent-chain
+        // unwrap, dispatching each unwrapped call across the three nested-op verbs (reusing the
+        // same shape checks as the root `.Override`/`.AddComponent`/`.RemoveComponent` verbs). An
+        // empty closure (`b => { }`) is accepted (no-op); an unsupported verb is SB1001.
+        private static void ProcessScopedClosure(ExpressionSyntax closureExpr, RecognizerContext ctx)
+        {
+            if (closureExpr is not SimpleLambdaExpressionSyntax lambda)
+            {
+                Report(ctx, closureExpr, SB1001, "On(...) closure must be a lambda like `b => ...`");
+                return;
+            }
+
+            var paramName = lambda.Parameter.Identifier.Text;
+
+            switch (lambda.Body)
+            {
+                case BlockSyntax block:
+                    foreach (var statement in block.Statements)
+                    {
+                        if (statement is not ExpressionStatementSyntax exprStatement)
+                        {
+                            Report(ctx, statement, SB1001, "Unsupported statement in On(...) closure (expected .Override/.AddComponent/.RemoveComponent calls)");
+                            continue;
+                        }
+
+                        ProcessScopedStatement(exprStatement.Expression, paramName, ctx);
+                    }
+                    break;
+
+                case ExpressionSyntax exprBody:
+                    ProcessScopedStatement(exprBody, paramName, ctx);
+                    break;
+
+                default:
+                    Report(ctx, lambda.Body, SB1001, "Unsupported lambda body");
+                    break;
+            }
+        }
+
+        private static void ProcessScopedStatement(ExpressionSyntax expression, string paramName, RecognizerContext ctx)
+        {
+            var (receiver, calls) = UnwrapChain(expression, ctx);
+            if (receiver == null)
+            {
+                return;
+            }
+
+            if (receiver.Identifier.Text != paramName)
+            {
+                Report(ctx, receiver, SB1001, $"Unknown receiver '{receiver.Identifier.Text}' in On(...) closure");
+                return;
+            }
+
+            foreach (var (method, callArgs, invocation) in calls)
+            {
+                switch (method)
+                {
+                    case "Override":
+                        ApplyOverride(callArgs, ctx);
+                        break;
+                    case "AddComponent":
+                        ApplyAddComponent(invocation, callArgs, ctx);
+                        break;
+                    case "RemoveComponent":
+                        ApplyRemoveComponent(invocation, ctx);
+                        break;
+                    default:
+                        Report(ctx, invocation, SB1001, $"Unsupported call '{method}' in On(...) closure (expected .Override/.AddComponent/.RemoveComponent)");
+                        break;
+                }
             }
         }
 
@@ -232,6 +314,47 @@ namespace SceneBuilder.Grammar
                 generic.TypeArgumentList.Arguments.Count != 1)
             {
                 Report(ctx, invocation, SB1001, "RemoveComponent<T>() requires exactly one type argument");
+            }
+        }
+
+        // `.AddChild(parentPath, name, cfg?)` — arg0/arg1 must be string literals; an optional
+        // arg2 closure is walked via ProcessClosure (the shared NodeHandle sub-grammar).
+        private static void ApplyAddChild(ArgumentListSyntax args, RecognizerContext ctx)
+        {
+            if (args.Arguments.Count < 2)
+            {
+                Report(ctx, args, SB1001, "AddChild(parentPath, name, cfg?) requires at least two arguments");
+                return;
+            }
+
+            if (!IsStringLiteral(args.Arguments[0].Expression))
+            {
+                Report(ctx, args.Arguments[0].Expression, SB1001, "Expected a string literal");
+            }
+
+            if (!IsStringLiteral(args.Arguments[1].Expression))
+            {
+                Report(ctx, args.Arguments[1].Expression, SB1001, "Expected a string literal");
+            }
+
+            if (args.Arguments.Count > 2)
+            {
+                ProcessClosure(args.Arguments[2].Expression, ctx);
+            }
+        }
+
+        // `.RemoveChild(childPath)` — structure-only (a single string-literal arg).
+        private static void ApplyRemoveChild(ArgumentListSyntax args, RecognizerContext ctx)
+        {
+            if (args.Arguments.Count != 1)
+            {
+                Report(ctx, args, SB1001, "RemoveChild(childPath) requires exactly one argument");
+                return;
+            }
+
+            if (!IsStringLiteral(args.Arguments[0].Expression))
+            {
+                Report(ctx, args.Arguments[0].Expression, SB1001, "Expected a string literal");
             }
         }
     }

@@ -22,5 +22,18 @@ namespace SceneBuilder.Authoring
             configure?.Invoke(new OverrideHandle());
             return this;
         }
+
+        /// <summary>Add a component of type <typeparamref name="T"/> to the scoped target with no field overrides.</summary>
+        public ScopedHandle AddComponent<T>() => this;
+
+        /// <summary>Add a component of type <typeparamref name="T"/> to the scoped target and set its serialized fields in a closure.</summary>
+        public ScopedHandle AddComponent<T>(Action<ComponentHandle<T>> configure)
+        {
+            configure?.Invoke(new ComponentHandle<T>());
+            return this;
+        }
+
+        /// <summary>Remove a component of type <typeparamref name="T"/> from the scoped target (must exist on the source prefab).</summary>
+        public ScopedHandle RemoveComponent<T>() => this;
     }
 }

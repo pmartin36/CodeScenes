@@ -73,6 +73,26 @@ namespace SceneBuilder.Authoring
             closure?.Invoke(new ScopedHandle());
             return this;
         }
+
+        /// <summary>
+        /// Add a new child GameObject nested under <paramref name="parentPath"/> in the instance's
+        /// hierarchy (<c>""</c> = the instance root).
+        /// </summary>
+        public NodeHandle AddChild(string parentPath, string name) => new NodeHandle();
+
+        /// <summary>
+        /// Add a new child GameObject nested under <paramref name="parentPath"/> and configure it in
+        /// a closure (the full <see cref="NodeHandle"/> authoring surface).
+        /// </summary>
+        public NodeHandle AddChild(string parentPath, string name, Action<NodeHandle> configure)
+        {
+            var handle = new NodeHandle();
+            configure?.Invoke(handle);
+            return handle;
+        }
+
+        /// <summary>Remove an existing child GameObject at <paramref name="childPath"/> from the instance's hierarchy.</summary>
+        public InstanceHandle RemoveChild(string childPath) => this;
     }
 
     /// <summary>
@@ -137,5 +157,8 @@ namespace SceneBuilder.Authoring
             closure?.Invoke(new ScopedHandle());
             return this;
         }
+
+        /// <summary>Remove an existing child GameObject at <paramref name="childPath"/> from the instance's hierarchy.</summary>
+        public new InstanceHandle<TRef> RemoveChild(string childPath) => this;
     }
 }

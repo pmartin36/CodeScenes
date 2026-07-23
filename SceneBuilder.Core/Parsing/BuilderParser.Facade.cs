@@ -8,10 +8,13 @@ namespace SceneBuilder.Core.Parsing
     // `.On(selector, closure)` scoped-override resolution — typed member chain (`t => t.A.B`) or
     // string path (`"A/B"`) resolved against the enclosing instance's FacadeCatalog entry
     // (`node.SourcePrefabGuid`, set by b4-t1's `Instance(Prefabs.X)` arm) to a real child path
-    // (RealName-joined) + the leaf's durable LocalId. The closure (arg1) is not read here —
-    // nested-override materialize is spec 24. A miss (unmatched segment / no catalog / instance
-    // has no resolved prefab guid) is a located Conflict, mirroring b4-t1's UnknownFacadeReference
-    // channel — never a throw, never a silent drop. See research.md.
+    // (RealName-joined) + the leaf's durable LocalId. On a resolve HIT, the closure body (arg1) is
+    // then parsed (b2-t1): each `.Override`/`.AddComponent`/`.RemoveComponent` op lowers into the
+    // instance's Overrides/AddedComponents/RemovedComponents, stamping `Target.ChildPath =
+    // childPath` (SubKey stays default `(0,0)` — the adapter resolves it later, b7-t2). A miss
+    // (unmatched segment / no catalog / instance has no resolved prefab guid) is a located
+    // Conflict, mirroring b4-t1's UnknownFacadeReference channel — never a throw, never a silent
+    // drop, and the closure is NOT parsed. See research.md.
     public static partial class BuilderParser
     {
         private static void ApplyScopedOn(NodeBuilder node, ArgumentListSyntax args, ParserContext ctx)
@@ -23,6 +26,7 @@ namespace SceneBuilder.Core.Parsing
                 ctx.FacadeCatalog.TryResolveSelector(node.SourcePrefabGuid ?? "", segments, byPropertyName, out var childPath, out var localId))
             {
                 node.ScopedOverrides.Add(new ScopedOverride { ChildPath = childPath, LocalId = localId });
+                ParseScopedClosure(node, args.Arguments[1].Expression, childPath);
                 return;
             }
 
@@ -33,6 +37,71 @@ namespace SceneBuilder.Core.Parsing
                 Reason = $"Unknown facade reference '{string.Join("/", segments)}'.",
                 Location = argSpan,
             });
+        }
+
+        // `.On(selector, b => b.<ops>)` closure body — mirrors ApplyOverride's Block/fluent-chain
+        // unwrap uniformly, but dispatches each unwrapped call across the three nested-op verbs
+        // (reusing the same lowering as the root `.Override`/`.AddComponent`/`.RemoveComponent`
+        // verbs, threading `childPath` so the resulting Target is stamped nested). An empty
+        // closure (`b => { }`, the spec-25 stub shape) is a no-op, not an error. An unsupported
+        // verb is fail-loud (gated by FlatShapeRecognizer.Instance.cs's mirrored dispatch).
+        private static void ParseScopedClosure(NodeBuilder node, ExpressionSyntax closureExpr, string childPath)
+        {
+            if (closureExpr is not SimpleLambdaExpressionSyntax lambda)
+            {
+                throw Unreachable();
+            }
+
+            var paramName = lambda.Parameter.Identifier.Text;
+
+            switch (lambda.Body)
+            {
+                case BlockSyntax block:
+                    foreach (var statement in block.Statements)
+                    {
+                        if (statement is not ExpressionStatementSyntax exprStatement)
+                        {
+                            throw Unreachable();
+                        }
+
+                        ParseScopedStatement(node, exprStatement.Expression, paramName, childPath);
+                    }
+                    break;
+
+                case ExpressionSyntax exprBody:
+                    ParseScopedStatement(node, exprBody, paramName, childPath);
+                    break;
+
+                default:
+                    throw Unreachable();
+            }
+        }
+
+        private static void ParseScopedStatement(NodeBuilder node, ExpressionSyntax expression, string paramName, string childPath)
+        {
+            var (receiver, calls) = UnwrapChain(expression);
+            if (receiver.Identifier.Text != paramName)
+            {
+                throw Unreachable();
+            }
+
+            foreach (var (method, callArgs, invocation) in calls)
+            {
+                switch (method)
+                {
+                    case "Override":
+                        ApplyOverride(node, callArgs, childPath);
+                        break;
+                    case "AddComponent":
+                        ApplyAddComponent(node, invocation, callArgs, childPath);
+                        break;
+                    case "RemoveComponent":
+                        ApplyRemoveComponent(node, invocation, childPath);
+                        break;
+                    default:
+                        throw Unreachable();
+                }
+            }
         }
 
         // arg0 is either a typed member-chain selector (`t => t.A.B`, recognizer-guaranteed shape:
