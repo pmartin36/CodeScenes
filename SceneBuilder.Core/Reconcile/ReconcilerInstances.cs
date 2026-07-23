@@ -170,8 +170,8 @@ namespace SceneBuilder.Core.Reconcile
             ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets);
             ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
-            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, edits);
-            ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, edits);
+            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
+            ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
         }
 
         // m-nested-props b4-t2: split each membership diff by Target.ChildPath. Root

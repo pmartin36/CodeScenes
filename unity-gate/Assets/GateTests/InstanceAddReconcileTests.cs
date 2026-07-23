@@ -143,10 +143,11 @@ public class InstanceAddReconcileGateScene : ISceneDefinition
         var synced = File.ReadAllText(_builderPath);
 
         // EMIT direction, adapter boundary: the added child round-trips into source as a `.AddChild`
-        // scoped to the instance (chained on `.Instance(Prefabs.Tank)`), naming its parent sub-object
-        // and its own name.
-        StringAssert.Contains(".AddChild(\"LeftTurret\", \"MuzzleFlash\")", synced,
-            "Sync did not emit a `.AddChild(parentPath, name)` for the scene-added child.\n" + synced);
+        // scoped to the instance (chained on `.Instance(Prefabs.Tank)`). The PARENT sub-object carries
+        // a façade identity, so it emits the TYPED selector (`sel => sel.LeftTurret`) — typed-by-default,
+        // matching `.On` (specs/27); the new child NAME stays a string.
+        StringAssert.Contains(".AddChild(sel => sel.LeftTurret, \"MuzzleFlash\")", synced,
+            "Sync did not emit a typed `.AddChild(sel => sel.Parent, name)` for the scene-added child.\n" + synced);
         StringAssert.Contains("Instance(Prefabs.Tank)", synced,
             "Sync dropped the typed instance the AddChild must scope under.\n" + synced);
 

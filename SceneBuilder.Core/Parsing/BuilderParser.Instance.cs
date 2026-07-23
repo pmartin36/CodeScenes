@@ -97,7 +97,7 @@ namespace SceneBuilder.Core.Parsing
                         ApplyScopedOn(node, call.Args, ctx);
                         break;
                     case "RemoveChild":
-                        ApplyRemoveChild(node, call.Args);
+                        ApplyRemoveChild(node, call.Args, ctx);
                         break;
                     case "AddChild":
                         // Deferred: the added child's LogicalId is parented on `node.LogicalId`,
@@ -353,7 +353,14 @@ namespace SceneBuilder.Core.Parsing
         // full NodeHandle authoring grammar (components/fields/nested children).
         private static void ApplyAddChild(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
         {
-            var parentPath = EvalStringLiteral(args.Arguments[0].Expression);
+            // arg0 (the PARENT) is a typed façade selector (`t => t.A.B`) or a string path; the child
+            // NAME (arg1) is always a string. A typed selector that misses the catalog is a located
+            // Conflict, and the child is NOT added — mirrors ApplyScopedOn (specs/27).
+            if (!TryResolveChildSelectorArg(args.Arguments[0].Expression, node, ctx, out var parentPath))
+            {
+                return;
+            }
+
             var name = EvalStringLiteral(args.Arguments[1].Expression);
 
             var child = new NodeBuilder { Name = name };
@@ -368,12 +375,51 @@ namespace SceneBuilder.Core.Parsing
             node.AddedGameObjects.Add((parentPath, child));
         }
 
-        // `.RemoveChild(childPath)` — inline (no LogicalId needed, the target is identified by
-        // ChildPath only; the adapter resolves SubKey before diff, same as RemovedComponents).
-        private static void ApplyRemoveChild(NodeBuilder node, ArgumentListSyntax args)
+        // `.RemoveChild(child)` — inline (no LogicalId needed, the target is identified by ChildPath
+        // only; the adapter resolves SubKey before diff, same as RemovedComponents). The removed
+        // source child is addressed by a typed façade selector (`t => t.A.B`, compiler-checked +
+        // rename-auto-syncing) or a string path. A typed selector that misses the catalog is a
+        // located Conflict, and nothing is removed — mirrors ApplyScopedOn (specs/27).
+        private static void ApplyRemoveChild(NodeBuilder node, ArgumentListSyntax args, ParserContext ctx)
         {
-            var childPath = EvalStringLiteral(args.Arguments[0].Expression);
+            if (!TryResolveChildSelectorArg(args.Arguments[0].Expression, node, ctx, out var childPath))
+            {
+                return;
+            }
+
             node.RemovedGameObjects.Add(new OverrideTarget { ChildPath = childPath });
+        }
+
+        // Resolves a `.RemoveChild`/`.AddChild` child/parent argument to a RealName-joined child path.
+        // A string literal is taken verbatim. A typed selector (`t => t.A.B`) resolves through the
+        // FacadeCatalog exactly like ApplyScopedOn's `.On` selector (TryReadSelectorSegments +
+        // FacadeCatalog.TryResolveSelector) — a miss records a located UnknownFacadeReference Conflict
+        // and returns false, so the caller drops the op (never a silent wrong-target edit).
+        private static bool TryResolveChildSelectorArg(ExpressionSyntax arg0, NodeBuilder node, ParserContext ctx, out string childPath)
+        {
+            if (arg0 is not SimpleLambdaExpressionSyntax)
+            {
+                childPath = EvalStringLiteral(arg0);
+                return true;
+            }
+
+            TryReadSelectorSegments(arg0, out var segments, out var byPropertyName);
+
+            if (ctx.FacadeCatalog != null &&
+                ctx.FacadeCatalog.TryResolveSelector(node.SourcePrefabGuid ?? "", segments, byPropertyName, out childPath, out _))
+            {
+                return true;
+            }
+
+            var argSpan = new SourceSpan(arg0.Span.Start, arg0.Span.Length);
+            ctx.FacadeConflicts.Add(new Conflict
+            {
+                Kind = ConflictKind.UnknownFacadeReference,
+                Reason = $"Unknown facade reference '{string.Join("/", segments)}'.",
+                Location = argSpan,
+            });
+            childPath = "";
+            return false;
         }
 
         // Mirrors the plain-GameObject IdentityMapEntry construction in CollectIdentityEntries,

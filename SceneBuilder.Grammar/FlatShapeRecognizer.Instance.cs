@@ -317,19 +317,23 @@ namespace SceneBuilder.Grammar
             }
         }
 
-        // `.AddChild(parentPath, name, cfg?)` — arg0/arg1 must be string literals; an optional
-        // arg2 closure is walked via ProcessClosure (the shared NodeHandle sub-grammar).
+        // `.AddChild(parent, name, cfg?)` — parent (arg0) is EITHER a typed member-chain selector
+        // (`t => t.A.B`, compiler-checked) OR a string path; the NEW child name (arg1) is always a
+        // string literal (a brand-new object has no façade type). An optional arg2 closure is walked
+        // via ProcessClosure (the shared NodeHandle sub-grammar). Mirrors ApplyScopedOn's arg0
+        // acceptance (specs/27).
         private static void ApplyAddChild(ArgumentListSyntax args, RecognizerContext ctx)
         {
             if (args.Arguments.Count < 2)
             {
-                Report(ctx, args, SB1001, "AddChild(parentPath, name, cfg?) requires at least two arguments");
+                Report(ctx, args, SB1001, "AddChild(parent, name, cfg?) requires at least two arguments");
                 return;
             }
 
-            if (!IsStringLiteral(args.Arguments[0].Expression))
+            var arg0 = args.Arguments[0].Expression;
+            if (!IsTypedChildSelector(arg0) && !IsStringLiteral(arg0))
             {
-                Report(ctx, args.Arguments[0].Expression, SB1001, "Expected a string literal");
+                Report(ctx, arg0, SB1001, "AddChild parent requires a typed member-chain selector (e.g. `t => t.A.B`) or a string path");
             }
 
             if (!IsStringLiteral(args.Arguments[1].Expression))
@@ -343,19 +347,26 @@ namespace SceneBuilder.Grammar
             }
         }
 
-        // `.RemoveChild(childPath)` — structure-only (a single string-literal arg).
+        // `.RemoveChild(child)` — child (arg0) is EITHER a typed member-chain selector
+        // (`t => t.A.B`, compiler-checked) OR a string path. Structure-only otherwise.
         private static void ApplyRemoveChild(ArgumentListSyntax args, RecognizerContext ctx)
         {
             if (args.Arguments.Count != 1)
             {
-                Report(ctx, args, SB1001, "RemoveChild(childPath) requires exactly one argument");
+                Report(ctx, args, SB1001, "RemoveChild(child) requires exactly one argument");
                 return;
             }
 
-            if (!IsStringLiteral(args.Arguments[0].Expression))
+            var arg0 = args.Arguments[0].Expression;
+            if (!IsTypedChildSelector(arg0) && !IsStringLiteral(arg0))
             {
-                Report(ctx, args.Arguments[0].Expression, SB1001, "Expected a string literal");
+                Report(ctx, arg0, SB1001, "RemoveChild(...) requires a typed member-chain selector (e.g. `t => t.A.B`) or a string path");
             }
         }
+
+        // A typed façade child selector `t => t.A.B` — a lambda whose body is a member-access spine.
+        // Same shape ApplyScopedOn accepts for `.On`.
+        private static bool IsTypedChildSelector(ExpressionSyntax expr) =>
+            expr is SimpleLambdaExpressionSyntax { Body: MemberAccessExpressionSyntax };
     }
 }

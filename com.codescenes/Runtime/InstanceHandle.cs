@@ -158,7 +158,34 @@ namespace SceneBuilder.Authoring
             return this;
         }
 
+        /// <summary>
+        /// Remove an existing source child GameObject addressed by a compiler-checked member selector
+        /// (e.g. <c>t =&gt; t.LeftTurret.Antenna</c>). A typo or a stale name is a COMPILE error, and a
+        /// hierarchy rename auto-syncs the accessor — exactly like <see cref="On{TNode}"/>. Use the
+        /// string overload for a child with no generated ref type.
+        /// </summary>
+        public InstanceHandle<TRef> RemoveChild<TNode>(Func<TRef, TNode> selector) => this;
+
         /// <summary>Remove an existing child GameObject at <paramref name="childPath"/> from the instance's hierarchy.</summary>
         public new InstanceHandle<TRef> RemoveChild(string childPath) => this;
+
+        /// <summary>
+        /// Add a new child GameObject nested under a compiler-checked parent selector (e.g.
+        /// <c>t =&gt; t.LeftTurret</c>). The PARENT is façade-checked (typo/stale = compile error,
+        /// rename auto-syncs); the new child <paramref name="name"/> stays a string — it is a
+        /// genuinely new object with no façade type yet.
+        /// </summary>
+        public NodeHandle AddChild<TNode>(Func<TRef, TNode> parentSelector, string name) => new NodeHandle();
+
+        /// <summary>
+        /// Add a new child GameObject under a compiler-checked parent selector and configure it in a
+        /// closure (the full <see cref="NodeHandle"/> authoring surface).
+        /// </summary>
+        public NodeHandle AddChild<TNode>(Func<TRef, TNode> parentSelector, string name, Action<NodeHandle> configure)
+        {
+            var handle = new NodeHandle();
+            configure?.Invoke(handle);
+            return handle;
+        }
     }
 }

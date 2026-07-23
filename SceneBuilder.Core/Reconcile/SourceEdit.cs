@@ -302,19 +302,24 @@ namespace SceneBuilder.Core.Reconcile
     // Emitted by ReconcilerInstances.Nested.cs from an AddedGameObjects/RemovedGameObjects diff;
     // rendered/reverted by SourcePatchApplier.Instances.cs.
 
-    // Top-level `.AddChild("<parentPath>", "<name>")` on the instance chain (NOT inside .On).
+    // Top-level `.AddChild(<parent>, "<name>")` on the instance chain (NOT inside .On). The parent is
+    // rendered as the typed façade selector (`sel => sel.A.B`) when the catalog resolves it, else the
+    // string path — matching `.On`'s typed-by-default emit (specs/27).
     public sealed record AppendInstanceAddChild : SourceEdit
     {
         // Inherited Anchor = the instance's LogicalId.
         public string ParentPath { get; init; } = ""; // AddedGameObject.Parent.ChildPath ("" == instance root).
+        public string ParentSelectorExpr { get; init; } = ""; // Rendered parent arg: `sel => sel.A.B` or a quoted string.
         public string Name { get; init; } = ""; // AddedGameObject.Node.Name.
         public GameObjectNode Node { get; init; } = new(); // Payload; components rendered into cfg closure (b4-t3).
     }
 
-    // Top-level `.RemoveChild("<childPath>")`.
+    // Top-level `.RemoveChild(<child>)`. The child is rendered as the typed façade selector
+    // (`sel => sel.A.B`) when the catalog resolves it, else the string path (specs/27).
     public sealed record AppendInstanceRemoveChild : SourceEdit
     {
         // Inherited Anchor = the instance's LogicalId.
         public string ChildPath { get; init; } = ""; // RemovedGameObjects target.ChildPath.
+        public string SelectorExpr { get; init; } = ""; // Rendered child arg: `sel => sel.A.B` or a quoted string.
     }
 }

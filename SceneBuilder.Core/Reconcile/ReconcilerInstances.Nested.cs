@@ -85,6 +85,8 @@ namespace SceneBuilder.Core.Reconcile
             PrefabInstanceNode model,
             SnapshotNode snapshot,
             string instanceLogicalId,
+            FacadeCatalog? facadeCatalog,
+            string? prefabGuid,
             List<SourceEdit> edits)
         {
             var modelKeys = new HashSet<(OverrideTarget Parent, string Name)>();
@@ -104,10 +106,16 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
+                // The PARENT is a resolved source sub-object, so it carries a façade identity — emit
+                // the typed selector when the catalog resolves it (root parent "" falls back to the
+                // empty string literal). The new child NAME stays a string (specs/27).
+                TryRenderScopedSelector(facadeCatalog, prefabGuid, snapshotAdded.Parent.ChildPath, out var parentSelectorExpr);
+
                 edits.Add(new AppendInstanceAddChild
                 {
                     Anchor = instanceLogicalId,
                     ParentPath = snapshotAdded.Parent.ChildPath,
+                    ParentSelectorExpr = parentSelectorExpr,
                     Name = snapshotAdded.Node.Name,
                     Node = snapshotAdded.Node,
                 });
@@ -136,6 +144,8 @@ namespace SceneBuilder.Core.Reconcile
             PrefabInstanceNode model,
             SnapshotNode snapshot,
             string instanceLogicalId,
+            FacadeCatalog? facadeCatalog,
+            string? prefabGuid,
             List<SourceEdit> edits)
         {
             var modelTargets = new HashSet<OverrideTarget>(model.RemovedGameObjects);
@@ -148,7 +158,10 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                edits.Add(new AppendInstanceRemoveChild { Anchor = instanceLogicalId, ChildPath = target.ChildPath });
+                // The removed child is a resolved source sub-object — emit the typed selector when
+                // the catalog resolves it, else the string path (specs/27).
+                TryRenderScopedSelector(facadeCatalog, prefabGuid, target.ChildPath, out var selectorExpr);
+                edits.Add(new AppendInstanceRemoveChild { Anchor = instanceLogicalId, ChildPath = target.ChildPath, SelectorExpr = selectorExpr });
             }
 
             foreach (var target in model.RemovedGameObjects)

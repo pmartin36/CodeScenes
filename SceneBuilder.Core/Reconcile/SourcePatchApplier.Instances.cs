@@ -72,7 +72,7 @@ namespace SceneBuilder.Core.Reconcile
                         Collect(appendAddChild.Anchor, RenderAddChildCall(appendAddChild), appendAddChild);
                         break;
                     case AppendInstanceRemoveChild appendRemoveChild:
-                        Collect(appendRemoveChild.Anchor, $"RemoveChild({SourceExpr.StringLiteral(appendRemoveChild.ChildPath)})", appendRemoveChild);
+                        Collect(appendRemoveChild.Anchor, $"RemoveChild({RemoveChildArg(appendRemoveChild)})", appendRemoveChild);
                         break;
                 }
             }
@@ -131,10 +131,19 @@ namespace SceneBuilder.Core.Reconcile
         // BuilderParser.Instance.cs's ApplyAddChild -> ProcessClosure (3rd-arg NodeHandle grammar).
         private static string RenderAddChildCall(AppendInstanceAddChild appendAddChild)
         {
-            var call = $"AddChild({SourceExpr.StringLiteral(appendAddChild.ParentPath)}, {SourceExpr.StringLiteral(appendAddChild.Name)}";
+            var call = $"AddChild({AddChildParentArg(appendAddChild)}, {SourceExpr.StringLiteral(appendAddChild.Name)}";
             var closure = RenderAddChildClosure(appendAddChild.Node);
             return closure is null ? call + ")" : $"{call}, {closure})";
         }
+
+        // Renders the removed-child / parent argument as the typed façade selector (`sel => sel.A.B`)
+        // the reconciler resolved, falling back to the string path form for edits produced without a
+        // catalog (older edits carry an empty SelectorExpr) — matching `.On`'s emit (specs/27).
+        private static string RemoveChildArg(AppendInstanceRemoveChild edit) =>
+            string.IsNullOrEmpty(edit.SelectorExpr) ? SourceExpr.StringLiteral(edit.ChildPath) : edit.SelectorExpr;
+
+        private static string AddChildParentArg(AppendInstanceAddChild edit) =>
+            string.IsNullOrEmpty(edit.ParentSelectorExpr) ? SourceExpr.StringLiteral(edit.ParentPath) : edit.ParentSelectorExpr;
 
         // Reuses ComponentPatchApplier's RenderComponentClosureArgs (same partial class) for each
         // component's field-set — one renderer, no reinvented field-value formatting. Null when
@@ -226,8 +235,9 @@ namespace SceneBuilder.Core.Reconcile
                     InstanceCallKind.Override => OverrideCallMatches(candidate, edit.PropertyPath),
                     // .AddChild(parentPath, "<name>") — match on the 2nd (name) argument.
                     InstanceCallKind.AddChild => StringLiteralArgMatches(candidate, 1, edit.PropertyPath),
-                    // .RemoveChild("<path>") — match on the sole (childPath) argument.
-                    InstanceCallKind.RemoveChild => StringLiteralArgMatches(candidate, 0, edit.PropertyPath),
+                    // .RemoveChild(<child>) — the arg is a typed selector or a string; match either
+                    // form against the RealName-joined childPath via SelectorKeyMatches (specs/27).
+                    InstanceCallKind.RemoveChild => RemoveChildArgMatches(candidate, edit.PropertyPath),
                     _ => GenericTypeArgMatches(candidate, edit.TypeFullName),
                 };
 
@@ -258,6 +268,21 @@ namespace SceneBuilder.Core.Reconcile
             return invocation.ArgumentList.Arguments[argIndex].Expression is LiteralExpressionSyntax literal
                 && literal.IsKind(SyntaxKind.StringLiteralExpression)
                 && literal.Token.ValueText == value;
+        }
+
+        // .RemoveChild drop matcher: the sole arg is a typed façade selector (`t => t.A.B`) or a
+        // string path. Reuses SelectorKeyMatches (SourcePatchApplier.ScopedOn.cs) — the same
+        // sanitized-typed / verbatim-string comparison `.On` uses — so a typed-authored RemoveChild
+        // reverts correctly (specs/27). Null == match any, mirroring GenericTypeArgMatches.
+        private static bool RemoveChildArgMatches(InvocationExpressionSyntax invocation, string? value)
+        {
+            if (value == null)
+            {
+                return true;
+            }
+
+            return invocation.ArgumentList.Arguments.Count >= 1
+                && SelectorKeyMatches(invocation.ArgumentList.Arguments[0].Expression, value);
         }
 
         private static bool OverrideCallMatches(InvocationExpressionSyntax invocation, string? propertyPath)

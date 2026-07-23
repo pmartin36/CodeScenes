@@ -51,10 +51,12 @@ namespace SceneBuilder.Core.Facades
                 }
             }
 
-            // Pass 2: typed `.On(t => t.A.B, ...)` selector segments, keyed on child LocalId.
+            // Pass 2: typed selector segments (arg0 member-chain), keyed on child LocalId — covers
+            // `.On(t => t.A.B, ...)`, `.RemoveChild(t => t.A.B)`, and `.AddChild(t => t.Parent, "New")`
+            // (the new child NAME string in AddChild is never a segment, so it is left untouched).
             foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
-                if (!IsTypedOnInvocation(invocation, out var receiver, out var lambda))
+                if (!IsTypedSelectorInvocation(invocation, out var receiver, out var lambda))
                 {
                     continue;
                 }
@@ -99,12 +101,13 @@ namespace SceneBuilder.Core.Facades
             return newRoot.ToFullString();
         }
 
-        private static bool IsTypedOnInvocation(InvocationExpressionSyntax invocation, out ExpressionSyntax receiver, out SimpleLambdaExpressionSyntax lambda)
+        private static bool IsTypedSelectorInvocation(InvocationExpressionSyntax invocation, out ExpressionSyntax receiver, out SimpleLambdaExpressionSyntax lambda)
         {
             receiver = null!;
             lambda = null!;
 
-            if (invocation.Expression is not MemberAccessExpressionSyntax { Name.Identifier.Text: "On" } memberAccess)
+            if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                memberAccess.Name.Identifier.Text is not ("On" or "RemoveChild" or "AddChild"))
             {
                 return false;
             }
