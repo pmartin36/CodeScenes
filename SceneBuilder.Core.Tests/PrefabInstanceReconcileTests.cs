@@ -605,5 +605,164 @@ public class InstanceMoveScene : ISceneDefinition
             Assert.Empty(result.Patch.Edits.OfType<AppendInstanceOverride>());
             Assert.Empty(result.Patch.Edits.OfType<DropInstanceCall>());
         }
+
+        // ---- m-nested-props b4-t2: below-root membership diff (nested override rename stability,
+        // child-GameObject add/remove) -----------------------------------------------------------
+
+        private const string HandledInstanceFixture = @"
+public class HandledInstanceScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+    }
+}
+";
+
+        // Spec #2: a nested override's ChildPath is re-derived by the adapter on every sync (it is
+        // NOT part of OverrideTarget equality — Model/OverrideTarget.cs keys on (SubKey,
+        // ComponentType) only). A pure rename (same SubKey/ComponentType/PropertyPath, new
+        // ChildPath) must therefore compare EQUAL — no drop, no re-add — while a genuinely NEW
+        // nested override on that same (renamed) sub-object still must route through the nested
+        // `.On` emit (AppendScopedOn), never the flat root AppendInstanceOverride.
+        [Fact]
+        public void NestedOverride_Rename_ReDerivesPath_KeepsKey()
+        {
+            var subKey = new PrefabInstanceKey { TargetObjectId = 42 };
+            var healthTarget = new OverrideTarget { SubKey = subKey, ComponentType = "UnityEngine.BoxCollider", ChildPath = "Turret/Barrel" };
+            var modelHealthOverride = new PropertyOverride { Target = healthTarget, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+
+            // Renamed in Unity: same SubKey/ComponentType/PropertyPath, ChildPath now "Cannon/Barrel".
+            var renamedHealthTarget = healthTarget with { ChildPath = "Cannon/Barrel" };
+            var snapshotHealthOverride = new PropertyOverride { Target = renamedHealthTarget, PropertyPath = "m_Health", Value = ValueNode.Primitive.Int(50) };
+
+            // A genuinely new nested override authored on the SAME (renamed) sub-object.
+            var armorTarget = renamedHealthTarget with { };
+            var snapshotArmorOverride = new PropertyOverride { Target = armorTarget, PropertyPath = "m_Armor", Value = ValueNode.Primitive.Int(30) };
+
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(
+                modelOverrides: new[] { modelHealthOverride },
+                snapshotOverrides: new[] { snapshotHealthOverride, snapshotArmorOverride });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            // Identity stable across the rename: no drop of the carried-over override, and it is
+            // not re-appended either (root OR nested form).
+            Assert.DoesNotContain(result.Patch.Edits, e => e is DropInstanceCall d && d.PropertyPath == "m_Health");
+            Assert.DoesNotContain(result.Patch.Edits, e => e is AppendInstanceOverride a && a.Sets.Any(s => s.PropertyPath == "m_Health"));
+            Assert.DoesNotContain(result.Patch.Edits, e => e is AppendScopedOn s && s.Ops.OfType<ScopedOverrideOp>().Any(op => op.Sets.Any(set => set.PropertyPath == "m_Health")));
+
+            // The new nested override routes through the scoped `.On` emit, keyed on the CURRENT
+            // (renamed) child path — never a flat root AppendInstanceOverride.
+            Assert.Empty(result.Patch.Edits.OfType<AppendInstanceOverride>());
+            var scoped = Assert.Single(result.Patch.Edits.OfType<AppendScopedOn>());
+            Assert.Equal("Cannon/Barrel", scoped.SelectorMatchKey);
+            var op = Assert.Single(scoped.Ops.OfType<ScopedOverrideOp>());
+            var set = Assert.Single(op.Sets);
+            Assert.Equal("m_Armor", set.PropertyPath);
+        }
+
+        // Spec #6: a snapshot-only AddedGameObjects entry under a nested parent emits a top-level
+        // `.AddChild(parentPath, name)` — b4-t1 under-delivered this machinery (see research.md), so
+        // both the reconcile emit AND the apply/reparse round trip are new behavior.
+        [Fact]
+        public void AddedChildGameObject_RoundTrips()
+        {
+            var added = new AddedGameObject
+            {
+                Parent = new OverrideTarget { ChildPath = "Turret" },
+                Node = new GameObjectNode { Name = "MuzzleFlash" },
+            };
+
+            var instance = new PrefabInstanceNode
+            {
+                LogicalId = "enemy",
+                Name = "Enemy",
+                SourcePrefab = new AssetRef { Guid = PrefabGuid, DisplayPath = PrefabPath },
+            };
+            var snapshotInstance = new SnapshotNode
+            {
+                GlobalObjectId = "goid-enemy",
+                Name = "Enemy",
+                SourcePrefabGuid = PrefabGuid,
+                AddedGameObjects = new[] { added },
+            };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "enemy", GlobalObjectId = "goid-enemy", Kind = "PrefabInstance", SourcePrefabGuid = PrefabGuid },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddChild>());
+            Assert.Equal("enemy", append.Anchor);
+            Assert.Equal("Turret", append.ParentPath);
+            Assert.Equal("MuzzleFlash", append.Name);
+
+            var anchors = BuilderParser.Parse(HandledInstanceFixture).Anchors;
+            var rendered = SourcePatchApplier.Apply(HandledInstanceFixture, result.Patch, anchors);
+
+            Assert.Contains(".AddChild(\"Turret\", \"MuzzleFlash\")", rendered);
+
+            var reparsed = BuilderParser.Parse(rendered);
+            var reparsedInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
+            var reparsedAdded = Assert.Single(reparsedInstance.AddedGameObjects);
+            Assert.Equal("Turret", reparsedAdded.Parent.ChildPath);
+            Assert.Equal("MuzzleFlash", reparsedAdded.Node.Name);
+        }
+
+        // Spec #7: a snapshot-only RemovedGameObjects entry emits a top-level
+        // `.RemoveChild(childPath)`.
+        [Fact]
+        public void RemovedChildGameObject_RoundTrips()
+        {
+            var removedTarget = new OverrideTarget { ChildPath = "Turret/Antenna" };
+
+            var instance = new PrefabInstanceNode
+            {
+                LogicalId = "enemy",
+                Name = "Enemy",
+                SourcePrefab = new AssetRef { Guid = PrefabGuid, DisplayPath = PrefabPath },
+            };
+            var snapshotInstance = new SnapshotNode
+            {
+                GlobalObjectId = "goid-enemy",
+                Name = "Enemy",
+                SourcePrefabGuid = PrefabGuid,
+                RemovedGameObjects = new[] { removedTarget },
+            };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "enemy", GlobalObjectId = "goid-enemy", Kind = "PrefabInstance", SourcePrefabGuid = PrefabGuid },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceRemoveChild>());
+            Assert.Equal("enemy", append.Anchor);
+            Assert.Equal("Turret/Antenna", append.ChildPath);
+
+            var anchors = BuilderParser.Parse(HandledInstanceFixture).Anchors;
+            var rendered = SourcePatchApplier.Apply(HandledInstanceFixture, result.Patch, anchors);
+
+            Assert.Contains(".RemoveChild(\"Turret/Antenna\")", rendered);
+
+            var reparsed = BuilderParser.Parse(rendered);
+            var reparsedInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
+            var reparsedRemoved = Assert.Single(reparsedInstance.RemovedGameObjects);
+            Assert.Equal("Turret/Antenna", reparsedRemoved.ChildPath);
+        }
     }
 }

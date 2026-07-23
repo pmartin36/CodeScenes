@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Parsing;
 using SceneBuilder.Core.Reconcile;
 using Xunit;
 
@@ -459,6 +460,89 @@ namespace SceneBuilder.Core.Tests
             var result2 = Reconciler.Reconcile(modelAfter, snapshot, map2);
             Assert.DoesNotContain(result2.Patch.Edits, e => e is AppendStatement);
             Assert.DoesNotContain(result2.Patch.Edits, e => e is AppendComponentStatement);
+        }
+
+        // m-nested-props b4-t3, spec #14 / §13's below-root twin: a snapshot-only AddedGameObject
+        // whose Node carries a component must render the component payload as a 3rd `.AddChild(...)`
+        // closure argument in the SAME Reconcile pass, never silently dropped. Round-trips through
+        // real source text (BuilderParser/SourcePatchApplier) so the reparsed model actually carries
+        // the component, then a second Reconcile against the same snapshot converges to empty.
+        private const string InstanceFixture = @"
+public class NestedAddScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+    }
+}
+";
+
+        [Fact]
+        public void CreateWithPayload_AddedChildWithComponent_ConvergesInOnePass()
+        {
+            var added = new AddedGameObject
+            {
+                Parent = new OverrideTarget { ChildPath = "Turret" },
+                Node = new GameObjectNode
+                {
+                    Name = "MuzzleFlash",
+                    Components = new[]
+                    {
+                        new ComponentData
+                        {
+                            Type = new TypeRef("UnityEngine.Light"),
+                            Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>("m_Range", ValueNode.Primitive.Float(5f)) }),
+                        },
+                    },
+                },
+            };
+
+            var instance = new PrefabInstanceNode
+            {
+                LogicalId = "enemy",
+                Name = "Enemy",
+                SourcePrefab = new AssetRef { Guid = "prefab-guid-1", DisplayPath = "Assets/Prefabs/Enemy.prefab" },
+            };
+            var snapshotInstance = new SnapshotNode
+            {
+                GlobalObjectId = "goid-enemy",
+                Name = "Enemy",
+                SourcePrefabGuid = "prefab-guid-1",
+                AddedGameObjects = new[] { added },
+            };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "enemy", GlobalObjectId = "goid-enemy", Kind = "PrefabInstance", SourcePrefabGuid = "prefab-guid-1" },
+                },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddChild>());
+            var anchors = BuilderParser.Parse(InstanceFixture).Anchors;
+            var rendered = SourcePatchApplier.Apply(InstanceFixture, result.Patch, anchors);
+
+            // Component payload rendered in the SAME pass as the AddChild — never silently dropped.
+            Assert.Contains(
+                ".AddChild(\"Turret\", \"MuzzleFlash\", cfg => cfg.Component<UnityEngine.Light>(c => c.Set(\"m_Range\", 5f)))",
+                rendered);
+
+            var reparsed = BuilderParser.Parse(rendered);
+            var reparsedInstance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
+            var reparsedAdded = Assert.Single(reparsedInstance.AddedGameObjects);
+            var reparsedComponent = Assert.Single(reparsedAdded.Node.Components);
+            Assert.Equal("UnityEngine.Light", reparsedComponent.Type.FullName);
+
+            // A second Reconcile using the reparsed (now payload-carrying) model against the SAME
+            // snapshot converges: no re-append, no drop.
+            var modelAfter = model with { Roots = new GameObjectNode[] { reparsedInstance } };
+            var result2 = Reconciler.Reconcile(modelAfter, snapshot, map);
+            Assert.Empty(result2.Patch.Edits.OfType<AppendInstanceAddChild>());
+            Assert.Empty(result2.Patch.Edits.OfType<DropInstanceCall>());
         }
     }
 }

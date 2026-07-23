@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
@@ -67,8 +68,21 @@ namespace SceneBuilder.Core.Reconcile
                     case AppendInstanceRemoveComponent appendRemoveComponent:
                         Collect(appendRemoveComponent.Anchor, $"RemoveComponent<{appendRemoveComponent.TypeFullName}>()", appendRemoveComponent);
                         break;
+                    case AppendInstanceAddChild appendAddChild:
+                        Collect(appendAddChild.Anchor, RenderAddChildCall(appendAddChild), appendAddChild);
+                        break;
+                    case AppendInstanceRemoveChild appendRemoveChild:
+                        Collect(appendRemoveChild.Anchor, $"RemoveChild({SourceExpr.StringLiteral(appendRemoveChild.ChildPath)})", appendRemoveChild);
+                        break;
                 }
             }
+
+            // m-nested-props b4-t1: AppendScopedOn shares this SAME callTextsByAnchor map — a
+            // find-or-create MISS contributes its `On(...)` call-text here so it composes with root
+            // chain appends on the same anchor via ONE AppendChainedCalls/ReplaceNode below (a HIT
+            // is resolved entirely inside ResolveScopedOnAppends, targeting the existing `.On`'s
+            // closure body instead).
+            ResolveScopedOnAppends(root, anchors, patch, callTextsByAnchor, allTargets, appliers, consumed);
 
             foreach (var (anchor, callTexts) in callTextsByAnchor)
             {
@@ -108,6 +122,39 @@ namespace SceneBuilder.Core.Reconcile
                 var newExpr = SyntaxFactory.ParseExpression(newExprText).WithTrailingTrivia(current.GetTrailingTrivia());
                 return currentRoot.ReplaceNode(current, newExpr);
             });
+        }
+
+        // m-nested-props b4-t3 (spec #14): renders `.AddChild(parent, name)` or, when the added
+        // child's Node carries >=1 representable (non-Transform) component, the payload-carrying
+        // `.AddChild(parent, name, cfg => cfg.Component<T>(...))` form so the component converges
+        // in the SAME Reconcile pass instead of being silently dropped. Round-trips through
+        // BuilderParser.Instance.cs's ApplyAddChild -> ProcessClosure (3rd-arg NodeHandle grammar).
+        private static string RenderAddChildCall(AppendInstanceAddChild appendAddChild)
+        {
+            var call = $"AddChild({SourceExpr.StringLiteral(appendAddChild.ParentPath)}, {SourceExpr.StringLiteral(appendAddChild.Name)}";
+            var closure = RenderAddChildClosure(appendAddChild.Node);
+            return closure is null ? call + ")" : $"{call}, {closure})";
+        }
+
+        // Reuses ComponentPatchApplier's RenderComponentClosureArgs (same partial class) for each
+        // component's field-set — one renderer, no reinvented field-value formatting. Null when
+        // there are zero representable components, so the caller keeps the exact 2-arg AddChild
+        // form (PrefabInstanceReconcileTests.cs:712 regression guard).
+        private static string? RenderAddChildClosure(GameObjectNode node)
+        {
+            var components = ComponentReconciler.ExcludeTransform(node.Components);
+            if (components.Length == 0)
+            {
+                return null;
+            }
+
+            var calls = components
+                .Select(c => $"cfg.Component<{c.Type.FullName}>{RenderComponentClosureArgs(c.Fields, null)}")
+                .ToArray();
+
+            return calls.Length == 1
+                ? $"cfg => {calls[0]}"
+                : $"cfg => {{ {string.Join(" ", calls.Select(c => c + ";"))} }}";
         }
 
         // Inverse of BuilderParser.Instance.cs's ApplyOverride/ParseOverrideSet: multiple Sets fold
@@ -159,6 +206,8 @@ namespace SceneBuilder.Core.Reconcile
             InstanceCallKind.Override => "Override",
             InstanceCallKind.AddComponent => "AddComponent",
             InstanceCallKind.RemoveComponent => "RemoveComponent",
+            InstanceCallKind.AddChild => "AddChild",
+            InstanceCallKind.RemoveChild => "RemoveChild",
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown InstanceCallKind."),
         };
 
@@ -172,9 +221,15 @@ namespace SceneBuilder.Core.Reconcile
 
             foreach (var candidate in candidates)
             {
-                var matches = edit.Kind == InstanceCallKind.Override
-                    ? OverrideCallMatches(candidate, edit.PropertyPath)
-                    : GenericTypeArgMatches(candidate, edit.TypeFullName);
+                var matches = edit.Kind switch
+                {
+                    InstanceCallKind.Override => OverrideCallMatches(candidate, edit.PropertyPath),
+                    // .AddChild(parentPath, "<name>") — match on the 2nd (name) argument.
+                    InstanceCallKind.AddChild => StringLiteralArgMatches(candidate, 1, edit.PropertyPath),
+                    // .RemoveChild("<path>") — match on the sole (childPath) argument.
+                    InstanceCallKind.RemoveChild => StringLiteralArgMatches(candidate, 0, edit.PropertyPath),
+                    _ => GenericTypeArgMatches(candidate, edit.TypeFullName),
+                };
 
                 if (matches)
                 {
@@ -183,6 +238,26 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             throw Fail(statement, $"No matching .{methodName}(...) call found for anchor '{edit.Anchor}'.");
+        }
+
+        // AddChild/RemoveChild drop matcher: mirrors GenericTypeArgMatches's "null == match any"
+        // convention. edit.PropertyPath carries the identifying string arg (name for AddChild,
+        // childPath for RemoveChild) per DropInstanceCall's doc comment.
+        private static bool StringLiteralArgMatches(InvocationExpressionSyntax invocation, int argIndex, string? value)
+        {
+            if (value == null)
+            {
+                return true;
+            }
+
+            if (invocation.ArgumentList.Arguments.Count <= argIndex)
+            {
+                return false;
+            }
+
+            return invocation.ArgumentList.Arguments[argIndex].Expression is LiteralExpressionSyntax literal
+                && literal.IsKind(SyntaxKind.StringLiteralExpression)
+                && literal.Token.ValueText == value;
         }
 
         private static bool OverrideCallMatches(InvocationExpressionSyntax invocation, string? propertyPath)

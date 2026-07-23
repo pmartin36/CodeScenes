@@ -204,7 +204,7 @@ namespace SceneBuilder.Core.Reconcile
 
     // ---- m10-b4-t1: instance-root override authoring (append + revert) ------------------------
 
-    public enum InstanceCallKind { Override, AddComponent, RemoveComponent }
+    public enum InstanceCallKind { Override, AddComponent, RemoveComponent, AddChild, RemoveChild }
 
     // Append `.Override(e => e.Set(a).Set(b))` onto the anchor's `scene.Instance(...)` chain.
     public sealed record AppendInstanceOverride : SourceEdit
@@ -249,5 +249,72 @@ namespace SceneBuilder.Core.Reconcile
         public InstanceCallKind Kind { get; init; }
         public string? TypeFullName { get; init; } // AddComponent/RemoveComponent: match the <T>.
         public string? PropertyPath { get; init; } // Override: match the closure whose .Set targets this path; null => the sole Override.
+    }
+
+    // ---- m-nested-props b4-t1: scoped `.On(...)` closure authoring (append + revert) -----------
+
+    // One op to place inside a `.On(...)` closure. Reuses the M10 root op payload shapes verbatim.
+    public abstract record ScopedOp;
+
+    public sealed record ScopedOverrideOp : ScopedOp
+    {
+        public IReadOnlyList<OverrideSetSpec> Sets { get; init; } = Array.Empty<OverrideSetSpec>();
+    }
+
+    public sealed record ScopedAddComponentOp : ScopedOp
+    {
+        public string TypeFullName { get; init; } = "";
+        public FieldMap Fields { get; init; } = FieldMap.Empty;
+        public IReadOnlyDictionary<string, string>? FieldExpressions { get; init; }
+    }
+
+    public sealed record ScopedRemoveComponentOp : ScopedOp
+    {
+        public string TypeFullName { get; init; } = "";
+    }
+
+    // Append ops under a sub-object's `.On`, find-or-creating the closure. Inherited Anchor =
+    // instance LogicalId.
+    public sealed record AppendScopedOn : SourceEdit
+    {
+        // Resolved-child identity (b4-t2 sets = ScopedOverride.ChildPath, e.g. "Turret/Barrel"); the
+        // applier matches an existing `.On` whose selector normalises to this. NOT literal text/span
+        // order.
+        public string SelectorMatchKey { get; init; } = "";
+
+        // Pre-rendered typed selector lambda for a NEW `.On` (b4-t2 renders via FacadeCatalog reverse
+        // lookup, e.g. "sel => sel.Turret.Barrel"). Only consumed on CREATE.
+        public string SelectorExpr { get; init; } = "";
+
+        public IReadOnlyList<ScopedOp> Ops { get; init; } = Array.Empty<ScopedOp>();
+    }
+
+    // Drop one op from inside a sub-object's `.On`; drop the whole `.On` when it was the last op.
+    public sealed record DropScopedOnCall : SourceEdit
+    {
+        public string SelectorMatchKey { get; init; } = "";
+        public InstanceCallKind Kind { get; init; } // REUSE M10 enum (Override|AddComponent|RemoveComponent)
+        public string? TypeFullName { get; init; } // Add/RemoveComponent: match the <T>.
+        public string? PropertyPath { get; init; } // Override: match the closure whose .Set targets this path; null => sole Override.
+    }
+
+    // ---- m-nested-props b4-t2: child GameObject add/remove authoring -------------------------
+    // Emitted by ReconcilerInstances.Nested.cs from an AddedGameObjects/RemovedGameObjects diff;
+    // rendered/reverted by SourcePatchApplier.Instances.cs.
+
+    // Top-level `.AddChild("<parentPath>", "<name>")` on the instance chain (NOT inside .On).
+    public sealed record AppendInstanceAddChild : SourceEdit
+    {
+        // Inherited Anchor = the instance's LogicalId.
+        public string ParentPath { get; init; } = ""; // AddedGameObject.Parent.ChildPath ("" == instance root).
+        public string Name { get; init; } = ""; // AddedGameObject.Node.Name.
+        public GameObjectNode Node { get; init; } = new(); // Payload; components rendered into cfg closure (b4-t3).
+    }
+
+    // Top-level `.RemoveChild("<childPath>")`.
+    public sealed record AppendInstanceRemoveChild : SourceEdit
+    {
+        // Inherited Anchor = the instance's LogicalId.
+        public string ChildPath { get; init; } = ""; // RemovedGameObjects target.ChildPath.
     }
 }

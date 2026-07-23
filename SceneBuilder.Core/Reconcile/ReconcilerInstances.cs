@@ -146,6 +146,11 @@ namespace SceneBuilder.Core.Reconcile
             SnapshotNode snapshot,
             string instanceLogicalId,
             IReadOnlyDictionary<string, SourceSpan>? anchors,
+            // m-nested-props b4-t2: Guid->FacadeEntry reverse lookup for a below-root override's
+            // typed `.On(sel => sel.A.B, ...)` selector. Threaded here from Reconciler.cs (already
+            // in scope at the call) so nested emit prefers the typed form, falling back to the
+            // string selector on a miss/absent catalog.
+            FacadeCatalog? facadeCatalog,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<Conflict> conflicts,
@@ -160,16 +165,28 @@ namespace SceneBuilder.Core.Reconcile
             var staleKeys = new HashSet<(OverrideTarget Target, string PropertyPath)>();
             InstanceOverrideDiff.DetectStaleOverrides(model, snapshot, conflicts, staleKeys);
 
-            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, resolveOwnerHandle, edits, conflicts, addedAssets);
-            ReconcileAddedComponents(model, snapshot, instanceLogicalId, resolveOwnerHandle, edits, addedAssets);
-            ReconcileRemovedComponents(model, snapshot, instanceLogicalId, edits);
+            var prefabGuid = snapshot.SourcePrefabGuid;
+
+            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets);
+            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets);
+            ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
+            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, edits);
+            ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, edits);
         }
 
+        // m-nested-props b4-t2: split each membership diff by Target.ChildPath. Root
+        // (ChildPath=="") keeps the unchanged M10 flat chained-call emit; nested (ChildPath!="")
+        // routes through the b4-t1 scoped `.On` machinery (ReconcilerInstances.Nested.cs). The diff
+        // KEY stays (SubKey, ComponentType[, PropertyPath]) either way — never re-keyed by
+        // ChildPath — so a sub-object rename (same key, new ChildPath) compares EQUAL and emits
+        // neither a drop nor a re-add (spec #2).
         private static void ReconcileOverrides(
             PrefabInstanceNode model,
             SnapshotNode snapshot,
             string instanceLogicalId,
             HashSet<(OverrideTarget Target, string PropertyPath)> staleKeys,
+            FacadeCatalog? facadeCatalog,
+            string? prefabGuid,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<Conflict> conflicts,
@@ -182,7 +199,8 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             var snapshotKeys = new HashSet<(OverrideTarget Target, string PropertyPath)>();
-            var sets = new List<OverrideSetSpec>();
+            var rootSets = new List<OverrideSetSpec>();
+            var nestedSetsByChildPath = new Dictionary<string, List<OverrideSetSpec>>();
 
             foreach (var snapshotOverride in snapshot.Overrides)
             {
@@ -194,12 +212,32 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                sets.Add(BuildOverrideSetSpec(snapshotOverride, resolveOwnerHandle, edits, addedAssets));
+                var setSpec = BuildOverrideSetSpec(snapshotOverride, resolveOwnerHandle, edits, addedAssets);
+                var childPath = snapshotOverride.Target.ChildPath;
+
+                if (string.IsNullOrEmpty(childPath))
+                {
+                    rootSets.Add(setSpec);
+                    continue;
+                }
+
+                if (!nestedSetsByChildPath.TryGetValue(childPath, out var nestedSets))
+                {
+                    nestedSets = new List<OverrideSetSpec>();
+                    nestedSetsByChildPath[childPath] = nestedSets;
+                }
+
+                nestedSets.Add(setSpec);
             }
 
-            if (sets.Count > 0)
+            if (rootSets.Count > 0)
             {
-                edits.Add(new AppendInstanceOverride { Anchor = instanceLogicalId, Sets = sets });
+                edits.Add(new AppendInstanceOverride { Anchor = instanceLogicalId, Sets = rootSets });
+            }
+
+            foreach (var (childPath, nestedSets) in nestedSetsByChildPath)
+            {
+                edits.Add(BuildAppendScopedOn(instanceLogicalId, childPath, facadeCatalog, prefabGuid, new ScopedOverrideOp { Sets = nestedSets }));
             }
 
             foreach (var modelOverride in model.Overrides)
@@ -210,12 +248,22 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                edits.Add(new DropInstanceCall
-                {
-                    Anchor = instanceLogicalId,
-                    Kind = InstanceCallKind.Override,
-                    PropertyPath = modelOverride.PropertyPath,
-                });
+                var childPath = modelOverride.Target.ChildPath;
+
+                edits.Add(string.IsNullOrEmpty(childPath)
+                    ? new DropInstanceCall
+                    {
+                        Anchor = instanceLogicalId,
+                        Kind = InstanceCallKind.Override,
+                        PropertyPath = modelOverride.PropertyPath,
+                    }
+                    : new DropScopedOnCall
+                    {
+                        Anchor = instanceLogicalId,
+                        SelectorMatchKey = childPath,
+                        Kind = InstanceCallKind.Override,
+                        PropertyPath = modelOverride.PropertyPath,
+                    });
             }
         }
 
@@ -223,6 +271,8 @@ namespace SceneBuilder.Core.Reconcile
             PrefabInstanceNode model,
             SnapshotNode snapshot,
             string instanceLogicalId,
+            FacadeCatalog? facadeCatalog,
+            string? prefabGuid,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets)
@@ -245,7 +295,21 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                edits.Add(BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets));
+                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets);
+                var childPath = snapshotComponent.Target.ChildPath;
+
+                if (string.IsNullOrEmpty(childPath))
+                {
+                    edits.Add(appendAddComponent);
+                    continue;
+                }
+
+                edits.Add(BuildAppendScopedOn(instanceLogicalId, childPath, facadeCatalog, prefabGuid, new ScopedAddComponentOp
+                {
+                    TypeFullName = appendAddComponent.TypeFullName,
+                    Fields = appendAddComponent.Fields,
+                    FieldExpressions = appendAddComponent.FieldExpressions,
+                }));
             }
 
             foreach (var modelComponent in model.AddedComponents)
@@ -257,12 +321,22 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                edits.Add(new DropInstanceCall
-                {
-                    Anchor = instanceLogicalId,
-                    Kind = InstanceCallKind.AddComponent,
-                    TypeFullName = typeFullName,
-                });
+                var childPath = modelComponent.Target.ChildPath;
+
+                edits.Add(string.IsNullOrEmpty(childPath)
+                    ? new DropInstanceCall
+                    {
+                        Anchor = instanceLogicalId,
+                        Kind = InstanceCallKind.AddComponent,
+                        TypeFullName = typeFullName,
+                    }
+                    : new DropScopedOnCall
+                    {
+                        Anchor = instanceLogicalId,
+                        SelectorMatchKey = childPath,
+                        Kind = InstanceCallKind.AddComponent,
+                        TypeFullName = typeFullName,
+                    });
             }
         }
 
@@ -270,6 +344,8 @@ namespace SceneBuilder.Core.Reconcile
             PrefabInstanceNode model,
             SnapshotNode snapshot,
             string instanceLogicalId,
+            FacadeCatalog? facadeCatalog,
+            string? prefabGuid,
             List<SourceEdit> edits)
         {
             var modelTargets = new HashSet<OverrideTarget>(model.RemovedComponents);
@@ -282,11 +358,20 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                edits.Add(new AppendInstanceRemoveComponent
+                if (string.IsNullOrEmpty(target.ChildPath))
                 {
-                    Anchor = instanceLogicalId,
+                    edits.Add(new AppendInstanceRemoveComponent
+                    {
+                        Anchor = instanceLogicalId,
+                        TypeFullName = target.ComponentType,
+                    });
+                    continue;
+                }
+
+                edits.Add(BuildAppendScopedOn(instanceLogicalId, target.ChildPath, facadeCatalog, prefabGuid, new ScopedRemoveComponentOp
+                {
                     TypeFullName = target.ComponentType,
-                });
+                }));
             }
 
             foreach (var target in model.RemovedComponents)
@@ -296,12 +381,20 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                edits.Add(new DropInstanceCall
-                {
-                    Anchor = instanceLogicalId,
-                    Kind = InstanceCallKind.RemoveComponent,
-                    TypeFullName = target.ComponentType,
-                });
+                edits.Add(string.IsNullOrEmpty(target.ChildPath)
+                    ? new DropInstanceCall
+                    {
+                        Anchor = instanceLogicalId,
+                        Kind = InstanceCallKind.RemoveComponent,
+                        TypeFullName = target.ComponentType,
+                    }
+                    : new DropScopedOnCall
+                    {
+                        Anchor = instanceLogicalId,
+                        SelectorMatchKey = target.ChildPath,
+                        Kind = InstanceCallKind.RemoveComponent,
+                        TypeFullName = target.ComponentType,
+                    });
             }
         }
 

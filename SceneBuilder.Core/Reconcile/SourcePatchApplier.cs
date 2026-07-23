@@ -107,8 +107,10 @@ namespace SceneBuilder.Core.Reconcile
                     case IntroduceComponentField introduceComponentField:
                         ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers);
                         break;
-                    case AppendInstanceOverride or AppendInstanceAddComponent or AppendInstanceRemoveComponent:
-                        // Already folded into a combined chained-call append above.
+                    case AppendInstanceOverride or AppendInstanceAddComponent or AppendInstanceRemoveComponent
+                        or AppendInstanceAddChild or AppendInstanceRemoveChild or AppendScopedOn:
+                        // Already folded into a combined chained-call append (or a scoped-On
+                        // append-into-existing-closure applier) above.
                         if (!consumedChainedCallEdits.Contains(edit))
                         {
                             throw Fail(root, $"Unresolved instance chained-call edit '{edit.GetType().Name}'.");
@@ -117,6 +119,9 @@ namespace SceneBuilder.Core.Reconcile
                         break;
                     case DropInstanceCall dropInstanceCall:
                         ResolveDropInstanceCall(root, anchors, dropInstanceCall, allTargets, appliers);
+                        break;
+                    case DropScopedOnCall dropScopedOnCall:
+                        ResolveDropScopedOnCall(root, anchors, dropScopedOnCall, allTargets, appliers);
                         break;
                     default:
                         throw Fail(root, $"Unsupported SourceEdit kind '{edit.GetType().Name}'.");

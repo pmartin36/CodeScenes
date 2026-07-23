@@ -94,5 +94,141 @@ public class FacadeEmitScene : ISceneDefinition
 
             Assert.Contains("scene.Instance(\"" + PrefabPath + "\");", rendered);
         }
+
+        // ---- m-nested-props b4-t2: below-root membership diff, typed nested `.On` emit ----------
+
+        private const string HandledTankFixture = @"
+public class HandledTankScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var tank = scene.Instance(""Assets/Prefabs/Tank.prefab"");
+    }
+}
+";
+
+        private static FacadeCatalog TankWithTurretBarrelCatalog() => new FacadeCatalog
+        {
+            Entries = new[]
+            {
+                new FacadeEntry
+                {
+                    PropertyName = "Tank",
+                    Guid = PrefabGuid,
+                    Root = new FacadeNode
+                    {
+                        Children = new[]
+                        {
+                            new FacadeChild
+                            {
+                                PropertyName = "Turret",
+                                RealName = "Turret",
+                                LocalId = 7,
+                                Node = new FacadeNode
+                                {
+                                    Children = new[]
+                                    {
+                                        new FacadeChild { PropertyName = "Barrel", RealName = "Barrel", LocalId = 42 },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+
+        private static (SceneModel Model, SceneSnapshot Snapshot, IdentityMap Map) MatchedTankInstance(
+            AddedComponent[]? snapshotAddedComponents = null,
+            OverrideTarget[]? snapshotRemovedComponents = null)
+        {
+            var instance = new PrefabInstanceNode
+            {
+                LogicalId = "tank",
+                Name = "Tank",
+                SourcePrefab = new AssetRef { Guid = PrefabGuid, DisplayPath = PrefabPath },
+            };
+            var snapshotInstance = new SnapshotNode
+            {
+                GlobalObjectId = "goid-tank-1",
+                Name = "Tank",
+                SourcePrefabGuid = PrefabGuid,
+                AddedComponents = snapshotAddedComponents ?? System.Array.Empty<AddedComponent>(),
+                RemovedComponents = snapshotRemovedComponents ?? System.Array.Empty<OverrideTarget>(),
+            };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "tank", GlobalObjectId = "goid-tank-1", Kind = "PrefabInstance", SourcePrefabGuid = PrefabGuid },
+                },
+                Assets = new[] { new AssetEntry { Guid = PrefabGuid, LastKnownPath = PrefabPath, TypeHint = "GameObject" } },
+            };
+            return (model, snapshot, map);
+        }
+
+        // Spec #4: a snapshot-only nested AddedComponent (Target.ChildPath != "") emits an
+        // `AppendScopedOn`/`ScopedAddComponentOp` (typed selector via the FacadeCatalog) — never the
+        // flat root `AppendInstanceAddComponent`.
+        [Fact]
+        public void NestedAddedComponent_RoundTrips()
+        {
+            var target = new OverrideTarget
+            {
+                SubKey = new PrefabInstanceKey { TargetObjectId = 42 },
+                ComponentType = "UnityEngine.AudioSource",
+                ChildPath = "Turret/Barrel",
+            };
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "audio-1", Type = new TypeRef("UnityEngine.AudioSource") },
+            };
+            var (model, snapshot, map) = MatchedTankInstance(snapshotAddedComponents: new[] { added });
+
+            var result = Reconciler.Reconcile(model, snapshot, map, facadeCatalog: TankWithTurretBarrelCatalog());
+
+            Assert.Empty(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            var scoped = Assert.Single(result.Patch.Edits.OfType<AppendScopedOn>());
+            Assert.Equal("Turret/Barrel", scoped.SelectorMatchKey);
+            Assert.Equal("sel => sel.Turret.Barrel", scoped.SelectorExpr);
+            var op = Assert.Single(scoped.Ops.OfType<ScopedAddComponentOp>());
+            Assert.Equal("UnityEngine.AudioSource", op.TypeFullName);
+
+            var anchors = BuilderParser.Parse(HandledTankFixture).Anchors;
+            var rendered = SourcePatchApplier.Apply(HandledTankFixture, result.Patch, anchors);
+
+            Assert.Contains(".On(sel => sel.Turret.Barrel, x => x.AddComponent<UnityEngine.AudioSource>())", rendered);
+        }
+
+        // Spec #5: a snapshot-only nested RemovedComponents entry emits `AppendScopedOn` /
+        // `ScopedRemoveComponentOp`.
+        [Fact]
+        public void NestedRemovedComponent_RoundTrips()
+        {
+            var target = new OverrideTarget
+            {
+                SubKey = new PrefabInstanceKey { TargetObjectId = 7 },
+                ComponentType = "UnityEngine.Light",
+                ChildPath = "Turret",
+            };
+            var (model, snapshot, map) = MatchedTankInstance(snapshotRemovedComponents: new[] { target });
+
+            var result = Reconciler.Reconcile(model, snapshot, map, facadeCatalog: TankWithTurretBarrelCatalog());
+
+            Assert.Empty(result.Patch.Edits.OfType<AppendInstanceRemoveComponent>());
+            var scoped = Assert.Single(result.Patch.Edits.OfType<AppendScopedOn>());
+            Assert.Equal("Turret", scoped.SelectorMatchKey);
+            Assert.Equal("sel => sel.Turret", scoped.SelectorExpr);
+            var op = Assert.Single(scoped.Ops.OfType<ScopedRemoveComponentOp>());
+            Assert.Equal("UnityEngine.Light", op.TypeFullName);
+
+            var anchors = BuilderParser.Parse(HandledTankFixture).Anchors;
+            var rendered = SourcePatchApplier.Apply(HandledTankFixture, result.Patch, anchors);
+
+            Assert.Contains(".On(sel => sel.Turret, x => x.RemoveComponent<UnityEngine.Light>())", rendered);
+        }
     }
 }

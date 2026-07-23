@@ -450,5 +450,238 @@ public class DropSoleCallScene : ISceneDefinition
             var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
             Assert.Empty(instance.Overrides);
         }
+
+        // ---- m-nested-props b4-t1: scoped `.On(...)` closure authoring (append + revert) --------
+
+        [Fact]
+        public void Apply_AppendScopedOn_CreatesTypedOnBlock()
+        {
+            var source = PlainInstanceFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendScopedOn
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Turret/Barrel",
+                        SelectorExpr = "sel => sel.Turret.Barrel",
+                        Ops = new ScopedOp[]
+                        {
+                            new ScopedOverrideOp
+                            {
+                                Sets = new[]
+                                {
+                                    new OverrideSetSpec { TypeFullName = "AudioSource", PropertyPath = "m_Volume", Value = ValueNode.Primitive.Float(0.5f) },
+                                },
+                            },
+                        },
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.Contains(
+                "var enemy = scene.Instance(\"Assets/Prefabs/Enemy.prefab\").On(sel => sel.Turret.Barrel, x => x.Override(e => e.Set<AudioSource>(\"m_Volume\", 0.5f)));\n",
+                result);
+        }
+
+        [Fact]
+        public void Reconcile_TwoEditsSameSubObject_GroupUnderOneOn()
+        {
+            var source = PlainInstanceFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendScopedOn
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Turret/Barrel",
+                        SelectorExpr = "sel => sel.Turret.Barrel",
+                        Ops = new ScopedOp[]
+                        {
+                            new ScopedOverrideOp
+                            {
+                                Sets = new[]
+                                {
+                                    new OverrideSetSpec { TypeFullName = "AudioSource", PropertyPath = "m_Volume", Value = ValueNode.Primitive.Float(0.5f) },
+                                },
+                            },
+                        },
+                    },
+                    new AppendScopedOn
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Turret/Barrel",
+                        SelectorExpr = "sel => sel.Turret.Barrel",
+                        Ops = new ScopedOp[] { new ScopedAddComponentOp { TypeFullName = "AudioSource" } },
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.Contains(
+                ".On(sel => sel.Turret.Barrel, x => x.Override(e => e.Set<AudioSource>(\"m_Volume\", 0.5f)).AddComponent<AudioSource>());\n",
+                result);
+            Assert.Equal(1, CountOccurrences(result, ".On("));
+        }
+
+        [Fact]
+        public void Reconcile_TwoEditsSameSubObject_ExistingOn_AppendsInsideClosure()
+        {
+            const string source = @"
+public class ExistingOnScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"").On(sel => sel.Turret.Barrel, x => x.Override(e => e.Set<AudioSource>(""m_Volume"", 0.5f)));
+    }
+}
+";
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendScopedOn
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Turret/Barrel",
+                        Ops = new ScopedOp[] { new ScopedAddComponentOp { TypeFullName = "AudioSource" } },
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.Contains(
+                ".On(sel => sel.Turret.Barrel, x => x.Override(e => e.Set<AudioSource>(\"m_Volume\", 0.5f)).AddComponent<AudioSource>());\n",
+                result);
+            Assert.Equal(1, CountOccurrences(result, ".On("));
+        }
+
+        [Fact]
+        public void Reconcile_TwoEditsSameSubObject_ExistingStringFormOn_MatchesSameKey_AppendsInsideClosure()
+        {
+            const string source = @"
+public class ExistingStringOnScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"").On(""Turret/Barrel"", x => x.Override(e => e.Set<AudioSource>(""m_Volume"", 0.5f)));
+    }
+}
+";
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendScopedOn
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Turret/Barrel",
+                        Ops = new ScopedOp[] { new ScopedAddComponentOp { TypeFullName = "AudioSource" } },
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.Contains(
+                ".On(\"Turret/Barrel\", x => x.Override(e => e.Set<AudioSource>(\"m_Volume\", 0.5f)).AddComponent<AudioSource>());\n",
+                result);
+            Assert.Equal(1, CountOccurrences(result, ".On("));
+        }
+
+        [Fact]
+        public void Reconcile_RevertNestedOp_DropsFromOn_DropsEmptyOn()
+        {
+            var anchors = BuilderParser.Parse(TwoOpOnFixture).Anchors;
+
+            var dropOneOfTwo = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new DropScopedOnCall
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Turret/Barrel",
+                        Kind = InstanceCallKind.AddComponent,
+                        TypeFullName = "AudioSource",
+                    },
+                },
+            };
+
+            var afterDropOne = SourcePatchApplier.Apply(TwoOpOnFixture, dropOneOfTwo, anchors);
+
+            Assert.Contains(
+                ".On(sel => sel.Turret.Barrel, x => x.Override(e => e.Set<AudioSource>(\"m_Volume\", 0.5f)));\n",
+                afterDropOne);
+            Assert.DoesNotContain("AddComponent<AudioSource>", afterDropOne);
+
+            var singleOpAnchors = BuilderParser.Parse(SingleOpOnFixture).Anchors;
+
+            var dropLastOp = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new DropScopedOnCall
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Turret/Barrel",
+                        Kind = InstanceCallKind.Override,
+                        PropertyPath = "m_Volume",
+                    },
+                },
+            };
+
+            var afterDropLast = SourcePatchApplier.Apply(SingleOpOnFixture, dropLastOp, singleOpAnchors);
+
+            Assert.DoesNotContain(".On(", afterDropLast);
+            Assert.Contains("var enemy = scene.Instance(\"Assets/Prefabs/Enemy.prefab\");", afterDropLast);
+        }
+
+        private const string TwoOpOnFixture = @"
+public class TwoOpOnScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"").On(sel => sel.Turret.Barrel, x => x.Override(e => e.Set<AudioSource>(""m_Volume"", 0.5f)).AddComponent<AudioSource>());
+    }
+}
+";
+
+        private const string SingleOpOnFixture = @"
+public class SingleOpOnScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"").On(sel => sel.Turret.Barrel, x => x.Override(e => e.Set<AudioSource>(""m_Volume"", 0.5f)));
+    }
+}
+";
+
+        private static int CountOccurrences(string haystack, string needle)
+        {
+            var count = 0;
+            var index = 0;
+            while ((index = haystack.IndexOf(needle, index, System.StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += needle.Length;
+            }
+
+            return count;
+        }
     }
 }

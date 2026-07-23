@@ -457,6 +457,7 @@ namespace SceneBuilder.Core.Reconcile
                         snapshotEntry.Node,
                         ownerLogicalId,
                         anchors,
+                        facadeCatalog,
                         ResolveOwnerHandle,
                         edits,
                         conflicts,
