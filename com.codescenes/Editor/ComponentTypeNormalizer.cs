@@ -29,9 +29,9 @@ namespace SceneBuilder.Editor
         /// the persisted identity out of sync with the type <c>IdentityRemapper</c>/<c>ComponentReconciler</c>
         /// key matching on. The join is exact: component <c>LogicalId</c> is UNCHANGED by <see cref="Normalize"/>.
         /// </summary>
-        public static ParseResult ParseAndNormalize(string source, IdentityMap? existingMap)
+        public static ParseResult ParseAndNormalize(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog = null)
         {
-            var parse = BuilderParser.Parse(source, existingMap);
+            var parse = BuilderParser.Parse(source, existingMap, facadeCatalog);
             var model = Normalize(parse.Model, parse.Usings, parse.ComponentAnchors);
 
             var qualifiedByLogicalId = new Dictionary<string, string>();

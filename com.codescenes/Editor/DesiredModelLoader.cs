@@ -81,11 +81,13 @@ namespace SceneBuilder.Editor
         /// Parses <paramref name="source"/> and returns a fully-prepared desired model. Every stage runs,
         /// always. <paramref name="existingMap"/> supplies both the prior identity entries (carried into
         /// the parse) and the <c>Assets[]</c> cache that lets a path stale from a move/rename recover its
-        /// GUID.
+        /// GUID. <paramref name="facadeCatalog"/> (b5-t5) resolves typed prefab façade forms
+        /// (<c>Instance(Prefabs.X)</c>/<c>.On(sel =&gt; ...)</c>) during the parse; null (the default)
+        /// keeps every existing 2-arg caller compiling unchanged and falls back to plain string forms.
         /// </summary>
-        public static Loaded Load(string source, IdentityMap? existingMap)
+        public static Loaded Load(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog = null)
         {
-            var parse = ComponentTypeNormalizer.ParseAndNormalize(source, existingMap);
+            var parse = ComponentTypeNormalizer.ParseAndNormalize(source, existingMap, facadeCatalog);
 
             // §M3: resolve transient member:<name> field keys to serialized paths BEFORE any diff,
             // remapping the field-argument spans in lockstep so span-local field patches still match.

@@ -49,6 +49,11 @@ namespace SceneBuilder.Editor
         /// <summary>Absolute path of the generated project catalog manifest.</summary>
         public static string ProjectCatalogManifestPath => Path.Combine(GeneratedDirectory, ProjectCatalogFileName);
 
+        /// <summary>Absolute path of the generated prefab-façade manifest. File name is the Core-owned
+        /// single source of truth (<see cref="SceneBuilder.Core.Model.FacadeManifest.FileName"/>).</summary>
+        public static string FacadeManifestPath =>
+            Path.Combine(GeneratedDirectory, SceneBuilder.Core.Model.FacadeManifest.FileName);
+
         /// <summary>Folder, inside the package, holding the shipped analyzer toolkit dlls.</summary>
         public const string AnalyzersFolderName = "Analyzers~";
 

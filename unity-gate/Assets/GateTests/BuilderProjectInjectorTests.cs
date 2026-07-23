@@ -57,6 +57,16 @@ public class BuilderProjectInjectorTests
             .ToArray();
     }
 
+    private static string[] AdditionalFilesIncludes(string csproj)
+    {
+        XNamespace ns = "http://schemas.microsoft.com/developer/msbuild/2003";
+        return XDocument.Parse(csproj)
+            .Descendants(ns + "AdditionalFiles")
+            .Select(e => e.Attribute("Include")?.Value)
+            .Where(v => v != null)
+            .ToArray();
+    }
+
     [Test]
     public void Inject_AddsACompileItemForTheBuilder_ToTheDonorProject()
     {
@@ -211,6 +221,44 @@ public class BuilderProjectInjectorTests
             "Precondition: this builder is outside the project dir.");
         Assert.AreEqual(ExpectedInclude("DemoScene.cs"), compile.Attribute("Link")?.Value,
             "Link must make it display under SceneBuilders/ instead of as a '..' path.");
+    }
+
+    [Test]
+    public void Inject_AddsAdditionalFilesItems_ForBothTheProjectCatalogAndTheFacadeManifest_WhenAnalyzersDirectoryProvided()
+    {
+        var result = BuilderProjectInjector.Inject(
+            DonorCsproj,
+            "Assembly-CSharp",
+            ProjectDir,
+            new[] { BuilderAt("DemoScene.cs") },
+            "/pkg/Analyzers~");
+
+        var includes = AdditionalFilesIncludes(result);
+
+        Assert.IsTrue(
+            includes.Any(i => i.EndsWith(SceneBuilderPaths.ProjectCatalogFileName, StringComparison.Ordinal)),
+            "The existing project catalog manifest item must survive alongside the new facade item.");
+        Assert.IsTrue(
+            includes.Any(i => i.EndsWith(SceneBuilder.Core.Model.FacadeManifest.FileName, StringComparison.Ordinal)),
+            "A second <AdditionalFiles> item for the prefab facade manifest must be injected.");
+        Assert.AreEqual(2, includes.Length,
+            "Exactly two AdditionalFiles items are expected: the project catalog and the facade manifest.");
+    }
+
+    [Test]
+    public void Inject_IsIdempotent_ForTheFacadeManifestAdditionalFilesItem()
+    {
+        var once = BuilderProjectInjector.Inject(
+            DonorCsproj, "Assembly-CSharp", ProjectDir, new[] { BuilderAt("DemoScene.cs") }, "/pkg/Analyzers~");
+        var twice = BuilderProjectInjector.Inject(
+            once, "Assembly-CSharp", ProjectDir, new[] { BuilderAt("DemoScene.cs") }, "/pkg/Analyzers~");
+
+        Assert.AreEqual(once, twice, "Re-injecting must not double the facade manifest item.");
+        Assert.AreEqual(
+            1,
+            AdditionalFilesIncludes(twice)
+                .Count(i => i.EndsWith(SceneBuilder.Core.Model.FacadeManifest.FileName, StringComparison.Ordinal)),
+            "The facade manifest item must never be duplicated.");
     }
 
     // ---- The Unity boundary: real assembly graph, real hook discovery ----

@@ -127,12 +127,17 @@ namespace SceneBuilder.Editor
             var source = File.ReadAllText(builderPath);
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
 
+            // b5-t5: load the façade manifest ONCE per Sync and thread it through every parse/reconcile
+            // seam below, so a typed `Instance(Prefabs.X)`/`.On(sel => ...)` resolves instead of refusing,
+            // and a scene edit of a façade-registered prefab instance can EMIT the typed form (b4-t4).
+            var facadeCatalog = FacadeCatalogLoader.Load();
+
             // THE shared source->desired seam (parse -> resolve authored paths -> lower asset refs).
             // Build goes through the exact same call. Sync used to open-code the first two stages and
             // silently omit the third, which is precisely why it never converged: an unlowered source
             // ref carries Guid="", AssetRef.Equals keys on (Guid, FileId) ONLY, so it could never equal
             // the snapshot's populated ref and every sync re-patched every asset ref forever.
-            var loaded = DesiredModelLoader.Load(source, map);
+            var loaded = DesiredModelLoader.Load(source, map, facadeCatalog);
 
             // A colliding LogicalId is a property of the SOURCE alone; FlattenModel drops one node
             // (last-write-wins), so heal BEFORE reconcile. Gate on DuplicateLogicalId only — an
@@ -143,7 +148,7 @@ namespace SceneBuilder.Editor
                 if (SceneBuilderPaths.WriteIfChanged(builderPath, healed))
                 {
                     source = healed;
-                    loaded = DesiredModelLoader.Load(healed, map);
+                    loaded = DesiredModelLoader.Load(healed, map, facadeCatalog);
                 }
             }
 
@@ -167,7 +172,8 @@ namespace SceneBuilder.Editor
                 flagPresence: parse.FlagPresence,
                 componentAnchors: parse.ComponentAnchors,
                 fieldArgumentSpans: fieldArgumentSpans,
-                handles: parse.Handles);
+                handles: parse.Handles,
+                facadeCatalog: facadeCatalog);
 
             foreach (var c in result.Conflicts)
             {
@@ -247,7 +253,7 @@ namespace SceneBuilder.Editor
             var sidecarWritten = false;
             if (editsApplied > 0 || hasMapDelta || hasAssetDelta)
             {
-                sidecarWritten = UpdateSidecar(map, result, currentSource, sidecarPath, assetMerge);
+                sidecarWritten = UpdateSidecar(map, result, currentSource, sidecarPath, assetMerge, facadeCatalog);
             }
 
             // No AssetDatabase.Refresh(): the only things this method writes are the builder .cs and the
@@ -364,8 +370,12 @@ namespace SceneBuilder.Editor
             var newSource = File.ReadAllText(builderPath);
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
 
-            var baselineLoaded = DesiredModelLoader.Load(baselineSource, map);
-            var newLoaded = DesiredModelLoader.Load(newSource, map);
+            // b5-t5: load the façade manifest ONCE per RunConflictAware and thread it through every
+            // parse/reconcile seam below — see Run's identical comment.
+            var facadeCatalog = FacadeCatalogLoader.Load();
+
+            var baselineLoaded = DesiredModelLoader.Load(baselineSource, map, facadeCatalog);
+            var newLoaded = DesiredModelLoader.Load(newSource, map, facadeCatalog);
 
             // SCENE-changed keys: baseline (last-converged) desired vs the LIVE scene — exactly the
             // fields the user moved in the scene since convergence.
@@ -378,7 +388,8 @@ namespace SceneBuilder.Editor
                 flagPresence: baselineLoaded.Parse.FlagPresence,
                 componentAnchors: baselineLoaded.Parse.ComponentAnchors,
                 fieldArgumentSpans: baselineLoaded.FieldArgumentSpans,
-                handles: baselineLoaded.Parse.Handles);
+                handles: baselineLoaded.Parse.Handles,
+                facadeCatalog: facadeCatalog);
 
             var sceneKeys = new HashSet<FieldKey>(
                 sceneReconcile.Patch.Edits
@@ -418,7 +429,8 @@ namespace SceneBuilder.Editor
                 flagPresence: newLoaded.Parse.FlagPresence,
                 componentAnchors: newLoaded.Parse.ComponentAnchors,
                 fieldArgumentSpans: newLoaded.FieldArgumentSpans,
-                handles: newLoaded.Parse.Handles);
+                handles: newLoaded.Parse.Handles,
+                facadeCatalog: facadeCatalog);
 
             // Resolves the AUTHORED GameObject name (e.g. "Box") for the located-error message — the
             // LogicalId itself is the resolved HANDLE when the statement declares one (e.g. `var box =
@@ -494,7 +506,7 @@ namespace SceneBuilder.Editor
                 {
                     // Re-resolve spans against the JUST-PATCHED text (a scene-value literal can differ
                     // in length from the code literal it replaced) before inserting marker lines.
-                    var patchedLoaded = DesiredModelLoader.Load(patchedSource, map);
+                    var patchedLoaded = DesiredModelLoader.Load(patchedSource, map, facadeCatalog);
                     patchedSource = InsertConflictMarkers(
                         patchedSource, patchedLoaded.FieldArgumentSpans, patchedLoaded.Parse.Anchors, conflicts);
 
@@ -520,7 +532,7 @@ namespace SceneBuilder.Editor
             var sidecarWritten = false;
             if (editsApplied > 0 || hasMapDelta || hasAssetDelta)
             {
-                sidecarWritten = UpdateSidecar(map, applicable, currentSource, sidecarPath, assetMerge);
+                sidecarWritten = UpdateSidecar(map, applicable, currentSource, sidecarPath, assetMerge, facadeCatalog);
             }
 
             result.EditsApplied = editsApplied;
@@ -778,7 +790,8 @@ namespace SceneBuilder.Editor
             ReconcileResult result,
             string currentSource,
             string sidecarPath,
-            AssetCacheMerge.Result assetMerge)
+            AssetCacheMerge.Result assetMerge,
+            SceneBuilder.Core.Model.FacadeCatalog? facadeCatalog = null)
         {
             var removed = new HashSet<string>(result.RemovedLogicalIds);
             var mergedEntries = map.Entries
@@ -796,7 +809,7 @@ namespace SceneBuilder.Editor
             // IdentityRemapper is the project's existing answer to that (LogicalId, then Name, then
             // SiblingIndex, parent-by-parent) — the same structural matching the Build path relies on.
             // Run it over the re-parsed model so ids survive the rewrite.
-            var reparsed = ComponentTypeNormalizer.ParseAndNormalize(currentSource, mergedMap);
+            var reparsed = ComponentTypeNormalizer.ParseAndNormalize(currentSource, mergedMap, facadeCatalog);
             var remapped = IdentityRemapper.Remap(reparsed.Model, mergedMap);
 
             // Split of authority, and it matters: the patched SOURCE decides WHICH entries exist and

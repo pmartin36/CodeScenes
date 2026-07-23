@@ -128,7 +128,11 @@ namespace SceneBuilder.Editor
             // PlanningValidator + the non-throwing UnityResolutionProvider. REFUSE, never guess
             // (§4/§7): on any error, return every diagnostic collected — scene untouched, nothing
             // created — instead of throwing on the first one found.
-            var rawParse = BuilderParser.Parse(source, existingMap);
+            // b5-t5: load the façade manifest ONCE per Build and thread it through every parse/reconcile
+            // seam below, so a typed `Instance(Prefabs.X)`/`.On(sel => ...)` resolves instead of refusing.
+            var facadeCatalog = FacadeCatalogLoader.Load();
+
+            var rawParse = BuilderParser.Parse(source, existingMap, facadeCatalog);
             var validation = PlanningValidator.Validate(
                 rawParse, source, new UnityResolutionProvider(existingMap?.Assets), builderPath);
 
@@ -145,7 +149,7 @@ namespace SceneBuilder.Editor
             // Sync goes through the exact same call, so neither direction can skip a stage. Guaranteed
             // not to throw here: the walk above already confirmed every type/asset/builtin resolves
             // via the SAME resolvers.
-            var loaded = DesiredModelLoader.Load(source, existingMap);
+            var loaded = DesiredModelLoader.Load(source, existingMap, facadeCatalog);
             var parse = loaded.Parse;
             var desired = loaded.Desired;
 
