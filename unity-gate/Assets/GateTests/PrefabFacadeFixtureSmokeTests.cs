@@ -78,4 +78,22 @@ public class PrefabFacadeFixtureSmokeTests
             Assert.IsNotNull(barrel.GetComponent<Light>(), $"{turretName}/Barrel has no Light component");
         }
     }
+
+    // m-nested-props b5-t1 (specs/24-nested-prefab-overrides.md): Antenna is the fixture's
+    // removed-component / removed-child target (`.On(sel => sel.Turret.Antenna, a =>
+    // a.RemoveComponent<MeshRenderer>())` / `.RemoveChild("Turret/Antenna")`), depth>=2 present on
+    // both nested Turret instances.
+    [Test]
+    public void Fixture_Turret_HasAntennaWithMeshRenderer()
+    {
+        var handles = PrefabFacadeFixture.Create(Dir);
+        var tank = AssetDatabase.LoadAssetAtPath<GameObject>(handles.TankPath);
+
+        foreach (var turretName in new[] { "LeftTurret", "RightTurret" })
+        {
+            var antenna = tank.transform.Find(turretName + "/Antenna");
+            Assert.IsNotNull(antenna, $"{turretName} has no 'Antenna' child");
+            Assert.IsNotNull(antenna.GetComponent<MeshRenderer>(), $"{turretName}/Antenna has no MeshRenderer component");
+        }
+    }
 }

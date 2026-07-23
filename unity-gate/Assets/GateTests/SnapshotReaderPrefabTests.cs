@@ -15,8 +15,10 @@ using SceneBuilder.Core.Model;
 // SourcePrefabGuid/PrefabKey, treat the whole instance as one unit (no Components/Children enumerated),
 // exclude modelled root transform/name/order mods (so a mere move never falsely flags an override), and —
 // under M10 — a ROOT-target property/added/removed override reads into the STRUCTURED
-// Overrides/AddedComponents/RemovedComponents collections (never OpaqueOverrides), while a NESTED-target
-// override (below the root) stays in OpaqueOverrides (M6, deferred). A plain (non-instance) GameObject
+// Overrides/AddedComponents/RemovedComponents collections (never OpaqueOverrides). Under m-nested-props
+// b5-t2 a NESTED-target override (below the root) ALSO lowers into the structured collections, with a
+// real per-sub-object SubKey/ChildPath resolved via the live source->live descendant map — it stays
+// opaque ONLY as a safety net when that resolution genuinely fails. A plain (non-instance) GameObject
 // reads all fields null/empty.
 public class SnapshotReaderPrefabTests
 {
@@ -267,11 +269,16 @@ public class SnapshotReaderPrefabTests
             "ObjectRef did not resolve to the mapped target's LogicalId");
     }
 
+    // m-nested-props b5-t2: supersedes the old M10-v0 contract (a below-root target stayed opaque).
+    // A resolvable NESTED-target override now lowers into structured Overrides[] with a real SubKey
+    // for the live sub-object, and OpaqueOverrides stays null (see NestedOverrideReadTests.cs for the
+    // deeper depth>=2 / added / removed child GO coverage of this same task).
     [Test]
-    public void InstanceRoot_WithNestedTargetOverride_StaysOpaque_StructuredCollectionsEmpty()
+    public void InstanceRoot_WithNestedTargetOverride_LowersToStructuredOverride_NotOpaque()
     {
         var root = Instantiate("Enemy1");
-        var childCollider = root.transform.Find("Child").GetComponent<BoxCollider>();
+        var childGo = root.transform.Find("Child").gameObject;
+        var childCollider = childGo.GetComponent<BoxCollider>();
         childCollider.center = new Vector3(5f, 5f, 5f);
         PrefabUtility.RecordPrefabInstancePropertyModifications(childCollider);
 
@@ -280,11 +287,22 @@ public class SnapshotReaderPrefabTests
 
         var node = ReadRoot(scene, "Enemy1");
 
-        Assert.IsNotNull(node.OpaqueOverrides, "A NESTED-target override must stay in OpaqueOverrides (M10 v0 defers below-root targets)");
-        Assert.IsNotEmpty(node.OpaqueOverrides!.RawToken, "OpaqueOverrides token was empty");
-        Assert.IsEmpty(node.Overrides, "A NESTED-target override must not leak into structured Overrides[]");
-        Assert.IsEmpty(node.AddedComponents, "A NESTED-target override must not leak into AddedComponents[]");
-        Assert.IsEmpty(node.RemovedComponents, "A NESTED-target override must not leak into RemovedComponents[]");
+        Assert.IsNull(node.OpaqueOverrides, "A resolvable NESTED-target override must no longer stay in OpaqueOverrides (b5-t2 undoes the opaque-collapse)");
+        Assert.AreEqual(3, node.Overrides.Length,
+            "A Vector3 override (BoxCollider.center) must lower to THREE PropertyOverride entries (.x/.y/.z)");
+        var childKey = new PrefabInstanceKey
+        {
+            TargetPrefabId = GlobalObjectId.GetGlobalObjectIdSlow(childGo).targetPrefabId,
+            TargetObjectId = GlobalObjectId.GetGlobalObjectIdSlow(childGo).targetObjectId,
+        };
+        foreach (var ov in node.Overrides)
+        {
+            Assert.AreEqual("UnityEngine.BoxCollider", ov.Target.ComponentType,
+                "Nested-target override ComponentType must carry the FullName");
+            Assert.AreEqual(childKey, ov.Target.SubKey,
+                "Nested-target override SubKey must resolve to the live sub-object's own pair-key, not (0,0)");
+            Assert.AreEqual("Child", ov.Target.ChildPath, "Nested-target override ChildPath must name the live sub-object");
+        }
     }
 
     [Test]

@@ -254,11 +254,17 @@ namespace SceneBuilder.Editor
                     // BaseValues, sorted (SubKey.TargetPrefabId, SubKey.TargetObjectId, ComponentType,
                     // PropertyPath) for byte-stable output; null (not empty) when there are none, so
                     // plain instances stay byte-identical. SubKey is stamped from `instanceRead.Key`
-                    // (the instance root's OWN pair-key), NOT `o.Target.SubKey` — PrefabInstanceProbe
-                    // still reads root-target overrides with SubKey=(0,0) (b5-t2 resolves the live
-                    // per-target SubKey; out of scope here), but a root override's SubKey IS the
-                    // instance's own key by the ChildPath=="" convention (tasks.md b1-t1), and this
-                    // write boundary has `instanceRead.Key` available, so persist the real value.
+                    // (the instance root's OWN pair-key), NOT `o.Target.SubKey` — a root override's
+                    // SubKey IS the instance's own key by the ChildPath=="" convention (tasks.md b1-t1),
+                    // and this write boundary has `instanceRead.Key` available, so persist the real
+                    // value.
+                    // b7-t1: since m-nested-props b5-t2, StructuredOverrides also carries NESTED
+                    // (below-root) entries with their OWN real `o.Target.SubKey` — this loop stamps
+                    // EVERY entry with the root's `instanceRead.Key`, which would overwrite a nested
+                    // entry's SubKey with the root's. Not fixed here (out of scope for b5-t2, which is
+                    // read-only); no existing test authors a below-root override through this
+                    // build-sidecar path, so this does not regress the current gate. b7-t1 must
+                    // discriminate root (o.Target.ChildPath == "") vs nested (persist o.Target.SubKey).
                     var overrideRecords = instanceRead.StructuredOverrides
                         .Select(o => new InstanceOverrideRecord
                         {

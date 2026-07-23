@@ -12,15 +12,19 @@ using UnityRemovedComponent = UnityEditor.SceneManagement.RemovedComponent;
 namespace SceneBuilder.Editor
 {
     /// <summary>
-    /// M10 (specs/11-m10-prefab-overrides.md, research.md b6-t1): classifies each
+    /// M10 (specs/11-m10-prefab-overrides.md, research.md b6-t1) + m-nested-props b5-t2
+    /// (specs/24-nested-prefab-overrides.md): classifies each
     /// <see cref="PrefabUtility.GetPropertyModifications"/>/<see cref="PrefabUtility.GetAddedComponents"/>/
     /// <see cref="PrefabUtility.GetRemovedComponents"/> entry into modelled (root name/transform, already
     /// read elsewhere — skipped here), ROOT-target (structured — <see cref="SnapshotNode.Overrides"/>/
     /// <see cref="SnapshotNode.AddedComponents"/>/<see cref="SnapshotNode.RemovedComponents"/>), or
-    /// NESTED-target (below the root — deferred, stays opaque via
-    /// <see cref="PrefabInstanceProbe.FormatModification"/>, M6). Root-target overrides carry
-    /// <c>SubKey=(0,0)</c> (default <see cref="PrefabInstanceKey"/>) with <c>ComponentType=FullName</c> —
-    /// see research.md REFINED note; this is the ONLY reader that must mirror the
+    /// NESTED-target (below the root). A resolvable nested target (via the lazily-built
+    /// source-&gt;live map, <c>PrefabInstanceProbe.Nested.cs</c>) ALSO lowers to the structured
+    /// collections with the live sub-object's own SubKey + ChildPath; only a genuinely unresolvable
+    /// target still falls back to opaque (<see cref="PrefabInstanceProbe.FormatModification"/> — a
+    /// safety net, never a silent drop). Root-target overrides carry <c>SubKey=(0,0)</c> (default
+    /// <see cref="PrefabInstanceKey"/>) with <c>ComponentType=FullName</c> — see research.md REFINED
+    /// note; this is the ONLY reader that must mirror the
     /// <c>BuilderParser.Instance</c>/<c>ReconcilerInstances</c> root-target convention.
     /// </summary>
     internal static partial class PrefabInstanceProbe
@@ -32,23 +36,34 @@ namespace SceneBuilder.Editor
             Nested,
         }
 
+        // Unity bookkeeping property paths on a sub-object — never surfaced as a structured override
+        // or leaked to opaque either (mirrors, per-sub-object, the implicit root exclusion the
+        // Modelled bucket already gives the instance root's own name/transform).
+        private static readonly HashSet<string> NestedBookkeepingPaths = new() { "m_Name", "m_RootOrder" };
+
         private readonly struct OverrideReadResult
         {
             internal readonly ValueNode.Unsupported? OpaqueOverrides;
             internal readonly PropertyOverride[] StructuredOverrides;
             internal readonly AddedComponent[] AddedComponents;
             internal readonly OverrideTarget[] RemovedComponents;
+            internal readonly AddedGameObject[] AddedGameObjects;
+            internal readonly OverrideTarget[] RemovedGameObjects;
 
             internal OverrideReadResult(
                 ValueNode.Unsupported? opaqueOverrides,
                 PropertyOverride[] structuredOverrides,
                 AddedComponent[] addedComponents,
-                OverrideTarget[] removedComponents)
+                OverrideTarget[] removedComponents,
+                AddedGameObject[] addedGameObjects,
+                OverrideTarget[] removedGameObjects)
             {
                 OpaqueOverrides = opaqueOverrides;
                 StructuredOverrides = structuredOverrides;
                 AddedComponents = addedComponents;
                 RemovedComponents = removedComponents;
+                AddedGameObjects = addedGameObjects;
+                RemovedGameObjects = removedGameObjects;
             }
         }
 
@@ -59,6 +74,10 @@ namespace SceneBuilder.Editor
             var opaqueTokens = new List<string>();
             var records = new List<ModificationRecord>();
             var baseValues = new List<ValueNode?>();
+
+            // Lazy: a plain/unmodified instance (the per-keystroke common case) has no below-root mod
+            // and never triggers the descent (research.md b5-t2 performance constraint).
+            var lazySourceToLive = new Lazy<Dictionary<UnityEngine.Object, GameObject>>(() => BuildSourceToLiveMap(go));
 
             foreach (var mod in mods)
             {
@@ -74,7 +93,34 @@ namespace SceneBuilder.Editor
                         continue;
 
                     case ModTargetKind.Nested:
-                        opaqueTokens.Add(FormatModification(sourceRoot, mod));
+                        if (NestedBookkeepingPaths.Contains(mod.propertyPath))
+                        {
+                            continue;
+                        }
+
+                        if (!lazySourceToLive.Value.TryGetValue(mod.target, out var liveTarget) || liveTarget == null)
+                        {
+                            // Genuinely unresolvable below-root target — safety net, never silently drop.
+                            opaqueTokens.Add(FormatModification(sourceRoot, mod));
+                            continue;
+                        }
+
+                        var nestedHasObjectReference = mod.objectReference != null;
+                        records.Add(new ModificationRecord
+                        {
+                            Target = new OverrideTarget
+                            {
+                                SubKey = SubKeyOf(liveTarget),
+                                ComponentType = mod.target is GameObject ? "" : mod.target.GetType().FullName,
+                                ChildPath = RelativePath(go, liveTarget),
+                            },
+                            PropertyPath = mod.propertyPath,
+                            Value = nestedHasObjectReference ? null : mod.value,
+                            ObjectReference = nestedHasObjectReference
+                                ? AssetReferenceResolver.ReadObjectReferenceValue(mod.objectReference!, resolveSceneRef)
+                                : null,
+                        });
+                        baseValues.Add(nestedHasObjectReference ? null : ReadBaseValue(mod));
                         continue;
 
                     default:
@@ -109,14 +155,20 @@ namespace SceneBuilder.Editor
                 opaque = new ValueNode.Unsupported(string.Join("\n", opaqueTokens));
             }
 
-            return new OverrideReadResult(opaque, structured, ReadAddedComponents(go, sourceRoot, resolveSceneRef), ReadRemovedComponents(go, sourceRoot));
+            return new OverrideReadResult(
+                opaque,
+                structured,
+                ReadAddedComponents(go, sourceRoot, resolveSceneRef),
+                ReadRemovedComponents(go, sourceRoot, lazySourceToLive),
+                ReadAddedGameObjects(go, resolveSceneRef),
+                ReadRemovedGameObjects(go));
         }
 
         // PropertyModification.target is the CORRESPONDING OBJECT IN THE SOURCE ASSET (not the live
         // instance). The root GameObject/name and the root Transform (position/rotation/scale/order)
         // are already modelled elsewhere (SnapshotNode.Name/Transform) — Modelled. A Component whose
         // own transform IS the source root's transform is a ROOT-target override — structured. Anything
-        // else (a target below the root) is Nested — deferred, stays opaque (M6).
+        // else (a target below the root) is Nested — resolved via the source->live map (b5-t2).
         private static ModTargetKind ClassifyTarget(GameObject? sourceRoot, UnityEngine.Object target)
         {
             if (sourceRoot == null)
@@ -190,10 +242,10 @@ namespace SceneBuilder.Editor
             }
         }
 
-        // PrefabUtility.GetAddedComponents(root) -> root-target entries only (instanceComponent.transform
-        // == root.transform); a nested added component is deferred (banner #5, not authored here). The
-        // SINGLE root-vs-nested filter — b6-t2's SAVE-side re-read (SceneBuilderBuild.WithGlobalObjectIds)
-        // reuses it via <see cref="RootAddedComponents"/> so the boundary is not duplicated.
+        // PrefabUtility.GetAddedComponents(root) -> ROOT-target entries (instanceComponent.transform ==
+        // root.transform, Target = default/empty OverrideTarget) AND BELOW-root entries (b5-t2):
+        // instanceComponent is already LIVE, so its owning sub-object's SubKey/ChildPath is derived
+        // directly — no source->live map needed for this reader.
         private static AddedComponent[] ReadAddedComponents(GameObject go, GameObject? sourceRoot, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             if (sourceRoot == null)
@@ -201,18 +253,34 @@ namespace SceneBuilder.Editor
                 return Array.Empty<AddedComponent>();
             }
 
-            var rootAdded = RootAddedComponents(go);
-            if (rootAdded.Length == 0)
+            var added = PrefabUtility.GetAddedComponents(go);
+            if (added == null || added.Count == 0)
             {
                 return Array.Empty<AddedComponent>();
             }
 
             var result = new List<AddedComponent>();
-            foreach (var instanceComponent in rootAdded)
+            foreach (UnityAddedComponent entry in added)
             {
+                var instanceComponent = entry.instanceComponent;
+                if (instanceComponent == null)
+                {
+                    continue;
+                }
+
+                var owner = instanceComponent.transform.gameObject;
+                var target = owner == go
+                    ? new OverrideTarget()
+                    : new OverrideTarget
+                    {
+                        SubKey = SubKeyOf(owner),
+                        ComponentType = "",
+                        ChildPath = RelativePath(go, owner),
+                    };
+
                 result.Add(new AddedComponent
                 {
-                    Target = new OverrideTarget(),
+                    Target = target,
                     Component = SerializedFieldBridge.ReadComponent(instanceComponent, resolveSceneRef),
                 });
             }
@@ -251,9 +319,13 @@ namespace SceneBuilder.Editor
             return result.ToArray();
         }
 
-        // PrefabUtility.GetRemovedComponents(root) -> root-target entries only (assetComponent.transform
-        // == sourceRoot.transform); a nested removed component is deferred (banner #5, not authored here).
-        private static OverrideTarget[] ReadRemovedComponents(GameObject go, GameObject? sourceRoot)
+        // PrefabUtility.GetRemovedComponents(root) -> ROOT-target entries (assetComponent.transform ==
+        // sourceRoot.transform, SubKey=(0,0)) AND BELOW-root entries (b5-t2): assetComponent is
+        // SOURCE-side (it no longer exists live), so its owning sub-object's LIVE GameObject — and
+        // thence its SubKey — is resolved via the lazily-built source->live map. Unresolvable below-root
+        // removed components are dropped (no opaque surface exists for this collection; matches the
+        // pre-b5-t2 below-root behavior, never regressing the root case).
+        private static OverrideTarget[] ReadRemovedComponents(GameObject go, GameObject? sourceRoot, Lazy<Dictionary<UnityEngine.Object, GameObject>> lazySourceToLive)
         {
             if (sourceRoot == null)
             {
@@ -270,12 +342,27 @@ namespace SceneBuilder.Editor
             foreach (UnityRemovedComponent entry in removed)
             {
                 var assetComponent = entry.assetComponent;
-                if (assetComponent == null || assetComponent.transform != sourceRoot.transform)
+                if (assetComponent == null)
                 {
                     continue;
                 }
 
-                result.Add(new OverrideTarget { ComponentType = assetComponent.GetType().FullName });
+                if (assetComponent.transform == sourceRoot.transform)
+                {
+                    result.Add(new OverrideTarget { ComponentType = assetComponent.GetType().FullName });
+                    continue;
+                }
+
+                var assetOwner = assetComponent.transform.gameObject;
+                if (lazySourceToLive.Value.TryGetValue(assetOwner, out var liveOwner) && liveOwner != null)
+                {
+                    result.Add(new OverrideTarget
+                    {
+                        SubKey = SubKeyOf(liveOwner),
+                        ComponentType = assetComponent.GetType().FullName,
+                        ChildPath = RelativePath(sourceRoot, assetOwner),
+                    });
+                }
             }
 
             return result.ToArray();

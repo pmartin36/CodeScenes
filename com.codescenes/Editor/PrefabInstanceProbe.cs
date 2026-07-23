@@ -34,6 +34,8 @@ namespace SceneBuilder.Editor
             internal readonly PropertyOverride[] StructuredOverrides;
             internal readonly AddedComponent[] AddedComponents;
             internal readonly OverrideTarget[] RemovedComponents;
+            internal readonly AddedGameObject[] AddedGameObjects;
+            internal readonly OverrideTarget[] RemovedGameObjects;
 
             internal InstanceReadResult(
                 string? sourcePrefabGuid,
@@ -41,7 +43,9 @@ namespace SceneBuilder.Editor
                 ValueNode.Unsupported? opaqueOverrides,
                 PropertyOverride[] structuredOverrides,
                 AddedComponent[] addedComponents,
-                OverrideTarget[] removedComponents)
+                OverrideTarget[] removedComponents,
+                AddedGameObject[] addedGameObjects,
+                OverrideTarget[] removedGameObjects)
             {
                 SourcePrefabGuid = sourcePrefabGuid;
                 Key = key;
@@ -49,6 +53,8 @@ namespace SceneBuilder.Editor
                 StructuredOverrides = structuredOverrides;
                 AddedComponents = addedComponents;
                 RemovedComponents = removedComponents;
+                AddedGameObjects = addedGameObjects;
+                RemovedGameObjects = removedGameObjects;
             }
         }
 
@@ -71,14 +77,14 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            var goid = GlobalObjectId.GetGlobalObjectIdSlow(go);
-            var key = new PrefabInstanceKey { TargetPrefabId = goid.targetPrefabId, TargetObjectId = goid.targetObjectId };
+            var key = SubKeyOf(go);
 
             var overrides = ReadOverrides(go, source, resolveSceneRef);
 
             return new InstanceReadResult(
                 guid, key, overrides.OpaqueOverrides, overrides.StructuredOverrides,
-                overrides.AddedComponents, overrides.RemovedComponents);
+                overrides.AddedComponents, overrides.RemovedComponents,
+                overrides.AddedGameObjects, overrides.RemovedGameObjects);
         }
 
         private static string FormatModification(GameObject? root, PropertyModification mod)

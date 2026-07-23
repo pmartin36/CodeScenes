@@ -4,7 +4,9 @@ using UnityEngine;
 // b6-t1 (specs/25-typed-prefab-facades.md): the SINGLE canonical fixture-authoring routine every
 // EditMode test in bucket b6 shares (FIX-1 — no divergent fixtures). Builds two real `.prefab`
 // assets at runtime under a caller-supplied temp folder:
-//   Turret.prefab: root "Turret" with child "Barrel" carrying a Light component.
+//   Turret.prefab: root "Turret" with children "Barrel" (carrying a Light component) and
+//                  "Antenna" (carrying a MeshRenderer component — m-nested-props b5-t1's
+//                  removed-component / removed-child target).
 //   Tank.prefab:   root "Tank" nesting Turret TWICE (PrefabUtility.InstantiatePrefab, renamed
 //                  "LeftTurret"/"RightTurret" — genuine nested-prefab instances, the depth>=2
 //                  collision b6-t6 exercises), plus a "Chassis" child with children in order
@@ -36,6 +38,11 @@ public static class PrefabFacadeFixture
         var barrel = new GameObject("Barrel");
         barrel.transform.SetParent(turretRoot.transform);
         barrel.AddComponent<Light>();
+
+        var antenna = new GameObject("Antenna");
+        antenna.transform.SetParent(turretRoot.transform);
+        antenna.AddComponent<MeshRenderer>();
+
         PrefabUtility.SaveAsPrefabAsset(turretRoot, turretPath);
         Object.DestroyImmediate(turretRoot);
 

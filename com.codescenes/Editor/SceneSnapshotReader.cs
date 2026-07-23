@@ -110,6 +110,8 @@ namespace SceneBuilder.Editor
             var overrides = Array.Empty<PropertyOverride>();
             var addedComponents = Array.Empty<AddedComponent>();
             var removedComponents = Array.Empty<OverrideTarget>();
+            var addedGameObjects = Array.Empty<AddedGameObject>();
+            var removedGameObjects = Array.Empty<OverrideTarget>();
             if (isInstanceRoot)
             {
                 var instance = PrefabInstanceProbe.ReadInstanceRoot(go, resolveSceneRef);
@@ -119,6 +121,8 @@ namespace SceneBuilder.Editor
                 overrides = instance.StructuredOverrides;
                 addedComponents = instance.AddedComponents;
                 removedComponents = instance.RemovedComponents;
+                addedGameObjects = instance.AddedGameObjects;
+                removedGameObjects = instance.RemovedGameObjects;
             }
 
             return new SnapshotNode
@@ -145,6 +149,8 @@ namespace SceneBuilder.Editor
                 Overrides = overrides,
                 AddedComponents = addedComponents,
                 RemovedComponents = removedComponents,
+                AddedGameObjects = addedGameObjects,
+                RemovedGameObjects = removedGameObjects,
             };
         }
 
