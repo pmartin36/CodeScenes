@@ -296,9 +296,18 @@ namespace SceneBuilder.Editor
         /// that correlates the model's authored <c>AddedComponents[]</c> to their live counterparts to
         /// persist a stable <c>GlobalObjectId</c> per added component.
         /// </summary>
-        internal static Component[] RootAddedComponents(GameObject go)
+        internal static Component[] RootAddedComponents(GameObject go) => AddedComponentsOn(go, go);
+
+        /// <summary>
+        /// m-nested-props b6-t1 (specs/24-nested-prefab-overrides.md write mechanics): generalizes
+        /// <see cref="RootAddedComponents"/> from "owned by the instance root" to "owned by any resolved
+        /// sub-object" — the added-component lookup <c>InstanceOverrideExecutor.Apply(RevertAddedComponent)</c>
+        /// needs at depth. <paramref name="outermostRoot"/> is passed to <c>GetAddedComponents</c> (the
+        /// whole-instance API); <paramref name="owner"/> filters to the specific live sub-object.
+        /// </summary>
+        internal static Component[] AddedComponentsOn(GameObject outermostRoot, GameObject owner)
         {
-            var added = PrefabUtility.GetAddedComponents(go);
+            var added = PrefabUtility.GetAddedComponents(outermostRoot);
             if (added == null || added.Count == 0)
             {
                 return Array.Empty<Component>();
@@ -308,7 +317,7 @@ namespace SceneBuilder.Editor
             foreach (UnityAddedComponent entry in added)
             {
                 var instanceComponent = entry.instanceComponent;
-                if (instanceComponent == null || instanceComponent.transform != go.transform)
+                if (instanceComponent == null || instanceComponent.transform != owner.transform)
                 {
                     continue;
                 }

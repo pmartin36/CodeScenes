@@ -70,7 +70,7 @@ namespace SceneBuilder.Editor
         /// <see cref="ReadInstanceRoot"/>, reused (not re-invented) for any live OR asset-side
         /// GameObject (an asset object's <see cref="GlobalObjectId"/> is its durable source fileID).
         /// </summary>
-        private static PrefabInstanceKey SubKeyOf(GameObject go)
+        internal static PrefabInstanceKey SubKeyOf(GameObject go)
         {
             var goid = GlobalObjectId.GetGlobalObjectIdSlow(go);
             return new PrefabInstanceKey { TargetPrefabId = goid.targetPrefabId, TargetObjectId = goid.targetObjectId };
@@ -88,6 +88,48 @@ namespace SceneBuilder.Editor
             return string.IsNullOrEmpty(childPath)
                 ? outermostRoot
                 : outermostRoot.transform.Find(childPath)?.gameObject;
+        }
+
+        /// <summary>
+        /// m-nested-props b6-t1 (specs/24-nested-prefab-overrides.md write mechanics): the durable
+        /// SubKey-&gt;live resolution the write side prefers once a nested override's <c>SubKey</c> has
+        /// been populated (post-bootstrap, b7-t2). Descends <paramref name="outermostRoot"/> (mirrors
+        /// <see cref="BuildSourceToLiveMap"/>'s descent) and returns the first descendant whose own
+        /// pair-key (<see cref="SubKeyOf"/>) equals <paramref name="subKey"/>; null if none.
+        /// </summary>
+        internal static GameObject? ResolveSubObjectBySubKey(GameObject outermostRoot, PrefabInstanceKey subKey)
+        {
+            var t = outermostRoot.transform;
+            for (var i = 0; i < t.childCount; i++)
+            {
+                var found = FindBySubKey(t.GetChild(i).gameObject, subKey);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        private static GameObject? FindBySubKey(GameObject go, PrefabInstanceKey subKey)
+        {
+            if (SubKeyOf(go).Equals(subKey))
+            {
+                return go;
+            }
+
+            var t = go.transform;
+            for (var i = 0; i < t.childCount; i++)
+            {
+                var found = FindBySubKey(t.GetChild(i).gameObject, subKey);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>

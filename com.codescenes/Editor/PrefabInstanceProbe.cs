@@ -109,7 +109,7 @@ namespace SceneBuilder.Editor
         // Structural path from the source-asset root to the modified target, independent of runtime
         // instance ids — stable across reads of the same override so the token doesn't spuriously
         // change when nothing about the override itself changed.
-        private static string RelativePath(GameObject? root, UnityEngine.Object target)
+        internal static string RelativePath(GameObject? root, UnityEngine.Object target)
         {
             var t = target is GameObject g ? g.transform : (target as Component)?.transform;
             if (t == null)

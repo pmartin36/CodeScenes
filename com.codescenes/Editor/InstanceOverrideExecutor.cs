@@ -21,15 +21,16 @@ namespace SceneBuilder.Editor
     /// property/added/removed-component override exactly as the Inspector would (symmetric with
     /// b6-t1's read side); reverts use the matching <see cref="PrefabUtility"/> Revert* API.
     /// </summary>
-    internal static class InstanceOverrideExecutor
+    internal static partial class InstanceOverrideExecutor
     {
         private const string MemberSigil = "member:";
 
         public static void Apply(SetInstanceOverride op, PlanExecutor.ExecutionResult result, IdentityMap map, Scene scene)
         {
             var root = InstanceRoot(op.LogicalId, result);
+            var owner = ResolveTargetObject(root, op.Target);
             var type = TypeOf(op.Target);
-            var comp = root != null && type != null ? root.GetComponent(type) : null;
+            var comp = owner != null && type != null ? owner.GetComponent(type) : null;
             if (comp == null)
             {
                 return;
@@ -44,13 +45,14 @@ namespace SceneBuilder.Editor
         public static void Apply(AddInstanceComponent op, PlanExecutor.ExecutionResult result, IdentityMap map, Scene scene)
         {
             var root = InstanceRoot(op.LogicalId, result);
+            var owner = ResolveTargetObject(root, op.Target);
             var type = ComponentTypeResolver.Resolve(op.Component.Type);
-            if (root == null || type == null)
+            if (owner == null || type == null)
             {
                 return;
             }
 
-            var comp = root.AddComponent(type);
+            var comp = owner.AddComponent(type);
             if (comp == null)
             {
                 return;
@@ -74,8 +76,9 @@ namespace SceneBuilder.Editor
         public static void Apply(RemoveInstanceComponent op, PlanExecutor.ExecutionResult result)
         {
             var root = InstanceRoot(op.LogicalId, result);
+            var owner = ResolveTargetObject(root, op.Target);
             var type = TypeOf(op.Target);
-            var comp = root != null && type != null ? root.GetComponent(type) : null;
+            var comp = owner != null && type != null ? owner.GetComponent(type) : null;
             if (comp != null)
             {
                 UnityEngine.Object.DestroyImmediate(comp);
@@ -85,8 +88,9 @@ namespace SceneBuilder.Editor
         public static void Apply(RevertInstanceOverride op, PlanExecutor.ExecutionResult result)
         {
             var root = InstanceRoot(op.LogicalId, result);
+            var owner = ResolveTargetObject(root, op.Target);
             var type = TypeOf(op.Target);
-            var comp = root != null && type != null ? root.GetComponent(type) : null;
+            var comp = owner != null && type != null ? owner.GetComponent(type) : null;
             if (comp == null)
             {
                 return;
@@ -104,7 +108,8 @@ namespace SceneBuilder.Editor
         public static void Apply(RevertAddedComponent op, PlanExecutor.ExecutionResult result)
         {
             var root = InstanceRoot(op.LogicalId, result);
-            if (root == null)
+            var owner = ResolveTargetObject(root, op.Target);
+            if (root == null || owner == null)
             {
                 return;
             }
@@ -117,7 +122,7 @@ namespace SceneBuilder.Editor
             else
             {
                 var typeFullName = StripOrdinal(op.ComponentLogicalId);
-                comp = PrefabInstanceProbe.RootAddedComponents(root)
+                comp = PrefabInstanceProbe.AddedComponentsOn(root, owner)
                     .FirstOrDefault(c => c.GetType().FullName == typeFullName);
             }
 
@@ -131,7 +136,8 @@ namespace SceneBuilder.Editor
         public static void Apply(RevertRemovedComponent op, PlanExecutor.ExecutionResult result)
         {
             var root = InstanceRoot(op.LogicalId, result);
-            if (root == null)
+            var owner = ResolveTargetObject(root, op.Target);
+            if (root == null || owner == null)
             {
                 return;
             }
@@ -143,9 +149,17 @@ namespace SceneBuilder.Editor
                 return;
             }
 
+            var ownerSource = owner == root ? null : PrefabUtility.GetCorrespondingObjectFromSource(owner);
+
             foreach (UnityRemovedComponent entry in removed)
             {
-                if (entry.assetComponent != null && entry.assetComponent.GetType().FullName == typeFullName)
+                if (entry.assetComponent == null || entry.assetComponent.GetType().FullName != typeFullName)
+                {
+                    continue;
+                }
+
+                var matches = owner == root || (UnityEngine.Object)entry.assetComponent.gameObject == ownerSource;
+                if (matches)
                 {
                     PrefabUtility.RevertRemovedComponent(root, entry.assetComponent, InteractionMode.AutomatedAction);
                     return;
@@ -166,6 +180,39 @@ namespace SceneBuilder.Editor
 
             var outermost = PrefabUtility.GetOutermostPrefabInstanceRoot(go);
             return outermost != null ? outermost : go;
+        }
+
+        // m-nested-props b6-t1 (specs/24-nested-prefab-overrides.md write mechanics): resolves the LIVE
+        // component/GameObject owner an override Target names — the generalization from "always the
+        // outermost instance root" (M10) to "any resolved sub-object at depth". A root Target
+        // (ChildPath=="") short-circuits to root byte-unchanged (M10 regression). SubKey is preferred
+        // once populated (durable, post-bootstrap b7-t2); a default SubKey (pre-bootstrap hand-authored
+        // Target) falls back to the ChildPath walk. Reuses PrefabInstanceProbe's resolvers verbatim —
+        // never re-derives GlobalObjectId here.
+        private static readonly PrefabInstanceKey DefaultSubKey = new();
+
+        private static GameObject? ResolveTargetObject(GameObject? root, OverrideTarget target)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrEmpty(target.ChildPath))
+            {
+                return root;
+            }
+
+            if (!target.SubKey.Equals(DefaultSubKey))
+            {
+                var bySubKey = PrefabInstanceProbe.ResolveSubObjectBySubKey(root, target.SubKey);
+                if (bySubKey != null)
+                {
+                    return bySubKey;
+                }
+            }
+
+            return PrefabInstanceProbe.ResolveSubObjectByChildPath(root, target.ChildPath);
         }
 
         private static Type? TypeOf(OverrideTarget target) => ComponentTypeResolver.Resolve(target.ComponentType);

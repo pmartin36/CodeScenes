@@ -17,12 +17,15 @@ using SceneBuilder.Core.Validation;
 // temp scene). Five tests, one per checklist step: (1) one instance connects + stamps the sidecar,
 // (2) two same-prefab instances share SourcePrefabGuid + TargetObjectId with distinct TargetPrefabId,
 // (3) an in-scene move+reparent updates the source without recreating the instance, (4) a live
-// NESTED-target property override (below the instance root) survives a rebuild — never reverted —
-// and (post b5-t2) lowers to a structured Overrides[] entry via the live sub-object's own pair-key,
-// so SB2301 "not modelled" does NOT fire for it (that flag now only fires for a genuinely
-// unresolvable/opaque override); a ROOT-target override is likewise MODELLED into structured
-// Overrides[] and reconciled (full round trip is b8-t1's PrefabInstanceOverrideRoundTripTests.cs,
-// gated on b7-t1's executor), (5) deleting the instance removes its statement.
+// NESTED-target property override (below the instance root) lowers to a structured Overrides[] entry
+// via the live sub-object's own pair-key, so SB2301 "not modelled" does NOT fire for it (that flag
+// only fires for a genuinely unresolvable/opaque override); since the override is not authored into
+// the builder source, it is absent from the desired model and a rebuild reverts it in place (m-nested-
+// props b6-t1's InstanceOverrideExecutor generalization — matches the existing root-target contract,
+// PrefabInstanceOverrideTests.cs:95 / PrefabInstanceMaterializeTests.cs:238, no root/nested exemption);
+// a ROOT-target override is likewise MODELLED into structured Overrides[] and reconciled (full
+// authored-override round trip is b8-t1's PrefabInstanceOverrideRoundTripTests.cs, gated on b7-t1's
+// bootstrap), (5) deleting the instance removes its statement.
 public class RoundTripPrefabInstanceTests
 {
     private const string FixturesDir = "Assets/GateTests/Fixtures_M6RoundTrip";
@@ -210,15 +213,18 @@ public class RoundTripPrefabInstanceScene : ISceneDefinition
     }
 
     // 4. A genuine live NESTED-target property override (on a component below the instance root)
-    //    survives a rebuild — never reverted. Post b5-t2, the override resolves to a structured
-    //    Overrides[] entry (via the live sub-object's own pair-key), so the rebuild does NOT surface
-    //    the SB2301 "overrides preserved, not modelled (M10)" info flag on BuildResult.Flags — that
-    //    flag now only fires for a genuinely unresolvable/opaque override. The builder source gains
-    //    no override authoring (out of scope until M10/b7-t1's executor). A ROOT-target override is
-    //    likewise read into structured Overrides[] and reconciled — that full round trip is b8-t1's
+    //    resolves to a structured Overrides[] entry (via the live sub-object's own pair-key), so the
+    //    rebuild does NOT surface the SB2301 "overrides preserved, not modelled (M10)" info flag on
+    //    BuildResult.Flags — that flag only fires for a genuinely unresolvable/opaque override. The
+    //    override is not authored into the builder source (out of scope until M10/b7-t1's bootstrap),
+    //    so it is absent from the desired model and the rebuild reverts it in place — the same
+    //    absent-from-desired-emits-revert contract the root-target case already has
+    //    (PrefabInstanceOverrideTests.cs:95 / PrefabInstanceMaterializeTests.cs:238), generalized to
+    //    depth by b6-t1's InstanceOverrideExecutor. A ROOT-target override is likewise read into
+    //    structured Overrides[] and reconciled — that full authored-override round trip is b8-t1's
     //    PrefabInstanceOverrideRoundTripTests.cs.
     [Test]
-    public void Override_NestedTarget_PreservedAsStructuredOverride_RebuildDoesNotRevert()
+    public void Override_NestedTarget_AbsentFromCode_RevertedInPlaceOnRebuild()
     {
         File.WriteAllText(_builderPath, Source($"        scene.Instance(\"{PrefabPath}\");"));
 
@@ -250,12 +256,13 @@ public class RoundTripPrefabInstanceScene : ISceneDefinition
         Assert.IsNotNull(liveRoot, "Instance root disappeared across rebuild");
         var liveChild = liveRoot.transform.Find("Child");
         Assert.IsNotNull(liveChild, "Nested Child disappeared across rebuild");
-        Assert.AreEqual(overriddenCenter, liveChild.GetComponent<BoxCollider>().center,
-            "Rebuild reverted the live nested-target property override");
+        Assert.AreEqual(Vector3.zero, liveChild.GetComponent<BoxCollider>().center,
+            "Rebuild did not revert the live nested-target property override — an override absent "
+            + "from the desired (code) model must be reverted in place, root or nested, no exemption");
 
         var rewritten = File.ReadAllText(_builderPath);
         StringAssert.DoesNotContain("BoxCollider", rewritten,
-            "Builder source gained override authoring — out of scope until M10.\n" + rewritten);
+            "Builder source gained override authoring — out of scope until M10/b7-t1.\n" + rewritten);
     }
 
     // 5. Deleting the live instance (scene->code) removes its .Instance(...) statement.
