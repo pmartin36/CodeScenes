@@ -19,7 +19,12 @@ namespace SceneBuilder.Core.Reconcile
         // b4-t1: Instance(Prefabs.X) where X is absent from the FacadeCatalog (or the catalog
         // is null). Located over the `Prefabs.X` argument span. Never a throw, never a silent
         // drop — the instance node is still produced.
-        UnknownFacadeReference
+        UnknownFacadeReference,
+
+        // b7-t2: a below-root override/added-component/removed-component/removed-child Target (or
+        // AddedGameObject.Parent) whose ChildPath resolves to NO live sub-object under a LIVE prefab
+        // instance root (see NestedOverrideBootstrap). Never a silent drop.
+        UnresolvedNestedSelector
     }
 
     public sealed record Conflict

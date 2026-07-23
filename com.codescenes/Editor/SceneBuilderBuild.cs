@@ -11,6 +11,7 @@ using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Materialize;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
+using SceneBuilder.Core.Reconcile;
 using SceneBuilder.Core.Serialization;
 using SceneBuilder.Core.Validation;
 
@@ -22,7 +23,7 @@ namespace SceneBuilder.Editor
     /// User-hand-added objects survive; coded objects keep their <see cref="GlobalObjectId"/>s across
     /// rebuilds. New objects' ids are captured on save.
     /// </summary>
-    public static class SceneBuilderBuild
+    public static partial class SceneBuilderBuild
     {
         private const string BuilderName = "DemoScene";
 
@@ -103,6 +104,22 @@ namespace SceneBuilder.Editor
         private static string FormatDiagnostic(SceneBuilder.Core.Validation.Diagnostic diagnostic) =>
             $"[SceneBuilder] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): {diagnostic.Message}";
 
+        // m-nested-props b7-t2: a located NestedOverrideBootstrap Conflict has no source span (it is
+        // resolved against the LIVE instance, not the parse) — reported at (0,0), same as the other
+        // unlocated-in-source Conflict kinds (e.g. MissingSourceAnchor).
+        private static SceneBuilder.Core.Validation.Diagnostic[] ToDiagnostics(
+            System.Collections.Generic.IReadOnlyList<Conflict> conflicts, string builderPath) =>
+            conflicts.Select(c => new SceneBuilder.Core.Validation.Diagnostic
+            {
+                File = builderPath,
+                Line = 0,
+                Col = 0,
+                Code = DiagnosticCodes.UnresolvedNestedSelector,
+                Severity = DiagnosticSeverity.Error,
+                Message = c.Reason,
+                Suggestion = null,
+            }).ToArray();
+
         /// <summary>
         /// Build (code-&gt;scene) against a PASSED scene + paths: parse the builder file at
         /// <paramref name="builderPath"/>, materialize a Plan against <paramref name="scene"/> and the
@@ -150,6 +167,15 @@ namespace SceneBuilder.Editor
             // not to throw here: the walk above already confirmed every type/asset/builtin resolves
             // via the SAME resolvers.
             var loaded = DesiredModelLoader.Load(source, existingMap, facadeCatalog);
+
+            // m-nested-props b7-t2: a nested override/added/removed target that could not be located
+            // against the live instance (NestedOverrideBootstrap.Resolve) is a REFUSAL, same policy as
+            // the collect-all planning pass above — scene untouched, never a silent drop/guess.
+            if (loaded.BootstrapConflicts.Count > 0)
+            {
+                return new BuildResult { Diagnostics = ToDiagnostics(loaded.BootstrapConflicts, builderPath) };
+            }
+
             var parse = loaded.Parse;
             var desired = loaded.Desired;
 
@@ -249,36 +275,13 @@ namespace SceneBuilder.Editor
                     && execution.GameObjectsByLogicalId.TryGetValue(e.LogicalId, out var instanceGo) && instanceGo != null)
                 {
                     var instanceRead = PrefabInstanceProbe.ReadInstanceRoot(instanceGo);
+                    desiredInstancesByLogicalId.TryGetValue(e.LogicalId, out var instanceNode);
 
-                    // M10/b1-t2: the instance's persisted root-target override targets + recorded
-                    // BaseValues, sorted (SubKey.TargetPrefabId, SubKey.TargetObjectId, ComponentType,
-                    // PropertyPath) for byte-stable output; null (not empty) when there are none, so
-                    // plain instances stay byte-identical. SubKey is stamped from `instanceRead.Key`
-                    // (the instance root's OWN pair-key), NOT `o.Target.SubKey` — a root override's
-                    // SubKey IS the instance's own key by the ChildPath=="" convention (tasks.md b1-t1),
-                    // and this write boundary has `instanceRead.Key` available, so persist the real
-                    // value.
-                    // b7-t1: since m-nested-props b5-t2, StructuredOverrides also carries NESTED
-                    // (below-root) entries with their OWN real `o.Target.SubKey` — this loop stamps
-                    // EVERY entry with the root's `instanceRead.Key`, which would overwrite a nested
-                    // entry's SubKey with the root's. Not fixed here (out of scope for b5-t2, which is
-                    // read-only); no existing test authors a below-root override through this
-                    // build-sidecar path, so this does not regress the current gate. b7-t1 must
-                    // discriminate root (o.Target.ChildPath == "") vs nested (persist o.Target.SubKey).
-                    var overrideRecords = instanceRead.StructuredOverrides
-                        .Select(o => new InstanceOverrideRecord
-                        {
-                            SubKey = instanceRead.Key,
-                            ComponentType = o.Target.ComponentType,
-                            PropertyPath = o.PropertyPath,
-                            Kind = "Property",
-                            BaseValue = AsString(o.BaseValue),
-                        })
-                        .OrderBy(r => r.SubKey.TargetPrefabId)
-                        .ThenBy(r => r.SubKey.TargetObjectId)
-                        .ThenBy(r => r.ComponentType, StringComparer.Ordinal)
-                        .ThenBy(r => r.PropertyPath, StringComparer.Ordinal)
-                        .ToArray();
+                    // M10/b1-t2 + m-nested-props b7-t1: EVERY read-side override/added/removed
+                    // collection (root AND nested, all Kinds), discriminated + sorted for byte-stable
+                    // output; null (not empty) when there are none, so plain instances stay
+                    // byte-identical. See SceneBuilderBuild.OverrideRecords.cs.
+                    var overrideRecords = BuildOverrideRecords(instanceRead, instanceNode, execution);
 
                     entries.Add(e with
                     {
@@ -293,8 +296,7 @@ namespace SceneBuilder.Editor
                     // matched added component (model AddedComponents[] correlated to the LIVE root-target
                     // added components by Type.FullName + ordinal). A model added component with no live
                     // match yet (executor not applied, b7-t1) is skipped — no phantom entry.
-                    if (desiredInstancesByLogicalId.TryGetValue(e.LogicalId, out var instanceNode)
-                        && instanceNode.AddedComponents.Length > 0)
+                    if (instanceNode != null && instanceNode.AddedComponents.Length > 0)
                     {
                         var liveAdded = PrefabInstanceProbe.RootAddedComponents(instanceGo);
                         var claimed = new bool[liveAdded.Length];
@@ -321,6 +323,16 @@ namespace SceneBuilder.Editor
                                 break;
                             }
                         }
+                    }
+
+                    // m-nested-props b7-t1: an added child (below-root, create-with-payload) is a
+                    // genuine new scene object like an added root component — splice its own
+                    // Kind="GameObject"/"Component" Entries[] so it keeps a stable GlobalObjectId
+                    // across reload (CollectIdentityEntries never walks AddedGameObjects). A model
+                    // added child with no live match yet (executor not applied) is skipped.
+                    if (instanceNode != null && instanceNode.AddedGameObjects.Length > 0)
+                    {
+                        entries.AddRange(AddedChildEntries(instanceNode, e.LogicalId, execution));
                     }
 
                     continue;

@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using SceneBuilder.Core.Facades;
 
 namespace SceneBuilder.Core.Reconcile
 {
@@ -190,9 +191,8 @@ namespace SceneBuilder.Core.Reconcile
 
         // ---- Shared: find-or-match an `.On` invocation by resolved-child selector key -----------
 
-        // Scans the statement for `.On(...)` invocations (2 args) whose selector normalises to
-        // matchKey — a typed lambda member-chain OR a string literal, both "/"-joined, per
-        // NormalizeSelectorKey. Matches the resolved durable child, NOT literal selector text or
+        // Scans the statement for `.On(...)` invocations (2 args) whose selector matches matchKey
+        // per SelectorKeyMatches. Matches the resolved durable child, NOT literal selector text or
         // `.On` call/span order.
         private static InvocationExpressionSyntax? FindExistingOn(StatementSyntax statement, string matchKey)
         {
@@ -201,13 +201,24 @@ namespace SceneBuilder.Core.Reconcile
                 .FirstOrDefault(inv => inv.Expression is MemberAccessExpressionSyntax member
                     && member.Name.Identifier.Text == "On"
                     && inv.ArgumentList.Arguments.Count == 2
-                    && NormalizeSelectorKey(inv.ArgumentList.Arguments[0].Expression) == matchKey);
+                    && SelectorKeyMatches(inv.ArgumentList.Arguments[0].Expression, matchKey));
         }
 
-        // Mirrors BuilderParser.Facade.cs's TryReadSelectorSegments spine-walk: a typed lambda's
-        // member-chain identifier segments (outer->inner walk, reversed) joined by "/"; a string
-        // literal used verbatim (already "/"-separated).
-        private static string NormalizeSelectorKey(ExpressionSyntax arg0)
+        // matchKey is always RealName-joined (b4-t2 sets it from the FacadeCatalog-resolved
+        // ChildPath — see ReconcilerInstances.Nested.cs). A `.On` selector's two source forms carry
+        // the child's name in two different alphabets, so each compares against matchKey
+        // differently:
+        //   - typed lambda (`sel => sel.Chassis.FrontWheel`): its identifiers ARE PropertyName
+        //     segments (sanitized C# identifiers), never RealName. Sanitize each matchKey segment
+        //     with the EXACT SAME allocator input rule the catalog builder used
+        //     (FacadeCatalogBuilder.SanitizeIdentifier — reused, not reimplemented) and compare
+        //     segment-by-segment. (Does not re-run the catalog's dedup-suffix allocation, which
+        //     needs sibling context this catalog-free applier does not have; ordinal identifier
+        //     sanitization alone is what diverges for the common space/punctuation case and is
+        //     what this fix targets.)
+        //   - string literal (`.On("Chassis/Front Wheel", ...)`): already RealName-joined verbatim
+        //     — matches matchKey byte-for-byte, unchanged from before this fix.
+        private static bool SelectorKeyMatches(ExpressionSyntax arg0, string matchKey)
         {
             if (arg0 is SimpleLambdaExpressionSyntax { Body: ExpressionSyntax body })
             {
@@ -219,12 +230,13 @@ namespace SceneBuilder.Core.Reconcile
                     current = memberAccess.Expression;
                 }
 
-                return string.Join("/", segments);
+                var sanitizedMatchKeySegments = matchKey.Split('/').Select(FacadeCatalogBuilder.SanitizeIdentifier);
+                return segments.SequenceEqual(sanitizedMatchKeySegments, StringComparer.Ordinal);
             }
 
             if (arg0 is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
             {
-                return literal.Token.ValueText;
+                return literal.Token.ValueText == matchKey;
             }
 
             throw Fail(arg0, "Unsupported .On(...) selector form; expected a typed member-chain lambda or a string literal.");

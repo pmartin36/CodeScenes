@@ -9,5 +9,6 @@ namespace SceneBuilder.Core.Validation
         public const string DuplicateLogicalId = "SB2202";
         public const string UnknownFacadeReference = "SB2203";
         public const string PrefabOverridesNotModelled = "SB2301";
+        public const string UnresolvedNestedSelector = "SB2302";
     }
 }

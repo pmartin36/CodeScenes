@@ -40,12 +40,14 @@ namespace SceneBuilder.Editor
                 SceneModel desired,
                 ParseResult parse,
                 IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> fieldArgumentSpans,
-                IReadOnlyList<AssetEntry> harvestedAssets)
+                IReadOnlyList<AssetEntry> harvestedAssets,
+                IReadOnlyList<Conflict> bootstrapConflicts)
             {
                 Desired = desired;
                 Parse = parse;
                 FieldArgumentSpans = fieldArgumentSpans;
                 HarvestedAssets = harvestedAssets;
+                BootstrapConflicts = bootstrapConflicts;
             }
 
             /// <summary>
@@ -75,6 +77,14 @@ namespace SceneBuilder.Editor
             /// source.
             /// </summary>
             public IReadOnlyList<AssetEntry> HarvestedAssets { get; }
+
+            /// <summary>
+            /// m-nested-props b7-t2: located conflicts from <see cref="NestedOverrideBootstrap.Resolve"/>
+            /// — a nested override/added/removed target whose <c>ChildPath</c> resolved to no live
+            /// sub-object under a LIVE prefab instance root. Empty when nothing was located (including
+            /// when <c>existingMap</c> was null — no sidecar means no instance is live yet).
+            /// </summary>
+            public IReadOnlyList<Conflict> BootstrapConflicts { get; }
         }
 
         /// <summary>
@@ -115,6 +125,18 @@ namespace SceneBuilder.Editor
             var prefabLowered = PrefabRefLowering.Lower(desired, assetResolver.ResolvePrefabSource);
             desired = prefabLowered.Model;
 
+            // m-nested-props b7-t2: stamp every nested (below-root) Target's real SubKey from its live
+            // sub-object BEFORE Rehydrate (so BaseValue disambiguation, spec #13, sees real keys) and
+            // BEFORE any diff/materialize/reconcile (so a converged nested override neither erases on
+            // rebuild nor churns on sync — see NestedOverrideBootstrap). Wired ONCE here so BOTH
+            // directions inherit it by default. Guarded on existingMap != null: no sidecar means no
+            // instance is live yet, so there is nothing to resolve against.
+            IReadOnlyList<Conflict> bootstrapConflicts = System.Array.Empty<Conflict>();
+            if (existingMap is not null)
+            {
+                desired = NestedOverrideBootstrap.Resolve(desired, existingMap, out bootstrapConflicts);
+            }
+
             // M10 (b6-t2 rehydrate seam): thread each persisted InstanceOverrideRecord.BaseValue back
             // onto the matching desired PropertyOverride.BaseValue, so DetectStaleOverrides sees a
             // non-null desired BaseValue through the real adapter, not just hand-built Core POCOs.
@@ -124,7 +146,7 @@ namespace SceneBuilder.Editor
                 desired = InstanceOverrideRehydrator.Rehydrate(desired, existingMap);
             }
 
-            return new Loaded(desired, parse, spans, assetResolver.Harvested);
+            return new Loaded(desired, parse, spans, assetResolver.Harvested, bootstrapConflicts);
         }
     }
 }

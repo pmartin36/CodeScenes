@@ -603,6 +603,50 @@ public class ExistingStringOnScene : ISceneDefinition
             Assert.Equal(1, CountOccurrences(result, ".On("));
         }
 
+        // Regression (m-nested-props final scope review, bucket-b4.md / scope/final.md): the emit
+        // side (b4-t2, ReconcilerInstances.Nested.cs) always sets SelectorMatchKey from the
+        // FacadeCatalog-resolved ChildPath, which is RealName-joined (e.g. "Chassis/Front Wheel"),
+        // while an existing typed `.On(sel => sel.Chassis.FrontWheel, ...)` selector's
+        // NormalizeSelectorKey is PropertyName-joined ("Chassis/FrontWheel") — the sanitized C#
+        // identifier, not the raw child name. For a child whose RealName needs sanitizing (a space,
+        // punctuation, or a deduped sibling — "Front Wheel" -> "FrontWheel"), FindExistingOn MUST
+        // still match the existing typed `.On` against the RealName-joined key, never emitting a
+        // second `.On` for the same sub-object (spec #15 / behavior #10).
+        [Fact]
+        public void Reconcile_TwoEditsSameSubObject_DivergentRealNameVsPropertyName_AppendsInsideExistingOn_NotDuplicate()
+        {
+            const string source = @"
+public class DivergentNameOnScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"").On(sel => sel.Chassis.FrontWheel, x => x.Override(e => e.Set<AudioSource>(""m_Volume"", 0.5f)));
+    }
+}
+";
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendScopedOn
+                    {
+                        Anchor = "enemy",
+                        SelectorMatchKey = "Chassis/Front Wheel",
+                        Ops = new ScopedOp[] { new ScopedAddComponentOp { TypeFullName = "AudioSource" } },
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.Equal(1, CountOccurrences(result, ".On("));
+            Assert.Contains(
+                ".On(sel => sel.Chassis.FrontWheel, x => x.Override(e => e.Set<AudioSource>(\"m_Volume\", 0.5f)).AddComponent<AudioSource>());\n",
+                result);
+        }
+
         [Fact]
         public void Reconcile_RevertNestedOp_DropsFromOn_DropsEmptyOn()
         {
@@ -649,6 +693,131 @@ public class ExistingStringOnScene : ISceneDefinition
 
             Assert.DoesNotContain(".On(", afterDropLast);
             Assert.Contains("var enemy = scene.Instance(\"Assets/Prefabs/Enemy.prefab\");", afterDropLast);
+        }
+
+        // ---- m-nested-props b4-t1 clause (d): top-level AddChild/RemoveChild (append + revert) ---
+
+        [Fact]
+        public void Apply_AppendInstanceAddChild_RendersTopLevelCall_AndReparses()
+        {
+            var source = PlainInstanceFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendInstanceAddChild
+                    {
+                        Anchor = "enemy",
+                        ParentPath = "Turret",
+                        Name = "MuzzleFlash",
+                        Node = new GameObjectNode { Name = "MuzzleFlash" },
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.Contains(".AddChild(\"Turret\", \"MuzzleFlash\")", result);
+
+            var reparsed = BuilderParser.Parse(result);
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
+            var added = Assert.Single(instance.AddedGameObjects);
+            Assert.Equal("Turret", added.Parent.ChildPath);
+            Assert.Equal("MuzzleFlash", added.Node.Name);
+        }
+
+        [Fact]
+        public void Apply_AppendInstanceRemoveChild_RendersTopLevelCall_AndReparses()
+        {
+            var source = PlainInstanceFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendInstanceRemoveChild { Anchor = "enemy", ChildPath = "Turret/Antenna" },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.Contains(".RemoveChild(\"Turret/Antenna\")", result);
+
+            var reparsed = BuilderParser.Parse(result);
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
+            var removed = Assert.Single(instance.RemovedGameObjects);
+            Assert.Equal("Turret/Antenna", removed.ChildPath);
+        }
+
+        [Fact]
+        public void Apply_DropInstanceCall_AddChild_RemovesThatChild_SiblingSurvives()
+        {
+            const string source = @"
+public class DropAddChildScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .AddChild(""Turret"", ""MuzzleFlash"")
+             .AddChild(""Turret"", ""Antenna"");
+    }
+}
+";
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new DropInstanceCall { Anchor = "enemy", Kind = InstanceCallKind.AddChild, PropertyPath = "MuzzleFlash" },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.DoesNotContain("\"MuzzleFlash\"", result);
+            Assert.Contains(".AddChild(\"Turret\", \"Antenna\")", result);
+
+            var reparsed = BuilderParser.Parse(result);
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
+            var added = Assert.Single(instance.AddedGameObjects);
+            Assert.Equal("Antenna", added.Node.Name);
+        }
+
+        [Fact]
+        public void Apply_DropInstanceCall_RemoveChild_RemovesThatCall_ReparsesClean()
+        {
+            const string source = @"
+public class DropRemoveChildScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"")
+             .RemoveChild(""Turret/Antenna"");
+    }
+}
+";
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new DropInstanceCall { Anchor = "enemy", Kind = InstanceCallKind.RemoveChild, PropertyPath = "Turret/Antenna" },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            Assert.DoesNotContain(".RemoveChild(", result);
+            Assert.Contains("var enemy = scene.Instance(\"Assets/Prefabs/Enemy.prefab\");", result);
+
+            var reparsed = BuilderParser.Parse(result);
+            var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
+            Assert.Empty(instance.RemovedGameObjects);
         }
 
         private const string TwoOpOnFixture = @"

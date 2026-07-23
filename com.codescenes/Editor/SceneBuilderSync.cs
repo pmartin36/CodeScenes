@@ -175,7 +175,14 @@ namespace SceneBuilder.Editor
                 handles: parse.Handles,
                 facadeCatalog: facadeCatalog);
 
-            foreach (var c in result.Conflicts)
+            // m-nested-props b7-t2: a NestedOverrideBootstrap Conflict (below-root target with no live
+            // sub-object) is folded in here — the SAME located-conflict channel the reconcile itself
+            // surfaces, never a silent drop.
+            var conflicts = loaded.BootstrapConflicts.Count > 0
+                ? loaded.BootstrapConflicts.Concat(result.Conflicts).ToArray()
+                : result.Conflicts;
+
+            foreach (var c in conflicts)
             {
                 Debug.LogWarning($"[SceneBuilder] Conflict ({c.Kind}) on '{c.LogicalId}': {c.Reason}");
             }
@@ -202,7 +209,7 @@ namespace SceneBuilder.Editor
                 Debug.Log("[SceneBuilder] Scene already matches code — nothing to sync.");
                 return new SyncResult
                 {
-                    Conflicts = result.Conflicts,
+                    Conflicts = conflicts,
                     Changed = false,
                     PatchEdits = result.Patch.Edits.Length,
                 };
@@ -264,7 +271,7 @@ namespace SceneBuilder.Editor
             {
                 EditsApplied = editsApplied,
                 PatchEdits = result.Patch.Edits.Length,
-                Conflicts = result.Conflicts,
+                Conflicts = conflicts,
                 AddedEntries = result.AddedEntries.Length,
                 RemovedEntries = result.RemovedLogicalIds.Length,
                 // Changed means BYTES CHANGED ON DISK, and nothing else. Deriving it from intent
@@ -472,7 +479,14 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            foreach (var c in applicable.Conflicts)
+            // m-nested-props b7-t2: fold newLoaded's NestedOverrideBootstrap conflicts in — `applicable`
+            // reconciles `newLoaded.Desired`, so its below-root targets are the ones that may have
+            // failed to resolve against the live instance.
+            var syncConflicts = newLoaded.BootstrapConflicts.Count > 0
+                ? newLoaded.BootstrapConflicts.Concat(applicable.Conflicts).ToArray()
+                : applicable.Conflicts;
+
+            foreach (var c in syncConflicts)
             {
                 Debug.LogWarning($"[SceneBuilder] Conflict ({c.Kind}) on '{c.LogicalId}': {c.Reason}");
             }
@@ -484,7 +498,7 @@ namespace SceneBuilder.Editor
             var result = new SyncResult
             {
                 PatchEdits = applicable.Patch.Edits.Length,
-                Conflicts = applicable.Conflicts,
+                Conflicts = syncConflicts,
                 ConflictFields = conflicts.Select(c => $"{c.Key.Group}.{c.Key.Field}").ToArray(),
             };
 

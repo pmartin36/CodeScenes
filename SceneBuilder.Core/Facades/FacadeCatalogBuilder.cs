@@ -127,7 +127,12 @@ namespace SceneBuilder.Core.Facades
             "using", "virtual", "void", "volatile", "while",
         };
 
-        private static string SanitizeIdentifier(string raw)
+        // internal (not private): SourcePatchApplier.ScopedOn.cs (m-nested-props b4-t1) reuses this
+        // verbatim to sanitize a RealName-joined SelectorMatchKey segment for comparison against a
+        // typed `.On` selector's PropertyName identifiers — the two must agree byte-for-byte with
+        // how PropertyName was allocated here, or a divergent-name child's find-or-create match
+        // silently misses and duplicates the `.On(...)` block.
+        internal static string SanitizeIdentifier(string raw)
         {
             var sb = new StringBuilder(string.IsNullOrEmpty(raw) ? 1 : raw.Length);
             for (var i = 0; i < raw.Length; i++)
