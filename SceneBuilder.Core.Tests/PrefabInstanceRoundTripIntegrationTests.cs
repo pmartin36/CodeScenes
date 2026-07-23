@@ -53,7 +53,7 @@ public class RoundTripScene : ISceneDefinition
             };
 
             // ---- Arrange: the desired model — same instance, now carrying overrides -------------
-            var scalarTarget = new OverrideTarget { PrefabId = "type:UnityEngine.BoxCollider", ObjectId = 0 };
+            var scalarTarget = new OverrideTarget { ComponentType = "UnityEngine.BoxCollider" };
             var scalarOverride = new PropertyOverride
             {
                 Target = scalarTarget,
@@ -61,7 +61,7 @@ public class RoundTripScene : ISceneDefinition
                 Value = ValueNode.Primitive.Int(50),
             };
 
-            var materialTarget = new OverrideTarget { PrefabId = "type:UnityEngine.MeshRenderer", ObjectId = 0 };
+            var materialTarget = new OverrideTarget { ComponentType = "UnityEngine.MeshRenderer" };
             // No Guid: an authored `.Override(... Asset("path"))` call never carries one in source —
             // the GUID is adapter-resolved on sync, not stored literally in code.
             var materialRef = new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/Materials/Enemy.mat" });
@@ -79,7 +79,7 @@ public class RoundTripScene : ISceneDefinition
                 Component = new ComponentData { LogicalId = "enemy/UnityEngine.Light#0", Type = new TypeRef("UnityEngine.Light") },
             };
 
-            var removedTarget = new OverrideTarget { PrefabId = "type:UnityEngine.AudioSource", ObjectId = 0 };
+            var removedTarget = new OverrideTarget { ComponentType = "UnityEngine.AudioSource" };
 
             var desiredInstance = baseInstance with
             {

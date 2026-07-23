@@ -300,7 +300,7 @@ public class TargetedInstanceScene : ISceneDefinition
             var reparsed = BuilderParser.Parse(result);
             var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
             var removed = Assert.Single(instance.RemovedComponents);
-            Assert.Equal("type:UnityEngine.BoxCollider", removed.PrefabId);
+            Assert.Equal("UnityEngine.BoxCollider", removed.ComponentType);
         }
 
         [Fact]
@@ -415,7 +415,7 @@ public class DropAddComponentScene : ISceneDefinition
             var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(reparsed.Model.Roots));
             Assert.Empty(instance.AddedComponents);
             var removed = Assert.Single(instance.RemovedComponents);
-            Assert.Equal("type:BoxCollider", removed.PrefabId);
+            Assert.Equal("BoxCollider", removed.ComponentType);
         }
 
         [Fact]

@@ -82,7 +82,7 @@ namespace SceneBuilder.Core.Tests
                 $"expected a location marker in message: {ex.Message}");
         }
 
-        private static readonly OverrideTarget SampleTarget = new() { PrefabId = "guid-prefab-1", ObjectId = 42 };
+        private static readonly OverrideTarget SampleTarget = new() { ComponentType = "guid-prefab-1", SubKey = new PrefabInstanceKey { TargetObjectId = 42 } };
 
         private static Plan.Plan PlanWith(PlanOp op) => new Plan.Plan
         {

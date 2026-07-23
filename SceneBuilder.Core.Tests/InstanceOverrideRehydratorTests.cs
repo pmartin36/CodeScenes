@@ -20,10 +20,10 @@ namespace SceneBuilder.Core.Tests
                 Overrides = overrides,
             };
 
-        private static PropertyOverride Override(string prefabId, long objectId, string propertyPath, ValueNode? baseValue = null) =>
+        private static PropertyOverride Override(string componentType, string propertyPath, ValueNode? baseValue = null) =>
             new PropertyOverride
             {
-                Target = new OverrideTarget { PrefabId = prefabId, ObjectId = objectId },
+                Target = new OverrideTarget { ComponentType = componentType },
                 PropertyPath = propertyPath,
                 Value = ValueNode.Primitive.Bool(true),
                 BaseValue = baseValue,
@@ -51,15 +51,15 @@ namespace SceneBuilder.Core.Tests
                 SchemaVersion = 1,
                 Roots = new GameObjectNode[]
                 {
-                    Instance("instance-1", new[] { Override("type:UnityEngine.BoxCollider", 0, "m_IsTrigger") }),
+                    Instance("instance-1", new[] { Override("UnityEngine.BoxCollider", "m_IsTrigger") }),
                 },
             };
             var sidecar = Sidecar("instance-1", "PrefabInstance", new[]
             {
                 new InstanceOverrideRecord
                 {
-                    PrefabId = "type:UnityEngine.BoxCollider",
-                    ObjectId = 0,
+                    ComponentType = "UnityEngine.BoxCollider",
+                    Kind = "Property",
                     PropertyPath = "m_IsTrigger",
                     BaseValue = "0",
                 },
@@ -72,22 +72,22 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
-        public void Rehydrate_MismatchedPrefabId_LeavesBaseValueNull()
+        public void Rehydrate_MismatchedComponentType_LeavesBaseValueNull()
         {
             var model = new SceneModel
             {
                 SchemaVersion = 1,
                 Roots = new GameObjectNode[]
                 {
-                    Instance("instance-1", new[] { Override("type:UnityEngine.BoxCollider", 0, "m_IsTrigger") }),
+                    Instance("instance-1", new[] { Override("UnityEngine.BoxCollider", "m_IsTrigger") }),
                 },
             };
             var sidecar = Sidecar("instance-1", "PrefabInstance", new[]
             {
                 new InstanceOverrideRecord
                 {
-                    PrefabId = "type:UnityEngine.SphereCollider",
-                    ObjectId = 0,
+                    ComponentType = "UnityEngine.SphereCollider",
+                    Kind = "Property",
                     PropertyPath = "m_IsTrigger",
                     BaseValue = "0",
                 },
@@ -107,15 +107,15 @@ namespace SceneBuilder.Core.Tests
                 SchemaVersion = 1,
                 Roots = new GameObjectNode[]
                 {
-                    Instance("instance-1", new[] { Override("type:UnityEngine.BoxCollider", 0, "m_IsTrigger") }),
+                    Instance("instance-1", new[] { Override("UnityEngine.BoxCollider", "m_IsTrigger") }),
                 },
             };
             var sidecar = Sidecar("instance-1", "PrefabInstance", new[]
             {
                 new InstanceOverrideRecord
                 {
-                    PrefabId = "type:UnityEngine.BoxCollider",
-                    ObjectId = 0,
+                    ComponentType = "UnityEngine.BoxCollider",
+                    Kind = "Property",
                     PropertyPath = "m_Enabled",
                     BaseValue = "0",
                 },
@@ -135,7 +135,7 @@ namespace SceneBuilder.Core.Tests
                 SchemaVersion = 1,
                 Roots = new GameObjectNode[]
                 {
-                    Instance("instance-1", new[] { Override("type:UnityEngine.BoxCollider", 0, "m_IsTrigger") }),
+                    Instance("instance-1", new[] { Override("UnityEngine.BoxCollider", "m_IsTrigger") }),
                 },
             };
             var sidecar = Sidecar("instance-1", "PrefabInstance", null);
@@ -154,15 +154,15 @@ namespace SceneBuilder.Core.Tests
                 SchemaVersion = 1,
                 Roots = new GameObjectNode[]
                 {
-                    Instance("instance-1", new[] { Override("type:UnityEngine.BoxCollider", 0, "m_IsTrigger") }),
+                    Instance("instance-1", new[] { Override("UnityEngine.BoxCollider", "m_IsTrigger") }),
                 },
             };
             var sidecar = Sidecar("instance-OTHER", "PrefabInstance", new[]
             {
                 new InstanceOverrideRecord
                 {
-                    PrefabId = "type:UnityEngine.BoxCollider",
-                    ObjectId = 0,
+                    ComponentType = "UnityEngine.BoxCollider",
+                    Kind = "Property",
                     PropertyPath = "m_IsTrigger",
                     BaseValue = "0",
                 },
@@ -183,15 +183,15 @@ namespace SceneBuilder.Core.Tests
                 SchemaVersion = 1,
                 Roots = new GameObjectNode[]
                 {
-                    Instance("instance-1", new[] { Override("type:UnityEngine.BoxCollider", 0, "m_IsTrigger", existing) }),
+                    Instance("instance-1", new[] { Override("UnityEngine.BoxCollider", "m_IsTrigger", existing) }),
                 },
             };
             var sidecar = Sidecar("instance-1", "PrefabInstance", new[]
             {
                 new InstanceOverrideRecord
                 {
-                    PrefabId = "type:UnityEngine.BoxCollider",
-                    ObjectId = 0,
+                    ComponentType = "UnityEngine.BoxCollider",
+                    Kind = "Property",
                     PropertyPath = "m_IsTrigger",
                     BaseValue = "0",
                 },

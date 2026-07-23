@@ -76,9 +76,9 @@ public class PlanExecutorInstanceOverrideTests
         }
     }
 
-    private static OverrideTarget BoxColliderTarget => new() { PrefabId = "type:UnityEngine.BoxCollider", ObjectId = 0 };
-    private static OverrideTarget LightTarget => new() { PrefabId = "type:UnityEngine.Light", ObjectId = 0 };
-    private static OverrideTarget DoorOpenerTarget => new() { PrefabId = "type:DoorOpener", ObjectId = 0 };
+    private static OverrideTarget BoxColliderTarget => new() { ComponentType = "UnityEngine.BoxCollider" };
+    private static OverrideTarget LightTarget => new() { ComponentType = "UnityEngine.Light" };
+    private static OverrideTarget DoorOpenerTarget => new() { ComponentType = "DoorOpener" };
 
     // Instantiates the fixture prefab (own Execute call, empty IdentityMap — mirrors
     // PlanExecutorInstantiatePrefabTests) and saves the scene (GlobalObjectId requires a saved

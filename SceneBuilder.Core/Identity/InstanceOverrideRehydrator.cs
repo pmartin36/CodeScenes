@@ -17,7 +17,7 @@ namespace SceneBuilder.Core.Identity
         /// Rebuilds <paramref name="model"/> so that every <see cref="PropertyOverride"/> on a
         /// <see cref="PrefabInstanceNode"/> whose <c>BaseValue</c> is currently null gets it filled in
         /// from the matching <paramref name="sidecar"/> entry's <see cref="InstanceOverrideRecord"/>
-        /// (matched by <c>LogicalId</c> + <c>(PrefabId, ObjectId, PropertyPath)</c>), never clobbering an
+        /// (matched by <c>LogicalId</c> + <c>(ComponentType, PropertyPath)</c>), never clobbering an
         /// already-set BaseValue. No-ops when there is no match.
         /// </summary>
         public static SceneModel Rehydrate(SceneModel model, IdentityMap sidecar)
@@ -45,7 +45,7 @@ namespace SceneBuilder.Core.Identity
                 }
 
                 var lookup = entry.Overrides.ToDictionary(
-                    r => (r.PrefabId, r.ObjectId, r.PropertyPath),
+                    r => (r.ComponentType, r.PropertyPath),
                     r => r.BaseValue);
 
                 return instance with
@@ -61,14 +61,14 @@ namespace SceneBuilder.Core.Identity
 
         private static PropertyOverride RehydrateOverride(
             PropertyOverride @override,
-            IReadOnlyDictionary<(string PrefabId, long ObjectId, string PropertyPath), string?> lookup)
+            IReadOnlyDictionary<(string ComponentType, string PropertyPath), string?> lookup)
         {
             if (@override.BaseValue is not null)
             {
                 return @override;
             }
 
-            var key = (@override.Target.PrefabId, @override.Target.ObjectId, @override.PropertyPath);
+            var key = (@override.Target.ComponentType, @override.PropertyPath);
             if (!lookup.TryGetValue(key, out var baseValue) || baseValue is null)
             {
                 return @override;

@@ -250,19 +250,27 @@ namespace SceneBuilder.Editor
                 {
                     var instanceRead = PrefabInstanceProbe.ReadInstanceRoot(instanceGo);
 
-                    // M10 (b6-t2): the instance's persisted root-target override targets + recorded
-                    // BaseValues, sorted (PrefabId, ObjectId, PropertyPath) for byte-stable output; null
-                    // (not empty) when there are none, so plain instances stay byte-identical.
+                    // M10/b1-t2: the instance's persisted root-target override targets + recorded
+                    // BaseValues, sorted (SubKey.TargetPrefabId, SubKey.TargetObjectId, ComponentType,
+                    // PropertyPath) for byte-stable output; null (not empty) when there are none, so
+                    // plain instances stay byte-identical. SubKey is stamped from `instanceRead.Key`
+                    // (the instance root's OWN pair-key), NOT `o.Target.SubKey` — PrefabInstanceProbe
+                    // still reads root-target overrides with SubKey=(0,0) (b5-t2 resolves the live
+                    // per-target SubKey; out of scope here), but a root override's SubKey IS the
+                    // instance's own key by the ChildPath=="" convention (tasks.md b1-t1), and this
+                    // write boundary has `instanceRead.Key` available, so persist the real value.
                     var overrideRecords = instanceRead.StructuredOverrides
                         .Select(o => new InstanceOverrideRecord
                         {
-                            PrefabId = o.Target.PrefabId,
-                            ObjectId = o.Target.ObjectId,
+                            SubKey = instanceRead.Key,
+                            ComponentType = o.Target.ComponentType,
                             PropertyPath = o.PropertyPath,
+                            Kind = "Property",
                             BaseValue = AsString(o.BaseValue),
                         })
-                        .OrderBy(r => r.PrefabId, StringComparer.Ordinal)
-                        .ThenBy(r => r.ObjectId)
+                        .OrderBy(r => r.SubKey.TargetPrefabId)
+                        .ThenBy(r => r.SubKey.TargetObjectId)
+                        .ThenBy(r => r.ComponentType, StringComparer.Ordinal)
                         .ThenBy(r => r.PropertyPath, StringComparer.Ordinal)
                         .ToArray();
 

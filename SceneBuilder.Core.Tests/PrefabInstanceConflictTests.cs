@@ -70,7 +70,7 @@ public class MixedScene : ISceneDefinition
             ValueNode? desiredBase, ValueNode desiredValue,
             ValueNode? snapshotBase, ValueNode snapshotValue)
         {
-            var target = new OverrideTarget { PrefabId = "prefab-guid-1", ObjectId = 12345 };
+            var target = new OverrideTarget { ComponentType = "prefab-guid-1", SubKey = new PrefabInstanceKey { TargetObjectId = 12345 } };
 
             var desired = new PrefabInstanceNode
             {

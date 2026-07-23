@@ -22,7 +22,7 @@ namespace SceneBuilder.Core.Model
         public OverrideTarget[] RemovedComponents { get; init; } = Array.Empty<OverrideTarget>();
 
         [JsonPropertyOrder(14)]
-        public GameObjectNode[] AddedGameObjects { get; init; } = Array.Empty<GameObjectNode>();
+        public AddedGameObject[] AddedGameObjects { get; init; } = Array.Empty<AddedGameObject>();
 
         [JsonPropertyOrder(15)]
         public OverrideTarget[] RemovedGameObjects { get; init; } = Array.Empty<OverrideTarget>();

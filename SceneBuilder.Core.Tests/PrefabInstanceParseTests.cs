@@ -251,8 +251,8 @@ public class OverrideScene : ISceneDefinition
             var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
             var propertyOverride = Assert.Single(instance.Overrides);
 
-            Assert.Equal("type:Health", propertyOverride.Target.PrefabId);
-            Assert.Equal(0, propertyOverride.Target.ObjectId);
+            Assert.Equal("Health", propertyOverride.Target.ComponentType);
+            Assert.Equal(new PrefabInstanceKey(), propertyOverride.Target.SubKey);
             Assert.Equal("member:health", propertyOverride.PropertyPath);
             Assert.Equal(ValueNode.Primitive.Int(50), propertyOverride.Value);
             Assert.Null(propertyOverride.ObjectReference);
@@ -267,7 +267,7 @@ public class OverrideScene : ISceneDefinition
             var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
             var propertyOverride = Assert.Single(instance.Overrides);
 
-            Assert.Equal("type:BoxCollider", propertyOverride.Target.PrefabId);
+            Assert.Equal("BoxCollider", propertyOverride.Target.ComponentType);
             Assert.Equal("m_Center.x", propertyOverride.PropertyPath);
             Assert.Equal(ValueNode.Primitive.Float(1.0f), propertyOverride.Value);
         }
@@ -343,15 +343,15 @@ public class OverrideScene : ISceneDefinition
         }
 
         [Fact]
-        public void Parse_RemoveComponent_YieldsTypeSigilRemovedTarget()
+        public void Parse_RemoveComponent_YieldsRootTarget()
         {
             var result = BuilderParser.Parse(RemoveComponentSource);
 
             var instance = Assert.IsType<PrefabInstanceNode>(Assert.Single(result.Model.Roots));
             var removed = Assert.Single(instance.RemovedComponents);
 
-            Assert.Equal("type:BoxCollider", removed.PrefabId);
-            Assert.Equal(0, removed.ObjectId);
+            Assert.Equal("BoxCollider", removed.ComponentType);
+            Assert.Equal(new PrefabInstanceKey(), removed.SubKey);
         }
 
         [Fact]

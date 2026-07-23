@@ -54,46 +54,73 @@ namespace SceneBuilder.Core.Serialization
         }
     }
 
-    // PropertyOverride[]: sort by (Target.PrefabId ordinal, Target.ObjectId, PropertyPath ordinal).
+    // PropertyOverride[]: sort by (Target.SubKey.TargetPrefabId, Target.SubKey.TargetObjectId,
+    // Target.ComponentType ordinal, PropertyPath ordinal).
     internal sealed class PropertyOverrideArrayConverter : CanonicalArrayConverter<PropertyOverride>
     {
         protected override int Compare(PropertyOverride a, PropertyOverride b)
         {
-            var cmp = string.CompareOrdinal(a.Target.PrefabId, b.Target.PrefabId);
+            var cmp = a.Target.SubKey.TargetPrefabId.CompareTo(b.Target.SubKey.TargetPrefabId);
             if (cmp != 0) return cmp;
 
-            cmp = a.Target.ObjectId.CompareTo(b.Target.ObjectId);
+            cmp = a.Target.SubKey.TargetObjectId.CompareTo(b.Target.SubKey.TargetObjectId);
+            if (cmp != 0) return cmp;
+
+            cmp = string.CompareOrdinal(a.Target.ComponentType, b.Target.ComponentType);
             if (cmp != 0) return cmp;
 
             return string.CompareOrdinal(a.PropertyPath, b.PropertyPath);
         }
     }
 
-    // AddedComponent[]: sort by (Target.PrefabId ordinal, Target.ObjectId, Component.Type.FullName ordinal).
+    // AddedComponent[]: sort by (Target.SubKey.TargetPrefabId, Target.SubKey.TargetObjectId,
+    // Target.ComponentType ordinal, Component.Type.FullName ordinal).
     internal sealed class AddedComponentArrayConverter : CanonicalArrayConverter<AddedComponent>
     {
         protected override int Compare(AddedComponent a, AddedComponent b)
         {
-            var cmp = string.CompareOrdinal(a.Target.PrefabId, b.Target.PrefabId);
+            var cmp = a.Target.SubKey.TargetPrefabId.CompareTo(b.Target.SubKey.TargetPrefabId);
             if (cmp != 0) return cmp;
 
-            cmp = a.Target.ObjectId.CompareTo(b.Target.ObjectId);
+            cmp = a.Target.SubKey.TargetObjectId.CompareTo(b.Target.SubKey.TargetObjectId);
+            if (cmp != 0) return cmp;
+
+            cmp = string.CompareOrdinal(a.Target.ComponentType, b.Target.ComponentType);
             if (cmp != 0) return cmp;
 
             return string.CompareOrdinal(a.Component.Type.FullName, b.Component.Type.FullName);
         }
     }
 
-    // OverrideTarget[]: sort by (PrefabId ordinal, ObjectId). Covers RemovedComponents AND
-    // RemovedGameObjects (both are OverrideTarget[]).
+    // OverrideTarget[]: sort by (SubKey.TargetPrefabId, SubKey.TargetObjectId, ComponentType ordinal).
+    // Covers RemovedComponents AND RemovedGameObjects (both are OverrideTarget[]).
     internal sealed class OverrideTargetArrayConverter : CanonicalArrayConverter<OverrideTarget>
     {
         protected override int Compare(OverrideTarget a, OverrideTarget b)
         {
-            var cmp = string.CompareOrdinal(a.PrefabId, b.PrefabId);
+            var cmp = a.SubKey.TargetPrefabId.CompareTo(b.SubKey.TargetPrefabId);
             if (cmp != 0) return cmp;
 
-            return a.ObjectId.CompareTo(b.ObjectId);
+            cmp = a.SubKey.TargetObjectId.CompareTo(b.SubKey.TargetObjectId);
+            if (cmp != 0) return cmp;
+
+            return string.CompareOrdinal(a.ComponentType, b.ComponentType);
+        }
+    }
+
+    // AddedGameObject[]: sort by (Parent.SubKey.TargetPrefabId, Parent.SubKey.TargetObjectId,
+    // Node.Name ordinal). Parent.ChildPath never participates.
+    internal sealed class AddedGameObjectArrayConverter : CanonicalArrayConverter<AddedGameObject>
+    {
+        protected override int Compare(AddedGameObject a, AddedGameObject b)
+        {
+            var cmp = a.Parent.SubKey.TargetPrefabId.CompareTo(b.Parent.SubKey.TargetPrefabId);
+            if (cmp != 0) return cmp;
+
+            cmp = a.Parent.SubKey.TargetObjectId.CompareTo(b.Parent.SubKey.TargetObjectId);
+            if (cmp != 0) return cmp;
+
+            return string.CompareOrdinal(a.Node.Name, b.Node.Name);
         }
     }
 }

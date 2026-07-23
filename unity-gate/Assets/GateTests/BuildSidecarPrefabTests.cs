@@ -212,7 +212,7 @@ public class BuildSidecarPrefabScene : ISceneDefinition
             "Added-component entry's GlobalObjectId did not match the live component");
     }
 
-    // b6-t2: a root-target property override's (PrefabId, ObjectId, PropertyPath) pair-key + recorded
+    // b6-t2/b1-t2: a root-target property override's (SubKey, ComponentType, PropertyPath) + recorded
     // BaseValue must persist onto the instance's own sidecar entry, so the target stays addressable
     // across reload and a future rebuild can stale-check against the recorded BaseValue (b3-t3).
     [Test]
@@ -249,16 +249,20 @@ public class BuildSidecarPrefabScene : ISceneDefinition
             "Instance entry has no persisted Overrides[].\n" + File.ReadAllText(_sidecarPath));
         var ov = entry.Overrides.SingleOrDefault(o => o.PropertyPath == "m_IsTrigger");
         Assert.IsNotNull(ov, "Persisted Overrides[] has no record for m_IsTrigger");
-        Assert.AreEqual("type:UnityEngine.BoxCollider", ov.PrefabId,
-            "Persisted override record PrefabId must carry the type sigil (root v0)");
-        Assert.AreEqual(0, ov.ObjectId, "Persisted override record ObjectId must be 0 (root v0)");
+        Assert.AreEqual("UnityEngine.BoxCollider", ov.ComponentType,
+            "Persisted override record ComponentType must carry the component's FullName");
+        Assert.AreEqual("Property", ov.Kind, "Persisted override record Kind must be \"Property\"");
+        Assert.AreEqual(entry.PrefabKey.TargetPrefabId, ov.SubKey.TargetPrefabId,
+            "Persisted override record SubKey must match the instance's own root pair-key");
+        Assert.AreEqual(entry.PrefabKey.TargetObjectId, ov.SubKey.TargetObjectId,
+            "Persisted override record SubKey must match the instance's own root pair-key");
         Assert.AreEqual("0", ov.BaseValue,
             "Persisted override record BaseValue did not match the source prefab's current default (false -> \"0\")");
     }
 
-    // b6-t2: the override target's (PrefabId, ObjectId) pair key must resolve identically across
-    // repeated builds ("the same pair key" — DELIVERABLE) — it is deterministic by construction
-    // (the type sigil, v0), so a second rebuild must persist the identical pair.
+    // b6-t2/b1-t2: the override target's SubKey must resolve identically across repeated builds
+    // ("the same pair key" — DELIVERABLE) — it is deterministic by construction, so a second rebuild
+    // must persist the identical SubKey.
     [Test]
     public void Run_SecondBuild_OverrideTargetPairKeyStable()
     {
@@ -294,8 +298,10 @@ public class BuildSidecarPrefabScene : ISceneDefinition
             .Overrides?.SingleOrDefault(o => o.PropertyPath == "m_IsTrigger");
         Assert.IsNotNull(secondOv, "Second rebuild did not persist the m_IsTrigger override record");
 
-        Assert.AreEqual(firstOv.PrefabId, secondOv.PrefabId, "PrefabId changed across repeated builds");
-        Assert.AreEqual(firstOv.ObjectId, secondOv.ObjectId, "ObjectId changed across repeated builds");
+        Assert.AreEqual(firstOv.SubKey.TargetPrefabId, secondOv.SubKey.TargetPrefabId,
+            "SubKey.TargetPrefabId changed across repeated builds");
+        Assert.AreEqual(firstOv.SubKey.TargetObjectId, secondOv.SubKey.TargetObjectId,
+            "SubKey.TargetObjectId changed across repeated builds");
     }
 
     // b6-t2 (iteration 3, seam fix): the persisted InstanceOverrideRecord.BaseValue must be threaded

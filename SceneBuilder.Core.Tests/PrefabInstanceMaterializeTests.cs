@@ -145,9 +145,9 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("parentB-1", setParent.ParentLogicalId);
         }
 
-        // b3-t2: instance-override diff + materialize. Target key is the (PrefabId, ObjectId) pair,
+        // b3-t2: instance-override diff + materialize. Target key is (SubKey, ComponentType),
         // independent of the instance's own LogicalId/SourcePrefab.
-        private static OverrideTarget Target() => new() { PrefabId = "prefab-guid-1", ObjectId = 12345 };
+        private static OverrideTarget Target() => new() { ComponentType = "prefab-guid-1", SubKey = new PrefabInstanceKey { TargetObjectId = 12345 } };
 
         private static (PrefabInstanceNode instance, SnapshotNode snapshotInstance, IdentityMap map) BuildMatched(
             PropertyOverride[]? desiredOverrides = null,

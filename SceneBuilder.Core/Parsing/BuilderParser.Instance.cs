@@ -143,7 +143,7 @@ namespace SceneBuilder.Core.Parsing
             Overrides = builder.Overrides.ToArray(),
             AddedComponents = BuildAddedComponents(builder),
             RemovedComponents = builder.RemovedComponentTypes
-                .Select(typeFullName => new OverrideTarget { PrefabId = "type:" + typeFullName, ObjectId = 0 })
+                .Select(typeFullName => new OverrideTarget { ComponentType = typeFullName })
                 .ToArray(),
             ScopedOverrides = builder.ScopedOverrides.Count == 0 ? null : builder.ScopedOverrides.ToArray(),
         };
@@ -275,7 +275,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             var value = ValueNodeParser.Parse(args[1].Expression);
-            var target = new OverrideTarget { PrefabId = "type:" + typeFullName, ObjectId = 0 };
+            var target = new OverrideTarget { ComponentType = typeFullName };
 
             return value is ValueNode.AssetRef or ValueNode.ObjectRef
                 ? new PropertyOverride { Target = target, PropertyPath = propertyPath, ObjectReference = value }
@@ -306,7 +306,7 @@ namespace SceneBuilder.Core.Parsing
             node.AddedComponents.Add(cb);
         }
 
-        // `.RemoveComponent<T>()` — records the provisional `type:<FullName>` target sigil;
+        // `.RemoveComponent<T>()` — records a root target (SubKey defaults to (0,0));
         // the adapter resolves it to the real (GUID:fileID, ObjectId) pair before diff.
         private static void ApplyRemoveComponent(NodeBuilder node, InvocationExpressionSyntax invocation)
         {

@@ -95,7 +95,7 @@ namespace SceneBuilder.Core.Tests
         public void Materialize_MatchedInstance_WithStructuredOverride_EmitsRevertOp_NotOpaqueFlag()
         {
             var (model, snapshot, map) = BuildMatchedInstance(overrides: null);
-            var target = new OverrideTarget { PrefabId = "prefab-guid-1", ObjectId = 12345 };
+            var target = new OverrideTarget { ComponentType = "prefab-guid-1", SubKey = new PrefabInstanceKey { TargetObjectId = 12345 } };
             var snapshotWithOverride = snapshot with
             {
                 Roots = new[]

@@ -233,7 +233,7 @@ namespace SceneBuilder.Core.Reconcile
             {
                 Kind = ConflictKind.StaleOverride,
                 LogicalId = instanceLogicalId,
-                Reason = $"Stale override '{instanceLogicalId} > {target.PrefabId}:{target.ObjectId} > {propertyPath}': " +
+                Reason = $"Stale override '{instanceLogicalId} > {target.ComponentType} > {propertyPath}': " +
                     $"the source prefab's default changed (recorded '{recordedBase}', now '{currentBase}') and the " +
                     "instance value now equals the new default. Not silently kept or dropped — confirm whether to " +
                     "keep the override or accept the new default.",

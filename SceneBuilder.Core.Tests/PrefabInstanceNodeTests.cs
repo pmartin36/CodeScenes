@@ -126,22 +126,22 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void OverrideTarget_Equality_ByPair()
         {
-            var a = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 };
-            var b = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 };
-            var differentPrefab = new OverrideTarget { PrefabId = "otherguid:200200", ObjectId = 100100 };
-            var differentObject = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 999999 };
+            var a = new OverrideTarget { ComponentType = "abc123def456:100100", SubKey = new PrefabInstanceKey { TargetObjectId = 100100 } };
+            var b = new OverrideTarget { ComponentType = "abc123def456:100100", SubKey = new PrefabInstanceKey { TargetObjectId = 100100 } };
+            var differentComponentType = new OverrideTarget { ComponentType = "otherguid:200200", SubKey = new PrefabInstanceKey { TargetObjectId = 100100 } };
+            var differentSubKey = new OverrideTarget { ComponentType = "abc123def456:100100", SubKey = new PrefabInstanceKey { TargetObjectId = 999999 } };
 
             Assert.Equal(a, b);
             Assert.Equal(a.GetHashCode(), b.GetHashCode());
-            Assert.NotEqual(a, differentPrefab);
-            Assert.NotEqual(a, differentObject);
+            Assert.NotEqual(a, differentComponentType);
+            Assert.NotEqual(a, differentSubKey);
         }
 
         [Fact]
         public void PrefabInstanceNode_PopulatedOverrideCollections_RoundTrip_ByteIdentical()
         {
-            var target1 = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 };
-            var target2 = new OverrideTarget { PrefabId = "abc123def456:200200", ObjectId = 200200 };
+            var target1 = new OverrideTarget { ComponentType = "abc123def456:100100", SubKey = new PrefabInstanceKey { TargetObjectId = 100100 } };
+            var target2 = new OverrideTarget { ComponentType = "abc123def456:200200", SubKey = new PrefabInstanceKey { TargetObjectId = 200200 } };
 
             var instance = SampleInstance() with
             {
@@ -171,7 +171,7 @@ namespace SceneBuilder.Core.Tests
                     },
                 },
                 RemovedComponents = new[] { target2 },
-                AddedGameObjects = new[] { new GameObjectNode { LogicalId = "Root/NewChild", Name = "NewChild" } },
+                AddedGameObjects = new[] { new AddedGameObject { Parent = target1, Node = new GameObjectNode { LogicalId = "Root/NewChild", Name = "NewChild" } } },
                 RemovedGameObjects = new[] { target1 },
             };
 
@@ -192,6 +192,37 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void PrefabInstanceNode_AddedGameObject_RoundTrips_PreservesParentSubKeyAndNode()
+        {
+            var parentA = new OverrideTarget { ComponentType = "", ChildPath = "Turret", SubKey = new PrefabInstanceKey { TargetObjectId = 100100 } };
+            var parentB = new OverrideTarget { ComponentType = "", ChildPath = "", SubKey = new PrefabInstanceKey { TargetObjectId = 200200 } };
+
+            var instance = SampleInstance() with
+            {
+                AddedGameObjects = new[]
+                {
+                    new AddedGameObject { Parent = parentA, Node = new GameObjectNode { LogicalId = "Root/Turret/MuzzleFlash", Name = "MuzzleFlash" } },
+                    new AddedGameObject { Parent = parentB, Node = new GameObjectNode { LogicalId = "Root/NewChild", Name = "NewChild" } },
+                },
+            };
+
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+
+            var json = SceneModelSerializer.Serialize(model);
+            var back = SceneModelSerializer.Deserialize(json);
+            var roundTripJson = SceneModelSerializer.Serialize(back);
+
+            Assert.Equal(json, roundTripJson);
+
+            var backInstance = Assert.IsType<PrefabInstanceNode>(back.Roots[0]);
+            Assert.Equal(2, backInstance.AddedGameObjects.Length);
+            Assert.Equal(100100UL, backInstance.AddedGameObjects[0].Parent.SubKey.TargetObjectId);
+            Assert.Equal("MuzzleFlash", backInstance.AddedGameObjects[0].Node.Name);
+            Assert.Equal(200200UL, backInstance.AddedGameObjects[1].Parent.SubKey.TargetObjectId);
+            Assert.Equal("NewChild", backInstance.AddedGameObjects[1].Node.Name);
+        }
+
+        [Fact]
         public void PropertyOverride_NullObjectReferenceAndBaseValue_OmitKeys()
         {
             var instance = SampleInstance() with
@@ -200,7 +231,7 @@ namespace SceneBuilder.Core.Tests
                 {
                     new PropertyOverride
                     {
-                        Target = new OverrideTarget { PrefabId = "abc123def456:100100", ObjectId = 100100 },
+                        Target = new OverrideTarget { ComponentType = "abc123def456:100100", SubKey = new PrefabInstanceKey { TargetObjectId = 100100 } },
                         PropertyPath = "m_LocalPosition.x",
                         Value = ValueNode.Primitive.Float(3.5f),
                     },

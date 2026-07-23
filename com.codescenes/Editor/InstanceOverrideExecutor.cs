@@ -23,7 +23,6 @@ namespace SceneBuilder.Editor
     /// </summary>
     internal static class InstanceOverrideExecutor
     {
-        private const string TypeSigilPrefix = "type:";
         private const string MemberSigil = "member:";
 
         public static void Apply(SetInstanceOverride op, PlanExecutor.ExecutionResult result, IdentityMap map, Scene scene)
@@ -137,7 +136,7 @@ namespace SceneBuilder.Editor
                 return;
             }
 
-            var typeFullName = StripSigil(op.Target.PrefabId);
+            var typeFullName = op.Target.ComponentType;
             var removed = PrefabUtility.GetRemovedComponents(root);
             if (removed == null)
             {
@@ -169,13 +168,7 @@ namespace SceneBuilder.Editor
             return outermost != null ? outermost : go;
         }
 
-        private static Type? TypeOf(OverrideTarget target) => ComponentTypeResolver.Resolve(StripSigil(target.PrefabId));
-
-        // Mirrors ReconcilerInstances.StripTypeSigil (SceneBuilder.Core/Reconcile/ReconcilerInstances.cs) —
-        // the parser's "type:<FullName>" encoding for a root-only OverrideTarget (b6-t1/research.md
-        // REFINED). Core's copy is private; this is the adapter-side mirror of the same convention.
-        private static string StripSigil(string prefabId) =>
-            prefabId.StartsWith(TypeSigilPrefix, StringComparison.Ordinal) ? prefabId.Substring(TypeSigilPrefix.Length) : prefabId;
+        private static Type? TypeOf(OverrideTarget target) => ComponentTypeResolver.Resolve(target.ComponentType);
 
         // ComponentLogicalId is "{ownerLogicalId}/{typeToken}#{ordinal}" (see PlanExecutor.OwnerOf) —
         // strip the owner prefix and ordinal suffix to get the bare type token for the type-based

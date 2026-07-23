@@ -18,10 +18,10 @@ namespace SceneBuilder.Editor
     /// read elsewhere — skipped here), ROOT-target (structured — <see cref="SnapshotNode.Overrides"/>/
     /// <see cref="SnapshotNode.AddedComponents"/>/<see cref="SnapshotNode.RemovedComponents"/>), or
     /// NESTED-target (below the root — deferred, stays opaque via
-    /// <see cref="PrefabInstanceProbe.FormatModification"/>, M6). Root-target overrides use the
-    /// <c>"type:"+FullName</c> sigil (NOT a real GUID:fileID pair) — see research.md REFINED note; this is
-    /// the ONLY reader that must mirror the <c>BuilderParser.Instance</c>/<c>ReconcilerInstances</c> sigil
-    /// convention.
+    /// <see cref="PrefabInstanceProbe.FormatModification"/>, M6). Root-target overrides carry
+    /// <c>SubKey=(0,0)</c> (default <see cref="PrefabInstanceKey"/>) with <c>ComponentType=FullName</c> —
+    /// see research.md REFINED note; this is the ONLY reader that must mirror the
+    /// <c>BuilderParser.Instance</c>/<c>ReconcilerInstances</c> root-target convention.
     /// </summary>
     internal static partial class PrefabInstanceProbe
     {
@@ -81,7 +81,7 @@ namespace SceneBuilder.Editor
                         var hasObjectReference = mod.objectReference != null;
                         records.Add(new ModificationRecord
                         {
-                            Target = new OverrideTarget { PrefabId = "type:" + mod.target.GetType().FullName, ObjectId = 0 },
+                            Target = new OverrideTarget { ComponentType = mod.target.GetType().FullName },
                             PropertyPath = mod.propertyPath,
                             Value = hasObjectReference ? null : mod.value,
                             ObjectReference = hasObjectReference
@@ -275,7 +275,7 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                result.Add(new OverrideTarget { PrefabId = "type:" + assetComponent.GetType().FullName, ObjectId = 0 });
+                result.Add(new OverrideTarget { ComponentType = assetComponent.GetType().FullName });
             }
 
             return result.ToArray();

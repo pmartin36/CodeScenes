@@ -333,7 +333,7 @@ public class InstanceMoveScene : ISceneDefinition
         // the user reverted it in Unity, so the call is DROPPED (#9), never rewritten to a default.
 
         private static OverrideTarget OverrideTargetFor(string typeFullName) =>
-            new() { PrefabId = "type:" + typeFullName, ObjectId = 0 };
+            new() { ComponentType = typeFullName };
 
         private static (PrefabInstanceNode instance, SnapshotNode snapshotInstance, IdentityMap map) BuildMatchedInstance(
             PropertyOverride[]? modelOverrides = null,

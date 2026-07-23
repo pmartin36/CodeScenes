@@ -285,7 +285,7 @@ namespace SceneBuilder.Core.Reconcile
                 edits.Add(new AppendInstanceRemoveComponent
                 {
                     Anchor = instanceLogicalId,
-                    TypeFullName = StripTypeSigil(target.PrefabId),
+                    TypeFullName = target.ComponentType,
                 });
             }
 
@@ -300,7 +300,7 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     Anchor = instanceLogicalId,
                     Kind = InstanceCallKind.RemoveComponent,
-                    TypeFullName = StripTypeSigil(target.PrefabId),
+                    TypeFullName = target.ComponentType,
                 });
             }
         }
@@ -312,7 +312,7 @@ namespace SceneBuilder.Core.Reconcile
             List<AssetEntry> addedAssets)
         {
             var renderedValue = snapshotOverride.ObjectReference ?? snapshotOverride.Value;
-            var typeFullName = StripTypeSigil(snapshotOverride.Target.PrefabId);
+            var typeFullName = snapshotOverride.Target.ComponentType;
 
             ComponentReconciler.CollectAssetEntries(renderedValue, addedAssets);
 
@@ -362,12 +362,5 @@ namespace SceneBuilder.Core.Reconcile
                 FieldExpressions = fieldExpressions,
             };
         }
-
-        // The parser's own encoding for a resolved override/added-component/removed-component
-        // target — BuilderParser.Instance.cs:112,243 writes `Target.PrefabId = "type:<FullName>"`
-        // when it cannot resolve a real (GUID:fileID) pair. StripTypeSigil is the inverse: reconcile
-        // renders `<T>` from the same convention, never a new one.
-        private static string StripTypeSigil(string prefabId) =>
-            prefabId.StartsWith("type:", StringComparison.Ordinal) ? prefabId.Substring("type:".Length) : prefabId;
     }
 }

@@ -83,7 +83,7 @@ namespace SceneBuilder.Core.Tests
                 {
                     new PropertyOverride
                     {
-                        Target = new OverrideTarget { PrefabId = "type:Light", ObjectId = 0 },
+                        Target = new OverrideTarget { ComponentType = "Light" },
                         PropertyPath = "member:cookie",
                         Value = new ValueNode.Unsupported(""),
                         ObjectReference = objectReference,

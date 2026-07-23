@@ -156,9 +156,9 @@ public class SnapshotReaderPrefabTests
             "(.x/.y/.z), never one Vec3-valued entry (banner #2)");
         foreach (var ov in node.Overrides)
         {
-            Assert.AreEqual("type:UnityEngine.BoxCollider", ov.Target.PrefabId,
-                "Root-target override PrefabId must carry the type sigil, not a GUID:fileID pair");
-            Assert.AreEqual(0, ov.Target.ObjectId, "Root-target override ObjectId must be 0 (v0 sigil convention)");
+            Assert.AreEqual("UnityEngine.BoxCollider", ov.Target.ComponentType,
+                "Root-target override ComponentType must carry the FullName");
+            Assert.AreEqual(new PrefabInstanceKey(), ov.Target.SubKey, "Root-target override SubKey must be (0,0)");
             StringAssert.StartsWith("m_Center", ov.PropertyPath,
                 "PropertyPath must be the raw serialized path");
             Assert.IsInstanceOf<ValueNode.Primitive>(ov.Value, "Override Value must be a String primitive");
@@ -201,8 +201,8 @@ public class SnapshotReaderPrefabTests
 
         Assert.AreEqual(1, node.RemovedComponents.Length,
             "Removed root BoxCollider did not read into RemovedComponents[]");
-        Assert.AreEqual("type:UnityEngine.BoxCollider", node.RemovedComponents[0].PrefabId);
-        Assert.AreEqual(0, node.RemovedComponents[0].ObjectId);
+        Assert.AreEqual("UnityEngine.BoxCollider", node.RemovedComponents[0].ComponentType);
+        Assert.AreEqual(new PrefabInstanceKey(), node.RemovedComponents[0].SubKey);
         Assert.IsNull(node.OpaqueOverrides, "A removed root component must not leak into OpaqueOverrides");
     }
 
@@ -219,7 +219,7 @@ public class SnapshotReaderPrefabTests
 
         var node = ReadRoot(scene, "Enemy1");
 
-        var ov = node.Overrides.FirstOrDefault(o => o.Target.PrefabId == "type:UnityEngine.MeshRenderer");
+        var ov = node.Overrides.FirstOrDefault(o => o.Target.ComponentType == "UnityEngine.MeshRenderer");
         Assert.IsNotNull(ov, "MeshRenderer material override did not read into structured Overrides[]");
         Assert.IsInstanceOf<ValueNode.AssetRef>(ov!.ObjectReference,
             "A material asset override must lower ObjectReference to AssetRef (got " +
@@ -257,7 +257,7 @@ public class SnapshotReaderPrefabTests
 
         var node = ReadRoot(scene, "Enemy1", resolveSceneRef);
 
-        var ov = node.Overrides.FirstOrDefault(o => o.Target.PrefabId == "type:DoorOpener");
+        var ov = node.Overrides.FirstOrDefault(o => o.Target.ComponentType == "DoorOpener");
         Assert.IsNotNull(ov, "DoorOpener.target override did not read into structured Overrides[]");
         Assert.AreEqual("target", ov!.PropertyPath);
         Assert.IsInstanceOf<ValueNode.ObjectRef>(ov.ObjectReference,

@@ -6,7 +6,7 @@ namespace SceneBuilder.Core.Tests
 {
     // b1-t3: OverrideMapper.ToOverrides/ToRecords are inverse, per-entry lossless (incl.
     // null vs "" Value), pass ObjectReference through symmetrically (AssetRef/ObjectRef),
-    // and never collapse entries that share ObjectId but differ in PrefabId (full pair-key).
+    // and never collapse entries that share SubKey but differ in ComponentType (full pair-key).
     public class OverrideMapperTests
     {
         [Fact]
@@ -14,7 +14,7 @@ namespace SceneBuilder.Core.Tests
         {
             var record = new ModificationRecord
             {
-                Target = new OverrideTarget { PrefabId = "prefab-a", ObjectId = 100 },
+                Target = new OverrideTarget { ComponentType = "prefab-a", SubKey = new PrefabInstanceKey { TargetObjectId = 100 } },
                 PropertyPath = "health",
                 Value = "50",
                 ObjectReference = null,
@@ -36,7 +36,7 @@ namespace SceneBuilder.Core.Tests
         {
             var nullRecord = new ModificationRecord
             {
-                Target = new OverrideTarget { PrefabId = "prefab-a", ObjectId = 1 },
+                Target = new OverrideTarget { ComponentType = "prefab-a", SubKey = new PrefabInstanceKey { TargetObjectId = 1 } },
                 PropertyPath = "field",
                 Value = null,
             };
@@ -56,7 +56,7 @@ namespace SceneBuilder.Core.Tests
             var assetRef = new ValueNode.AssetRef(new AssetRef { Guid = "guid-1", FileId = 0, IsBuiltin = false });
             var record = new ModificationRecord
             {
-                Target = new OverrideTarget { PrefabId = "prefab-a", ObjectId = 5 },
+                Target = new OverrideTarget { ComponentType = "prefab-a", SubKey = new PrefabInstanceKey { TargetObjectId = 5 } },
                 PropertyPath = "sharedMaterial",
                 Value = "",
                 ObjectReference = assetRef,
@@ -76,7 +76,7 @@ namespace SceneBuilder.Core.Tests
             var objectRef = new ValueNode.ObjectRef("some-logical-id");
             var record = new ModificationRecord
             {
-                Target = new OverrideTarget { PrefabId = "prefab-a", ObjectId = 6 },
+                Target = new OverrideTarget { ComponentType = "prefab-a", SubKey = new PrefabInstanceKey { TargetObjectId = 6 } },
                 PropertyPath = "target",
                 Value = "",
                 ObjectReference = objectRef,
@@ -91,17 +91,17 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
-        public void PairKey_SameObjectId_DifferentPrefabId_DistinctEntries()
+        public void PairKey_SameSubKey_DifferentComponentType_DistinctEntries()
         {
             var recordA = new ModificationRecord
             {
-                Target = new OverrideTarget { PrefabId = "prefab-a", ObjectId = 42 },
+                Target = new OverrideTarget { ComponentType = "prefab-a", SubKey = new PrefabInstanceKey { TargetObjectId = 42 } },
                 PropertyPath = "health",
                 Value = "10",
             };
             var recordB = new ModificationRecord
             {
-                Target = new OverrideTarget { PrefabId = "prefab-b", ObjectId = 42 },
+                Target = new OverrideTarget { ComponentType = "prefab-b", SubKey = new PrefabInstanceKey { TargetObjectId = 42 } },
                 PropertyPath = "health",
                 Value = "20",
             };
@@ -112,9 +112,23 @@ namespace SceneBuilder.Core.Tests
             Assert.NotEqual(overrides[0].Target, overrides[1].Target);
             Assert.NotEqual(overrides[0], overrides[1]);
 
-            // An ObjectId-only key would collapse both entries; the full OverrideTarget must not.
-            Assert.NotEqual(overrides[0].Target.PrefabId, overrides[1].Target.PrefabId);
-            Assert.Equal(overrides[0].Target.ObjectId, overrides[1].Target.ObjectId);
+            // A SubKey-only key would collapse both entries; ComponentType participates too.
+            Assert.NotEqual(overrides[0].Target.ComponentType, overrides[1].Target.ComponentType);
+            Assert.Equal(overrides[0].Target.SubKey, overrides[1].Target.SubKey);
+        }
+
+        [Fact]
+        public void Equality_SameSubKeyAndComponentType_DifferentChildPath_AreEqual_ShareHashCode()
+        {
+            var subKey = new PrefabInstanceKey { TargetPrefabId = 111, TargetObjectId = 222 };
+            var a = new OverrideTarget { SubKey = subKey, ComponentType = "UnityEngine.BoxCollider", ChildPath = "Turret" };
+            var b = new OverrideTarget { SubKey = subKey, ComponentType = "UnityEngine.BoxCollider", ChildPath = "Turret/Barrel" };
+
+            Assert.Equal(a, b);
+            Assert.Equal(a.GetHashCode(), b.GetHashCode());
+
+            var differentType = a with { ComponentType = "UnityEngine.Light" };
+            Assert.NotEqual(a, differentType);
         }
     }
 }

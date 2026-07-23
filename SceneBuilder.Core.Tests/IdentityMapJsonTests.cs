@@ -139,6 +139,63 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void IdentityMap_PrefabInstanceEntry_WithOverrideRecords_RoundTripsByteIdentical_PreservingSubKeyAndKind()
+        {
+            var map = new IdentityMap
+            {
+                SchemaVersion = 1,
+                Scene = "Assets/Scenes/Demo.unity",
+                Entries = new IdentityMapEntry[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "Root/Enemy",
+                        GlobalObjectId = "",
+                        Kind = "PrefabInstance",
+                        ParentLogicalId = "Root",
+                        PrefabKey = new PrefabInstanceKey { TargetPrefabId = 111UL, TargetObjectId = 222UL },
+                        SourcePrefabGuid = "abc123def456",
+                        Overrides = new[]
+                        {
+                            new InstanceOverrideRecord
+                            {
+                                SubKey = new PrefabInstanceKey { TargetPrefabId = 111UL, TargetObjectId = 222UL },
+                                ComponentType = "UnityEngine.BoxCollider",
+                                PropertyPath = "m_IsTrigger",
+                                Kind = "Property",
+                                BaseValue = "0",
+                            },
+                            new InstanceOverrideRecord
+                            {
+                                SubKey = new PrefabInstanceKey { TargetPrefabId = 111UL, TargetObjectId = 333UL },
+                                ComponentType = "UnityEngine.GameObject",
+                                PropertyPath = "",
+                                Kind = "RemovedGameObject",
+                            },
+                        },
+                    },
+                },
+                Assets = System.Array.Empty<AssetEntry>(),
+            };
+
+            var json = IdentityMapJson.Serialize(map);
+            var back = IdentityMapJson.Deserialize(json);
+            var roundTripJson = IdentityMapJson.Serialize(back);
+
+            Assert.Equal(json, roundTripJson);
+            Assert.Equal(map.Entries[0].LogicalId, back.Entries[0].LogicalId);
+            Assert.Equal(map.Entries[0].Kind, back.Entries[0].Kind);
+            Assert.Equal(map.Entries[0].PrefabKey, back.Entries[0].PrefabKey);
+            Assert.Equal(map.Entries[0].SourcePrefabGuid, back.Entries[0].SourcePrefabGuid);
+            Assert.Equal(2, back.Entries[0].Overrides!.Length);
+            Assert.Equal(222UL, back.Entries[0].Overrides![0].SubKey.TargetObjectId);
+            Assert.Equal("Property", back.Entries[0].Overrides![0].Kind);
+            Assert.Equal(333UL, back.Entries[0].Overrides![1].SubKey.TargetObjectId);
+            Assert.Equal("RemovedGameObject", back.Entries[0].Overrides![1].Kind);
+            Assert.Null(back.Entries[0].Overrides![1].BaseValue);
+        }
+
+        [Fact]
         public void IdentityMap_PlainEntry_OmitsPrefabKeyAndSourcePrefabGuid()
         {
             var map = SampleMap();
