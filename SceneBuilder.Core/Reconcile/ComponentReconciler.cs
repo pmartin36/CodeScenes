@@ -44,7 +44,11 @@ namespace SceneBuilder.Core.Reconcile
             List<string> removedLogicalIds,
             List<Conflict> conflicts,
             List<SkippedField> skippedFields,
-            List<AssetEntry> addedAssets)
+            List<AssetEntry> addedAssets,
+            // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain
+            // instead of `Asset("path")`. Optional/trailing so every pre-existing call site/test
+            // stays green unchanged.
+            AssetCatalog? assetCatalog = null)
         {
             // b4-t1: canonicalize FitSize-before-SurfaceSnap BEFORE the ADD/REORDER passes so both emit
             // in canonical order and the REORDER pass compares canonical-vs-canonical for the
@@ -130,7 +134,8 @@ namespace SceneBuilder.Core.Reconcile
                     introduceOwnerHandle,
                     edits,
                     addedEntries,
-                    harvestSink);
+                    harvestSink,
+                    assetCatalog);
 
                 // Only the FIRST component statement carries the introduction.
                 introduceOwnerHandle = false;
@@ -269,7 +274,7 @@ namespace SceneBuilder.Core.Reconcile
                             // invalid `SurfaceSnap+Vertical.Up` FQN into the `down:` slot.
                             var patchExpr = SpatialComponentSource.IsSpatial(sourceComp.Type.FullName) && snapVal is ValueNode.Enum
                                 ? SpatialComponentSource.RenderKeyValue(fieldKey, snapVal, string.Empty)
-                                : RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits);
+                                : RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, assetCatalog);
                             edits.Add(new PatchComponentField
                             {
                                 Anchor = sourceComp.LogicalId,
@@ -316,7 +321,7 @@ namespace SceneBuilder.Core.Reconcile
                             FieldKey = fieldKey,
                             Value = snapVal,
                             NewExpr = introduceResolution == RefResolution.Resolvable
-                                ? RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits)
+                                ? RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, assetCatalog)
                                 : null,
                         });
 
@@ -393,6 +398,14 @@ namespace SceneBuilder.Core.Reconcile
             return pendingTargets.Contains(target) ? RefResolution.Pending : RefResolution.Dangling;
         }
 
+        // b4-t1: gate for the EmitComponentAppend pre-render branch above — a project AssetRef whose
+        // (Guid, FileId) resolves in the catalog must be pre-rendered into FieldExpressions (its typed
+        // member chain), same as an ObjectRef. Built-ins never hit the reverse lookup.
+        internal static bool IsCataloguedAssetRef(ValueNode value, AssetCatalog? assetCatalog) =>
+            value is ValueNode.AssetRef(var r)
+            && r is { IsBuiltin: false }
+            && assetCatalog?.TryGetMember(r.Guid, r.FileId, out _, out _, out _) == true;
+
         // b4-t2: the identical span lookup used by the span-based patch emission below, reused for a
         // DanglingReference conflict's Location. Emitted even when the span is absent (returns null) —
         // "never a silent null" outranks having a located span (research.md CLEANLINESS).
@@ -415,7 +428,8 @@ namespace SceneBuilder.Core.Reconcile
             ValueNode value,
             string typeFullName,
             System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
-            List<SourceEdit> edits)
+            List<SourceEdit> edits,
+            AssetCatalog? assetCatalog = null)
         {
             if (value is ValueNode.ObjectRef(var targetLogicalId))
             {
@@ -438,7 +452,7 @@ namespace SceneBuilder.Core.Reconcile
             // form — never the generic ValueNodeLiteral fallback.
             return SpatialComponentSource.IsSpatial(typeFullName)
                 ? SpatialComponentSource.RenderFieldValue(value)
-                : SourceExpr.ValueNodeLiteral(value);
+                : SourceExpr.ValueNodeLiteral(value, assetCatalog);
         }
 
         // §13 one-pass attach (b4-t1) reuses this for the just-appended owner: same
@@ -478,7 +492,10 @@ namespace SceneBuilder.Core.Reconcile
             bool introduceOwnerHandle,
             List<SourceEdit> edits,
             List<IdentityMapEntry> addedEntries,
-            List<AssetEntry>? addedAssets)
+            List<AssetEntry>? addedAssets,
+            // b4-t1: catalogued AssetRef fields pre-render into FieldExpressions the same way
+            // ObjectRef fields already do — extends the existing pre-render gate below.
+            AssetCatalog? assetCatalog = null)
         {
             var componentLogicalId = $"{ownerEffectiveId}/{typeFullName}#{ordinal}";
 
@@ -521,10 +538,10 @@ namespace SceneBuilder.Core.Reconcile
 
                 filteredFields?.Add(new KeyValuePair<string, ValueNode>(fieldKey, value));
 
-                if (value is ValueNode.ObjectRef)
+                if (value is ValueNode.ObjectRef || IsCataloguedAssetRef(value, assetCatalog))
                 {
                     fieldExpressions ??= new Dictionary<string, string>();
-                    fieldExpressions[fieldKey] = RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits);
+                    fieldExpressions[fieldKey] = RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, assetCatalog);
                 }
             }
 

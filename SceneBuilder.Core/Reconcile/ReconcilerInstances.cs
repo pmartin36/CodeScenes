@@ -154,7 +154,10 @@ namespace SceneBuilder.Core.Reconcile
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<Conflict> conflicts,
-            List<AssetEntry> addedAssets)
+            List<AssetEntry> addedAssets,
+            // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain —
+            // threaded to BuildOverrideSetSpec/BuildAddInstanceComponent's RenderFieldValue calls.
+            AssetCatalog? assetCatalog = null)
         {
             if (anchors != null && !anchors.ContainsKey(instanceLogicalId))
             {
@@ -167,8 +170,8 @@ namespace SceneBuilder.Core.Reconcile
 
             var prefabGuid = snapshot.SourcePrefabGuid;
 
-            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets);
-            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets);
+            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, assetCatalog);
+            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, assetCatalog);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
             ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
             ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
@@ -190,7 +193,8 @@ namespace SceneBuilder.Core.Reconcile
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<Conflict> conflicts,
-            List<AssetEntry> addedAssets)
+            List<AssetEntry> addedAssets,
+            AssetCatalog? assetCatalog = null)
         {
             var modelByKey = new Dictionary<(OverrideTarget Target, string PropertyPath), PropertyOverride>();
             foreach (var modelOverride in model.Overrides)
@@ -212,7 +216,7 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var setSpec = BuildOverrideSetSpec(snapshotOverride, resolveOwnerHandle, edits, addedAssets);
+                var setSpec = BuildOverrideSetSpec(snapshotOverride, resolveOwnerHandle, edits, addedAssets, assetCatalog);
                 var childPath = snapshotOverride.Target.ChildPath;
 
                 if (string.IsNullOrEmpty(childPath))
@@ -275,7 +279,8 @@ namespace SceneBuilder.Core.Reconcile
             string? prefabGuid,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
-            List<AssetEntry> addedAssets)
+            List<AssetEntry> addedAssets,
+            AssetCatalog? assetCatalog = null)
         {
             var modelKeys = new HashSet<(OverrideTarget Target, string TypeFullName)>();
             foreach (var modelComponent in model.AddedComponents)
@@ -295,7 +300,7 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets);
+                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, assetCatalog);
                 var childPath = snapshotComponent.Target.ChildPath;
 
                 if (string.IsNullOrEmpty(childPath))
@@ -402,7 +407,8 @@ namespace SceneBuilder.Core.Reconcile
             PropertyOverride snapshotOverride,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
-            List<AssetEntry> addedAssets)
+            List<AssetEntry> addedAssets,
+            AssetCatalog? assetCatalog = null)
         {
             var renderedValue = snapshotOverride.ObjectReference ?? snapshotOverride.Value;
             var typeFullName = snapshotOverride.Target.ComponentType;
@@ -414,7 +420,7 @@ namespace SceneBuilder.Core.Reconcile
                 TypeFullName = typeFullName,
                 PropertyPath = snapshotOverride.PropertyPath,
                 Value = snapshotOverride.Value,
-                ValueExpression = ComponentReconciler.RenderFieldValue(renderedValue, typeFullName, resolveOwnerHandle, edits),
+                ValueExpression = ComponentReconciler.RenderFieldValue(renderedValue, typeFullName, resolveOwnerHandle, edits, assetCatalog),
             };
         }
 
@@ -430,7 +436,8 @@ namespace SceneBuilder.Core.Reconcile
             string instanceLogicalId,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
-            List<AssetEntry> addedAssets)
+            List<AssetEntry> addedAssets,
+            AssetCatalog? assetCatalog = null)
         {
             var component = snapshotComponent.Component;
             var typeFullName = component.Type.FullName;
@@ -438,10 +445,10 @@ namespace SceneBuilder.Core.Reconcile
             Dictionary<string, string>? fieldExpressions = null;
             foreach (var (fieldKey, value) in component.Fields)
             {
-                if (value is ValueNode.ObjectRef)
+                if (value is ValueNode.ObjectRef || ComponentReconciler.IsCataloguedAssetRef(value, assetCatalog))
                 {
                     fieldExpressions ??= new Dictionary<string, string>();
-                    fieldExpressions[fieldKey] = ComponentReconciler.RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits);
+                    fieldExpressions[fieldKey] = ComponentReconciler.RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, assetCatalog);
                 }
 
                 ComponentReconciler.CollectAssetEntries(value, addedAssets);

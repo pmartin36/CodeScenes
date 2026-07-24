@@ -47,7 +47,11 @@ namespace SceneBuilder.Core.Reconcile
             // b4-t4: optional Guid->PropertyName reverse lookup — non-null iff the caller
             // threaded a manifest-backed FacadeCatalog; used by HandleInstanceNode to prefer the
             // typed `Instance(Prefabs.X)` emission over the string fallback.
-            FacadeCatalog? facadeCatalog)
+            FacadeCatalog? facadeCatalog,
+            // b4-t1: catalogued AssetRef fields on a newly-created object pre-render into their
+            // typed `Assets.<...>` member chain — threaded through only to reach the
+            // EmitComponentAppend call below, mirroring facadeCatalog.
+            AssetCatalog? assetCatalog = null)
         {
             // The array position IS the scene sibling index (FlattenSnapshot keys SnapshotEntry off the
             // same index), and it is what a created node's statement must be placed at.
@@ -107,7 +111,8 @@ namespace SceneBuilder.Core.Reconcile
                         conflicts,
                         addedAssets,
                         prefabPathByGuid,
-                        facadeCatalog);
+                        facadeCatalog,
+                        assetCatalog);
 
                     continue;
                 }
@@ -221,7 +226,8 @@ namespace SceneBuilder.Core.Reconcile
                                 false,
                                 edits,
                                 addedEntries,
-                                addedAssets);
+                                addedAssets,
+                                assetCatalog);
                         }
                     }
 
@@ -245,7 +251,8 @@ namespace SceneBuilder.Core.Reconcile
                         conflicts,
                         addedAssets,
                         prefabPathByGuid,
-                        facadeCatalog);
+                        facadeCatalog,
+                        assetCatalog);
 
                     continue;
                 }
@@ -270,7 +277,8 @@ namespace SceneBuilder.Core.Reconcile
                     conflicts,
                     addedAssets,
                     prefabPathByGuid,
-                    facadeCatalog);
+                    facadeCatalog,
+                    assetCatalog);
             }
         }
     }

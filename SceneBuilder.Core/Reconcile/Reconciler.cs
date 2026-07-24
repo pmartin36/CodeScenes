@@ -24,7 +24,11 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors = null,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans = null,
             IReadOnlyDictionary<string, string>? handles = null,
-            FacadeCatalog? facadeCatalog = null)
+            FacadeCatalog? facadeCatalog = null,
+            // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain
+            // instead of `Asset("path")`. Reconcile-time-only, mirroring facadeCatalog — never
+            // reaches SourcePatchApplier/SourceExpr-at-apply.
+            AssetCatalog? assetCatalog = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
@@ -461,7 +465,8 @@ namespace SceneBuilder.Core.Reconcile
                         ResolveOwnerHandle,
                         edits,
                         conflicts,
-                        addedAssets);
+                        addedAssets,
+                        assetCatalog);
                     continue;
                 }
 
@@ -481,7 +486,8 @@ namespace SceneBuilder.Core.Reconcile
                     removedLogicalIds,
                     conflicts,
                     skippedFields,
-                    addedAssets);
+                    addedAssets,
+                    assetCatalog);
             }
 
             DetectAppends(
@@ -504,7 +510,8 @@ namespace SceneBuilder.Core.Reconcile
                 conflicts,
                 addedAssets,
                 prefabPathByGuid,
-                facadeCatalog);
+                facadeCatalog,
+                assetCatalog);
 
             // THE write-path chokepoint for duplicate sibling names.
             //

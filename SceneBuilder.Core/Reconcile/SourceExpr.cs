@@ -65,7 +65,7 @@ namespace SceneBuilder.Core.Reconcile
         /// kind has a rendering that parses back via <c>ValueNodeParser.Parse</c> to an equal
         /// <see cref="ValueNode"/>.
         /// </summary>
-        public static string ValueNodeLiteral(ValueNode node) => node switch
+        public static string ValueNodeLiteral(ValueNode node, AssetCatalog? assetCatalog = null) => node switch
         {
             ValueNode.Primitive(PrimitiveKind.Bool, bool b) => b ? "true" : "false",
             ValueNode.Primitive(PrimitiveKind.Int, int i) => IntLiteral(i),
@@ -92,25 +92,49 @@ namespace SceneBuilder.Core.Reconcile
                 $"new UnityEngine.Color({FloatLiteral(v.R)}, {FloatLiteral(v.G)}, {FloatLiteral(v.B)}, {FloatLiteral(v.A)})",
 
             ValueNode.List { Items.Count: 0 } => "new object[] { }",
-            ValueNode.List list => "new[] { " + string.Join(", ", list.Items.Select(ValueNodeLiteral)) + " }",
+            ValueNode.List list => "new[] { " + string.Join(", ", list.Items.Select(item => ValueNodeLiteral(item, assetCatalog))) + " }",
 
             ValueNode.Nested nested => "new " + nested.TypeName + " { " +
-                string.Join(", ", nested.Fields.Select(kv => kv.Key + " = " + ValueNodeLiteral(kv.Value))) +
+                string.Join(", ", nested.Fields.Select(kv => kv.Key + " = " + ValueNodeLiteral(kv.Value, assetCatalog))) +
                 " }",
 
             ValueNode.Unsupported unsupported => unsupported.RawToken,
 
-            ValueNode.AssetRef(null) => "Asset(null)",
-            ValueNode.AssetRef(AssetRef { IsBuiltin: true, TypeHint: "" } assetRef) =>
-                "Builtin(" + StringLiteral(assetRef.DisplayPath) + ")",
-            ValueNode.AssetRef(AssetRef { IsBuiltin: true } assetRef) =>
-                "Builtin(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.TypeHint) + ")",
-            ValueNode.AssetRef(AssetRef { SubAsset: "" } assetRef) =>
-                "Asset(" + StringLiteral(assetRef.DisplayPath) + ")",
-            ValueNode.AssetRef(var assetRef) =>
-                "Asset(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.SubAsset) + ")",
+            ValueNode.AssetRef(var assetRef) => RenderAssetRef(assetRef, assetCatalog),
 
             _ => throw new NotSupportedException($"SourceExpr.ValueNodeLiteral: unsupported ValueNode kind {node.GetType().Name}"),
         };
+
+        /// <summary>
+        /// Renders an <see cref="AssetRef"/> leaf value. A catalogued project asset ((Guid, FileId)
+        /// present in <paramref name="catalog"/>) renders as its typed `Assets.&lt;Group&gt;.&lt;folders...&gt;.&lt;Member&gt;`
+        /// member chain; built-ins never hit the reverse lookup; everything else falls back to the
+        /// string forms (`Asset(...)` / `Builtin(...)`).
+        /// </summary>
+        private static string RenderAssetRef(AssetRef? assetRef, AssetCatalog? catalog)
+        {
+            if (assetRef is null)
+            {
+                return "Asset(null)";
+            }
+
+            if (!assetRef.IsBuiltin
+                && catalog is not null
+                && catalog.TryGetMember(assetRef.Guid, assetRef.FileId, out var group, out var folderSegments, out var member))
+            {
+                return string.Join(".", new[] { "Assets", group }.Concat(folderSegments).Append(member));
+            }
+
+            if (assetRef.IsBuiltin)
+            {
+                return assetRef.TypeHint == ""
+                    ? "Builtin(" + StringLiteral(assetRef.DisplayPath) + ")"
+                    : "Builtin(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.TypeHint) + ")";
+            }
+
+            return assetRef.SubAsset == ""
+                ? "Asset(" + StringLiteral(assetRef.DisplayPath) + ")"
+                : "Asset(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.SubAsset) + ")";
+        }
     }
 }
