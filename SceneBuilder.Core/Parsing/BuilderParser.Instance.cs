@@ -84,10 +84,10 @@ namespace SceneBuilder.Core.Parsing
                 switch (call.Method)
                 {
                     case "Override":
-                        ApplyOverride(node, call.Args);
+                        ApplyOverride(node, call.Args, ctx);
                         break;
                     case "AddComponent":
-                        ApplyAddComponent(node, call.Invocation, call.Args);
+                        ApplyAddComponent(node, call.Invocation, call.Args, ctx);
                         break;
                     case "RemoveComponent":
                         ApplyRemoveComponent(node, call.Invocation);
@@ -110,7 +110,7 @@ namespace SceneBuilder.Core.Parsing
                 }
             }
 
-            var explicitId = ApplyChainedCalls(node, chainedCalls);
+            var explicitId = ApplyChainedCalls(node, chainedCalls, ctx);
 
             var siblingIndex = targetList.Count;
             var parentLogicalId = parentNode?.LogicalId;
@@ -194,7 +194,7 @@ namespace SceneBuilder.Core.Parsing
         // `.Override(e => ...)` — closure body is a block of `e.Set(...)` statements or a fluent
         // chain `e.Set(a).Set(b)`; both forms unwrap uniformly through UnwrapChain (a lone
         // `.Set(...)` call unwraps to a single-element chain).
-        private static void ApplyOverride(NodeBuilder node, ArgumentListSyntax args, string childPath = "")
+        private static void ApplyOverride(NodeBuilder node, ArgumentListSyntax args, ParserContext ctx, string childPath = "")
         {
             if (args.Arguments.Count != 1)
             {
@@ -218,12 +218,12 @@ namespace SceneBuilder.Core.Parsing
                             throw Unreachable();
                         }
 
-                        ApplyOverrideSetChain(exprStatement.Expression, paramName, node, childPath);
+                        ApplyOverrideSetChain(exprStatement.Expression, paramName, node, ctx, childPath);
                     }
                     break;
 
                 case ExpressionSyntax exprBody:
-                    ApplyOverrideSetChain(exprBody, paramName, node, childPath);
+                    ApplyOverrideSetChain(exprBody, paramName, node, ctx, childPath);
                     break;
 
                 default:
@@ -231,7 +231,7 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
-        private static void ApplyOverrideSetChain(ExpressionSyntax expression, string paramName, NodeBuilder node, string childPath = "")
+        private static void ApplyOverrideSetChain(ExpressionSyntax expression, string paramName, NodeBuilder node, ParserContext ctx, string childPath = "")
         {
             var (receiver, calls) = UnwrapChain(expression);
             if (receiver.Identifier.Text != paramName)
@@ -246,7 +246,7 @@ namespace SceneBuilder.Core.Parsing
                     throw Unreachable();
                 }
 
-                node.Overrides.Add(ParseOverrideSet(invocation, childPath));
+                node.Overrides.Add(ParseOverrideSet(invocation, ctx, childPath));
             }
         }
 
@@ -254,7 +254,7 @@ namespace SceneBuilder.Core.Parsing
         // lowering reuses ValueNodeParser.Parse verbatim (b3-t2, total). A reference value
         // (AssetRef/ObjectRef) lands in ObjectReference, leaving Value at its model default;
         // every other value lands in Value, leaving ObjectReference null.
-        private static PropertyOverride ParseOverrideSet(InvocationExpressionSyntax setInvocation, string childPath = "")
+        private static PropertyOverride ParseOverrideSet(InvocationExpressionSyntax setInvocation, ParserContext ctx, string childPath = "")
         {
             var args = setInvocation.ArgumentList.Arguments;
             if (args.Count != 2)
@@ -299,7 +299,7 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
-            var value = ValueNodeParser.Parse(args[1].Expression);
+            var value = ValueNodeParser.Parse(args[1].Expression, ctx.AssetCatalog, ctx.FacadeConflicts);
             var target = new OverrideTarget { ComponentType = typeFullName, ChildPath = childPath };
 
             return value is ValueNode.AssetRef or ValueNode.ObjectRef
@@ -311,7 +311,7 @@ namespace SceneBuilder.Core.Parsing
         // reuses ProcessComponentClosure verbatim for the `c => c.Set(...)` closure. The owner
         // (instance root) and this component's ordinal LogicalId are resolved later, in
         // BuildInstanceNode.
-        private static void ApplyAddComponent(NodeBuilder node, InvocationExpressionSyntax invocation, ArgumentListSyntax args, string childPath = "")
+        private static void ApplyAddComponent(NodeBuilder node, InvocationExpressionSyntax invocation, ArgumentListSyntax args, ParserContext ctx, string childPath = "")
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
                 memberAccess.Name is not GenericNameSyntax generic ||
@@ -325,7 +325,7 @@ namespace SceneBuilder.Core.Parsing
 
             if (args.Arguments.Count > 0)
             {
-                ProcessComponentClosure(args.Arguments[0].Expression, cb);
+                ProcessComponentClosure(args.Arguments[0].Expression, cb, ctx);
             }
 
             node.AddedComponents.Add(cb);

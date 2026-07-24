@@ -26,7 +26,7 @@ namespace SceneBuilder.Core.Parsing
                 ctx.FacadeCatalog.TryResolveSelector(node.SourcePrefabGuid ?? "", segments, byPropertyName, out var childPath, out var localId))
             {
                 node.ScopedOverrides.Add(new ScopedOverride { ChildPath = childPath, LocalId = localId });
-                ParseScopedClosure(node, args.Arguments[1].Expression, childPath);
+                ParseScopedClosure(node, args.Arguments[1].Expression, childPath, ctx);
                 return;
             }
 
@@ -45,7 +45,7 @@ namespace SceneBuilder.Core.Parsing
         // verbs, threading `childPath` so the resulting Target is stamped nested). An empty
         // closure (`b => { }`, the spec-25 stub shape) is a no-op, not an error. An unsupported
         // verb is fail-loud (gated by FlatShapeRecognizer.Instance.cs's mirrored dispatch).
-        private static void ParseScopedClosure(NodeBuilder node, ExpressionSyntax closureExpr, string childPath)
+        private static void ParseScopedClosure(NodeBuilder node, ExpressionSyntax closureExpr, string childPath, ParserContext ctx)
         {
             if (closureExpr is not SimpleLambdaExpressionSyntax lambda)
             {
@@ -64,12 +64,12 @@ namespace SceneBuilder.Core.Parsing
                             throw Unreachable();
                         }
 
-                        ParseScopedStatement(node, exprStatement.Expression, paramName, childPath);
+                        ParseScopedStatement(node, exprStatement.Expression, paramName, childPath, ctx);
                     }
                     break;
 
                 case ExpressionSyntax exprBody:
-                    ParseScopedStatement(node, exprBody, paramName, childPath);
+                    ParseScopedStatement(node, exprBody, paramName, childPath, ctx);
                     break;
 
                 default:
@@ -77,7 +77,7 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
-        private static void ParseScopedStatement(NodeBuilder node, ExpressionSyntax expression, string paramName, string childPath)
+        private static void ParseScopedStatement(NodeBuilder node, ExpressionSyntax expression, string paramName, string childPath, ParserContext ctx)
         {
             var (receiver, calls) = UnwrapChain(expression);
             if (receiver.Identifier.Text != paramName)
@@ -90,10 +90,10 @@ namespace SceneBuilder.Core.Parsing
                 switch (method)
                 {
                     case "Override":
-                        ApplyOverride(node, callArgs, childPath);
+                        ApplyOverride(node, callArgs, ctx, childPath);
                         break;
                     case "AddComponent":
-                        ApplyAddComponent(node, invocation, callArgs, childPath);
+                        ApplyAddComponent(node, invocation, callArgs, ctx, childPath);
                         break;
                     case "RemoveComponent":
                         ApplyRemoveComponent(node, invocation, childPath);

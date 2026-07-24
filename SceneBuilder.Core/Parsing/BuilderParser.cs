@@ -18,17 +18,19 @@ namespace SceneBuilder.Core.Parsing
     {
         private static readonly string[] TransformPositionalArgs = { "pos", "rot", "scale" };
 
-        public static ParseResult Parse(string source) => ParseCore(source, null, null);
+        public static ParseResult Parse(string source) => ParseCore(source, null, null, null);
 
-        public static ParseResult Parse(string source, IdentityMap? existingMap = null) => ParseCore(source, existingMap, null);
+        public static ParseResult Parse(string source, IdentityMap? existingMap = null) => ParseCore(source, existingMap, null, null);
 
         // b4-t1: the FacadeCatalog-aware overload — Instance(Prefabs.X) resolves X via the
         // catalog straight to a Guid; an unknown entry (or a null catalog) is a located Conflict
         // (never a throw, never a silent drop). See research.md.
-        public static ParseResult Parse(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog) =>
-            ParseCore(source, existingMap, facadeCatalog);
+        // b2-t1: `assetCatalog` is optional (=null) so the 3-arg callers (ComponentTypeNormalizer,
+        // SceneBuilderBuild) keep binding unchanged. See research.md.
+        public static ParseResult Parse(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog, AssetCatalog? assetCatalog = null) =>
+            ParseCore(source, existingMap, facadeCatalog, assetCatalog);
 
-        private static ParseResult ParseCore(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog)
+        private static ParseResult ParseCore(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog, AssetCatalog? assetCatalog)
         {
             var tree = CSharpSyntaxTree.ParseText(source);
             var root = (CompilationUnitSyntax)tree.GetRoot();
@@ -42,7 +44,7 @@ namespace SceneBuilder.Core.Parsing
 
             RecognizeOrThrow(tree, body, sceneParamName);
 
-            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap), facadeCatalog);
+            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap), facadeCatalog, assetCatalog);
 
             foreach (var statement in body.Statements)
             {
@@ -211,7 +213,7 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
-            var explicitId = ApplyChainedCalls(node, calls);
+            var explicitId = ApplyChainedCalls(node, calls, ctx);
             if (explicitId != null)
             {
                 node.LogicalId = explicitId;
@@ -252,7 +254,7 @@ namespace SceneBuilder.Core.Parsing
             var node = new NodeBuilder { Name = name };
             node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
 
-            var explicitId = ApplyChainedCalls(node, calls.Skip(1).ToList());
+            var explicitId = ApplyChainedCalls(node, calls.Skip(1).ToList(), ctx);
 
             var siblingIndex = targetList.Count;
             var parentLogicalId = parentNode?.LogicalId;
@@ -273,7 +275,7 @@ namespace SceneBuilder.Core.Parsing
 
         // Applies non-Add chained calls as property setters on `node`; returns the explicit
         // `.Id(...)` value if present (caller decides how it factors into LogicalId priority).
-        private static string? ApplyChainedCalls(NodeBuilder node, List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls)
+        private static string? ApplyChainedCalls(NodeBuilder node, List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls, ParserContext ctx)
         {
             string? explicitId = null;
 
@@ -307,13 +309,13 @@ namespace SceneBuilder.Core.Parsing
                         node.IdCallSpan = new SourceSpan(idAnchorStart, invocation.Span.End - idAnchorStart);
                         break;
                     case "Component":
-                        ApplyComponent(node, args, invocation);
+                        ApplyComponent(node, args, invocation, ctx);
                         break;
                     case "FitSize":
-                        ApplyFitSize(node, args, invocation);
+                        ApplyFitSize(node, args, invocation, ctx);
                         break;
                     case "SurfaceSnap":
-                        ApplySurfaceSnap(node, args, invocation);
+                        ApplySurfaceSnap(node, args, invocation, ctx);
                         break;
                     default:
                         throw Unreachable();
@@ -372,7 +374,7 @@ namespace SceneBuilder.Core.Parsing
         // type-argument syntax (Core does no namespace resolution; fixtures author FQNs).
         // The AnchorSpan slices ONLY this `.Component<T>(...)` call (dot through this call's
         // own closing paren) — NOT the whole preceding chain.
-        private static void ApplyComponent(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
+        private static void ApplyComponent(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
                 memberAccess.Name is not GenericNameSyntax generic ||
@@ -392,7 +394,7 @@ namespace SceneBuilder.Core.Parsing
 
             if (args.Arguments.Count > 0)
             {
-                ProcessComponentClosure(args.Arguments[0].Expression, cb);
+                ProcessComponentClosure(args.Arguments[0].Expression, cb, ctx);
             }
 
             node.Components.Add(cb);
@@ -400,7 +402,7 @@ namespace SceneBuilder.Core.Parsing
 
         // Mirrors ProcessClosure but self-contained: a component closure only contains
         // `x.Set(...)` calls on the lambda parameter, no node handles / nested Add.
-        private static void ProcessComponentClosure(ExpressionSyntax closureExpression, ComponentBuilder cb)
+        private static void ProcessComponentClosure(ExpressionSyntax closureExpression, ComponentBuilder cb, ParserContext ctx)
         {
             if (closureExpression is not SimpleLambdaExpressionSyntax lambda)
             {
@@ -419,12 +421,12 @@ namespace SceneBuilder.Core.Parsing
                             throw Unreachable();
                         }
 
-                        ProcessComponentSetCall(exprStatement.Expression, paramName, cb);
+                        ProcessComponentSetCall(exprStatement.Expression, paramName, cb, ctx);
                     }
                     break;
 
                 case ExpressionSyntax exprBody:
-                    ProcessComponentSetCall(exprBody, paramName, cb);
+                    ProcessComponentSetCall(exprBody, paramName, cb, ctx);
                     break;
 
                 default:
@@ -432,7 +434,7 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
-        private static void ProcessComponentSetCall(ExpressionSyntax expression, string paramName, ComponentBuilder cb)
+        private static void ProcessComponentSetCall(ExpressionSyntax expression, string paramName, ComponentBuilder cb, ParserContext ctx)
         {
             if (expression is not InvocationExpressionSyntax setInvocation ||
                 setInvocation.Expression is not MemberAccessExpressionSyntax setMemberAccess ||
@@ -443,7 +445,7 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
-            var (key, value, valueSpan) = ParseSetCall(setInvocation);
+            var (key, value, valueSpan) = ParseSetCall(setInvocation, ctx);
             cb.Fields.Add(new KeyValuePair<string, ValueNode>(key, value));
             cb.FieldValueSpans.Add(new KeyValuePair<string, SourceSpan>(key, valueSpan));
         }
@@ -453,7 +455,7 @@ namespace SceneBuilder.Core.Parsing
         // "member:"+memberName key (unresolved — Core never maps member->serialized-path).
         // KEY handling stays fail-loud (keys are not values); VALUE lowering is delegated to
         // ValueNodeParser (b3-t2), which is total and never throws.
-        private static (string Key, ValueNode Value, SourceSpan ValueSpan) ParseSetCall(InvocationExpressionSyntax setInvocation)
+        private static (string Key, ValueNode Value, SourceSpan ValueSpan) ParseSetCall(InvocationExpressionSyntax setInvocation, ParserContext ctx)
         {
             var args = setInvocation.ArgumentList.Arguments;
             if (args.Count != 2)
@@ -477,7 +479,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             var valueExpr = args[1].Expression;
-            var value = ValueNodeParser.Parse(valueExpr);
+            var value = ValueNodeParser.Parse(valueExpr, ctx.AssetCatalog, ctx.FacadeConflicts);
             var valueSpan = new SourceSpan(valueExpr.SpanStart, valueExpr.Span.Length);
             return (key, value, valueSpan);
         }
@@ -756,16 +758,18 @@ namespace SceneBuilder.Core.Parsing
 
         private sealed class ParserContext
         {
-            public ParserContext(string sceneParamName, LogicalIdResolver resolver, FacadeCatalog? facadeCatalog = null)
+            public ParserContext(string sceneParamName, LogicalIdResolver resolver, FacadeCatalog? facadeCatalog = null, AssetCatalog? assetCatalog = null)
             {
                 SceneParamName = sceneParamName;
                 Resolver = resolver;
                 FacadeCatalog = facadeCatalog;
+                AssetCatalog = assetCatalog;
             }
 
             public string SceneParamName { get; }
             public LogicalIdResolver Resolver { get; }
             public FacadeCatalog? FacadeCatalog { get; }
+            public AssetCatalog? AssetCatalog { get; }
             public Dictionary<string, NodeBuilder> Handles { get; } = new();
             public List<NodeBuilder> Roots { get; } = new();
             public List<Conflict> FacadeConflicts { get; } = new();

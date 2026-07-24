@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Core.Parsing
 {
@@ -17,12 +18,15 @@ namespace SceneBuilder.Core.Parsing
     {
         private static readonly string[] VectorTypeNames = { "Vector2", "Vector3", "Vector4", "Quaternion", "Color" };
 
-        public static ValueNode Parse(ExpressionSyntax expr)
+        // b2-t1: `assetCatalog`/`conflicts` are optional so every pre-existing 1-arg call site
+        // keeps binding unchanged. They flow only to the new Assets-root arm (TryParseAssetChain)
+        // and the recursion carriers that can reach it.
+        public static ValueNode Parse(ExpressionSyntax expr, AssetCatalog? assetCatalog = null, List<Conflict>? conflicts = null)
         {
             switch (expr)
             {
                 case PrefixUnaryExpressionSyntax unary when unary.OperatorToken.IsKind(SyntaxKind.MinusToken):
-                    return ParseNegated(unary);
+                    return ParseNegated(unary, assetCatalog, conflicts);
 
                 case LiteralExpressionSyntax literal:
                     return ParseLiteral(literal, expr);
@@ -49,6 +53,15 @@ namespace SceneBuilder.Core.Parsing
                 case IdentifierNameSyntax id:
                     return new ValueNode.ObjectRef(id.Identifier.Text);
 
+                // b2-t1: an `Assets.<Group>.<folders...>.<Leaf>` chain, claimed ONLY when
+                // catalog-shaped (known Group in a non-null catalog). MUST run before the bare
+                // MemberAccess->Enum arm below or a resolvable typed ref would never be reached;
+                // a non-catalog-shaped chain falls through to that arm unchanged (the pinned
+                // false-hijack regression guard — see research.md).
+                case MemberAccessExpressionSyntax assetChain
+                    when TryParseAssetChain(assetChain, assetCatalog, conflicts, out var assetNode):
+                    return assetNode;
+
                 case MemberAccessExpressionSyntax memberAccess:
                     return new ValueNode.Enum(
                         memberAccess.Expression.ToString(),
@@ -56,22 +69,22 @@ namespace SceneBuilder.Core.Parsing
                         IsFlags: false);
 
                 case ObjectCreationExpressionSyntax objectCreation:
-                    return ParseObjectCreation(objectCreation, expr);
+                    return ParseObjectCreation(objectCreation, expr, assetCatalog, conflicts);
 
                 case ArrayCreationExpressionSyntax { Initializer: { } arrayInitializer }:
-                    return ParseList(arrayInitializer);
+                    return ParseList(arrayInitializer, assetCatalog, conflicts);
 
                 case ImplicitArrayCreationExpressionSyntax implicitArray:
-                    return ParseList(implicitArray.Initializer);
+                    return ParseList(implicitArray.Initializer, assetCatalog, conflicts);
 
                 default:
                     return Unsupported(expr);
             }
         }
 
-        private static ValueNode ParseNegated(PrefixUnaryExpressionSyntax unary)
+        private static ValueNode ParseNegated(PrefixUnaryExpressionSyntax unary, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
         {
-            var operand = Parse(unary.Operand);
+            var operand = Parse(unary.Operand, assetCatalog, conflicts);
             return operand switch
             {
                 ValueNode.Primitive(PrimitiveKind.Int, int i) => ValueNode.Primitive.Int(-i),
@@ -156,18 +169,18 @@ namespace SceneBuilder.Core.Parsing
             return false;
         }
 
-        private static ValueNode ParseObjectCreation(ObjectCreationExpressionSyntax objectCreation, ExpressionSyntax whole)
+        private static ValueNode ParseObjectCreation(ObjectCreationExpressionSyntax objectCreation, ExpressionSyntax whole, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
         {
             var initializerKind = objectCreation.Initializer?.Kind();
 
             if (initializerKind == SyntaxKind.ObjectInitializerExpression)
             {
-                return ParseNested(objectCreation.Type, objectCreation.Initializer!, whole);
+                return ParseNested(objectCreation.Type, objectCreation.Initializer!, whole, assetCatalog, conflicts);
             }
 
             if (initializerKind == SyntaxKind.CollectionInitializerExpression)
             {
-                return ParseList(objectCreation.Initializer!);
+                return ParseList(objectCreation.Initializer!, assetCatalog, conflicts);
             }
 
             var typeName = TypeNameOf(objectCreation.Type);
@@ -187,7 +200,7 @@ namespace SceneBuilder.Core.Parsing
             _ => null,
         };
 
-        private static ValueNode ParseNested(TypeSyntax type, InitializerExpressionSyntax initializer, ExpressionSyntax whole)
+        private static ValueNode ParseNested(TypeSyntax type, InitializerExpressionSyntax initializer, ExpressionSyntax whole, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
@@ -198,16 +211,16 @@ namespace SceneBuilder.Core.Parsing
                     return Unsupported(whole);
                 }
 
-                fields.Add(new KeyValuePair<string, ValueNode>(ident.Identifier.Text, Parse(assignment.Right)));
+                fields.Add(new KeyValuePair<string, ValueNode>(ident.Identifier.Text, Parse(assignment.Right, assetCatalog, conflicts)));
             }
 
             // Full written type text (namespace preserved), NOT TypeNameOf (drops the namespace).
             return new ValueNode.Nested(type.ToString().Trim(), new FieldMap(fields));
         }
 
-        private static ValueNode ParseList(InitializerExpressionSyntax initializer)
+        private static ValueNode ParseList(InitializerExpressionSyntax initializer, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
         {
-            var items = initializer.Expressions.Select(Parse).ToArray();
+            var items = initializer.Expressions.Select(e => Parse(e, assetCatalog, conflicts)).ToArray();
             return new ValueNode.List(items);
         }
 
@@ -323,6 +336,105 @@ namespace SceneBuilder.Core.Parsing
             }
 
             value = "";
+            return false;
+        }
+
+        // b2-t1: claims an `Assets.<Group>.<folders...>.<Leaf>` chain ONLY when catalog-shaped —
+        // root identifier `Assets`, a non-null catalog, AND the Group (2nd segment) is KNOWN in
+        // the catalog. Mirrors BuilderParser.Instance.cs's `Instance(Prefabs.X)` arm: a hit
+        // resolves straight to the string-form AssetRef shape (ParseAsset, above); a
+        // catalog-shaped miss records ONE located Conflict and still claims the node (never a
+        // silent Enum). A non-catalog-shaped chain (null catalog, or an unknown Group) returns
+        // false so the caller falls through to the ordinary MemberAccess->Enum arm — the pinned
+        // false-hijack regression guard (a user's own `enum Assets` is never hijacked).
+        private static bool TryParseAssetChain(MemberAccessExpressionSyntax expr, AssetCatalog? catalog, List<Conflict>? conflicts, out ValueNode node)
+        {
+            node = default!;
+
+            if (catalog == null)
+            {
+                return false;
+            }
+
+            if (!TryFlattenIdentifierChain(expr, out var segments))
+            {
+                return false;
+            }
+
+            if (segments.Count < 3 || segments[0] != "Assets")
+            {
+                return false;
+            }
+
+            var group = segments[1];
+            var leaf = segments[^1];
+            var folders = segments.GetRange(2, segments.Count - 3);
+
+            if (catalog.TryGetEntry(group, folders, leaf, out var entry))
+            {
+                node = new ValueNode.AssetRef(new AssetRef { DisplayPath = entry.Path, SubAsset = entry.SubAsset });
+                return true;
+            }
+
+            if (!GroupKnown(catalog, group))
+            {
+                return false;
+            }
+
+            conflicts?.Add(new Conflict
+            {
+                Kind = ConflictKind.UnknownFacadeReference,
+                Reason = $"Unknown typed asset reference '{string.Join(".", segments)}'.",
+                Location = new SourceSpan(expr.Span.Start, expr.Span.Length),
+            });
+            node = new ValueNode.AssetRef(new AssetRef { DisplayPath = "" });
+            return true;
+        }
+
+        // Walks a MemberAccessExpressionSyntax spine right-to-left, requiring every `.Name` be a
+        // plain IdentifierNameSyntax (rejects a generic segment / invocation / `?.`) and the
+        // leftmost `.Expression` be a plain IdentifierNameSyntax (the chain root). Returns the
+        // segments root-to-leaf, e.g. `Assets.Materials.Environment.Rocks.Stone` ->
+        // ["Assets","Materials","Environment","Rocks","Stone"].
+        private static bool TryFlattenIdentifierChain(MemberAccessExpressionSyntax expr, out List<string> segments)
+        {
+            var names = new List<string>();
+            ExpressionSyntax current = expr;
+
+            while (current is MemberAccessExpressionSyntax memberAccess)
+            {
+                if (memberAccess.Name is not IdentifierNameSyntax nameIdentifier)
+                {
+                    segments = new List<string>();
+                    return false;
+                }
+
+                names.Add(nameIdentifier.Identifier.Text);
+                current = memberAccess.Expression;
+            }
+
+            if (current is not IdentifierNameSyntax rootIdentifier)
+            {
+                segments = new List<string>();
+                return false;
+            }
+
+            names.Add(rootIdentifier.Identifier.Text);
+            names.Reverse();
+            segments = names;
+            return true;
+        }
+
+        private static bool GroupKnown(AssetCatalog catalog, string group)
+        {
+            foreach (var e in catalog.Entries)
+            {
+                if (string.Equals(e.Group, group, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
             return false;
         }
 

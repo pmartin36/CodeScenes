@@ -16,7 +16,7 @@ namespace SceneBuilder.Core.Parsing
     {
         // `.FitSize(height: 2f)` (aspect-locked) | `.FitSize(size: (2,1,0.5f))` (explicit).
         // Total on VALUES (non-literal -> Unsupported); Fail (located) on STRUCTURE.
-        private static void ApplyFitSize(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
+        private static void ApplyFitSize(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
@@ -39,7 +39,7 @@ namespace SceneBuilder.Core.Parsing
                     fields.Add(new KeyValuePair<string, ValueNode>(
                         SpatialComponents.FitSizeFields.Mode,
                         new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { member }, false)));
-                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ParseSpatialScalar(arg.Expression)));
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ParseSpatialScalar(arg.Expression, ctx)));
                     spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Value, span));
                 }
                 else if (name == SpatialComponents.FitSizeFields.Size)
@@ -48,7 +48,7 @@ namespace SceneBuilder.Core.Parsing
                     fields.Add(new KeyValuePair<string, ValueNode>(
                         SpatialComponents.FitSizeFields.Mode,
                         new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Explicit }, false)));
-                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, ParseSpatialVec3(arg.Expression)));
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, ParseSpatialVec3(arg.Expression, ctx)));
                     spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Size, span));
                 }
                 else
@@ -95,31 +95,31 @@ namespace SceneBuilder.Core.Parsing
 
         // Scalar field: reuse ValueNodeParser, then coerce any numeric primitive to Float
         // (spec: width/height/depth are FLOAT ValueNodes). Non-numeric -> Unsupported (total).
-        private static ValueNode ParseSpatialScalar(ExpressionSyntax expr)
-            => TryCoerceFloat(ValueNodeParser.Parse(expr), out var f)
+        private static ValueNode ParseSpatialScalar(ExpressionSyntax expr, ParserContext ctx)
+            => TryCoerceFloat(ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts), out var f)
                 ? ValueNode.Primitive.Float(f)
                 : new ValueNode.Unsupported(expr.ToString());
 
         // Explicit size: the authored form is a bare 3-tuple (x,y,z). ValueNodeParser does not
         // parse bare tuples, so build the Vec3 here; fall back to ValueNodeParser for any other
         // form (e.g. new Vector3(...)), which stays total.
-        private static ValueNode ParseSpatialVec3(ExpressionSyntax expr)
+        private static ValueNode ParseSpatialVec3(ExpressionSyntax expr, ParserContext ctx)
         {
             if (expr is TupleExpressionSyntax tuple && tuple.Arguments.Count == 3
-                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[0].Expression), out var x)
-                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[1].Expression), out var y)
-                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[2].Expression), out var z))
+                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[0].Expression, ctx.AssetCatalog, ctx.FacadeConflicts), out var x)
+                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[1].Expression, ctx.AssetCatalog, ctx.FacadeConflicts), out var y)
+                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[2].Expression, ctx.AssetCatalog, ctx.FacadeConflicts), out var z))
             {
                 return new ValueNode.Vec3(new Vec3(x, y, z));
             }
 
-            return ValueNodeParser.Parse(expr); // Vector3(...) -> Vec3; else Unsupported
+            return ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts); // Vector3(...) -> Vec3; else Unsupported
         }
 
         // `.SurfaceSnap(down: true, left: true, target: floor)` — bool axis flags + optional target ObjectRef.
         // Structural errors (unnamed/unknown arg, contradictory pair, no axis) -> Fail (located).
         // Non-literal flag value -> Unsupported (total); target -> ValueNodeParser (total, ObjectRef).
-        private static void ApplySurfaceSnap(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation)
+        private static void ApplySurfaceSnap(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
@@ -142,7 +142,7 @@ namespace SceneBuilder.Core.Parsing
 
                 if (name == SpatialComponents.SurfaceSnapFields.Target)
                 {
-                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression)));
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
                     spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SurfaceSnapFields.Target, span));
                     continue;
                 }
