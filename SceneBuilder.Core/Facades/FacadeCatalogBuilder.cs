@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -162,27 +161,5 @@ namespace SceneBuilder.Core.Facades
 
         private static bool IsValidIdentifierChar(char c) =>
             (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
-
-        // Core's own allocator: BARE-number suffix (Wheel, Wheel2, Wheel3, ...) — NOT
-        // CatalogEmit's "_N" form. Loop-until-unique also guards the rare case where a
-        // synthesized "Wheel2" collides with a literally-named "Wheel2" sibling.
-        private sealed class IdentifierAllocator
-        {
-            private readonly HashSet<string> _used = new(StringComparer.Ordinal);
-
-            public string Allocate(string sanitized)
-            {
-                var candidate = sanitized;
-                var n = 1;
-                while (_used.Contains(candidate))
-                {
-                    n++;
-                    candidate = sanitized + n.ToString(CultureInfo.InvariantCulture);
-                }
-
-                _used.Add(candidate);
-                return candidate;
-            }
-        }
     }
 }
