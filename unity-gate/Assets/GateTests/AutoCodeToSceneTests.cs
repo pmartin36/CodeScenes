@@ -17,9 +17,9 @@ using UnityEngine.TestTools;
 // propagation via SceneBuilderAutoSync.ExecuteCodeToScene directly (real GameObject/scene asset).
 public class AutoCodeToSceneTests
 {
+    private const string BuilderName = "AutoCodeToSceneScene";
     private const string ScenePath = "Assets/GateTests/__AutoCodeToSceneTemp.unity";
 
-    private string _dir;
     private string _builderPath;
     private string _sidecarPath;
 
@@ -39,11 +39,11 @@ public class AutoCodeToSceneScene : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "sb_c2a_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_dir);
-        _builderPath = Path.Combine(_dir, "AutoCodeToSceneScene.cs");
-        _sidecarPath = Path.Combine(_dir, "AutoCodeToSceneScene.sbmap.json");
+        SceneBuilderPaths.EnsureBuildersDirectory();
+        _builderPath = SceneBuilderPaths.Builder(BuilderName);
+        _sidecarPath = SceneBuilderPaths.Sidecar(BuilderName);
 
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
     }
@@ -51,13 +51,12 @@ public class AutoCodeToSceneScene : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
 
-        if (Directory.Exists(_dir))
-        {
-            Directory.Delete(_dir, true);
-        }
+        if (File.Exists(_builderPath)) File.Delete(_builderPath);
+        if (File.Exists(_sidecarPath)) File.Delete(_sidecarPath);
 
         if (File.Exists(ScenePath))
         {
@@ -75,6 +74,7 @@ public class AutoCodeToSceneScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         Assert.IsNull(FindRoot(EditorSceneManager.GetActiveScene(), "Beta"),
             "Precondition: Beta must not exist before the external edit.");
@@ -101,6 +101,7 @@ public class AutoCodeToSceneScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         var contents = File.ReadAllText(_builderPath);
 
@@ -126,6 +127,7 @@ public class AutoCodeToSceneScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         var sceneTextBefore = File.ReadAllText(ScenePath);
         var rootsBefore = EditorSceneManager.GetActiveScene().GetRootGameObjects().Select(go => go.name).ToArray();

@@ -17,6 +17,7 @@ using UnityEngine.TestTools;
 // an already-durable object) and AutoSceneToCodeTests'/AutoTriggerTests' direct-executor-drive pattern.
 public class AutoConflictTests
 {
+    private const string BuilderName = "AutoConflictScene";
     private const string ScenePath = "Assets/GateTests/__AutoConflictTemp.unity";
 
     private string _dir;
@@ -39,11 +40,16 @@ public class AutoConflictScene : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
+        // Unrelated helper dir kept only for Conflict_DualTrigger_RunsOneCombinedCycle_NotTwoSingles'
+        // External.cs (never a governing builder, never routed) — not stale.
         _dir = Path.Combine(Path.GetTempPath(), "sb_conflict_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
-        _builderPath = Path.Combine(_dir, "AutoConflictScene.cs");
-        _sidecarPath = Path.Combine(_dir, "AutoConflictScene.sbmap.json");
 
+        SceneBuilderPaths.EnsureBuildersDirectory();
+        _builderPath = SceneBuilderPaths.Builder(BuilderName);
+        _sidecarPath = SceneBuilderPaths.Sidecar(BuilderName);
+
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
     }
@@ -51,6 +57,7 @@ public class AutoConflictScene : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
 
@@ -58,6 +65,9 @@ public class AutoConflictScene : ISceneDefinition
         {
             Directory.Delete(_dir, true);
         }
+
+        if (File.Exists(_builderPath)) File.Delete(_builderPath);
+        if (File.Exists(_sidecarPath)) File.Delete(_sidecarPath);
 
         if (File.Exists(ScenePath))
         {
@@ -85,6 +95,7 @@ public class AutoConflictScene : ISceneDefinition
             "        var beta = scene.Add(\"Beta\");\n" +
             "        beta.Component<UnityEngine.Rigidbody>(c => c.Set(\"m_Mass\", 1f));"));
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        SceneBuilderRouter.ResetForTests();
 
         return EditorSceneManager.GetActiveScene();
     }
@@ -235,11 +246,11 @@ public class AutoConflictScene : ISceneDefinition
         // A real prior converged cycle, via the production executor only — no direct CaptureBaseline call.
         SceneBuilderAutoSync.ExecuteSceneToCode(Array.Empty<EntityId>());
 
-        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSource,
-            "A converged production scene->code cycle (ExecuteSceneToCode) must establish the " +
-            "conflict-aware baseline itself — it must not stay null until a test calls CaptureBaseline directly.");
-        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSnapshot,
-            "A converged production scene->code cycle (ExecuteSceneToCode) must establish the baseline snapshot.");
+        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSourceFor(BuilderName),
+            "A converged production scene->code cycle (ExecuteSceneToCode) must establish THIS builder's " +
+            "own conflict-aware baseline — it must not stay null until a test calls CaptureBaseline directly.");
+        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSnapshotFor(BuilderName),
+            "A converged production scene->code cycle (ExecuteSceneToCode) must establish THIS builder's own baseline snapshot.");
 
         // Both-sides change: Box live in the scene, Beta externally in code (non-overlapping fields).
         box.GetComponent<Rigidbody>().mass = 9f;
@@ -267,10 +278,10 @@ public class AutoConflictScene : ISceneDefinition
         // A real prior converged cycle via the production code->scene executor only.
         SceneBuilderAutoSync.ExecuteCodeToScene(new[] { _builderPath });
 
-        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSource,
-            "A converged production code->scene cycle (ExecuteCodeToScene) must establish the " +
-            "conflict-aware baseline itself — it must not stay null until a test calls CaptureBaseline directly.");
-        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSnapshot,
-            "A converged production code->scene cycle (ExecuteCodeToScene) must establish the baseline snapshot.");
+        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSourceFor(BuilderName),
+            "A converged production code->scene cycle (ExecuteCodeToScene) must establish THIS builder's " +
+            "own conflict-aware baseline — it must not stay null until a test calls CaptureBaseline directly.");
+        Assert.IsNotNull(SceneBuilderAutoSync.BaselineSnapshotFor(BuilderName),
+            "A converged production code->scene cycle (ExecuteCodeToScene) must establish THIS builder's own baseline snapshot.");
     }
 }

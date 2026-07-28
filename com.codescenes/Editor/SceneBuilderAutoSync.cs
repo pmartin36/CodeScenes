@@ -40,10 +40,6 @@ namespace SceneBuilder.Editor
             ApplyToggleState();
         }
 
-        // Matches SceneBuilderSync/SceneBuilderBuild's own copy of this literal — the single demo
-        // builder this milestone scopes. A third copy; flagged, not refactored here (research.md).
-        private const string BuilderName = "DemoScene";
-
         public static bool IsArmed { get; private set; }
 
         internal static Func<double> Clock = () => EditorApplication.timeSinceStartup;
@@ -58,8 +54,16 @@ namespace SceneBuilder.Editor
         // b6-t1 seams (RED stub — pump routing + real merge land with the task's implementation).
         internal static Action<IReadOnlyCollection<EntityId>, IReadOnlyCollection<string>>? ConflictExecutor;
         internal static int ConflictCycleCount { get; private set; }
-        internal static SceneBuilder.Core.Model.SceneSnapshot? BaselineSnapshot;
-        internal static string? BaselineSource;
+
+        // b2-t3 (multi-scene-builders): per-builder baseline state, keyed on BuilderRoute.BuilderName —
+        // never a single global, so one builder's converged baseline can never be attributed to another.
+        private static readonly Dictionary<string, (string source, SceneBuilder.Core.Model.SceneSnapshot snap)> _baselines = new();
+
+        internal static string? BaselineSourceFor(string builderName) =>
+            _baselines.TryGetValue(builderName, out var baseline) ? baseline.source : null;
+
+        internal static SceneBuilder.Core.Model.SceneSnapshot? BaselineSnapshotFor(string builderName) =>
+            _baselines.TryGetValue(builderName, out var baseline) ? baseline.snap : null;
 
         private static readonly HashSet<EntityId> _pendingSceneIds = new();
         private static bool _sceneDeadlineArmed;
@@ -73,9 +77,21 @@ namespace SceneBuilder.Editor
         private static readonly HashSet<string> _watcherPendingPaths = new();
         private static FileSystemWatcher? _watcher;
 
-        // Session-local O(changed) snapshot assembler for the scene->code executor; wiped on reload
-        // (a cold re-assemble rewarms). Reset alongside the rest of the pump's state for tests.
-        private static ChangeScopedSnapshot? _snapshotAssembler;
+        // Session-local O(changed) snapshot assembler(s), one per builder — a shared instance would
+        // leak one builder's incremental node/id cache into another's assemble (research.md). Wiped
+        // on reload (a cold re-assemble rewarms). Reset alongside the rest of the pump's state for tests.
+        private static readonly Dictionary<string, ChangeScopedSnapshot> _snapshotAssemblers = new();
+
+        private static ChangeScopedSnapshot GetAssembler(string builderName)
+        {
+            if (!_snapshotAssemblers.TryGetValue(builderName, out var assembler))
+            {
+                assembler = new ChangeScopedSnapshot();
+                _snapshotAssemblers[builderName] = assembler;
+            }
+
+            return assembler;
+        }
 
         /// <summary>Arm iff the persisted master toggle is on; else disarm. Domain-reload survival + menu-flip wiring.</summary>
         public static void ApplyToggleState()
@@ -413,13 +429,16 @@ namespace SceneBuilder.Editor
                 return;
             }
 
-            // Prefer the last builder/sidecar this session actually BUILT (SceneBuilderBuild.Run) —
-            // covers the isolated-fixture case (build against a non-default path) as well as the
-            // production default, since a normal session's Build/BuildDemo call always targets
-            // SceneBuilderPaths.Builder(BuilderName) itself. Falls back to the fixed default when
-            // nothing has been built yet this session (e.g. a fresh domain reload).
-            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
-            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
+            // Route the ACTIVE scene to its OWN governing builder — never the last-built builder's
+            // paths (that silently reconciles the wrong builder, or writes an orphan scene's edits
+            // into whichever builder happened to be built last). No governing route = clean no-op.
+            if (!SceneBuilderRouter.TryRouteScene(scene, out var route))
+            {
+                return;
+            }
+
+            var builderPath = route.BuilderPath;
+            var sidecarPath = route.SidecarPath;
             if (!File.Exists(builderPath) || !File.Exists(sidecarPath))
             {
                 return; // nothing to sync back into
@@ -438,20 +457,20 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            _snapshotAssembler ??= new ChangeScopedSnapshot();
+            var assembler = GetAssembler(route.BuilderName);
             // M5: resolve live scene-object reference fields to LogicalId (mapped) / raw GlobalObjectId
             // (unmapped) — the reconcile-feeding incremental read path, mirroring the cold Sync path.
-            _snapshotAssembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
+            assembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
             var snapshot = ids.Count == 0
-                ? _snapshotAssembler.AssembleCold(scene)          // sceneSaved catch-all
-                : _snapshotAssembler.AssembleIncremental(scene, ids);
+                ? assembler.AssembleCold(scene)          // sceneSaved catch-all
+                : assembler.AssembleIncremental(scene, ids);
 
             SceneBuilderSync.Run(builderPath, sidecarPath, scene, snapshot);
 
             // Establish/refresh the b6-t1 conflict-aware baseline at this converged tail (scope-
             // validator finding, bucket-b6.md #1) — without this, a real session's baseline stays
             // null forever and every dual-trigger cycle silently degrades to the clobbering fallback.
-            CaptureBaseline(EditorSceneManager.GetActiveScene());
+            CaptureBaseline(scene);
         }
 
         /// <summary>
@@ -499,54 +518,47 @@ namespace SceneBuilder.Editor
         /// </summary>
         internal static void ExecuteCodeToScene(IReadOnlyCollection<string> paths)
         {
-            var scene = EditorSceneManager.GetActiveScene();
-            if (!scene.IsValid() || !scene.isLoaded || string.IsNullOrEmpty(scene.path))
-            {
-                return;
-            }
-
-            // Same last-built-pair discovery ExecuteSceneToCode uses (research.md), for symmetry.
-            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
-            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
-
-            // Only build on a real change to the governing builder — defensive against a watcher
-            // event for an unrelated file in the builders directory.
-            var fullBuilderPath = Path.GetFullPath(builderPath);
-            var isGoverningBuilderChanged = false;
             foreach (var path in paths)
             {
-                if (string.Equals(Path.GetFullPath(path), fullBuilderPath, StringComparison.Ordinal))
+                if (!SceneBuilderRouter.TryRouteBuilderFile(path, out var route))
                 {
-                    isGoverningBuilderChanged = true;
-                    break;
+                    continue;
                 }
-            }
 
-            if (!isGoverningBuilderChanged || !File.Exists(builderPath))
-            {
-                return;
-            }
+                if (!File.Exists(route.BuilderPath))
+                {
+                    continue;
+                }
 
-            try
-            {
-                var result = SceneBuilderBuild.Run(builderPath, scene.path, sidecarPath, scene);
-                foreach (var diagnostic in result.Diagnostics)
+                if (!SceneBuilderRouter.TryGetOpenScene(route, out var scene))
                 {
                     Debug.LogError(
-                        $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
-                        $"{diagnostic.Message} — scene left untouched.");
+                        $"[CodeScenes] {route.BuilderName}: scene {route.ScenePath} is not open — " +
+                        "code->scene build skipped.");
+                    continue;
                 }
 
-                // Establish/refresh the b6-t1 conflict-aware baseline at this converged tail (scope-
-                // validator finding, bucket-b6.md #1) — without this, a real session's baseline stays
-                // null forever and every dual-trigger cycle silently degrades to the clobbering fallback.
-                CaptureBaseline(EditorSceneManager.GetActiveScene());
-            }
-            catch (ParseException e)
-            {
-                Debug.LogError(
-                    $"[CodeScenes] Parse error in {builderPath} at line {e.Line}, column {e.Column}: " +
-                    $"{e.Message} — scene left untouched.");
+                try
+                {
+                    var result = SceneBuilderBuild.Run(route.BuilderPath, route.ScenePath, route.SidecarPath, scene);
+                    foreach (var diagnostic in result.Diagnostics)
+                    {
+                        Debug.LogError(
+                            $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
+                            $"{diagnostic.Message} — scene left untouched.");
+                    }
+
+                    // Establish/refresh the b6-t1 conflict-aware baseline at this converged tail (scope-
+                    // validator finding, bucket-b6.md #1) — without this, a real session's baseline stays
+                    // null forever and every dual-trigger cycle silently degrades to the clobbering fallback.
+                    CaptureBaseline(scene);
+                }
+                catch (ParseException e)
+                {
+                    Debug.LogError(
+                        $"[CodeScenes] Parse error in {route.BuilderPath} at line {e.Line}, column {e.Column}: " +
+                        $"{e.Message} — scene left untouched.");
+                }
             }
         }
 
@@ -559,30 +571,31 @@ namespace SceneBuilder.Editor
         /// </summary>
         internal static void CaptureBaseline(Scene scene)
         {
-            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
-            if (!File.Exists(builderPath))
+            if (!SceneBuilderRouter.TryRouteScene(scene, out var route))
             {
-                BaselineSource = null;
-                BaselineSnapshot = null;
                 return;
             }
 
-            BaselineSource = File.ReadAllText(builderPath);
-            _snapshotAssembler ??= new ChangeScopedSnapshot();
+            if (!File.Exists(route.BuilderPath))
+            {
+                _baselines.Remove(route.BuilderName);
+                return;
+            }
+
+            var assembler = GetAssembler(route.BuilderName);
 
             // M5: resolve live scene-object reference fields the same way the reconcile-feeding reads
             // do, so a baseline ObjectRef agrees with the field-diff (ExecuteBothChanged) that compares
             // against it. No sidecar yet -> resolver stays whatever it was (an ObjectRef read as
             // Unsupported is harmless here: the baseline is only used for desired-vs-desired code diffs
             // and scene-vs-baseline field attribution, never written back).
-            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
-            if (File.Exists(sidecarPath))
+            if (File.Exists(route.SidecarPath))
             {
-                var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
-                _snapshotAssembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
+                var map = IdentityMapJson.Deserialize(File.ReadAllText(route.SidecarPath));
+                assembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
             }
 
-            BaselineSnapshot = _snapshotAssembler.AssembleCold(scene);
+            _baselines[route.BuilderName] = (File.ReadAllText(route.BuilderPath), assembler.AssembleCold(scene));
         }
 
         /// <summary>
@@ -603,7 +616,15 @@ namespace SceneBuilder.Editor
                 return;
             }
 
-            if (BaselineSource == null || BaselineSnapshot == null)
+            // Route the ACTIVE scene to its OWN governing builder — an active scene with no governing
+            // route is a clean no-op (this also subsumes the old empty-path guard, since "" matches no
+            // route).
+            if (!SceneBuilderRouter.TryRouteScene(scene, out var route))
+            {
+                return;
+            }
+
+            if (!_baselines.TryGetValue(route.BuilderName, out var baseline))
             {
                 // Cold session: no last-converged baseline to attribute against — degrade safely to
                 // the two single-direction executors rather than risk a stale-baseline clobber.
@@ -612,24 +633,24 @@ namespace SceneBuilder.Editor
                 return;
             }
 
-            var builderPath = SceneBuilderBuild.LastBuilderPath ?? SceneBuilderPaths.Builder(BuilderName);
-            var sidecarPath = SceneBuilderBuild.LastSidecarPath ?? SceneBuilderPaths.Sidecar(BuilderName);
+            var builderPath = route.BuilderPath;
+            var sidecarPath = route.SidecarPath;
             if (!File.Exists(builderPath) || !File.Exists(sidecarPath))
             {
                 return; // nothing to sync back into
             }
 
-            _snapshotAssembler ??= new ChangeScopedSnapshot();
+            var assembler = GetAssembler(route.BuilderName);
             // M5: same reverse-map every reconcile-feeding read applies, so the live snapshot's
             // ObjectRefs agree with the baseline's for unchanged fields (idempotent field attribution).
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
-            _snapshotAssembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
+            assembler.SceneRefResolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
             var liveSnapshot = ids.Count == 0
-                ? _snapshotAssembler.AssembleCold(scene)
-                : _snapshotAssembler.AssembleIncremental(scene, ids);
+                ? assembler.AssembleCold(scene)
+                : assembler.AssembleIncremental(scene, ids);
 
             SceneBuilderSync.RunConflictAware(
-                builderPath, sidecarPath, scene, liveSnapshot, BaselineSource, BaselineSnapshot, new ConflictSurfacing());
+                builderPath, sidecarPath, scene, liveSnapshot, baseline.source, baseline.snap, new ConflictSurfacing());
 
             // Push CODE-only fields into the scene: the source RunConflictAware just wrote already
             // carries the scene-authoritative + conflict-resolved values, so this Build call no-ops
@@ -672,9 +693,8 @@ namespace SceneBuilder.Editor
             CodeToSceneExecutor = null;
             ConflictExecutor = null;
             ConflictCycleCount = 0;
-            BaselineSnapshot = null;
-            BaselineSource = null;
-            _snapshotAssembler = null;
+            _baselines.Clear();
+            _snapshotAssemblers.Clear();
             SceneBuilderBuild.LastBuilderPath = null;
             SceneBuilderBuild.LastSidecarPath = null;
 

@@ -19,8 +19,8 @@ using UnityEngine.SceneManagement;
 public class AutoIntegrationTests
 {
     private const string ScenePath = "Assets/GateTests/__AutoIntegrationTemp.unity";
+    private const string BuilderName = "AutoIntegrationScene";
 
-    private string _dir;
     private string _builderPath;
     private string _sidecarPath;
 
@@ -40,11 +40,11 @@ public class AutoIntegrationScene : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "sb_integration_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_dir);
-        _builderPath = Path.Combine(_dir, "AutoIntegrationScene.cs");
-        _sidecarPath = Path.Combine(_dir, "AutoIntegrationScene.sbmap.json");
+        SceneBuilderPaths.EnsureBuildersDirectory();
+        _builderPath = SceneBuilderPaths.Builder(BuilderName);
+        _sidecarPath = SceneBuilderPaths.Sidecar(BuilderName);
 
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
     }
@@ -52,13 +52,12 @@ public class AutoIntegrationScene : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
 
-        if (Directory.Exists(_dir))
-        {
-            Directory.Delete(_dir, true);
-        }
+        if (File.Exists(_builderPath)) File.Delete(_builderPath);
+        if (File.Exists(_sidecarPath)) File.Delete(_sidecarPath);
 
         if (File.Exists(ScenePath))
         {
@@ -113,6 +112,7 @@ public class AutoIntegrationScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         var alpha = FindRoot(EditorSceneManager.GetActiveScene(), "Alpha");
         Assert.IsNotNull(alpha, "Alpha was not created by SceneBuilderBuild.Run.");
@@ -147,6 +147,7 @@ public class AutoIntegrationScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         var alpha = FindRoot(EditorSceneManager.GetActiveScene(), "Alpha");
         Assert.IsNotNull(alpha, "Alpha was not created by SceneBuilderBuild.Run.");

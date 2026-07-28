@@ -16,11 +16,14 @@ using UnityEngine.SceneManagement;
 // builder + sidecar + saved scene, then the test drives a live edit and asserts propagation.
 public class AutoSceneToCodeTests
 {
-    // Scene must save under Assets (EditorSceneManager.SaveScene is project-relative); the builder
-    // + sidecar live in a system temp dir so Unity never tries to import/compile the builder .cs.
+    // Scene must save under Assets (EditorSceneManager.SaveScene is project-relative). The builder
+    // + sidecar live under the real <ProjectRoot>/SceneBuilders/ dir (SceneBuilderPaths.Builder/Sidecar)
+    // so SceneBuilderRouter.Discover() — TypeCache-backed — can route this builder via the compiled
+    // AutoSceneToCodeScene fixture (unity-gate/Assets/Fixtures/AutoSceneToCodeScene.cs); a temp-dir
+    // seed is invisible to TypeCache and would silently no-op ExecuteSceneToCode post-rewire.
     private const string ScenePath = "Assets/GateTests/__AutoSceneToCodeTemp.unity";
+    private const string BuilderName = "AutoSceneToCodeScene";
 
-    private string _dir;
     private string _builderPath;
     private string _sidecarPath;
 
@@ -40,11 +43,11 @@ public class AutoSceneToCodeScene : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "sb_a2c_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_dir);
-        _builderPath = Path.Combine(_dir, "AutoSceneToCodeScene.cs");
-        _sidecarPath = Path.Combine(_dir, "AutoSceneToCodeScene.sbmap.json");
+        SceneBuilderPaths.EnsureBuildersDirectory();
+        _builderPath = SceneBuilderPaths.Builder(BuilderName);
+        _sidecarPath = SceneBuilderPaths.Sidecar(BuilderName);
 
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
     }
@@ -52,13 +55,12 @@ public class AutoSceneToCodeScene : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
 
-        if (Directory.Exists(_dir))
-        {
-            Directory.Delete(_dir, true);
-        }
+        if (File.Exists(_builderPath)) File.Delete(_builderPath);
+        if (File.Exists(_sidecarPath)) File.Delete(_sidecarPath);
 
         if (File.Exists(ScenePath))
         {
@@ -91,6 +93,7 @@ public class AutoSceneToCodeScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         var sceneTextBeforeCreate = File.ReadAllText(ScenePath);
         StringAssert.DoesNotContain("Weapon", sceneTextBeforeCreate,
@@ -133,6 +136,7 @@ public class AutoSceneToCodeScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         var alpha = FindRoot(EditorSceneManager.GetActiveScene(), "Alpha");
         Assert.IsNotNull(alpha, "Alpha was not created by SceneBuilderBuild.Run");
@@ -162,6 +166,7 @@ public class AutoSceneToCodeScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
         SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        SceneBuilderRouter.ResetForTests();
 
         var alpha = FindRoot(EditorSceneManager.GetActiveScene(), "Alpha");
         Assert.IsNotNull(alpha, "Alpha was not created by SceneBuilderBuild.Run");
@@ -183,6 +188,11 @@ public class AutoSceneToCodeScene : ISceneDefinition
         Assert.AreEqual(coldResult.Changed, overloadResult.Changed);
         Assert.AreEqual(File.ReadAllText(coldBuilderPath), File.ReadAllText(_builderPath),
             "The pre-assembled-snapshot overload must produce byte-identical source to the cold 3-arg Run given an equivalent snapshot.");
+
+        // These live under the real SceneBuilders/ dir now (not a temp dir wiped wholesale by
+        // TearDown) — clean up the scratch copies explicitly so they don't linger between runs.
+        if (File.Exists(coldBuilderPath)) File.Delete(coldBuilderPath);
+        if (File.Exists(coldSidecarPath)) File.Delete(coldSidecarPath);
     }
 
     // The pump's production default must be wired to the real executor, not left null — the whole
