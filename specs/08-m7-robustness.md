@@ -1,5 +1,21 @@
 # M7 — Robustness pass (hardening the loop)
 
+> ## AMENDED 2026-07-28 — rescoped: two deliverables already shipped under M-Auto (spec 14)
+> M-Auto (spec 14) was built before M7 and already delivers part of this spec. Do NOT re-build these:
+> - **(a) Self-triggered event suppression — SHIPPED.** `com.codescenes/Editor/SuppressionScope.cs` is
+>   exactly this deliverable: ref-counted, exception-safe, time-bounded, with a leaked-scope backstop.
+> - **(b) Domain-reload re-subscribe — SHIPPED (the re-subscribe half).** `SceneBuilderAutoSync.cs`
+>   `[InitializeOnLoad]` re-arms on every reload and re-subscribes `changesPublished` + `sceneSaved`.
+>
+> **Genuinely remaining, and the real scope of M7:**
+> - **`SyncCheckpoint` / `FooScene.sbstate.json` hash-based routing** (not found in shipped code): persist
+>   the last-reconciled snapshot/source/sidecar hashes and route direction on reload, or surface a
+>   both-changed conflict, instead of guessing.
+> - **External-edit reconciliation on focus-regain / scene-open** via full-snapshot diff (no event fired).
+> - **An explicit determinism / no-churn audit** (byte-stable output, no LogicalId/GlobalObjectId churn
+>   across N cycles). Continuously gate-tested per milestone today, but never done as a dedicated audit.
+> Treat the (a)/(b) detail below as background for what already exists, not as work to redo.
+
 ### Additions to the contract
 
 No new §3 data-model types. This milestone hardens existing behavior and adds two persisted-state /
@@ -35,10 +51,11 @@ Five independently testable hardening behaviors:
 
 - **(a) Self-triggered event suppression** — a code→scene Materialize must not re-trigger a scene→code
   Reconcile via `ObjectChangeEvents`. Suppress/guard the event stream for the duration of Plan
-  execution.
+  execution. **[SHIPPED by M-Auto — see AMENDED banner; not M7 work.]**
 - **(b) Domain-reload survival** — re-subscribe to events via `[InitializeOnLoad]`; persist plugin
   state to disk (not memory); treat every reload as a **resync-from-disk checkpoint** (§5:
-  "Reconcile on every domain reload and focus-regain").
+  "Reconcile on every domain reload and focus-regain"). **[Re-subscribe half SHIPPED by M-Auto; the
+  disk-checkpoint / resync-routing half remains M7 work.]**
 - **(c) External-edit reconciliation** — a scene changed on disk by git/another tool while unobserved
   is recovered by a **full-snapshot diff** on next focus/reload, even though no `ObjectChangeEvent`
   fired (the authority is a fresh snapshot, per §5).

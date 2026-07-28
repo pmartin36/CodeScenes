@@ -1,5 +1,12 @@
 # M9 — `[SerializeReference]` polymorphism
 
+> **Note (2026-07-28):** buildable as-written, with one seam change since this spec was authored.
+> `ValueNodeParser.Parse` is now 3-arg and catalog-threaded (`Parse(expr, ctx.AssetCatalog,
+> ctx.FacadeConflicts)`), so M9's managed-instance value parsing must plug into that signature, and its
+> `x => x.field` field selector should reuse the shipped `.Set(x => x.field)` selector parser. Asset
+> fields inside a managed instance ride the typed asset catalog (spec 28, `Assets.<Type>…`), not string
+> `Asset("path")`.
+
 ### Additions to the contract
 This milestone introduces new types/ops not in `00-foundation.md`. They are flagged here per §3's rule.
 

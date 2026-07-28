@@ -1,5 +1,27 @@
 # M8 — UnityEvents / OnClick wiring
 
+> ## AMENDED 2026-07-28 — supersedes conflicting detail below (read first)
+> The compiler-safety toolkit and typed selectors shipped after this spec was written. M8 must be built
+> to match what already exists:
+> - **The method reference is a typed method-lambda, not `nameof`.** The wiring shape is
+>   `.OnClick(<target>, x => x.Method(args))`, where `x` is typed as the target component and a static
+>   argument is written inside the call (`l => l.SetLevel(3)`). Every `nameof(...)` example in this
+>   document (authoring API, test plan, checklist) is superseded by the lambda form.
+> - **The SB1201/SB1202 UnityEvent-signature analyzer already ships** (delivered under spec 26) in
+>   `CodeScenes.Analyzers/UnityEventAnalysis.cs`: SB1201 arity mismatch (Error), SB1202 non-public target
+>   (Warning). It is deliberately inert and recognizes ONLY the lambda form (`TryFindMethodLambdaArg`); it
+>   never matches `nameof`. So M8's job is to build the authoring + Core round-trip surface that makes
+>   these diagnostics bind and fire. The out-of-scope line "signature validation deferred to a later
+>   analyzer" is now backwards and void: the analyzer waits on M8, not the reverse.
+> - **Still genuinely OPEN / unbuilt:** the target model itself, a *capturable component handle*. Today
+>   `Component<T>(...)` returns a fluent `NodeHandle`, not a handle carrying a component `LogicalId`
+>   (`com.codescenes/Runtime/NodeHandle.cs`); M8 must add that. The Core round-trip
+>   (`ValueNode.UnityEventListeners`, `SetUnityEvent`, adapter read/write) is unbuilt, as specified below.
+> - **Reuse, do not reinvent:** the `.OnEvent(x => x.onValueChanged, …)` event-field selector is the same
+>   member-chain-from-source parser shipped for façade selectors and `.Set(x => x.field)`. Asset targets
+>   and object-mode asset arguments ride the shipped typed asset catalog (spec 28, emit-typed-by-default
+>   `Assets.<Type>…`), not string `Asset("path")`.
+
 > ## Target-model decision (banked 2026-07-21 — authoritative)
 > A persistent listener's target is the **specific component**, not the owning GameObject (Unity stores
 > `m_Target` as the exact `Object`; two components on one GameObject can share a method name). So:
@@ -12,9 +34,10 @@
 >   only ever targets GameObjects (handles are GameObject-only); M8 extends the handle model + `ObjectRef`
 >   resolution so a component `LogicalId` (the IdentityMap already has `Kind=="Component"` entries) is a
 >   valid target. A method on the GameObject itself (e.g. `GameObject.SetActive`) still targets the GO.
-> - **Emitted method refs are fully-qualified `nameof(...)`** (e.g. `nameof(Game.Door.Open)`), consistent
->   with existing FQ type emission; no general `using`-injection is added. An unchanged listener's authored
->   token is preserved verbatim (span-local reconcile); only new appends use the FQ form.
+> - **Emitted method refs use the typed method-lambda** `x => x.Method(args)` (see the AMENDED banner
+>   above; the earlier `nameof(...)` decision is superseded). The lambda receiver is the target component
+>   type; no general `using`-injection is added. An unchanged listener's authored token is preserved
+>   verbatim (span-local reconcile); only new appends use the lambda form.
 
 ### Additions to the contract
 This milestone introduces new types/ops not in `00-foundation.md`. They are flagged here per §3's rule.
@@ -73,8 +96,9 @@ that forwards the event's own runtime argument(s) to the method (multi-arg `Unit
   `Unsupported`, flagged.
 - Custom `[Serializable]` `UnityEvent` subclasses beyond field-typed discovery (handled generically if
   they serialize the standard `m_PersistentCalls` shape; exotic shapes → `Unsupported`).
-- Authoring-time validation that `methodName` exists / is signature-compatible on the target type
-  (deferred to a later analyzer; M8 fails loud only at Materialize when Unity rejects the wire).
+- Building the SB1201/SB1202 signature analyzer: it ALREADY ships (see AMENDED banner). M8's obligation
+  is to build the typed method-lambda authoring surface so those diagnostics bind and fire in the IDE and
+  the gate; M8 still fails loud at Materialize when Unity rejects a wire.
 
 ## Core deliverables
 ### Types added/changed (referencing §3)
@@ -131,25 +155,30 @@ that forwards the event's own runtime argument(s) to the method (multi-arg `Unit
   from Core's projection.
 
 ## Authoring API added
+The method is a **typed method-lambda** on the target component; the static argument (if any) is written
+inside the call, so the compiler and the shipped SB1201/SB1202 analyzer check the signature.
 ```csharp
-// Button convenience (m_OnClick):
-scene.Add("Button").Component<Button>(b => b.OnClick(door, nameof(Door.Open)));           // void
-scene.Add("Button").Component<Button>(b => b.OnClick(audio, nameof(AudioSource.Play)));    // void, asset-less scene target
-scene.Add("Button").Component<Button>(b => b.OnClick(lamp, nameof(Lamp.SetLevel), 3));     // int arg
-scene.Add("Button").Component<Button>(b => b.OnClick(mixer, nameof(Mixer.SetVol), 0.5f,    // float arg + call state
+// Button convenience (m_OnClick) — target is a component handle, method is a typed lambda on it:
+scene.Add("Button").Component<Button>(b => b.OnClick(opener, o => o.Open()));              // void
+scene.Add("Button").Component<Button>(b => b.OnClick(audio, a => a.Play()));               // void, asset-less scene target
+scene.Add("Button").Component<Button>(b => b.OnClick(lamp, l => l.SetLevel(3)));           // int arg (captured from the call)
+scene.Add("Button").Component<Button>(b => b.OnClick(mixer, m => m.SetVol(0.5f),           // float arg + call state
                                                      callState: UnityEventCallState.EditorAndRuntime));
 
-// Generic UnityEvent field on any component:
-b.OnEvent(c => c.onValueChanged, target: hud, method: nameof(Hud.Refresh));                 // bool/int/etc. per field type
+// Generic UnityEvent field on any component (event-field selector reuses the shipped .Set(x => x.field) parser):
+b.OnEvent(c => c.onValueChanged, hud, h => h.Refresh());                                    // bool/int/etc. per field type
 
 // Dynamic — forward the event's own arg(s) to a matching method (covers multi-arg UnityEvent<T…>):
-slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, target: hud,
-                                        method: nameof(Hud.SetValue), dynamic: true));       // ArgMode "dynamic", no stored value
+slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, hud,
+                                        h => h.SetValue, dynamic: true));                   // ArgMode "dynamic", no stored value
 ```
-- `target` is a builder **handle** (→ `ObjectRef`, §6) or an asset reference (→ `AssetRef`).
+- `target` is a **component handle** (→ `ObjectRef` addressing a component `LogicalId`, per the target-model
+  banner) or an asset reference (→ `AssetRef`, authored via the typed asset catalog `Assets.<Type>…`, spec 28).
+- The method-lambda's receiver is typed as the target component, so a wrong or non-existent method fails to
+  compile (and SB1201/SB1202 flag arity / non-public before Materialize).
 - Lowering (Editor→Core): `.OnClick(...)`/`.OnEvent(...)` → `ComponentData.Fields[eventPath]` =
-  `UnityEventListeners([...])`; overloads select `ArgMode`/`ArgValue`; default `callState` =
-  `RuntimeOnly`.
+  `UnityEventListeners([...])`; the lambda's method name and in-call argument select `ArgMode`/`ArgValue`;
+  default `callState` = `RuntimeOnly`.
 
 ## IdentityMap / sidecar changes
 - No new entry kinds. Listener **targets** reuse existing identity: scene targets resolve through the
@@ -162,7 +191,7 @@ slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, target: hud,
 - **Model ↔ serialized listener (void)**: build a `UnityEventListener{ Target=ObjectRef, Method,
   ArgMode=void, CallState=RuntimeOnly }`; project to persistent-call fields and back → equal;
   `m_Mode == 1` (Void).
-- **Round-trip void**: SceneModel with `.OnClick(door, "Open")` → serialize → parse → equal model.
+- **Round-trip void**: SceneModel with `.OnClick(opener, o => o.Open())` → serialize → parse → equal model.
 - **Round-trip 1-arg** (one test per mode int/float/string/bool/object): `ArgValue` and `m_Mode`
   map correctly (`3/4/5/6/2`); `m_Int/Float/String/Bool/ObjectArgument` populated; reverse equal.
 - **Target = scene object** vs **target = asset**: `ObjectRef` resolves via IdentityMap; `AssetRef`
@@ -187,13 +216,13 @@ slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, target: hud,
   unchanged scene is a no-op; no silent drop.
 
 ## Unity confirmation checklist
-1. Open a scene with a `Button` (`door` GameObject present, `Door.Open()` public). Author
-   `.Component<Button>(b => b.OnClick(door, nameof(Door.Open)))`, Materialize → in Unity the Button's
-   OnClick shows one persistent entry: target `door`, function `Door.Open ()`, RuntimeOnly. **Expected:** wired, no errors.
-2. In Unity, change the OnClick target to a different GameObject → save. **Expected:** source's
-   `.OnClick(...)` first argument updates to the new handle; map unchanged for other entries.
+1. Open a scene with a `Button` and a `DoorOpener` component (`Open()` public). Author
+   `.Component<Button>(b => b.OnClick(opener, o => o.Open()))`, Materialize → in Unity the Button's
+   OnClick shows one persistent entry: target `opener`, function `DoorOpener.Open ()`, RuntimeOnly. **Expected:** wired, no errors.
+2. In Unity, change the OnClick target to a different component → save. **Expected:** source's
+   `.OnClick(...)` target argument updates to the new component handle; map unchanged for other entries.
 3. In Unity, change the invoked method to a 1-arg `int` method and set the value to `7` → save.
-   **Expected:** source becomes `.OnClick(target, nameof(...), 7)` (ArgMode int, value 7).
+   **Expected:** source becomes `.OnClick(target, t => t.Method(7))` (ArgMode int, value 7).
 4. In Unity, set the OnClick target to a **project asset** (e.g. an `AudioSource` on a prefab asset or
    an asset object arg) → save. **Expected:** source arg becomes the asset reference; `Assets[]` gains
    its GUID.
@@ -203,7 +232,7 @@ slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, target: hud,
    from source.
 7. In Unity, wire a `Slider.onValueChanged` **dynamically** to a `Hud.SetValue(float)` method (drag it
    under the "Dynamic float" section) → save. **Expected:** source becomes
-   `.OnEvent(x => x.onValueChanged, target: hud, method: nameof(Hud.SetValue), dynamic: true)`; round-trips.
+   `.OnEvent(x => x.onValueChanged, hud, h => h.SetValue, dynamic: true)`; round-trips.
 8. Re-run Materialize with no code change. **Expected:** no plan ops (idempotent).
 
 ## Dependencies
