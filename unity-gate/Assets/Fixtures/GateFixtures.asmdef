@@ -1,7 +1,9 @@
 {
     "name": "GateFixtures",
     "rootNamespace": "GateFixtures",
-    "references": [],
+    "references": [
+        "SceneBuilder.Authoring"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
