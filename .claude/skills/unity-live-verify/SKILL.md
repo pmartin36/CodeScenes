@@ -90,13 +90,37 @@ editor never connected or the sync never fired, say so; never infer a pass.
 
 ## Isolation and safety (critical)
 
-- Do NOT mutate an existing meaningful builder or scene (e.g. the manual test project's `DemoScene`). Note
-  that simply opening the editor makes auto-sync reconcile any pre-existing code/scene drift, which itself
-  edits the builder. Prefer a dedicated `LiveVerify_<feature>` builder and scene per experiment.
-- Back up any file you will touch, and restore it at the end. Verify the scene is clean (root count and
-  object list back to baseline) and no probe objects remain.
+- Simply opening the editor makes auto-sync reconcile any pre-existing code/scene drift, which itself edits
+  the governing builder. Expect that.
+- Back up any file you will touch, and restore it at the end (sha/byte-verify the restore). Verify the
+  scene is clean (root count and object list back to baseline) and no probe objects remain.
 - If you installed the pipeline package into a shared project, restore its `manifest.json` and
   `packages-lock.json` and remove any stale `Temp/UnityLockfile` when done.
+
+## Project-specific realities (manual test project, verified 2026-07-28) — read before designing a test
+
+- **Auto-sync is single-builder, hardwired to `DemoScene`.** `SceneBuilderAutoSync.BuilderName = "DemoScene"`;
+  the running editor DROPS any file-watcher event whose path is not that builder, and the menu items are
+  literally `Build DemoScene` / `Sync DemoScene`. So a dedicated `LiveVerify_<feature>` builder is NOT picked
+  up here and an isolated-scene approach does not work. The practical path is a MINIMAL, reversible edit to
+  `DemoScene.cs` with a backup, then restore byte-for-byte. Do not burn time trying to bind a new builder.
+- **The live read is the source of truth, not the on-disk `.unity` bytes.** FitSize/SurfaceSnap re-apply in
+  edit mode, so a build writes authored transforms to the file that the live scene immediately re-snaps in
+  memory (e.g. Crate `y=3/scale1` on disk vs `y=0.6/scale1.2` live), and the `.sbmap.json` sidecar gets
+  deterministically re-enriched by any build. Diffing the scene file reads as false churn. Assert with
+  `get_component_properties` against the live object.
+- **Construct a typed catalog member from the manifest, do not guess it.** The chain is
+  `Assets.<Group>.<folderSegments…>.<Leaf>`, so `Assets/Materials/Green.mat` is
+  `Assets.Materials.Materials.Green` (group and folder both "Materials"), NOT `Assets.Materials.Green`. Read
+  `SceneBuilders/Generated/Assets.sbassets.json` (each entry's group + folderSegments + memberName) and the
+  emit shape in `CodeScenes.Analyzers/AssetCatalogEmit.cs`.
+- **Make a resolution test decisive:** swap the value to a DIFFERENT asset first (observe the live object
+  change), then to the target, then back. A parse-failure no-op leaves the pre-existing value in place and
+  is otherwise indistinguishable from a successful resolve.
+- **`recompile_status` stays `idle` for builder-only edits** (the builder lives outside `Assets/`; typed-chain
+  resolution is the CodeScenes Roslyn parser, not Unity's compiler). "Compiles clean" here means no located
+  parse diagnostic and a successful `[SceneBuilder] Built in place` log, plus zero `error CS` from the
+  source generator compiled into `Assembly-CSharp`.
 
 ## What is and is not testable in a given project
 
