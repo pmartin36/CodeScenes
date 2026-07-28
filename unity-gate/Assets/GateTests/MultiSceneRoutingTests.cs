@@ -276,4 +276,59 @@ public class {builderName} : ISceneDefinition
         Assert.IsTrue(betaMap.Entries.Any(e => e.Name == "Beta"), "RouteBeta's sidecar must contain its own object.");
         Assert.IsFalse(betaMap.Entries.Any(e => e.Name == "Alpha"), "RouteBeta's sidecar must not leak RouteAlpha's object entries.");
     }
+
+    // Checklist #7 (b3-t1): CodeScenes/Build Active Scene must route by the ACTIVE scene's OWN
+    // governing builder (like ExecuteCodeToScene's routing, but from the manual menu entry point) —
+    // never the last-built builder's paths. Beta is made active; only Beta's live+saved scene may
+    // change, Alpha (live scene bytes and its own source) must be untouched.
+    [Test]
+    public void MultiScene_Menu_BuildActiveScene_TargetsActiveBuildersScene()
+    {
+        EditorSceneManager.SetActiveScene(_betaScene);
+        Assert.AreEqual(BetaScenePath, EditorSceneManager.GetActiveScene().path,
+            "Precondition: Beta must be the active scene.");
+
+        var alphaSceneBytesBefore = File.ReadAllBytes(AlphaScenePath);
+        var alphaSourceBefore = File.ReadAllText(_alphaBuilderPath);
+
+        File.WriteAllText(_betaBuilderPath, Source("RouteBeta", "        scene.Add(\"Beta\");\n        scene.Add(\"Gamma\");"));
+        SceneBuilderRouter.ResetForTests();
+
+        SceneBuilderBuild.BuildActiveScene();
+
+        Assert.IsTrue(_betaScene.GetRootGameObjects().Any(go => go.name == "Gamma"),
+            "Build Active Scene must build the active scene's OWN governing builder's change into that scene.");
+        StringAssert.Contains("Gamma", File.ReadAllText(BetaScenePath),
+            "The routed builder's own scene ASSET must be saved with the change.");
+
+        CollectionAssert.AreEqual(alphaSceneBytesBefore, File.ReadAllBytes(AlphaScenePath),
+            "Alpha's scene asset must be byte-identical — Build Active Scene must never touch a non-active scene.");
+        Assert.AreEqual(alphaSourceBefore, File.ReadAllText(_alphaBuilderPath),
+            "Alpha's builder source must be untouched by building the (Beta) active scene.");
+    }
+
+    // Checklist #7 (b3-t1): when the active scene has no governing builder, Build Active Scene must
+    // log ONE located Error containing "no governing builder" and write to no scene/builder — never
+    // throw, never silently build into the wrong scene.
+    [Test]
+    public void MultiScene_Menu_BuildActiveScene_NoGoverningBuilder_LogsLocatedError_WritesNothing()
+    {
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var plainScene = EditorSceneManager.GetActiveScene();
+        Assert.IsFalse(SceneBuilderRouter.TryRouteScene(plainScene, out _),
+            "Precondition: a brand-new unsaved scene must not match any discovered route.");
+
+        var alphaSourceBefore = File.ReadAllText(_alphaBuilderPath);
+        var betaSourceBefore = File.ReadAllText(_betaBuilderPath);
+
+        LogAssert.Expect(UnityEngine.LogType.Error, new System.Text.RegularExpressions.Regex("no governing builder"));
+
+        Assert.DoesNotThrow(() => SceneBuilderBuild.BuildActiveScene(),
+            "An active scene with no governing builder must be a safe located error, never an exception.");
+
+        Assert.AreEqual(alphaSourceBefore, File.ReadAllText(_alphaBuilderPath),
+            "No governing builder for the active scene means RouteAlpha's source must be untouched.");
+        Assert.AreEqual(betaSourceBefore, File.ReadAllText(_betaBuilderPath),
+            "No governing builder for the active scene means RouteBeta's source must be untouched.");
+    }
 }

@@ -23,14 +23,6 @@ namespace SceneBuilder.Editor
     /// </summary>
     public static class SceneBuilderSync
     {
-        private const string BuilderName = "DemoScene";
-
-        // <ProjectRoot>/SceneBuilders/ — outside Assets/, so writing the builder never triggers a
-        // domain reload. Resolved per call (not a const) since the project root is only known at
-        // runtime; see SceneBuilderPaths.
-        private static string BuilderPath => SceneBuilderPaths.Builder(BuilderName);
-        private static string SidecarPath => SceneBuilderPaths.Sidecar(BuilderName);
-
         /// <summary>Summary of a <see cref="Run"/> sync for callers/tests.</summary>
         public sealed class SyncResult
         {
@@ -78,24 +70,63 @@ namespace SceneBuilder.Editor
             public string[] ConflictFields { get; set; } = System.Array.Empty<string>();
         }
 
-        [MenuItem("CodeScenes/Sync DemoScene (scene -> code)")]
-        public static void SyncDemo()
+        /// <summary>
+        /// Sync-back (scene-&gt;code) the ACTIVE scene's OWN governing builder — routed via
+        /// <see cref="SceneBuilderRouter.TryRouteScene"/>, never a hardcoded single builder. When the
+        /// active scene matches no discovered route, logs one located <see cref="Debug.LogError"/>
+        /// containing "no governing builder" and writes nothing.
+        /// </summary>
+        [MenuItem("CodeScenes/Sync Active Scene (scene -> code)")]
+        public static void SyncActiveScene()
         {
             try
             {
                 SceneBuilderPaths.EnsureBuildersDirectory();
 
-                if (!File.Exists(BuilderPath) || !File.Exists(SidecarPath))
+                var scene = SceneManager.GetActiveScene();
+                if (!SceneBuilderRouter.TryRouteScene(scene, out var route))
                 {
-                    Debug.LogError($"[SceneBuilder] Build first — missing {BuilderPath} or {SidecarPath}.");
+                    Debug.LogError(
+                        $"[CodeScenes] Active scene '{scene.path}' has no governing builder — nothing synced.");
                     return;
                 }
 
-                Run(BuilderPath, SidecarPath, SceneManager.GetActiveScene());
+                if (!File.Exists(route.BuilderPath) || !File.Exists(route.SidecarPath))
+                {
+                    Debug.LogError(
+                        $"[CodeScenes] Build first — missing {route.BuilderPath} or {route.SidecarPath}.");
+                    return;
+                }
+
+                Run(route.BuilderPath, route.SidecarPath, scene);
             }
             catch (System.Exception e)
             {
-                Debug.LogError("[SceneBuilder] Sync failed:\n" + e);
+                Debug.LogError("[CodeScenes] Sync failed:\n" + e);
+            }
+        }
+
+        /// <summary>
+        /// Sync-back (scene-&gt;code) EVERY discovered builder whose OWN scene is currently open —
+        /// never force-opens a scene (spec Out of scope).
+        /// </summary>
+        [MenuItem("CodeScenes/Sync All")]
+        public static void SyncAll()
+        {
+            try
+            {
+                foreach (var route in SceneBuilderRouter.Discover())
+                {
+                    if (SceneBuilderRouter.TryGetOpenScene(route, out var scene)
+                        && File.Exists(route.BuilderPath) && File.Exists(route.SidecarPath))
+                    {
+                        Run(route.BuilderPath, route.SidecarPath, scene);
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[CodeScenes] Sync failed:\n" + e);
             }
         }
 
@@ -103,7 +134,7 @@ namespace SceneBuilder.Editor
         /// Sync-back (scene-&gt;code) against a PASSED scene + paths: read <paramref name="scene"/>,
         /// reconcile it against the builder file at <paramref name="builderPath"/> keyed on
         /// GlobalObjectId, patch THAT builder source in place, and update THAT sidecar at
-        /// <paramref name="sidecarPath"/>. The testable seam behind <see cref="SyncDemo"/>. Throws on
+        /// <paramref name="sidecarPath"/>. The testable seam behind <see cref="SyncActiveScene"/>/<see cref="SyncAll"/>. Throws on
         /// failure (no swallowing) so callers/tests observe errors.
         /// </summary>
         public static SyncResult Run(string builderPath, string sidecarPath, Scene scene)
@@ -241,7 +272,7 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            // Convergence-defect guard (inherit-by-default: the manual SyncDemo path gets it too):
+            // Convergence-defect guard (inherit-by-default: the manual SyncActiveScene path gets it too):
             // the reconcile PRODUCED edits (PatchEdits > 0) but the applied text was byte-identical to
             // what was already on disk (EditsApplied == 0, i.e. WriteIfChanged found no real diff).
             // That means the reconcile believed the source was stale when it was not — a bug in the

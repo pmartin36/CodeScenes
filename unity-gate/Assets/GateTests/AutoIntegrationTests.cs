@@ -13,7 +13,7 @@ using UnityEngine.SceneManagement;
 // write drops its own watcher echo, the loop settles instead of oscillating, and the master toggle
 // gates the whole loop while the retained manual menu items still work and the toggle persists.
 // Drives the real production write paths (SceneBuilderBuild.Run / SceneBuilderAutoSync.ExecuteSceneToCode
-// / BuildDemo / SyncDemo) directly, following AutoSceneToCodeTests'/AutoConflictTests' setup pattern —
+// / SceneBuilderSync.Run) directly, following AutoSceneToCodeTests'/AutoConflictTests' setup pattern —
 // this file does NOT re-test b2-t1's own ref-count/time-bound internals (SuppressionScopeTests already
 // does), only that the real write seams and the b4-t1 pump agree with each other.
 public class AutoIntegrationTests
@@ -227,19 +227,26 @@ public class AutoIntegrationScene : ISceneDefinition
             File.WriteAllText(demoBuilderPath, Source("        scene.Add(\"ManualObject\");"));
 
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            var activeScene = EditorSceneManager.GetActiveScene();
 
-            SceneBuilderBuild.BuildDemo();
+            // b3-t1: BuildDemo()/SyncDemo() are retired in favor of router-driven active-scene menus.
+            // No compiled "DemoScene" ISceneDefinition fixture exists for SceneBuilderRouter.Discover()
+            // to route through, so this test (whose intent is "the manual menu path still works while
+            // auto is disarmed", not router discovery — that is MultiSceneRoutingTests' job) drives the
+            // underlying Run seams directly against the active scene, per the b3-t1 blueprint's
+            // migration note.
+            SceneBuilderBuild.Run(demoBuilderPath, DemoScenePath, demoSidecarPath, activeScene);
 
             var manual = FindRoot(EditorSceneManager.GetActiveScene(), "ManualObject");
             Assert.IsNotNull(manual,
-                "CodeScenes/Build DemoScene must still materialize the object while auto is toggled OFF.");
+                "The manual build path must still materialize the object while auto is toggled OFF.");
 
             manual.transform.position = new Vector3(9f, 8f, 7f);
-            SceneBuilderSync.SyncDemo();
+            SceneBuilderSync.Run(demoBuilderPath, demoSidecarPath, EditorSceneManager.GetActiveScene());
 
             var syncedSource = File.ReadAllText(demoBuilderPath);
             StringAssert.Contains("(9f, 8f, 7f)", syncedSource,
-                "CodeScenes/Sync DemoScene must still patch the source while auto is toggled OFF.\n" + syncedSource);
+                "The manual sync path must still patch the source while auto is toggled OFF.\n" + syncedSource);
 
             // --- toggle back ON persists across a re-read (simulated restart) ---
             SceneBuilderAutoToggle.Enabled = true;

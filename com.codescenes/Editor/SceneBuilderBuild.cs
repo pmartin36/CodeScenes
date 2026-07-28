@@ -25,16 +25,6 @@ namespace SceneBuilder.Editor
     /// </summary>
     public static partial class SceneBuilderBuild
     {
-        private const string BuilderName = "DemoScene";
-
-        // The SCENE stays under Assets/ — it is a real Unity asset and EditorSceneManager.SaveScene
-        // takes a project-relative path. Only the builder .cs and its sidecar move out to
-        // <ProjectRoot>/SceneBuilders/, where writing them cannot trigger a domain reload.
-        private const string ScenePath = "Assets/SceneBuilder/DemoScene.unity";
-
-        private static string BuilderPath => SceneBuilderPaths.Builder(BuilderName);
-        private static string SidecarPath => SceneBuilderPaths.Sidecar(BuilderName);
-
         /// <summary>
         /// The builder/sidecar paths this session's LAST successful <see cref="Run"/> built — the
         /// auto-sync scene-&gt;code executor's fallback discovery for "which builder governs the
@@ -76,28 +66,72 @@ namespace SceneBuilder.Editor
                 { get; set; } = System.Array.Empty<SceneBuilder.Core.Validation.Diagnostic>();
         }
 
-        [MenuItem("CodeScenes/Build DemoScene (code -> scene)")]
-        public static void BuildDemo()
+        /// <summary>
+        /// Build (code-&gt;scene) the ACTIVE scene's OWN governing builder — routed via
+        /// <see cref="SceneBuilderRouter.TryRouteScene"/>, never a hardcoded single builder. When the
+        /// active scene matches no discovered route, logs one located <see cref="Debug.LogError"/>
+        /// containing "no governing builder" and writes nothing.
+        /// </summary>
+        [MenuItem("CodeScenes/Build Active Scene (code -> scene)")]
+        public static void BuildActiveScene()
         {
             try
             {
                 SceneBuilderPaths.EnsureBuildersDirectory();
 
-                if (!File.Exists(BuilderPath))
+                var scene = EditorSceneManager.GetActiveScene();
+                if (!SceneBuilderRouter.TryRouteScene(scene, out var route))
                 {
-                    Debug.LogError($"[SceneBuilder] Builder file not found: {BuilderPath}");
+                    Debug.LogError(
+                        $"[CodeScenes] Active scene '{scene.path}' has no governing builder — nothing built.");
                     return;
                 }
 
-                var result = Run(BuilderPath, ScenePath, SidecarPath, EditorSceneManager.GetActiveScene());
-                foreach (var diagnostic in result.Diagnostics)
+                BuildRoute(route, scene);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[CodeScenes] Build failed:\n" + e);
+            }
+        }
+
+        /// <summary>
+        /// Build (code-&gt;scene) EVERY discovered builder whose OWN scene is currently open — never
+        /// force-opens a scene (spec Out of scope).
+        /// </summary>
+        [MenuItem("CodeScenes/Build All")]
+        public static void BuildAll()
+        {
+            try
+            {
+                SceneBuilderPaths.EnsureBuildersDirectory();
+
+                foreach (var route in SceneBuilderRouter.Discover())
                 {
-                    Debug.LogError(FormatDiagnostic(diagnostic));
+                    if (SceneBuilderRouter.TryGetOpenScene(route, out var scene))
+                    {
+                        BuildRoute(route, scene);
+                    }
                 }
             }
             catch (System.Exception e)
             {
-                Debug.LogError("[SceneBuilder] Build failed:\n" + e);
+                Debug.LogError("[CodeScenes] Build failed:\n" + e);
+            }
+        }
+
+        private static void BuildRoute(BuilderRoute route, Scene scene)
+        {
+            if (!File.Exists(route.BuilderPath))
+            {
+                Debug.LogError($"[CodeScenes] Builder file not found: {route.BuilderPath}");
+                return;
+            }
+
+            var result = Run(route.BuilderPath, route.ScenePath, route.SidecarPath, scene);
+            foreach (var diagnostic in result.Diagnostics)
+            {
+                Debug.LogError(FormatDiagnostic(diagnostic));
             }
         }
 
@@ -125,7 +159,7 @@ namespace SceneBuilder.Editor
         /// <paramref name="builderPath"/>, materialize a Plan against <paramref name="scene"/> and the
         /// sidecar at <paramref name="sidecarPath"/>, execute it IN PLACE, save the scene to
         /// <paramref name="scenePath"/>, and rewrite the sidecar. The testable seam behind
-        /// <see cref="BuildDemo"/>. Collect-all-refuse for planning-phase errors: never throws for a
+        /// <see cref="BuildActiveScene"/>/<see cref="BuildAll"/>. Collect-all-refuse for planning-phase errors: never throws for a
         /// resolvable type/asset/identity problem — returns a <see cref="BuildResult"/> whose
         /// <see cref="BuildResult.Diagnostics"/> carries every error found, scene left untouched.
         /// </summary>
@@ -159,7 +193,7 @@ namespace SceneBuilder.Editor
             // NOTE: no Debug.LogError here — `Run` is the testable seam and must stay silent on a
             // collected refusal so callers (including tests) observe it via the returned
             // `BuildResult.Diagnostics`, not an unhandled console error. The interactive entry point
-            // (`BuildDemo`) logs each diagnostic for the user after calling `Run`.
+            // (`BuildActiveScene`/`BuildAll`) logs each diagnostic for the user after calling `Run`.
             if (!validation.Ok)
             {
                 return new BuildResult { Diagnostics = validation.Diagnostics };
