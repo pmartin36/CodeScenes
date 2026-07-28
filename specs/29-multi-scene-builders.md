@@ -83,11 +83,15 @@ once — auto is ON by default, no buttons on the happy path.
 
 ## In scope
 
-- **Builder discovery** via `TypeCache.GetTypesDerivedFrom<ISceneDefinition>()` (the same TypeCache
-  mechanism the adapter already uses for component types, e.g. `ComponentTypeResolver.cs`), producing one
-  `BuilderRoute` per concrete implementation. Each route's builder/sidecar paths come from
-  `SceneBuilderPaths.Builder(name)`/`Sidecar(name)` (`SceneBuilderPaths.cs:35,38`); each route's scene
-  comes from the sidecar's `IdentityMap.Scene` field, or the deterministic default when no sidecar exists.
+- **Builder discovery** by scanning the builder-source directory `SceneBuilders/*.cs`, one `BuilderRoute`
+  per file (name = file stem). **DISCOVERY MUST NOT USE `TypeCache`** (corrected 2026-07-28 after a live
+  bug): builders live OUTSIDE `Assets/` by design (`BuilderProjectInjector` — "Unity does not import it,
+  does not compile it") so they are never in a compiled assembly, so `TypeCache.GetTypesDerivedFrom<...>()`
+  returns ZERO builders in the real editor and all live sync dies. The builder set is the `.cs` files under
+  `SceneBuilders/` (the same files the Roslyn `BuilderParser` already reads to build them); enumerate those,
+  not compiled types. Each route's builder/sidecar paths come from `SceneBuilderPaths.Builder(name)`/
+  `Sidecar(name)` (`SceneBuilderPaths.cs:35,38`); each route's scene comes from the sidecar's
+  `IdentityMap.Scene` field, or the deterministic default when no sidecar exists.
 - **The governing builder is the one whose scene is the active/open scene.** For a sync cycle the governing
   builder is the discovered builder whose mapped scene is the currently **active/open** scene. A builder
   whose scene is not open is skipped for scene→code (there is no live scene to read); for code→scene, a
@@ -145,14 +149,15 @@ scope change to be flagged — the expectation is zero Core edits.
 
 ### 1. `SceneBuilderRouter` (new: `com.codescenes/Editor/SceneBuilderRouter.cs`)
 
-- **`IReadOnlyList<BuilderRoute> Discover()`** — enumerate
-  `TypeCache.GetTypesDerivedFrom<SceneBuilder.Authoring.ISceneDefinition>()`, filter to concrete
-  non-abstract classes, and build one `BuilderRoute` per type: `BuilderName = type.Name`,
-  `BuilderPath = SceneBuilderPaths.Builder(type.Name)`, `SidecarPath = SceneBuilderPaths.Sidecar(type.Name)`,
-  and `ScenePath` = the sidecar's `IdentityMap.Scene` when `File.Exists(SidecarPath)`
-  (`IdentityMapJson.Deserialize`, as `SceneBuilderAutoSync.cs:428` already does), else
-  `"Assets/SceneBuilder/" + type.Name + ".unity"`. Skip a type whose builder `.cs` does not exist on disk
-  (a defined-but-unbuilt type has nothing to watch). Deterministic order (by `BuilderName`, Ordinal).
+- **`IReadOnlyList<BuilderRoute> Discover()`** — enumerate the builder-source files
+  `Directory.GetFiles(SceneBuilderPaths.BuildersDir, "*.cs")` (the `SceneBuilders/` directory; do NOT use
+  `TypeCache` — builders are never compiled, see In-scope note), and build one `BuilderRoute` per file:
+  `BuilderName = Path.GetFileNameWithoutExtension(file)`, `BuilderPath = file` (equivalently
+  `SceneBuilderPaths.Builder(name)`), `SidecarPath = SceneBuilderPaths.Sidecar(name)`, and `ScenePath` =
+  the sidecar's `IdentityMap.Scene` when `File.Exists(SidecarPath)` (`IdentityMapJson.Deserialize`, as
+  `SceneBuilderAutoSync.cs:428` already does), else `"Assets/SceneBuilder/" + name + ".unity"`. Exclude
+  generated/non-builder files if the folder convention requires (e.g. skip `Generated/`). Deterministic
+  order (by `BuilderName`, Ordinal).
 - **`bool TryRouteBuilderFile(string changedFullPath, out BuilderRoute route)`** — the **code→scene**
   lookup: normalize with `Path.GetFullPath` (matching `SceneBuilderAutoSync.cs:514`) and match against each
   route's `BuilderPath`. Replaces the single-`fullBuilderPath` equality gate at
@@ -222,16 +227,23 @@ scope change to be flagged — the expectation is zero Core edits.
 ## Unity confirmation checklist (⇒ EditMode tests in `unity-gate/Assets/GateTests/`)
 
 Each item is a real editor action; each maps 1:1 to an EditMode test that exercises **two** builders
-(`RouteAlpha`, `RouteBeta`) mapped to **two** scenes (`Alpha.unity`, `Beta.unity`), against real
+mapped to **two** scenes (`Alpha.unity`, `Beta.unity`), against real
 `GameObject`/`Scene`/`GlobalObjectId`/`AssetDatabase` (the boundary the headless Core tests are blind to,
 CLAUDE.md). Follow `AutoCodeToSceneTests.cs` / `AutoSceneToCodeTests.cs` setup (seed via
-`SceneBuilderBuild.Run`, drive via `SceneBuilderAutoSync.Execute*` directly). Suggested file:
+`SceneBuilderBuild.Run`, drive via `SceneBuilderAutoSync.Execute*` directly).
+**CRITICAL — the test builder `.cs` files MUST live OUTSIDE `Assets/`, in the real `SceneBuilders/`
+location (via `SceneBuilderPaths`), NOT under `unity-gate/Assets/Fixtures/`.** A builder placed under
+`Assets/` gets compiled and would let a `TypeCache`-based discovery pass while the real out-of-`Assets/`
+builder fails — the exact blindness that let the original bug ship. The discovery test is only valid if its
+builder is unbuilt-by-Unity, exactly as a real builder is. Suggested file:
 `unity-gate/Assets/GateTests/MultiSceneRoutingTests.cs`.
 
-1. **Discovery enumerates all builders, not one.** `SceneBuilderRouter.Discover()` returns a
-   `BuilderRoute` for every project `ISceneDefinition` whose `.cs` exists — with correct
-   builder/sidecar/scene paths (scene read from each sidecar's `IdentityMap.Scene`) — and does **not**
-   collapse to `DemoScene`. (`MultiScene_Discover_EnumeratesAllBuilders`)
+1. **Discovery enumerates all builders from the out-of-`Assets/` source dir, not one.** With two builder
+   `.cs` files written to the real `SceneBuilders/` directory (NOT under `Assets/`, so Unity never compiles
+   them), `SceneBuilderRouter.Discover()` returns a `BuilderRoute` for each — correct builder/sidecar/scene
+   paths (scene from each sidecar's `IdentityMap.Scene`) — and does **not** collapse to `DemoScene`. This
+   test MUST fail against a `TypeCache`-based `Discover()` (proving the file-scan is what is exercised).
+   (`MultiScene_Discover_EnumeratesOutOfAssetsBuilders`)
 2. **Code→scene routes the RIGHT scene; the other is untouched (the bug).** With Alpha+Beta built and
    `Beta.unity` the open/active scene, an external edit to `RouteBeta.cs` adding object `Gamma`, then
    `ExecuteCodeToScene(new[]{ betaBuilderPath })`. **Expected:** `Beta.unity` gains `Gamma` (live + saved
@@ -272,7 +284,8 @@ CLAUDE.md). Follow `AutoCodeToSceneTests.cs` / `AutoSceneToCodeTests.cs` setup (
 - **The per-scene `IdentityMap` (`IdentityMap.cs`)** — its `Scene` field (`:12`), already written by
   `SceneBuilderBuild.Run` (`SceneBuilderBuild.cs:213`), is the authoritative builder→scene link that makes
   routing possible without a new persisted registry.
-- **`TypeCache`** — the same discovery mechanism `ComponentTypeResolver.cs` uses for component types.
+- **`Directory.GetFiles(SceneBuilders/, "*.cs")`** — the builder-source scan is the discovery mechanism
+  (NOT `TypeCache`, which cannot see the never-compiled out-of-`Assets/` builders).
 - **`specs/needs_research/multi-scene-additive.md`** — the explicit boundary: additive/cross-scene
   semantics are NOT in this milestone (see Out of scope).
 - **`specs/needs_research/concurrent-multi-scene-sync.md` (B, deferred)** — concurrent auto-sync of several
@@ -301,9 +314,10 @@ CLAUDE.md). Follow `AutoCodeToSceneTests.cs` / `AutoSceneToCodeTests.cs` setup (
   deferred to `specs/needs_research/concurrent-multi-scene-sync.md`.
 - **Watching N builders.** The single `FileSystemWatcher` already watches the whole `SceneBuilders/`
   directory for `*.cs` (`SceneBuilderAutoSync.cs:146-150`), so N builders cost no extra watchers — only the
-  per-event `TryRouteBuilderFile` lookup, which is O(routes) over a small set. `Discover()` should be cached
-  and invalidated on domain reload (TypeCache is reload-scoped anyway), not recomputed per event, to keep
-  the debounce cheap (CLAUDE.md sync-performance constraint).
+  per-event `TryRouteBuilderFile` lookup, which is O(routes) over a small set. The `SceneBuilders/` scan is
+  cheap (a handful of files); `Discover()` may be cached and invalidated when the builder set changes (a
+  create/delete in `SceneBuilders/`, which the watcher already sees), not recomputed per event, to keep the
+  debounce cheap (CLAUDE.md sync-performance constraint).
 - **Stale routes.** A builder file deleted or a scene renamed leaves a route pointing at a missing path;
   `Discover()` skips builders whose `.cs` is absent, and `TryRouteScene`/`TryGetOpenScene` fail closed
   (drop, log) rather than building into the wrong scene.
