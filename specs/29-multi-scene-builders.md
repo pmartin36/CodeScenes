@@ -1,5 +1,14 @@
 # M-MultiScene — Multiple scene builders, each auto-synced to its own scene
 
+> **SCOPE — single active scene (A).** This milestone is **single-active-scene routing**: the project has
+> many `ISceneDefinition` builders, you work in ONE scene at a time, and the builder governing the
+> **active/open** scene syncs (both directions). Concurrent auto-sync of multiple simultaneously-open **and
+> dirty** scenes — additive multi-scene editing where each open scene syncs concurrently, requiring
+> per-object owning-scene attribution and per-scene suppression — is **DEFERRED** to
+> `specs/needs_research/concurrent-multi-scene-sync.md` (B). B is a rare workflow; A covers the common need.
+> Wherever routing must pick a scene, this spec resolves it as the **active/open** scene, never as one of
+> several concurrently-dirty scenes.
+
 > **Why this milestone exists.** CodeScenes' live auto-sync governs exactly ONE hardcoded builder today.
 > `com.codescenes/Editor/SceneBuilderAutoSync.cs:45` pins `private const string BuilderName = "DemoScene";`,
 > and every routing decision in the driver resolves the governing builder as
@@ -54,7 +63,7 @@ discovery source of truth. `LastBuilderPath`/`LastSidecarPath` (`SceneBuilderBui
 as the *routing* mechanism (they remain valid as a build-result echo but are no longer consulted for
 "which builder governs a change").
 
-**Ledger:** the `SceneBuilderRouter` (discovery + both lookup directions), the per-scene routing of both
+**Ledger:** the `SceneBuilderRouter` (discovery + both lookup directions), the active-scene routing of both
 executors, the per-builder menu generalization, and the removal of the `BuilderName` constant are all
 owned by **M-MultiScene**. No Core file changes shape.
 
@@ -63,10 +72,12 @@ owned by **M-MultiScene**. No Core file changes shape.
 ## Goal
 
 Every `ISceneDefinition` in the project is a first-class scene builder that auto-syncs to its own scene,
-both directions, independently. Editing builder file `A.cs` builds scene `A.unity` and touches nothing
-else; editing scene `B.unity` reconciles builder `B.cs` and touches nothing else. Two (or more) builders'
-scenes can be open at once and each syncs on its own edits. No hardcoded `"DemoScene"`, no "last built
-wins", no dropped events for the non-active builder. The single master toggle
+both directions. You work in ONE scene at a time: the builder governing the active/open scene syncs, and
+switching to a different builder's scene switches which builder governs. Editing builder file `A.cs` (with
+`A.unity` open) builds scene `A.unity` and touches nothing else; editing the active scene `B.unity`
+reconciles builder `B.cs` and touches nothing else. No hardcoded `"DemoScene"`, no "last built wins", no
+dropped events for a builder that is not the active one. (Concurrent sync of several simultaneously-dirty
+scenes is B — deferred; see scope banner.) The single master toggle
 (`SceneBuilderAutoToggle`, `SceneBuilderAutoToggle.cs`) still governs both directions for all builders at
 once — auto is ON by default, no buttons on the happy path.
 
@@ -77,20 +88,25 @@ once — auto is ON by default, no buttons on the happy path.
   `BuilderRoute` per concrete implementation. Each route's builder/sidecar paths come from
   `SceneBuilderPaths.Builder(name)`/`Sidecar(name)` (`SceneBuilderPaths.cs:35,38`); each route's scene
   comes from the sidecar's `IdentityMap.Scene` field, or the deterministic default when no sidecar exists.
-- **A governing set, not one builder.** The active set for a sync cycle is the discovered builders whose
-  mapped scene is currently **open** in the editor (one or many — several may be open at once). A builder
-  whose scene is not open is skipped for scene→code (there is no live scene to read) and built-on-demand
-  for code→scene only if its scene can be resolved/loaded (see Out of scope for the additive boundary).
+- **The governing builder is the one whose scene is the active/open scene.** For a sync cycle the governing
+  builder is the discovered builder whose mapped scene is the currently **active/open** scene. A builder
+  whose scene is not open is skipped for scene→code (there is no live scene to read); for code→scene, a
+  changed builder file whose scene is not the open scene is skipped (a located log — never a build into the
+  wrong active scene), see Tradeoffs.
 - **Code→scene routing per builder.** A watcher event names a changed builder FILE; map file → `BuilderRoute`
-  → its scene; build THAT scene. Non-`DemoScene` events are no longer dropped.
-- **Scene→code routing per scene.** An `ObjectChangeEvent` / `sceneSaved` names a changed SCENE; map scene
-  → its governing `BuilderRoute`; reconcile THAT builder's source. Handles the active-scene case AND the
-  several-open-scenes case (attribute each changed object to the scene that owns it).
+  → its OWN scene; build THAT scene **if it is the open/active scene**. Non-`DemoScene` events are no longer
+  dropped (removing the event-drop is the headline bug fix); the target is the routed builder's own scene
+  resolved as the open scene, not `GetActiveScene()` with the last-built builder's paths.
+- **Scene→code routing by the active scene.** Route the ACTIVE scene
+  (`EditorSceneManager.GetActiveScene()`) to its governing `BuilderRoute` and reconcile THAT builder's
+  source against that scene. No per-object owning-scene attribution across concurrently-dirty scenes (that
+  is B). An edit in a scene with no governing builder is a no-op.
 - **Per-builder sidecar/state isolation.** Each builder owns its own `*.sbmap.json`
   (`SceneBuilderPaths.Sidecar(name)`); one builder's identity map is never read or written while
   reconciling another's scene.
-- **Per-operation suppression scope.** Suppressing our own write to scene `A` must not deafen sync for
-  scene `B` in the same window.
+- **Suppression stays global (unchanged).** The existing global `SceneWriteSuppressed` self-write guard is
+  correct when one scene syncs at a time, and is kept as-is. Per-scene suppression (so writing scene `A`
+  does not deafen a concurrent edit to scene `B`) is a **B** concern — deferred, not addressed here.
 - **Menu generalization.** `Build DemoScene`/`Sync DemoScene` (`SceneBuilderBuild.cs:79`,
   `SceneBuilderSync.cs:81`) become "act on the active scene's builder" plus a "build all"/"sync all"
   affordance — retained as debug scaffolding only (CLAUDE.md: the happy path has no buttons).
@@ -101,9 +117,13 @@ once — auto is ON by default, no buttons on the happy path.
   code, and reconcile when several *additively-loaded* scenes are edited as one unit. That is the research
   stub `specs/needs_research/multi-scene-additive.md` (cross-scene `ValueNode.ObjectRef`, scene-qualified
   identity, project-level vs per-scene IdentityMap). **This milestone supports many builders each mapped to
-  ONE scene, and correctly routes when several such scenes happen to be open** (single or additive load) —
-  it does NOT introduce cross-scene references or a composed-multi-scene builder. A builder still owns
-  exactly one scene; `IdentityMap` stays per-scene (`IdentityMap.cs:12`).
+  ONE scene, and routes the single active/open scene to its builder** — it does NOT introduce cross-scene
+  references or a composed-multi-scene builder. A builder still owns exactly one scene; `IdentityMap` stays
+  per-scene (`IdentityMap.cs:12`).
+- **Concurrent auto-sync of several simultaneously-open+dirty scenes (B).** Per-object owning-scene
+  attribution and per-scene suppression when multiple builder-mapped scenes are open additively and edited
+  concurrently. Deferred to `specs/needs_research/concurrent-multi-scene-sync.md`; A routes only the
+  active/open scene.
 - **Auto-loading a builder's scene that is not open.** Scene→code cannot read a scene that is not loaded;
   code→scene against a closed scene is bounded to "load it single/additively if resolvable, else skip with
   a located log" (see Tradeoffs) — never a surprise scene-open on the user. No forced multi-scene open.
@@ -150,19 +170,20 @@ scope change to be flagged — the expectation is zero Core edits.
   `LastSidecarPath ?? Sidecar(BuilderName)` fallback pair (`:421-422`, `:509-510`, `:562`, `:615-616`).
   Replace with `SceneBuilderRouter` lookups.
 - **`ExecuteCodeToScene(paths)` (`:500-551`) — real routing table, not the current single-builder drop.**
-  For each changed `path`, `TryRouteBuilderFile` → its `BuilderRoute`; if the route's scene is open
-  (`TryGetOpenScene`), `SceneBuilderBuild.Run(route.BuilderPath, route.ScenePath, route.SidecarPath, openScene)`
-  into THAT scene (not `GetActiveScene()`). Multiple distinct builders changed in one debounce batch each
-  build their own scene. Preserve the existing parse-error located-log + scene-untouched behavior
-  (`:530-550`) per builder. Preserve `CaptureBaseline` at the converged tail (`:543`) **per builder** (see
-  §4).
-- **`ExecuteSceneToCode(ids)` (`:408-455`) — route by owning scene, not the active scene.** Group the
-  changed `EntityId`s by the scene that owns each object (resolve the object via
-  `EditorUtility.EntityIdToObject` as `:473` already does, then its `GameObject.scene`), and for each
-  affected scene `TryRouteScene` → its `BuilderRoute`. Reconcile that builder against that scene using its
-  own sidecar (`SceneBuilderSync.Run(route.BuilderPath, route.SidecarPath, scene, snapshot)` —
-  `:449`). The `sceneSaved` cold path (`:244-249`) already names the scene; route it the same way. A
-  changed object in a scene with no governing builder is dropped for that object only (not the whole batch).
+  For each changed `path`, `TryRouteBuilderFile` → its `BuilderRoute`; if the route's OWN scene is the
+  open/active scene (`TryGetOpenScene`),
+  `SceneBuilderBuild.Run(route.BuilderPath, route.ScenePath, route.SidecarPath, openScene)` into THAT scene
+  (not `GetActiveScene()` with the last-built builder's paths). If the routed builder's scene is not open,
+  skip it with a located log (never build into the wrong active scene). Preserve the existing parse-error
+  located-log + scene-untouched behavior (`:530-550`) per builder. Preserve `CaptureBaseline` at the
+  converged tail (`:543`) **per builder** (see §3).
+- **`ExecuteSceneToCode(ids)` (`:408-455`) — route the ACTIVE scene to its builder.** Resolve the active
+  scene via `EditorSceneManager.GetActiveScene()` (`:410`, kept) and `TryRouteScene` → its `BuilderRoute`.
+  Reconcile that builder against the active scene using its own sidecar
+  (`SceneBuilderSync.Run(route.BuilderPath, route.SidecarPath, scene, snapshot)` — `:449`). The `sceneSaved`
+  cold path (`:244-249`) already names its scene; route that named scene the same way. When the active scene
+  has no governing builder, the cycle is a no-op. **Do NOT** attribute changed objects to their owning
+  `GameObject.scene` across concurrently-dirty scenes — that per-object attribution is B (deferred).
 - **`NeedsSaveForDurableId` (`:469-493`)** stays, but is evaluated against the ROUTED builder's sidecar
   map, per scene.
 
@@ -175,17 +196,15 @@ scope change to be flagged — the expectation is zero Core edits.
   `B`'s reconcile. `CaptureBaseline` (`:560-586`) and `ExecuteBothChanged` (`:598-648`) become per-route.
   `ResetForTests` (`:663-690`) clears all per-builder state.
 
-### 4. Suppression scope isolation
+### 4. Suppression — global, unchanged
 
-- Audit `SuppressionScope` for global-vs-per-operation state. `SceneWriteSuppressed`
-  (checked at `:256`) gates ALL scene→code accumulation while any scene write is in flight. Writing scene
-  `A` inside `SuppressScene()` (`SceneBuilderBuild.cs:198`) must NOT drop a genuine user edit to scene `B`
-  arriving in the same window. If `SuppressScene` is a global flag, either (a) key suppression by the scene
-  being written, or (b) confirm the write is synchronous within one executor call and the pump only reads
-  the flag on `ObjectChangeEvents` for the SAME synchronous write (document which, with a test at §checklist
-  #7). The own-write content-hash registry for source files (`SuppressionScope.IsOwnWrite`, used at
-  `SceneBuilderAutoSync.cs:281-284`) is already keyed by file path, so it is per-builder-correct — verify,
-  don't assume.
+- Keep the existing global suppression as-is. `SceneWriteSuppressed` (checked at `:256`) gating ALL
+  scene→code accumulation while a scene write is in flight is **correct when one scene syncs at a time**,
+  which is exactly this milestone's scope. Do NOT make suppression per-scene here — that is a **B** concern
+  (`specs/needs_research/concurrent-multi-scene-sync.md`), where writing scene `A` must not deafen a genuine
+  concurrent user edit to scene `B`. The own-write content-hash registry for source files
+  (`SuppressionScope.IsOwnWrite`, used at `SceneBuilderAutoSync.cs:281-284`) is already keyed by file path,
+  so it is per-builder-correct — no change needed.
 
 ### 5. Menu generalization (debug scaffolding only)
 
@@ -213,33 +232,32 @@ CLAUDE.md). Follow `AutoCodeToSceneTests.cs` / `AutoSceneToCodeTests.cs` setup (
    `BuilderRoute` for every project `ISceneDefinition` whose `.cs` exists — with correct
    builder/sidecar/scene paths (scene read from each sidecar's `IdentityMap.Scene`) — and does **not**
    collapse to `DemoScene`. (`MultiScene_Discover_EnumeratesAllBuilders`)
-2. **Code→scene routes the RIGHT scene; the other is untouched (the bug).** With Alpha+Beta built and both
-   scenes open, an external edit to `RouteBeta.cs` adding object `Gamma`, then
+2. **Code→scene routes the RIGHT scene; the other is untouched (the bug).** With Alpha+Beta built and
+   `Beta.unity` the open/active scene, an external edit to `RouteBeta.cs` adding object `Gamma`, then
    `ExecuteCodeToScene(new[]{ betaBuilderPath })`. **Expected:** `Beta.unity` gains `Gamma` (live + saved
    asset); `Alpha.unity` is byte-identical/unchanged. A `LiveVerify`-style builder that is NOT the
    last-built is **no longer dropped**. (`MultiScene_CodeToScene_RoutesToOwningScene_LeavesOtherUntouched`)
-3. **Scene→code routes the RIGHT builder; the other source is untouched.** Move a `GameObject` in
-   `Alpha.unity`, `ExecuteSceneToCode` with that object's `EntityId`. **Expected:** `RouteAlpha.cs` is
-   patched with the new transform; `RouteBeta.cs` is byte-identical.
+3. **Scene→code routes the RIGHT builder; the other source is untouched.** With `Alpha.unity` active, move
+   a `GameObject` in it, `ExecuteSceneToCode` with that object's `EntityId`. **Expected:** `RouteAlpha.cs`
+   is patched with the new transform; `RouteBeta.cs` is byte-identical.
    (`MultiScene_SceneToCode_RoutesToOwningBuilder_LeavesOtherUntouched`)
-4. **Both scenes open, both edited in one window → each syncs its own.** Edit an object in each of Alpha
-   and Beta, pump one scene→code cycle. **Expected:** each builder gets only its own scene's change; no
-   cross-write. (`MultiScene_TwoOpenScenes_BothEdited_EachSyncsIndependently`)
-5. **Sidecar isolation.** After a full round-trip on both, assert `RouteAlpha.sbmap.json` contains only
+4. **Sidecar isolation.** After a full round-trip on both, assert `RouteAlpha.sbmap.json` contains only
    Alpha's LogicalIds/`Scene=Alpha.unity` and `RouteBeta.sbmap.json` only Beta's — one map never leaks the
    other's entries. (`MultiScene_Sidecars_DoNotCrossContaminate`)
-6. **Builder whose scene is NOT open.** Close `Beta.unity` (leave Alpha open), fire a `RouteBeta.cs`
+5. **Builder whose scene is NOT open.** Close `Beta.unity` (leave Alpha open/active), fire a `RouteBeta.cs`
    watcher event. **Expected:** no exception, no write to Alpha, a located skip/log for Beta (not a silent
    build into the wrong active scene). (`MultiScene_CodeToScene_SceneNotOpen_SkipsSafely`)
-7. **Suppression does not cross scenes.** While an in-flight suppressed write to `Alpha.unity` is
-   simulated, a genuine user `ObjectChangeEvent` on `Beta.unity` must still accumulate and sync Beta.
-   (`MultiScene_Suppression_DoesNotDeafenOtherScene`)
-8. **Scene open with no governing builder.** Open a plain scene that no `ISceneDefinition` maps to; a
-   scene edit there is dropped with no write to any builder and no exception.
+6. **Scene active with no governing builder.** Make active a plain scene that no `ISceneDefinition` maps
+   to; a scene edit there is a no-op — no write to any builder and no exception.
    (`MultiScene_SceneToCode_NoGoverningBuilder_NoOp`)
-9. **Menu: active-scene routing.** With Beta active, `CodeScenes/Build Active Scene` builds `RouteBeta`
+7. **Menu: active-scene routing.** With Beta active, `CodeScenes/Build Active Scene` builds `RouteBeta`
    into `Beta.unity`; with no governing builder active it logs a located error and writes nothing.
    (`MultiScene_Menu_BuildActiveScene_TargetsActiveBuildersScene`)
+
+> **Deferred to B** (`specs/needs_research/concurrent-multi-scene-sync.md`), promoted as its acceptance
+> criteria: *both scenes open and edited in one window → each syncs its own* (was #4) and *suppression does
+> not cross scenes* (was #7). Both require concurrently-dirty-scene attribution / per-scene suppression,
+> which is out of this milestone's single-active scope.
 
 ## Dependencies
 
@@ -257,13 +275,16 @@ CLAUDE.md). Follow `AutoCodeToSceneTests.cs` / `AutoSceneToCodeTests.cs` setup (
 - **`TypeCache`** — the same discovery mechanism `ComponentTypeResolver.cs` uses for component types.
 - **`specs/needs_research/multi-scene-additive.md`** — the explicit boundary: additive/cross-scene
   semantics are NOT in this milestone (see Out of scope).
+- **`specs/needs_research/concurrent-multi-scene-sync.md` (B, deferred)** — concurrent auto-sync of several
+  simultaneously-open+dirty scenes: per-object owning-scene attribution and per-scene suppression. This
+  milestone (A) is its foundation — B builds on the router + single-active routing shipped here.
 
 ## Risks / tradeoffs
 
-- **Two open scenes both dirty in one debounce window.** The scene→code path must attribute each changed
-  `EntityId` to its owning `GameObject.scene` and route per scene — a single `GetActiveScene()` read
-  (`:410`) would misattribute Beta's edits to Alpha when Alpha is active. This is the core routing risk and
-  is pinned by checklist #4.
+- **Two open scenes both dirty in one debounce window is B, deferred.** Under single-active scope,
+  scene→code routes the active scene (`GetActiveScene()`, `:410`) to its builder; it does NOT attempt to
+  attribute each changed `EntityId` to its owning `GameObject.scene`. Concurrent per-scene attribution is
+  the deferred B milestone (`specs/needs_research/concurrent-multi-scene-sync.md`).
 - **`ExecuteCodeToScene` today is a silent DROP, and the fix is a routing table, not a one-liner.** The
   early-return at `SceneBuilderAutoSync.cs:525-528` fires whenever the changed file ≠ the single computed
   `fullBuilderPath`. Deleting the gate is not enough: the executor then still builds into
@@ -273,11 +294,11 @@ CLAUDE.md). Follow `AutoCodeToSceneTests.cs` / `AutoSceneToCodeTests.cs` setup (
   is open. That is the `SceneBuilderRouter` table above — a real per-builder lookup on both directions.
 - **A builder whose scene is not open.** Scene→code has nothing to read, so skip. Code→scene could load the
   scene, but auto-opening scenes under the user is intrusive; default to a located skip-log and leave
-  on-demand loading to the additive milestone. Pinned by checklist #6.
-- **Suppression granularity.** `SuppressScene()` (`SceneBuilderBuild.cs:198`) + the global
-  `SceneWriteSuppressed` check (`:256`) risk deafening OTHER scenes' sync mid-write. Must be per-operation
-  (per scene being written) or provably synchronous-only. Pinned by checklist #7 — a real risk of silently
-  eating a concurrent edit to another scene.
+  on-demand loading to the additive milestone. Pinned by checklist #5.
+- **Suppression granularity is B.** Global `SceneWriteSuppressed` (`:256`) is correct while one scene syncs
+  at a time (this milestone's scope), so it is kept unchanged. Making it per-scene — so `SuppressScene()`
+  (`SceneBuilderBuild.cs:198`) writing scene `A` cannot deafen a genuine concurrent edit to scene `B` — is
+  deferred to `specs/needs_research/concurrent-multi-scene-sync.md`.
 - **Watching N builders.** The single `FileSystemWatcher` already watches the whole `SceneBuilders/`
   directory for `*.cs` (`SceneBuilderAutoSync.cs:146-150`), so N builders cost no extra watchers — only the
   per-event `TryRouteBuilderFile` lookup, which is O(routes) over a small set. `Discover()` should be cached
