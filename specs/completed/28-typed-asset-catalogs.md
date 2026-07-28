@@ -97,6 +97,18 @@ SerializedFieldBridge are untouched. The string `Asset(...)` / `Builtin(...)` fo
     `Assets.Materials.Characters.Skin.Stone` are distinct references with NO suffix. This replaces the
     former flat `Stone` / `Stone2` numeric disambiguation, which was bad for the north star: an LLM could
     not tell `Stone` from `Stone2` and the compiler accepted either (a silent wrong-asset hazard).
+- **Leading-folder collapse (2026-07-28 refinement — drop a folder segment that duplicates the group).**
+  A leading folder segment whose sanitized identifier equals the type-group name is DROPPED from the
+  member chain, because the stutter hurts LLM-writability and is the common case (assets live in a
+  type-named folder). So `Assets/Materials/Green.mat` (group `Materials`, folders `[Materials]`) emits
+  `Assets.Materials.Green`, NOT `Assets.Materials.Materials.Green`; `Assets/Scenes/MainMenu.unity` →
+  `Assets.Scenes.MainMenu`; `Assets/Materials/Environment/Rocks/Stone.mat` →
+  `Assets.Materials.Environment.Rocks.Stone` (only the LEADING duplicate is dropped, not a deeper one).
+  **Collision-aware:** apply the collapse ONLY when the collapsed member does not collide with another in
+  the same group. `Assets/Materials/Green.mat` collapsing to `Assets.Materials.Green` would collide with a
+  hypothetical `Assets/Green.mat` (folders `[]`, same group+name); when the collapsed form is already
+  taken, keep the folder segment (do not collapse) so uniqueness holds. Deterministic and byte-stable.
+  Pure member-name refinement: resolution identity (`Guid`/`FileId`/path) is unchanged.
 - **Identifier sanitization + last-resort disambiguation** — **every path segment** (the type group,
   each folder segment, and the leaf name) is sanitized independently to a valid C# identifier via the
   **shipped** `CatalogEmit.SanitizeIdentifier` convention (spaces/punctuation/leading-digit/keyword
