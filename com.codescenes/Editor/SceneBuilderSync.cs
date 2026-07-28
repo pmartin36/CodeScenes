@@ -226,7 +226,7 @@ namespace SceneBuilder.Editor
             {
                 // Component edits anchor on component LogicalIds — merge those anchors in.
                 var anchors = MergeAnchors(parse.Anchors, parse.ComponentAnchors);
-                var newSource = SourcePatchApplier.Apply(source, result.Patch, anchors);
+                var newSource = SourcePatchApplier.Apply(source, result.Patch, anchors, assetCatalog);
                 if (SceneBuilderPaths.WriteIfChanged(builderPath, newSource))
                 {
                     currentSource = newSource;
@@ -523,7 +523,7 @@ namespace SceneBuilder.Editor
             {
                 var anchors = MergeAnchors(newLoaded.Parse.Anchors, newLoaded.Parse.ComponentAnchors);
                 var filteredPatch = new SourcePatch { FilePath = builderPath, Edits = keptEdits.ToArray() };
-                var patchedSource = SourcePatchApplier.Apply(newSource, filteredPatch, anchors);
+                var patchedSource = SourcePatchApplier.Apply(newSource, filteredPatch, anchors, assetCatalog);
 
                 if (conflicts.Count > 0)
                 {

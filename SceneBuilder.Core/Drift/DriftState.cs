@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Plan;
 using SceneBuilder.Core.Reconcile;
 
@@ -18,14 +19,17 @@ namespace SceneBuilder.Core.Drift
             ReconcileResult reconcile,
             string source,
             IReadOnlyDictionary<string, SourceSpan> anchors,
-            bool assetDelta = false)
+            bool assetDelta = false,
+            // b7-t2: threaded through to SourcePatchApplier.Apply so a catalogued AssetRef field's
+            // dry-run apply renders identically to the real Sync write — see its doc comment.
+            AssetCatalog? assetCatalog = null)
         {
             bool codeAhead = plan.Ops.Length > 0 || plan.Skipped.Length > 0;
 
             bool appliedChanged = false;
             if (reconcile.Patch.Edits.Length > 0)
             {
-                var applied = SourcePatchApplier.Apply(source, reconcile.Patch, anchors);
+                var applied = SourcePatchApplier.Apply(source, reconcile.Patch, anchors, assetCatalog);
                 appliedChanged = !string.Equals(applied, source, StringComparison.Ordinal);
             }
 

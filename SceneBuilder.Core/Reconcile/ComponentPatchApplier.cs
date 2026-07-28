@@ -24,7 +24,10 @@ namespace SceneBuilder.Core.Reconcile
             Dictionary<string, SyntaxAnnotation> appendAnnotations,
             Dictionary<string, SyntaxAnnotation> lastSiblingByParent,
             List<SyntaxNode> allTargets,
-            List<Func<SyntaxNode, SyntaxNode>> appliers)
+            List<Func<SyntaxNode, SyntaxNode>> appliers,
+            // b7-t2: threaded down to the RenderComponentClosureArgs fallback — see SourcePatchApplier
+            // .Apply's doc comment on assetCatalog.
+            AssetCatalog? assetCatalog = null)
         {
             if (appendAnnotations.ContainsKey(edit.Anchor))
             {
@@ -43,7 +46,7 @@ namespace SceneBuilder.Core.Reconcile
                 lastSiblingByParent[edit.Anchor] = ownAnnotation;
 
                 var indent = BodyIndent(root);
-                var newStmt = ParseComponentStatement(edit, receiver, indent)
+                var newStmt = ParseComponentStatement(edit, receiver, indent, assetCatalog)
                     .WithAdditionalAnnotations(ownAnnotation);
 
                 appliers.Add(currentRoot =>
@@ -66,7 +69,7 @@ namespace SceneBuilder.Core.Reconcile
                     ? ownerLocal.Declaration.Variables[0].Identifier.Text
                     : throw Fail(ownerStatement, $"Anchor '{edit.Anchor}' has no handle variable; component attach is not expressible."));
 
-            var componentStmt = ParseComponentStatement(edit, existingReceiver, IndentOf(ownerStatement));
+            var componentStmt = ParseComponentStatement(edit, existingReceiver, IndentOf(ownerStatement), assetCatalog);
 
             // A component list is ORDERED, so this goes through the same placement path as every other
             // append (see StatementPlacement.cs). Inserting it "right after the owner" instead put a
@@ -85,16 +88,18 @@ namespace SceneBuilder.Core.Reconcile
                 edit.NewSiblingIndex));
         }
 
-        private static StatementSyntax ParseComponentStatement(AppendComponentStatement edit, string receiver, string indent)
+        private static StatementSyntax ParseComponentStatement(
+            AppendComponentStatement edit, string receiver, string indent, AssetCatalog? assetCatalog = null)
         {
-            var text = BuildComponentStatementText(edit, receiver);
+            var text = BuildComponentStatementText(edit, receiver, assetCatalog);
 
             return SyntaxFactory.ParseStatement(text)
                 .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
                 .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
         }
 
-        private static string BuildComponentStatementText(AppendComponentStatement edit, string receiver)
+        private static string BuildComponentStatementText(
+            AppendComponentStatement edit, string receiver, AssetCatalog? assetCatalog = null)
         {
             // b4-t1: FitSize/SurfaceSnap always render as their dedicated fluent call — never the
             // generic .Component<T> form, which would fail to stamp TransformData.DrivenChannels
@@ -105,7 +110,7 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             var call = $"{receiver}.Component<{edit.TypeFullName}>";
-            return $"{call}{RenderComponentClosureArgs(edit.Fields, edit.FieldExpressions)};";
+            return $"{call}{RenderComponentClosureArgs(edit.Fields, edit.FieldExpressions, assetCatalog)};";
         }
 
         // m10-b4-t1: extracted from BuildComponentStatementText so AppendInstanceAddComponent
@@ -113,7 +118,8 @@ namespace SceneBuilder.Core.Reconcile
         // byte-identically to `.Component<T>(...)`'s — one renderer, two call sites.
         // Returns the PARENTHESIZED argument list: `()`, `(c => c.Set("k", v))`, or
         // `(c => { c.Set(...); ... })`.
-        private static string RenderComponentClosureArgs(FieldMap fields, IReadOnlyDictionary<string, string>? fieldExpressions)
+        private static string RenderComponentClosureArgs(
+            FieldMap fields, IReadOnlyDictionary<string, string>? fieldExpressions, AssetCatalog? assetCatalog = null)
         {
             if (fields.Count == 0)
             {
@@ -123,10 +129,14 @@ namespace SceneBuilder.Core.Reconcile
             // b4-t3: FieldExpressions carries a pre-rendered override for a field SourceExpr
             // cannot format context-free (an ObjectRef handle argument) — consulted first, with
             // ValueNodeLiteral as the unchanged fallback for every other field.
+            // b7-t2: the fallback must ALSO carry the catalog — a field never pre-rendered into
+            // FieldExpressions (e.g. a List<AssetRef> like `m_Materials`, whose per-element catalog
+            // lookup only ValueNodeLiteral's own recursive List arm performs) still needs it to
+            // resolve to the typed `Assets.<...>` chain instead of the `Asset("path")` fallback.
             string Render(string key, ValueNode value) =>
                 fieldExpressions != null && fieldExpressions.TryGetValue(key, out var expr)
                     ? expr
-                    : SourceExpr.ValueNodeLiteral(value);
+                    : SourceExpr.ValueNodeLiteral(value, assetCatalog);
 
             if (fields.Count == 1)
             {
@@ -178,7 +188,10 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, SourceSpan> anchors,
             IntroduceComponentField edit,
             List<SyntaxNode> allTargets,
-            List<Func<SyntaxNode, SyntaxNode>> appliers)
+            List<Func<SyntaxNode, SyntaxNode>> appliers,
+            // b7-t2: threaded down to the ValueNodeLiteral fallback below — see SourcePatchApplier
+            // .Apply's doc comment on assetCatalog.
+            AssetCatalog? assetCatalog = null)
         {
             var invocation = FindComponentInvocation(root, anchors, edit.Anchor);
             var arguments = invocation.ArgumentList.Arguments;
@@ -186,7 +199,9 @@ namespace SceneBuilder.Core.Reconcile
             // b4-t3: pre-rendered ObjectRef override (mirrors AppendComponentStatement.FieldExpressions'
             // pattern) — SourceExpr.ValueNodeLiteral has no ObjectRef arm and stays pure/context-free,
             // so anything context-dependent or side-effecting is pre-rendered at EMIT time.
-            var valueExpr = edit.NewExpr ?? SourceExpr.ValueNodeLiteral(edit.Value);
+            // b7-t2: the fallback must ALSO carry the catalog — see RenderComponentClosureArgs's
+            // identical comment.
+            var valueExpr = edit.NewExpr ?? SourceExpr.ValueNodeLiteral(edit.Value, assetCatalog);
 
             // b7-t1 fix: a dedicated `.FitSize(...)/.SurfaceSnap(...)` call has ALL-named-argument shape
             // (SpatialComponentSource.RenderArguments), never the generic `c => ...` closure the

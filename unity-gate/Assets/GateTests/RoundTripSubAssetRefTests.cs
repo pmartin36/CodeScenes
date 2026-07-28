@@ -20,6 +20,12 @@ public class RoundTripSubAssetRefTests
     private const string AssetPath = ModelsDir + "/Barrel.subasset.asset";
     private const string ScenePath = ModelsDir + "/__RoundTripSubAssetScene.unity";
 
+    // The sub-mesh's container is a catalogued project asset, so scene->code sync of a
+    // hand-ASSIGNED sub-mesh (never previously authored) emits typed-by-default (spec 28) rather
+    // than the Asset(path, name) string form. Group="Meshes" (Mesh type); FolderSegments="Models"
+    // (ModelsDir with the leading "Assets/" stripped); MemberName is the sub-object's OWN name.
+    private const string TypedBarrelMesh = "Assets.Meshes.Models.BarrelMesh";
+
     private Mesh _main;
     private Mesh _sub;
     private bool _createdModelsDir;
@@ -197,10 +203,14 @@ using SceneBuilder.Authoring;
         Assert.IsTrue(result.Changed, "Sync reported no change despite a hand-assigned sub-mesh");
 
         var rewritten = File.ReadAllText(_builderPath);
-        StringAssert.Contains("Asset(\"" + AssetPath + "\", \"BarrelMesh\")", rewritten,
-            "Sync did not emit the 2-arg Asset(path, \"BarrelMesh\") form for the hand-assigned sub-mesh.\n" + rewritten);
+        StringAssert.Contains(TypedBarrelMesh, rewritten,
+            "Sync did not emit the typed catalog reference for the hand-assigned CATALOGUED sub-mesh "
+            + "(emit-typed-by-default, spec 28).\n" + rewritten);
         StringAssert.DoesNotContain("Asset(\"" + AssetPath + "\")", rewritten,
             "Sync emitted the bare 1-arg Asset(path) form — the sub-object name was dropped on read.\n" + rewritten);
+        StringAssert.DoesNotContain("Asset(\"" + AssetPath + "\", \"BarrelMesh\")", rewritten,
+            "Sync emitted the raw string 2-arg Asset(path, name) form instead of the typed catalog "
+            + "chain for a catalogued sub-mesh.\n" + rewritten);
     }
 
     // Checklist #4: re-syncing an unchanged authored sub-mesh is a genuine no-op — the second sync's

@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
@@ -17,7 +18,15 @@ namespace SceneBuilder.Core.Reconcile
         public static string Apply(
             string source,
             SourcePatch patch,
-            IReadOnlyDictionary<string, SourceSpan> anchors)
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            // b7-t2: catalogued AssetRef fields that were NOT pre-rendered into FieldExpressions at
+            // emit time (e.g. a List<AssetRef> field, whose element-wise catalog lookup only
+            // SourceExpr.ValueNodeLiteral's recursive List arm performs) must still resolve to their
+            // typed `Assets.<...>` chain at APPLY time — the fallback render below was previously
+            // calling ValueNodeLiteral with no catalog at all, silently downgrading every such field
+            // to the `Asset("path")` string form. Optional/trailing so every pre-existing call site
+            // stays green unchanged.
+            AssetCatalog? assetCatalog = null)
         {
             var tree = CSharpSyntaxTree.ParseText(source);
             var root = (CompilationUnitSyntax)tree.GetRoot();
@@ -86,7 +95,7 @@ namespace SceneBuilder.Core.Reconcile
                         ResolveAppendStatement(root, anchors, appendStatement, appendAnnotations, lastSiblingByParent, allTargets, appliers);
                         break;
                     case AppendComponentStatement appendComponentStatement:
-                        ResolveAppendComponentStatement(root, anchors, appendComponentStatement, appendAnnotations, lastSiblingByParent, allTargets, appliers);
+                        ResolveAppendComponentStatement(root, anchors, appendComponentStatement, appendAnnotations, lastSiblingByParent, allTargets, appliers, assetCatalog);
                         break;
                     case PatchFlagArgument patchFlagArgument:
                         ResolvePatchFlagArgument(root, anchors, patchFlagArgument, allTargets, appliers);
@@ -105,7 +114,7 @@ namespace SceneBuilder.Core.Reconcile
                         ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers);
                         break;
                     case IntroduceComponentField introduceComponentField:
-                        ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers);
+                        ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers, assetCatalog);
                         break;
                     case AppendInstanceOverride or AppendInstanceAddComponent or AppendInstanceRemoveComponent
                         or AppendInstanceAddChild or AppendInstanceRemoveChild or AppendScopedOn:

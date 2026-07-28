@@ -265,12 +265,35 @@ namespace SceneBuilder.Editor
             internal static SubObjectProbe TryResolveSubObject(string currentPath, string subName)
             {
                 var all = AssetDatabase.LoadAllAssetsAtPath(currentPath);
+                var main = AssetDatabase.LoadMainAssetAtPath(currentPath);
                 var matches = new List<UnityEngine.Object>();
                 foreach (var candidate in all)
                 {
                     if (candidate != null && candidate.name == subName)
                     {
                         matches.Add(candidate);
+                    }
+                }
+
+                // A caller naming a SUB-asset never means the container's main asset — exclude it when
+                // it collides by name with a genuine sub-object (e.g. a Single-mode Sprite import, whose
+                // default name equals its Texture2D main asset's name: LoadAllAssetsAtPath returns both
+                // objects named identically). Only applied when it still leaves >=1 candidate, so a name
+                // that matches ONLY the main asset is unaffected.
+                if (matches.Count > 1 && main != null)
+                {
+                    var withoutMain = new List<UnityEngine.Object>();
+                    foreach (var candidate in matches)
+                    {
+                        if (!ReferenceEquals(candidate, main))
+                        {
+                            withoutMain.Add(candidate);
+                        }
+                    }
+
+                    if (withoutMain.Count > 0)
+                    {
+                        matches = withoutMain;
                     }
                 }
 

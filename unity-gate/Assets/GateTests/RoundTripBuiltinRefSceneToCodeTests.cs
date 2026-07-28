@@ -131,8 +131,12 @@ public class RoundTripBuiltinRefSceneToCodeTests : BuiltinRefGateHarness
         Assert.IsTrue(toAsset.Changed, "Sync reported no change despite swapping to a project asset material");
 
         var afterAssetSync = File.ReadAllText(BuilderPath);
-        StringAssert.Contains("Asset(\"" + RedPath + "\")", afterAssetSync,
-            "Builder source did not gain Asset(Red.mat) after the built-in->asset swap.\n" + afterAssetSync);
+        StringAssert.Contains("Assets.Materials.GateTests.Fixtures.Red", afterAssetSync,
+            "Builder source did not gain the typed catalog reference for Red.mat after the "
+            + "built-in->asset swap (emit-typed-by-default, spec 28).\n" + afterAssetSync);
+        StringAssert.DoesNotContain("Asset(\"" + RedPath, afterAssetSync,
+            "Sync emitted the raw string Asset(path) form instead of the typed catalog chain for the "
+            + "CATALOGUED material.\n" + afterAssetSync);
         StringAssert.DoesNotContain("Builtin(\"Default-Material\")", afterAssetSync,
             "Builder source still carries Builtin(\"Default-Material\") after the swap to a project asset.\n" + afterAssetSync);
 

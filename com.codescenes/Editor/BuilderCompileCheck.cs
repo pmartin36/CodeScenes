@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using SceneBuilder.Core.Model;
 // System.Diagnostics.Debug would otherwise collide with UnityEngine.Debug.
 using Debug = UnityEngine.Debug;
 
@@ -48,6 +49,16 @@ namespace SceneBuilder.Editor
         // the cache can never outlive the assemblies it was built from. No manual busting needed.
         private static MetadataReference[]? _references;
         private static CSharpCompilation? _template;
+
+        // b7-t2 (iteration 2): the generator-emitted `Assets` static class exists only in the REAL
+        // project csproj (emitted by CodeScenes.Analyzers' source generator), never in this editor
+        // AppDomain — so without help, every typed `Assets.*` reference (emit-typed-by-default,
+        // b4/spec 28) reads as CS0103 here even though it compiles for real. AssetCatalogLoader
+        // already caches the parsed AssetCatalog by (path, mtime, length); we key the parsed stub
+        // SyntaxTree off THAT cached instance so a repeat Check() within an unchanged manifest never
+        // re-emits/re-parses the stub. Sourced INSIDE Check so every caller inherits it by default.
+        private static AssetCatalog? _stubCatalog;
+        private static SyntaxTree? _stubTree;
 
         /// <summary>
         /// Wall-clock ms spent building the reference set — the dominant one-time cost, paid once per
@@ -131,6 +142,32 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
+        /// The cached compilable stub of the on-disk <see cref="AssetCatalog"/>'s generator-emitted
+        /// <c>Assets</c> root (see <see cref="AssetCatalogStubEmitter"/>), or null when no manifest is
+        /// present — in which case <see cref="Check"/>'s behavior is unchanged from before this stub
+        /// existed.
+        /// </summary>
+        private static SyntaxTree? StubTree()
+        {
+            var catalog = AssetCatalogLoader.Load();
+            if (catalog == null)
+            {
+                _stubCatalog = null;
+                _stubTree = null;
+                return null;
+            }
+
+            if (_stubTree != null && ReferenceEquals(catalog, _stubCatalog))
+            {
+                return _stubTree;
+            }
+
+            _stubCatalog = catalog;
+            _stubTree = CSharpSyntaxTree.ParseText(AssetCatalogStubEmitter.Emit(catalog));
+            return _stubTree;
+        }
+
+        /// <summary>
         /// Compiles <paramref name="source"/> and returns its error diagnostics (empty when it compiles).
         /// Pure — reports, never throws or logs.
         /// </summary>
@@ -140,6 +177,12 @@ namespace SceneBuilder.Editor
             var stopwatch = first ? Stopwatch.StartNew() : null;
 
             var compilation = Template().AddSyntaxTrees(CSharpSyntaxTree.ParseText(source));
+
+            var stubTree = StubTree();
+            if (stubTree != null)
+            {
+                compilation = compilation.AddSyntaxTrees(stubTree);
+            }
 
             var diagnostics = compilation.GetDiagnostics()
                 .Where(d => d.Severity == DiagnosticSeverity.Error)

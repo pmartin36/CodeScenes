@@ -120,7 +120,7 @@ namespace SceneBuilder.Core.Reconcile
 
             if (!assetRef.IsBuiltin
                 && catalog is not null
-                && catalog.TryGetMember(assetRef.Guid, assetRef.FileId, out var group, out var folderSegments, out var member))
+                && catalog.TryGetMember(assetRef.Guid, CatalogLookupFileId(assetRef), out var group, out var folderSegments, out var member))
             {
                 return string.Join(".", new[] { "Assets", group }.Concat(folderSegments).Append(member));
             }
@@ -136,5 +136,19 @@ namespace SceneBuilder.Core.Reconcile
                 ? "Asset(" + StringLiteral(assetRef.DisplayPath) + ")"
                 : "Asset(" + StringLiteral(assetRef.DisplayPath) + ", " + StringLiteral(assetRef.SubAsset) + ")";
         }
+
+        // b7-t2 fix: AssetCatalogGenerator normalizes a MAIN asset's catalog entry to FileId=0
+        // (spec's documented durable-identity convention — SceneBuilder.Core/Model/AssetCatalog.cs
+        // FileId doc comment), but AssetReferenceResolver (both the live-scene read side and the
+        // Build-time `Assets.X` lowering side) always carries the asset's TRUE
+        // AssetDatabase.TryGetGUIDAndLocalFileIdentifier value — round-trip identity equality
+        // (AssetRef.Equals) depends on BOTH sides staying on that true value, so neither can be
+        // changed to match the catalog's 0 without breaking ordinary (non-catalog) asset-ref
+        // round-tripping. The reverse catalog lookup is therefore the one place that must bridge the
+        // two conventions: a MAIN asset (SubAsset == "", the same discriminator
+        // AssetReferenceResolver already stamps) queries the catalog by FileId=0; a sub-object
+        // queries by its own (already-matching) FileId unchanged.
+        internal static long CatalogLookupFileId(AssetRef assetRef) =>
+            assetRef.SubAsset == "" ? 0 : assetRef.FileId;
     }
 }

@@ -24,6 +24,12 @@ public class RoundTripAssetRefTests
     private const string RedPath = FixturesDir + "/Red.mat";
     private const string BluePath = FixturesDir + "/Blue.mat";
 
+    // Fixture root = FixturesDir with the leading "Assets/" stripped (AssetCatalogGenerator's raw
+    // FolderSegments convention) — these ARE catalogued project assets, so scene->code sync emits
+    // typed-by-default (spec 28) rather than the Asset("path") string form.
+    private const string TypedRed = "Assets.Materials.GateTests.Fixtures.Red";
+    private const string TypedBlue = "Assets.Materials.GateTests.Fixtures.Blue";
+
     private string _dir;
     private string _builderPath;
     private string _sidecarPath;
@@ -153,8 +159,12 @@ using SceneBuilder.Authoring;
         Assert.IsTrue(result.Changed, "Sync reported no change despite an assigned material");
 
         var rewritten = File.ReadAllText(_builderPath);
-        StringAssert.Contains("Asset(\"" + RedPath + "\")", rewritten,
-            "Builder source did not gain an Asset(Red.mat) reference for the assigned material.\n" + rewritten);
+        StringAssert.Contains(TypedRed, rewritten,
+            "Builder source did not gain the typed catalog reference for the assigned CATALOGUED "
+            + "material (emit-typed-by-default, spec 28).\n" + rewritten);
+        StringAssert.DoesNotContain("Asset(\"" + RedPath, rewritten,
+            "Sync emitted the raw string Asset(path) form instead of the typed catalog chain for a "
+            + "catalogued asset.\n" + rewritten);
     }
 
     // 3. swap (scene->code): assigning a DIFFERENT material asset over an existing authored one rewrites
@@ -186,10 +196,14 @@ using SceneBuilder.Authoring;
         Assert.IsTrue(result.Changed, "Sync reported no change despite a swapped material");
 
         var rewritten = File.ReadAllText(_builderPath);
-        StringAssert.Contains("Asset(\"" + BluePath + "\")", rewritten,
-            "Builder source did not update to the swapped-in Blue.mat path.\n" + rewritten);
+        StringAssert.Contains(TypedBlue, rewritten,
+            "Builder source did not update to the swapped-in Blue.mat typed catalog reference "
+            + "(emit-typed-by-default, spec 28).\n" + rewritten);
         StringAssert.DoesNotContain(RedPath, rewritten,
             "Builder source still carries the old Red.mat path after the swap.\n" + rewritten);
+        StringAssert.DoesNotContain("Asset(\"" + BluePath, rewritten,
+            "Sync emitted the raw string Asset(path) form instead of the typed catalog chain for the "
+            + "swapped-in CATALOGUED material.\n" + rewritten);
     }
 
     // 4. clear to None (scene->code): clearing a material slot to None in the scene rewrites the source

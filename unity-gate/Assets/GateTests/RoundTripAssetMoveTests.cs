@@ -22,6 +22,10 @@ public class RoundTripAssetMoveTests
     private const string RedPath = FixturesDir + "/Red.mat";
     private const string MovedPath = FixturesDir + "/Crimson.mat";
 
+    // Red.mat is a catalogued project asset, so scene->code sync emits typed-by-default (spec 28)
+    // for it post-rename rather than the Asset("path") string form.
+    private const string TypedCrimson = "Assets.Materials.GateTests.Fixtures.Crimson";
+
     private string _dir;
     private string _builderPath;
     private string _sidecarPath;
@@ -166,10 +170,14 @@ using SceneBuilder.Authoring;
         Assert.IsTrue(result.Changed, "Sync reported no change despite the moved asset path");
 
         var rewritten = File.ReadAllText(_builderPath);
-        StringAssert.Contains("Asset(\"" + MovedPath + "\")", rewritten,
-            "Builder source did not re-derive to the moved asset's new path.\n" + rewritten);
+        StringAssert.Contains(TypedCrimson, rewritten,
+            "Builder source did not re-derive to the moved (catalogued) asset's typed catalog "
+            + "reference (emit-typed-by-default, spec 28).\n" + rewritten);
         StringAssert.DoesNotContain(RedPath, rewritten,
             "Builder source still carries the stale pre-move path.\n" + rewritten);
+        StringAssert.DoesNotContain("Asset(\"" + MovedPath, rewritten,
+            "Sync emitted the raw string Asset(path) form instead of the typed catalog chain for the "
+            + "moved CATALOGUED asset.\n" + rewritten);
     }
 
     // 3. DELETE stays loud (regression): a genuinely deleted asset (GUID maps to nothing) must STILL

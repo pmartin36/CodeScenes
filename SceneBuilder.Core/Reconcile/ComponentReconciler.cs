@@ -404,7 +404,7 @@ namespace SceneBuilder.Core.Reconcile
         internal static bool IsCataloguedAssetRef(ValueNode value, AssetCatalog? assetCatalog) =>
             value is ValueNode.AssetRef(var r)
             && r is { IsBuiltin: false }
-            && assetCatalog?.TryGetMember(r.Guid, r.FileId, out _, out _, out _) == true;
+            && assetCatalog?.TryGetMember(r.Guid, SourceExpr.CatalogLookupFileId(r), out _, out _, out _) == true;
 
         // b4-t2: the identical span lookup used by the span-based patch emission below, reused for a
         // DanglingReference conflict's Location. Emitted even when the span is absent (returns null) —
