@@ -290,8 +290,8 @@ public class BuilderProjectInjectorTests
         // GateTests.asmdef lists SceneBuilder.Authoring in "references"; SceneBuilder.Authoring's own
         // asmdef has no references (it does not reference itself) — a real assembly that IS found in
         // the graph but does NOT reference Authoring, distinct from the not-found-at-all case below.
-        // (multi-scene-builders b1-t1: GateFixtures.asmdef now references SceneBuilder.Authoring, for
-        // the RouteAlpha/RouteBeta ISceneDefinition fixtures, so it no longer serves as the negative case.)
+        // (multi-scene-builders b1-t1: GateFixtures.asmdef references SceneBuilder.Authoring, so it
+        // no longer serves as the negative case.)
         Assert.IsTrue(BuilderProjectInjector.ReferencesAuthoring("GateTests"),
             "GateTests references SceneBuilder.Authoring in its asmdef.");
         Assert.IsFalse(BuilderProjectInjector.ReferencesAuthoring("SceneBuilder.Authoring"),

@@ -10,11 +10,12 @@ using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
 // Gate for the multi-scene-builders b1-t1 router (spec checklist #1): SceneBuilderRouter.Discover()
-// must enumerate one BuilderRoute per REAL compiled ISceneDefinition with an on-disk builder
-// source, resolving each one's ScenePath from its OWN sidecar — never collapsed to a single
-// "DemoScene" value. Shared harness (SetUp/TearDown) seeds two distinct builders (RouteAlpha,
-// RouteBeta — unity-gate/Assets/Fixtures/RouteAlpha.cs / RouteBeta.cs) into two distinct scenes
-// under the REAL <ProjectRoot>/SceneBuilders/ dir (not a temp dir — Discover() only resolves
+// must enumerate one BuilderRoute per *.cs directly under SceneBuilderPaths.BuildersDirectory
+// (excluding Generated/), resolving each one's ScenePath from its OWN sidecar — never collapsed to
+// a single "DemoScene" value. No compiled ISceneDefinition counterpart is required (builders live
+// outside Assets/ and are never compiled). Shared harness (SetUp/TearDown) seeds two distinct
+// builders (RouteAlpha, RouteBeta) into two distinct scenes under the REAL
+// <ProjectRoot>/SceneBuilders/ dir (not a temp dir — Discover() only resolves
 // SceneBuilderPaths.Builder(name)); reused by the b2/b3 routing checklist tests.
 public class MultiSceneRoutingTests
 {
@@ -87,9 +88,9 @@ public class {builderName} : ISceneDefinition
 
     // Checklist #1: Discover() must enumerate BOTH seeded builders with correct builder/sidecar
     // paths, and each one's ScenePath must come from ITS OWN sidecar (proves per-sidecar read, not
-    // a default/collapsed value). Asserts CONTAINS-both + fields, not exact count — other compiled
-    // ISceneDefinition fixtures exist in the domain (e.g. SpatialAuthoringExamplesFixture) and are
-    // correctly excluded only by the on-disk-.cs-exists filter, so an exact-count assert is brittle.
+    // a default/collapsed value). Asserts CONTAINS-both + fields, not exact count — the scan is
+    // *.cs under SceneBuilders/ excluding Generated/, and other tests may leave/seed other builder
+    // .cs files in that same real directory, so an exact-count assert is brittle.
     [Test]
     public void MultiScene_Discover_EnumeratesAllBuilders()
     {
@@ -115,6 +116,47 @@ public class {builderName} : ISceneDefinition
 
         Assert.AreNotEqual(alpha.ScenePath, beta.ScenePath,
             "Each builder's ScenePath must be distinct — never collapsed to a single DemoScene value.");
+    }
+
+    // Regression gate (multiscene-discover-filescan-fix b1-t1): builders live OUTSIDE Assets/ and are
+    // NEVER compiled, so a TypeCache-based Discover() sees zero routes for them in the real editor —
+    // all live auto-sync is dead. "OrphanRouteZeta" deliberately has NO compiled ISceneDefinition
+    // counterpart anywhere in the domain (unlike RouteAlpha/RouteBeta, which still have compiled
+    // fixtures), so this MUST fail against TypeCache discovery and MUST pass once Discover() scans
+    // SceneBuilderPaths.BuildersDirectory's *.cs files directly.
+    [Test]
+    public void MultiScene_Discover_EnumeratesOutOfAssetsBuilders()
+    {
+        const string name = "OrphanRouteZeta";
+        SceneBuilderPaths.EnsureBuildersDirectory();
+        var builderPath = SceneBuilderPaths.Builder(name);
+        var sidecarPath = SceneBuilderPaths.Sidecar(name);
+
+        File.WriteAllText(builderPath, Source(name, "        scene.Add(\"Zeta\");"));
+        SceneBuilderRouter.ResetForTests();
+
+        try
+        {
+            var routes = SceneBuilderRouter.Discover();
+
+            Assert.IsTrue(routes.Any(r => r.BuilderName == name),
+                "Discover() must include a route for a builder .cs with NO compiled ISceneDefinition " +
+                "counterpart anywhere in the domain — discovery must be a filesystem scan of " +
+                "SceneBuilders/*.cs, not TypeCache.");
+
+            var route = routes.First(r => r.BuilderName == name);
+
+            Assert.AreEqual(SceneBuilderPaths.Builder(name), route.BuilderPath);
+            Assert.AreEqual(SceneBuilderPaths.Sidecar(name), route.SidecarPath);
+            Assert.AreEqual("Assets/SceneBuilder/" + name + ".unity", route.ScenePath,
+                "With no sidecar written, ScenePath must fall back to the deterministic default.");
+        }
+        finally
+        {
+            SceneBuilderRouter.ResetForTests();
+            if (File.Exists(builderPath)) File.Delete(builderPath);
+            if (File.Exists(sidecarPath)) File.Delete(sidecarPath);
+        }
     }
 
     // Checklist #2 (b2-t1): a code->scene cycle for a changed builder must route by that BUILDER'S

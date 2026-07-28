@@ -3,16 +3,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using SceneBuilder.Core.Serialization;
-using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 
 namespace SceneBuilder.Editor
 {
     /// <summary>
-    /// One discovered builder: its compiled <see cref="SceneBuilder.Authoring.ISceneDefinition"/>
-    /// name plus the on-disk builder/sidecar/scene paths it routes to. Value-type (struct) so
-    /// callers (and tests) can compare/assert routes directly and `out route` defaults cleanly.
+    /// One discovered builder: its name (from its <c>.cs</c> file stem) plus the on-disk
+    /// builder/sidecar/scene paths it routes to. Value-type (struct) so callers (and tests) can
+    /// compare/assert routes directly and `out route` defaults cleanly.
     /// </summary>
     /// <remarks>
     /// Plain <c>readonly struct</c>, not <c>record struct</c>: Unity 6000.5.3f1's default project
@@ -37,24 +36,27 @@ namespace SceneBuilder.Editor
     }
 
     /// <summary>
-    /// Discovers every compiled <see cref="SceneBuilder.Authoring.ISceneDefinition"/> with an
-    /// on-disk builder source and resolves each one's scene, so code-&gt;scene / scene-&gt;code can
-    /// route a changed file or scene to the SPECIFIC builder that owns it, instead of a single
-    /// hardcoded builder/scene pair.
+    /// Discovers every builder source under <see cref="SceneBuilderPaths.BuildersDirectory"/> and
+    /// resolves each one's scene, so code-&gt;scene / scene-&gt;code can route a changed file or
+    /// scene to the SPECIFIC builder that owns it, instead of a single hardcoded builder/scene pair.
     /// </summary>
     /// <remarks>
-    /// Discovery walks <see cref="UnityEditor.TypeCache"/> (the same fast, Unity-aware index
-    /// <c>ComponentTypeResolver</c> uses for <c>Component</c>-derived types) rather than
-    /// <c>AppDomain</c> reflection.
+    /// Discovery is a filesystem scan of each <c>.cs</c> directly under
+    /// <see cref="SceneBuilderPaths.BuildersDirectory"/> (the out-of-<c>Assets/</c> folder builders
+    /// live in), excluding <see cref="SceneBuilderPaths.GeneratedDirectory"/>. Builders live outside
+    /// Unity's asset pipeline and are never compiled, so a Unity type index cannot see them — the
+    /// <c>.cs</c> file IS the unit.
     /// </remarks>
     public static class SceneBuilderRouter
     {
         private static IReadOnlyList<BuilderRoute>? _cache;
 
         /// <summary>
-        /// One <see cref="BuilderRoute"/> per compiled <c>ISceneDefinition</c> whose builder source
-        /// exists on disk, deterministically ordered by <see cref="BuilderRoute.BuilderName"/>
-        /// (Ordinal). Cached per-domain; cleared by <see cref="ResetForTests"/>.
+        /// One <see cref="BuilderRoute"/> per <c>.cs</c> directly under
+        /// <see cref="SceneBuilderPaths.BuildersDirectory"/> (excluding
+        /// <see cref="SceneBuilderPaths.GeneratedDirectory"/>), deterministically ordered by
+        /// <see cref="BuilderRoute.BuilderName"/> (Ordinal). Cached per-domain; cleared by
+        /// <see cref="ResetForTests"/>.
         /// </summary>
         public static IReadOnlyList<BuilderRoute> Discover()
         {
@@ -65,24 +67,22 @@ namespace SceneBuilder.Editor
 
             var routes = new List<BuilderRoute>();
 
-            foreach (var type in TypeCache.GetTypesDerivedFrom<SceneBuilder.Authoring.ISceneDefinition>())
+            if (Directory.Exists(SceneBuilderPaths.BuildersDirectory))
             {
-                if (!type.IsClass || type.IsAbstract || type.IsGenericTypeDefinition)
+                foreach (var file in Directory.GetFiles(SceneBuilderPaths.BuildersDirectory, "*.cs"))
                 {
-                    continue;
+                    if (string.Equals(Path.GetDirectoryName(file), SceneBuilderPaths.GeneratedDirectory, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var name = Path.GetFileNameWithoutExtension(file);
+                    var builderPath = SceneBuilderPaths.Builder(name);
+                    var sidecarPath = SceneBuilderPaths.Sidecar(name);
+                    var scenePath = ResolveScenePath(name, sidecarPath);
+
+                    routes.Add(new BuilderRoute(name, builderPath, sidecarPath, scenePath));
                 }
-
-                var name = type.Name;
-                var builderPath = SceneBuilderPaths.Builder(name);
-                if (!File.Exists(builderPath))
-                {
-                    continue;
-                }
-
-                var sidecarPath = SceneBuilderPaths.Sidecar(name);
-                var scenePath = ResolveScenePath(name, sidecarPath);
-
-                routes.Add(new BuilderRoute(name, builderPath, sidecarPath, scenePath));
             }
 
             routes.Sort((a, b) => string.CompareOrdinal(a.BuilderName, b.BuilderName));
