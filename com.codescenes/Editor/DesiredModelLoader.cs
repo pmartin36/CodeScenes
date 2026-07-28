@@ -95,9 +95,9 @@ namespace SceneBuilder.Editor
         /// (<c>Instance(Prefabs.X)</c>/<c>.On(sel =&gt; ...)</c>) during the parse; null (the default)
         /// keeps every existing 2-arg caller compiling unchanged and falls back to plain string forms.
         /// </summary>
-        public static Loaded Load(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog = null)
+        public static Loaded Load(string source, IdentityMap? existingMap, FacadeCatalog? facadeCatalog = null, AssetCatalog? assetCatalog = null)
         {
-            var parse = ComponentTypeNormalizer.ParseAndNormalize(source, existingMap, facadeCatalog);
+            var parse = ComponentTypeNormalizer.ParseAndNormalize(source, existingMap, facadeCatalog, assetCatalog);
 
             // §M3: resolve transient member:<name> field keys to serialized paths BEFORE any diff,
             // remapping the field-argument spans in lockstep so span-local field patches still match.

@@ -148,8 +148,11 @@ namespace SceneBuilder.Editor
             // b5-t5: load the façade manifest ONCE per Build and thread it through every parse/reconcile
             // seam below, so a typed `Instance(Prefabs.X)`/`.On(sel => ...)` resolves instead of refusing.
             var facadeCatalog = FacadeCatalogLoader.Load();
+            // b6-t3: load the asset manifest ONCE per Build, alongside the façade catalog, and thread
+            // it through the same parse seam so a typed `Assets.Group.X` member resolves.
+            var assetCatalog = AssetCatalogLoader.Load();
 
-            var rawParse = BuilderParser.Parse(source, existingMap, facadeCatalog);
+            var rawParse = BuilderParser.Parse(source, existingMap, facadeCatalog, assetCatalog);
             var validation = PlanningValidator.Validate(
                 rawParse, source, new UnityResolutionProvider(existingMap?.Assets), builderPath);
 
@@ -166,7 +169,7 @@ namespace SceneBuilder.Editor
             // Sync goes through the exact same call, so neither direction can skip a stage. Guaranteed
             // not to throw here: the walk above already confirmed every type/asset/builtin resolves
             // via the SAME resolvers.
-            var loaded = DesiredModelLoader.Load(source, existingMap, facadeCatalog);
+            var loaded = DesiredModelLoader.Load(source, existingMap, facadeCatalog, assetCatalog);
 
             // m-nested-props b7-t2: a nested override/added/removed target that could not be located
             // against the live instance (NestedOverrideBootstrap.Resolve) is a REFUSAL, same policy as

@@ -178,8 +178,9 @@ public class AnalyzerToolkitInjectionTests
         Assert.IsTrue(ReferenceEquals(once, twice),
             "Re-injecting must return the SAME instance when every item is already present.");
         Assert.AreEqual(2, AnalyzerIncludes(twice).Length, "Must never double-inject the two analyzer dlls.");
-        Assert.AreEqual(2, AdditionalFilesIncludes(twice).Length,
-            "Must never double-inject the catalog file or the facade manifest file (two AdditionalFiles items total).");
+        Assert.AreEqual(3, AdditionalFilesIncludes(twice).Length,
+            "Must never double-inject the catalog file, the facade manifest file, or the asset manifest "
+            + "file (three AdditionalFiles items total).");
 
         Assert.AreEqual(
             DonorCsproj,

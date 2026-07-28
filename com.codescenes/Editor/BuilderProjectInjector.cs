@@ -166,10 +166,10 @@ namespace SceneBuilder.Editor
         /// <param name="builderFiles">Absolute paths of the builder sources to inject.</param>
         /// <param name="analyzersDirectory">
         /// Absolute path of the package's shipped analyzer toolkit (<c>Analyzers~/</c>), or null to skip
-        /// wiring it. When supplied (and builders are present), two <c>&lt;Analyzer /&gt;</c> items and two
-        /// <c>&lt;AdditionalFiles /&gt;</c> items (the project catalog manifest and the prefab façade
-        /// manifest) are injected alongside the builder <c>&lt;Compile /&gt;</c> items. Null behaves
-        /// byte-identically to the original 4-arg contract.
+        /// wiring it. When supplied (and builders are present), two <c>&lt;Analyzer /&gt;</c> items and
+        /// three <c>&lt;AdditionalFiles /&gt;</c> items (the project catalog manifest, the prefab façade
+        /// manifest, and the asset catalog manifest) are injected alongside the builder
+        /// <c>&lt;Compile /&gt;</c> items. Null behaves byte-identically to the original 4-arg contract.
         /// </param>
         public static string Inject(
             string csprojContent,
@@ -229,6 +229,13 @@ namespace SceneBuilder.Editor
                     SceneBuilderPaths.GeneratedFolderName,
                     SceneBuilder.Core.Model.FacadeManifest.FileName);
                 AppendItemIfAbsent(items, csprojContent, "AdditionalFiles", RelativePath(projectDirectory, facadeManifestPath));
+
+                var assetManifestPath = Path.Combine(
+                    projectDirectory,
+                    SceneBuilderPaths.BuildersFolderName,
+                    SceneBuilderPaths.GeneratedFolderName,
+                    SceneBuilder.Core.Model.AssetManifest.FileName);
+                AppendItemIfAbsent(items, csprojContent, "AdditionalFiles", RelativePath(projectDirectory, assetManifestPath));
             }
 
             if (items.Length == 0)

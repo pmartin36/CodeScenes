@@ -241,8 +241,12 @@ public class BuilderProjectInjectorTests
         Assert.IsTrue(
             includes.Any(i => i.EndsWith(SceneBuilder.Core.Model.FacadeManifest.FileName, StringComparison.Ordinal)),
             "A second <AdditionalFiles> item for the prefab facade manifest must be injected.");
-        Assert.AreEqual(2, includes.Length,
-            "Exactly two AdditionalFiles items are expected: the project catalog and the facade manifest.");
+        Assert.IsTrue(
+            includes.Any(i => i.EndsWith(SceneBuilder.Core.Model.AssetManifest.FileName, StringComparison.Ordinal)),
+            "A third <AdditionalFiles> item for the asset catalog manifest must be injected.");
+        Assert.AreEqual(3, includes.Length,
+            "Exactly three AdditionalFiles items are expected: the project catalog, the facade manifest, "
+            + "and the asset catalog manifest.");
     }
 
     [Test]
@@ -259,6 +263,22 @@ public class BuilderProjectInjectorTests
             AdditionalFilesIncludes(twice)
                 .Count(i => i.EndsWith(SceneBuilder.Core.Model.FacadeManifest.FileName, StringComparison.Ordinal)),
             "The facade manifest item must never be duplicated.");
+    }
+
+    [Test]
+    public void Inject_IsIdempotent_ForTheAssetManifestAdditionalFilesItem()
+    {
+        var once = BuilderProjectInjector.Inject(
+            DonorCsproj, "Assembly-CSharp", ProjectDir, new[] { BuilderAt("DemoScene.cs") }, "/pkg/Analyzers~");
+        var twice = BuilderProjectInjector.Inject(
+            once, "Assembly-CSharp", ProjectDir, new[] { BuilderAt("DemoScene.cs") }, "/pkg/Analyzers~");
+
+        Assert.AreEqual(once, twice, "Re-injecting must not double the asset manifest item.");
+        Assert.AreEqual(
+            1,
+            AdditionalFilesIncludes(twice)
+                .Count(i => i.EndsWith(SceneBuilder.Core.Model.AssetManifest.FileName, StringComparison.Ordinal)),
+            "The asset manifest item must never be duplicated.");
     }
 
     // ---- The Unity boundary: real assembly graph, real hook discovery ----
