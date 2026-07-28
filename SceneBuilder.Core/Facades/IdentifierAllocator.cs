@@ -26,5 +26,10 @@ namespace SceneBuilder.Core.Facades
             _used.Add(candidate);
             return candidate;
         }
+
+        // Non-mutating occupancy peek. Reuses the same `_used` truth as Allocate so a caller
+        // (e.g. AssetCatalogBuilder's collapse-collision check) can ask "is this slot taken"
+        // without allocating into it.
+        public bool IsAllocated(string sanitized) => _used.Contains(sanitized);
     }
 }

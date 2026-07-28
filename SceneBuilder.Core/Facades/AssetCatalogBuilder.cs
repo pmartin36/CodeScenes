@@ -26,48 +26,38 @@ namespace SceneBuilder.Core.Facades
 
             var groupRoots = new Dictionary<string, Node>(StringComparer.Ordinal);
             var built = new AssetCatalogEntry[ordered.Length];
+            var groups = new string[ordered.Length];
 
+            // Phase A: allocate every NON-candidate (natural position) in (Guid, FileId) order,
+            // exactly as before. Naturals occupy their slots first so a leading-folder collapse
+            // (Phase B) can never steal a slot from a naturally-positioned entry.
             for (var i = 0; i < ordered.Length; i++)
             {
                 var entry = ordered[i];
                 var group = SanitizeIdentifier(entry.Group);
+                groups[i] = group;
 
-                if (!groupRoots.TryGetValue(group, out var node))
-                {
-                    node = new Node();
-                    groupRoots[group] = node;
-                }
+                if (IsCandidate(entry, group))
+                    continue;
 
-                var resolvedSegments = new string[entry.FolderSegments.Length];
-                for (var s = 0; s < entry.FolderSegments.Length; s++)
-                {
-                    var rawSegment = entry.FolderSegments[s];
-                    if (!node.Children.TryGetValue(rawSegment, out var child))
-                    {
-                        var allocatedName = node.Allocator.Allocate(SanitizeIdentifier(rawSegment));
-                        child = new Node { AllocatedName = allocatedName };
-                        node.Children[rawSegment] = child;
-                    }
+                built[i] = AllocateAlong(groupRoots, group, entry, entry.FolderSegments);
+            }
 
-                    resolvedSegments[s] = child.AllocatedName!;
-                    node = child;
-                }
+            // Phase B: for each collapse candidate (leading FolderSegments[0] sanitizes to the
+            // group name), take the collapsed slot iff it is free; otherwise keep the entry's
+            // full original FolderSegments unchanged, identical to a non-candidate.
+            for (var i = 0; i < ordered.Length; i++)
+            {
+                var entry = ordered[i];
+                var group = groups[i];
 
-                var leafRaw = string.IsNullOrEmpty(entry.SubAsset)
-                    ? Path.GetFileNameWithoutExtension(entry.Path)
-                    : entry.SubAsset;
-                var member = node.Allocator.Allocate(SanitizeIdentifier(leafRaw));
+                if (!IsCandidate(entry, group))
+                    continue;
 
-                built[i] = new AssetCatalogEntry
-                {
-                    Group = group,
-                    FolderSegments = resolvedSegments,
-                    MemberName = member,
-                    Guid = entry.Guid,
-                    FileId = entry.FileId,
-                    Path = entry.Path,
-                    SubAsset = entry.SubAsset,
-                };
+                var collapsedFolders = entry.FolderSegments.Skip(1).ToArray();
+                built[i] = CollapsedLeafFree(groupRoots, group, entry, collapsedFolders)
+                    ? AllocateAlong(groupRoots, group, entry, collapsedFolders)
+                    : AllocateAlong(groupRoots, group, entry, entry.FolderSegments);
             }
 
             // Pass 2: final byte-stable ordering, independent of allocation (input) order.
@@ -75,6 +65,81 @@ namespace SceneBuilder.Core.Facades
 
             return new AssetCatalog { SchemaVersion = 1, Entries = built };
         }
+
+        // Walks (and mutates: get-or-adds folder nodes + allocates the leaf) `folderSegments`
+        // under `group`'s root, producing the built entry. Shared by Phase A's natural
+        // allocation and both of Phase B's commit branches (collapsed / full-path fallback) —
+        // ONE allocation implementation, no duplication across the three commit sites.
+        private static AssetCatalogEntry AllocateAlong(
+            Dictionary<string, Node> groupRoots, string group, AssetCatalogEntry entry, string[] folderSegments)
+        {
+            if (!groupRoots.TryGetValue(group, out var node))
+            {
+                node = new Node();
+                groupRoots[group] = node;
+            }
+
+            var resolvedSegments = new string[folderSegments.Length];
+            for (var s = 0; s < folderSegments.Length; s++)
+            {
+                var rawSegment = folderSegments[s];
+                if (!node.Children.TryGetValue(rawSegment, out var child))
+                {
+                    var allocatedName = node.Allocator.Allocate(SanitizeIdentifier(rawSegment));
+                    child = new Node { AllocatedName = allocatedName };
+                    node.Children[rawSegment] = child;
+                }
+
+                resolvedSegments[s] = child.AllocatedName!;
+                node = child;
+            }
+
+            var member = node.Allocator.Allocate(SanitizeIdentifier(LeafRaw(entry)));
+
+            return new AssetCatalogEntry
+            {
+                Group = group,
+                FolderSegments = resolvedSegments,
+                MemberName = member,
+                Guid = entry.Guid,
+                FileId = entry.FileId,
+                Path = entry.Path,
+                SubAsset = entry.SubAsset,
+            };
+        }
+
+        // Non-mutating peek: is `entry`'s leaf slot free at `collapsedFolders` under `group`'s
+        // root right now? Reads the SAME trie Phase A/B mutate, via IdentifierAllocator.IsAllocated
+        // — no parallel occupancy set.
+        private static bool CollapsedLeafFree(
+            Dictionary<string, Node> groupRoots, string group, AssetCatalogEntry entry, string[] collapsedFolders)
+        {
+            if (!groupRoots.TryGetValue(group, out var node))
+                return true;
+
+            foreach (var rawSegment in collapsedFolders)
+            {
+                if (!node.Children.TryGetValue(rawSegment, out var child))
+                    return true;
+
+                node = child;
+            }
+
+            return !node.Allocator.IsAllocated(SanitizeIdentifier(LeafRaw(entry)));
+        }
+
+        // A collapse candidate: at least one folder segment, and its LEADING segment sanitizes
+        // to the group name. Only the leading segment is ever considered.
+        private static bool IsCandidate(AssetCatalogEntry entry, string group) =>
+            entry.FolderSegments.Length >= 1 &&
+            string.Equals(SanitizeIdentifier(entry.FolderSegments[0]), group, StringComparison.Ordinal);
+
+        // The raw leaf name an entry allocates from — SubAsset if present, else the file's base
+        // name. Extracted so the collision peek and the commit derive the identical leaf name.
+        private static string LeafRaw(AssetCatalogEntry entry) =>
+            string.IsNullOrEmpty(entry.SubAsset)
+                ? Path.GetFileNameWithoutExtension(entry.Path)
+                : entry.SubAsset;
 
         private static int CompareEntries(AssetCatalogEntry a, AssetCatalogEntry b)
         {

@@ -1,6 +1,7 @@
 using System.Linq;
 using SceneBuilder.Core.Facades;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Parsing;
 using Xunit;
 
 namespace SceneBuilder.Core.Tests
@@ -137,6 +138,117 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(new[] { "Env", "Stone" }, detail.FolderSegments);
             Assert.Equal(new[] { "Env" }, leaf.FolderSegments);
             Assert.Equal("Stone2", leaf.MemberName);
+        }
+
+        // b1-t1 case 1: leading segment sanitizing to the group name is dropped.
+        [Fact]
+        public void LeadingFolderEqualsGroup_Collapses()
+        {
+            var raw = new[]
+            {
+                RawEntry("Materials", new[] { "Materials" }, "Assets/Materials/Green.mat", "11111111111111111111111111111111"),
+            };
+
+            var catalog = AssetCatalogBuilder.Build(raw);
+
+            var entry = Assert.Single(catalog.Entries);
+            Assert.Equal(System.Array.Empty<string>(), entry.FolderSegments);
+            Assert.Equal("Green", entry.MemberName);
+        }
+
+        // b1-t1 case 2: only the LEADING duplicate collapses; a deeper occurrence of the group
+        // name (anywhere but position 0) is left untouched.
+        [Fact]
+        public void DeepDuplicate_NotCollapsed()
+        {
+            var raw = new[]
+            {
+                RawEntry("Materials", new[] { "Materials", "Environment", "Rocks" }, "Assets/Materials/Environment/Rocks/Stone.mat", "11111111111111111111111111111111"),
+                RawEntry("Materials", new[] { "Environment", "Materials" }, "Assets/Environment/Materials/Stone.mat", "22222222222222222222222222222222"),
+            };
+
+            var catalog = AssetCatalogBuilder.Build(raw);
+            var byGuid = catalog.Entries.ToDictionary(e => e.Guid);
+
+            // Leading "Materials" dropped; deeper "Environment", "Rocks" untouched.
+            Assert.Equal(new[] { "Environment", "Rocks" }, byGuid["11111111111111111111111111111111"].FolderSegments);
+
+            // "Materials" recurs at a DEEPER position (index 1), not leading — unchanged.
+            Assert.Equal(new[] { "Environment", "Materials" }, byGuid["22222222222222222222222222222222"].FolderSegments);
+        }
+
+        // b1-t1 case 3: a leading folder that does not sanitize to the group name is untouched.
+        [Fact]
+        public void NonDuplicateLeadingFolder_Unchanged()
+        {
+            var raw = new[]
+            {
+                RawEntry("Materials", new[] { "Characters", "Skin" }, "Assets/Characters/Skin/Stone.mat", "11111111111111111111111111111111"),
+            };
+
+            var catalog = AssetCatalogBuilder.Build(raw);
+
+            var entry = Assert.Single(catalog.Entries);
+            Assert.Equal(new[] { "Characters", "Skin" }, entry.FolderSegments);
+        }
+
+        // b1-t1 case 4: collapse is collision-aware. A naturally root-positioned asset (empty
+        // FolderSegments) keeps the clean slot; a foldered candidate that would collapse onto
+        // that same slot yields and keeps its original segment. Byte-stable regardless of input
+        // order and regardless of which Guid sorts lower.
+        [Fact]
+        public void CollapseCollision_NaturalWins_ByteStableAcrossOrder()
+        {
+            var natural = RawEntry("Materials", new string[0], "Assets/Green.mat", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            var foldered = RawEntry("Materials", new[] { "Materials" }, "Assets/Materials/Green.mat", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+            var raw = new[] { natural, foldered };
+
+            var a = AssetCatalogBuilder.Build(raw);
+            var b = AssetCatalogBuilder.Build(raw.Reverse().ToArray());
+
+            Assert.Equal(a.Serialize(), b.Serialize());
+
+            var byGuid = a.Entries.ToDictionary(e => e.Guid);
+            var naturalBuilt = byGuid["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"];
+            var folderedBuilt = byGuid["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"];
+
+            Assert.Equal(System.Array.Empty<string>(), naturalBuilt.FolderSegments);
+            Assert.Equal("Green", naturalBuilt.MemberName);
+            Assert.Equal("Assets/Green.mat", naturalBuilt.Path);
+
+            Assert.Equal(new[] { "Materials" }, folderedBuilt.FolderSegments);
+            Assert.Equal("Green", folderedBuilt.MemberName);
+            Assert.Equal("Assets/Materials/Green.mat", folderedBuilt.Path);
+        }
+
+        // b1-t1 case 5: round-trip — the collapsed chain the builder produces resolves, through
+        // the parser, back to the same asset (same Guid/Path) via the built AssetCatalog.
+        [Fact]
+        public void CollapsedChain_RoundTrips_ThroughParser()
+        {
+            var raw = new[]
+            {
+                RawEntry("Materials", new[] { "Materials" }, "Assets/Materials/Green.mat", "11111111111111111111111111111111"),
+            };
+            var catalog = AssetCatalogBuilder.Build(raw);
+            var entry = Assert.Single(catalog.Entries);
+
+            const string Source = @"
+public class ArenaScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Rock"").Component<UnityEngine.MeshRenderer>(mr => mr.Set(""sharedMaterial"", Assets.Materials.Green));
+    }
+}
+";
+            var result = BuilderParser.Parse(Source, null, null, catalog);
+
+            var component = Assert.Single(Assert.Single(result.Model.Roots).Components);
+            var field = Assert.IsType<ValueNode.AssetRef>(component.Fields["sharedMaterial"]);
+
+            Assert.NotNull(field.Ref);
+            Assert.Equal(entry.Path, field.Ref!.DisplayPath);
         }
     }
 }
