@@ -39,6 +39,11 @@ namespace SceneBuilder.Core.Reconcile
         {
             var consumed = new HashSet<SourceEdit>();
             var callTextsByAnchor = new Dictionary<string, List<string>>();
+            // b3-t1: drops sharing an anchor with a chained-call append fold into that anchor's
+            // single ReplaceNode too — see the class doc comment. Collected here (NOT marked
+            // consumed yet) so a drop whose anchor never gains an append call-text falls through to
+            // the existing independent ResolveDropInstanceCall path unchanged.
+            var dropsByAnchor = new Dictionary<string, List<DropInstanceCall>>();
 
             void Collect(string anchor, string callText, SourceEdit edit)
             {
@@ -74,6 +79,15 @@ namespace SceneBuilder.Core.Reconcile
                     case AppendInstanceRemoveChild appendRemoveChild:
                         Collect(appendRemoveChild.Anchor, $"RemoveChild({RemoveChildArg(appendRemoveChild)})", appendRemoveChild);
                         break;
+                    case DropInstanceCall dropInstanceCall:
+                        if (!dropsByAnchor.TryGetValue(dropInstanceCall.Anchor, out var drops))
+                        {
+                            drops = new List<DropInstanceCall>();
+                            dropsByAnchor[dropInstanceCall.Anchor] = drops;
+                        }
+
+                        drops.Add(dropInstanceCall);
+                        break;
                 }
             }
 
@@ -86,7 +100,16 @@ namespace SceneBuilder.Core.Reconcile
 
             foreach (var (anchor, callTexts) in callTextsByAnchor)
             {
-                AppendChainedCalls(root, anchors, anchor, callTexts, allTargets, appliers);
+                dropsByAnchor.TryGetValue(anchor, out var anchorDrops);
+                AppendChainedCalls(root, anchors, anchor, callTexts, anchorDrops, allTargets, appliers);
+
+                if (anchorDrops != null)
+                {
+                    foreach (var drop in anchorDrops)
+                    {
+                        consumed.Add(drop);
+                    }
+                }
             }
 
             return consumed;
@@ -104,6 +127,7 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, SourceSpan> anchors,
             string anchor,
             IReadOnlyList<string> callTexts,
+            IReadOnlyList<DropInstanceCall>? drops,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
@@ -117,9 +141,24 @@ namespace SceneBuilder.Core.Reconcile
             appliers.Add(currentRoot =>
             {
                 var current = currentRoot.GetCurrentNode(chainExpr)!;
-                var newExprText = current.WithoutTrailingTrivia().ToFullString()
+                var originalTrailing = current.GetTrailingTrivia();
+
+                // b3-t1: splice out any same-anchor drop(s) from a DETACHED copy of the chain
+                // BEFORE appending the new calls, so the drop target is located inside `working`
+                // rather than via a separately-tracked node the ReplaceNode below would orphan.
+                var working = (ExpressionSyntax)current;
+                if (drops != null)
+                {
+                    foreach (var drop in drops)
+                    {
+                        var dropCall = FindInstanceCall(working, drop);
+                        working = (ExpressionSyntax)RemoveTrailingInvocation(working, dropCall);
+                    }
+                }
+
+                var newExprText = working.WithoutTrailingTrivia().ToFullString()
                     + string.Concat(callTexts.Select(callText => "." + callText));
-                var newExpr = SyntaxFactory.ParseExpression(newExprText).WithTrailingTrivia(current.GetTrailingTrivia());
+                var newExpr = SyntaxFactory.ParseExpression(newExprText).WithTrailingTrivia(originalTrailing);
                 return currentRoot.ReplaceNode(current, newExpr);
             });
         }
@@ -220,11 +259,15 @@ namespace SceneBuilder.Core.Reconcile
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown InstanceCallKind."),
         };
 
-        private static InvocationExpressionSyntax FindInstanceCall(StatementSyntax statement, DropInstanceCall edit)
+        // b3-t1: `scope` widened from StatementSyntax to SyntaxNode — when this is called from
+        // AppendChainedCalls's drop splice, the anchorless single-call case has the `.Override(...)`
+        // (or other instance call) AS the chain expression itself, not merely a descendant of a
+        // statement, so DescendantNodesAndSelf (not DescendantNodes) is required to find it.
+        private static InvocationExpressionSyntax FindInstanceCall(SyntaxNode scope, DropInstanceCall edit)
         {
             var methodName = InstanceCallMethodName(edit.Kind);
 
-            var candidates = statement.DescendantNodes()
+            var candidates = scope.DescendantNodesAndSelf()
                 .OfType<InvocationExpressionSyntax>()
                 .Where(inv => inv.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.Text == methodName);
 
@@ -247,7 +290,7 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
-            throw Fail(statement, $"No matching .{methodName}(...) call found for anchor '{edit.Anchor}'.");
+            throw Fail(scope, $"No matching .{methodName}(...) call found for anchor '{edit.Anchor}'.");
         }
 
         // AddChild/RemoveChild drop matcher: mirrors GenericTypeArgMatches's "null == match any"

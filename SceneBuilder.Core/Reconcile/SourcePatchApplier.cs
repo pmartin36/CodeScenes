@@ -127,7 +127,15 @@ namespace SceneBuilder.Core.Reconcile
 
                         break;
                     case DropInstanceCall dropInstanceCall:
-                        ResolveDropInstanceCall(root, anchors, dropInstanceCall, allTargets, appliers);
+                        // b3-t1: a drop sharing an anchor with a chained-call append was already
+                        // folded into that anchor's single ReplaceNode by
+                        // ResolveInstanceChainedCallAppends above; resolving it again here would
+                        // independently track its target node, which the fold's re-parse orphans.
+                        if (!consumedChainedCallEdits.Contains(edit))
+                        {
+                            ResolveDropInstanceCall(root, anchors, dropInstanceCall, allTargets, appliers);
+                        }
+
                         break;
                     case DropScopedOnCall dropScopedOnCall:
                         ResolveDropScopedOnCall(root, anchors, dropScopedOnCall, allTargets, appliers);
