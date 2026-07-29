@@ -63,24 +63,9 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         return scene.GetRootGameObjects().FirstOrDefault(go => go.name == name);
     }
 
-    // PlanExecutor adds the FitSize/SurfaceSnap MonoBehaviour (triggering its [ExecuteAlways] OnValidate ->
-    // Evaluate synchronously) BEFORE the SetField pass populates the sibling MeshFilter's mesh, so a
-    // transient "no MeshFilter/mesh to size" error is expected Console noise on every Build that
-    // creates a FitSize — irrelevant here (the reporting surface is the assertions below, not the
-    // Console), matching the RoundTripSpatialTests.cs (b6-t1) precedent. Scoped to ONLY the Build call
-    // so a genuine error from a later explicit Evaluate() still fails the test.
     private void RunBuild(Scene scene)
     {
-        var prevIgnore = LogAssert.ignoreFailingMessages;
-        LogAssert.ignoreFailingMessages = true;
-        try
-        {
-            SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
-        }
-        finally
-        {
-            LogAssert.ignoreFailingMessages = prevIgnore;
-        }
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
     }
 
     // Extracts the full `.Transform(pos: (...))` call text (balanced parens) so an assertion can

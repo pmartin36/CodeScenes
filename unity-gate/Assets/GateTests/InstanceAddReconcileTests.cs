@@ -6,7 +6,6 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using UnityEngine.TestTools;
 using SceneBuilder.Editor;
 
 // m-nested-props b7-t2 (specs/24-nested-prefab-overrides.md checklist #5/#6, adapter boundary):
@@ -87,20 +86,6 @@ public class InstanceAddReconcileGateScene : ISceneDefinition
         }
     }
 
-    private static SceneBuilderSync.SyncResult SyncIgnoringFacadeCompileNoise(string builderPath, string sidecarPath, Scene scene)
-    {
-        var prevIgnore = LogAssert.ignoreFailingMessages;
-        LogAssert.ignoreFailingMessages = true;
-        try
-        {
-            return SceneBuilderSync.Run(builderPath, sidecarPath, scene);
-        }
-        finally
-        {
-            LogAssert.ignoreFailingMessages = prevIgnore;
-        }
-    }
-
     // Builds a bare typed `.Instance(Prefabs.Tank)`, then live-adds a plain GameObject "MuzzleFlash"
     // under the instance's LeftTurret sub-object — the real user action's data effect: an
     // AddedGameObjects override on the instance (asserted here so a setup that fails to register the
@@ -136,7 +121,7 @@ public class InstanceAddReconcileGateScene : ISceneDefinition
             "Setup: the live-added MuzzleFlash was not recorded as an AddedGameObjects override on the "
             + "Tank instance — the emit path would have nothing to read back.");
 
-        var syncResult = SyncIgnoringFacadeCompileNoise(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var syncResult = SceneBuilderSync.Run(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(syncResult.Changed,
             "Sync did not write — a scene-added child under the instance must be captured back into source.");
 

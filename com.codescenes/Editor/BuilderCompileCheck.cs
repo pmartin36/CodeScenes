@@ -60,6 +60,12 @@ namespace SceneBuilder.Editor
         private static AssetCatalog? _stubCatalog;
         private static SyntaxTree? _stubTree;
 
+        // b5-t1 (specs/30-live-verify-bug-fixes.md, Bug 5): identical rationale/caching pattern as
+        // _stubCatalog/_stubTree above, but for the generator-emitted `Prefabs` façade root (see
+        // PrefabFacadeStubEmitter) sourced from FacadeCatalogLoader's cached FacadeCatalog instance.
+        private static FacadeCatalog? _facadeStubCatalog;
+        private static SyntaxTree? _facadeStubTree;
+
         /// <summary>
         /// Wall-clock ms spent building the reference set — the dominant one-time cost, paid once per
         /// domain. Zero until it is built. Sync performance is a first-class constraint, so the real
@@ -168,6 +174,32 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
+        /// The cached compilable stub of the on-disk <see cref="FacadeCatalog"/>'s generator-emitted
+        /// <c>Prefabs</c> root (see <see cref="PrefabFacadeStubEmitter"/>), or null when no manifest
+        /// is present — in which case <see cref="Check"/>'s behavior is unchanged from before this
+        /// stub existed. Mirrors <see cref="StubTree"/> exactly.
+        /// </summary>
+        private static SyntaxTree? FacadeStubTree()
+        {
+            var catalog = FacadeCatalogLoader.Load();
+            if (catalog == null)
+            {
+                _facadeStubCatalog = null;
+                _facadeStubTree = null;
+                return null;
+            }
+
+            if (_facadeStubTree != null && ReferenceEquals(catalog, _facadeStubCatalog))
+            {
+                return _facadeStubTree;
+            }
+
+            _facadeStubCatalog = catalog;
+            _facadeStubTree = CSharpSyntaxTree.ParseText(PrefabFacadeStubEmitter.Emit(catalog));
+            return _facadeStubTree;
+        }
+
+        /// <summary>
         /// Compiles <paramref name="source"/> and returns its error diagnostics (empty when it compiles).
         /// Pure — reports, never throws or logs.
         /// </summary>
@@ -182,6 +214,12 @@ namespace SceneBuilder.Editor
             if (stubTree != null)
             {
                 compilation = compilation.AddSyntaxTrees(stubTree);
+            }
+
+            var facadeStubTree = FacadeStubTree();
+            if (facadeStubTree != null)
+            {
+                compilation = compilation.AddSyntaxTrees(facadeStubTree);
             }
 
             var diagnostics = compilation.GetDiagnostics()
