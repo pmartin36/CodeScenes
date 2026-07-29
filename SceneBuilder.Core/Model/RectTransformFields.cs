@@ -156,5 +156,43 @@ namespace SceneBuilder.Core.Model
             => new(
                 anchoredPosition.X + sizeDelta.X * (1f - pivot.X),
                 anchoredPosition.Y + sizeDelta.Y * (1f - pivot.Y));
+
+        /// <summary>b2-t1/R4: holds each DRIVEN rect axis (per <see cref="TransformData.DrivenChannels"/>,
+        /// rect bits only) to the model's value so a diff can never register a difference on that axis —
+        /// the rect-field mirror of Reconciler.MaskDriven's base-transform Position/Scale masking. Only
+        /// fields the snapshot actually has set are rewritten; when no rect channel is driven the
+        /// snapshot is returned UNCHANGED (same reference). Shared by the Differ (this task) and
+        /// Reconciler.MaskDriven's rect extension (b3-t2) — never re-implement the loop.</summary>
+        public static TransformData MaskDrivenRect(TransformData model, TransformData snapshot)
+        {
+            var driven = snapshot.DrivenChannels & ChannelMask.AllRectFields;
+            if (driven == ChannelMask.None)
+            {
+                return snapshot;
+            }
+
+            var result = snapshot;
+            foreach (var field in All)
+            {
+                var snapshotValue = field.Get(snapshot);
+                if (snapshotValue is not { } sv)
+                {
+                    continue;
+                }
+
+                var drivenAxes = driven & field.Mask;
+                if (drivenAxes == ChannelMask.None)
+                {
+                    continue;
+                }
+
+                var modelValue = field.Get(model) ?? field.Default;
+                var x = (drivenAxes & field.MaskX) != 0 ? modelValue.X : sv.X;
+                var y = (drivenAxes & field.MaskY) != 0 ? modelValue.Y : sv.Y;
+                result = field.With(result, new Vec2(x, y));
+            }
+
+            return result;
+        }
     }
 }

@@ -98,7 +98,9 @@ namespace SceneBuilder.Editor
                 {
                     case CreateObject create:
                     {
-                        var go = new GameObject(create.Name);
+                        var go = create.TransformKind == RectTransformFields.Kind
+                            ? new GameObject(create.Name, typeof(RectTransform))
+                            : new GameObject(create.Name);
                         if (scene.IsValid() && go.scene != scene)
                         {
                             SceneManager.MoveGameObjectToScene(go, scene);
@@ -382,6 +384,11 @@ namespace SceneBuilder.Editor
         // still lives entirely in Reconciler.MaskDriven / SceneSnapshotReader.DeriveDrivenChannels.
         private static void ApplyTransformField(Transform t, SetField op)
         {
+            if (TryApplyRectTransformField(t, op))
+            {
+                return;
+            }
+
             switch (op.Value)
             {
                 case ValueNode.Vec3 v when op.Path == "m_LocalPosition":
@@ -410,6 +417,64 @@ namespace SceneBuilder.Editor
                     Debug.LogWarning($"[SceneBuilder] Unhandled SetField '{op.Path}' on '{op.LogicalId}'.");
                     break;
             }
+        }
+
+        // Claims ONLY the five RectTransform serialized paths carrying a Vec2. Returns false for every
+        // other path/value so the existing Transform switch (and its "Unhandled SetField" warning) is
+        // untouched.
+        private static bool TryApplyRectTransformField(Transform t, SetField op)
+        {
+            if (op.Value is not ValueNode.Vec2 vec || !RectTransformFields.TryFromSerializedPath(op.Path, out _))
+            {
+                return false;
+            }
+
+            var rt = EnsureRectTransform(t, op.LogicalId);
+            if (rt == null)
+            {
+                return true; // located error already surfaced; object left alive
+            }
+
+            var v = new Vector2(vec.Value.X, vec.Value.Y);
+            switch (op.Path)
+            {
+                case RectTransformFields.AnchoredPositionPath: rt.anchoredPosition = v; break;
+                case RectTransformFields.SizeDeltaPath:        rt.sizeDelta        = v; break;
+                case RectTransformFields.AnchorMinPath:        rt.anchorMin        = v; break;
+                case RectTransformFields.AnchorMaxPath:        rt.anchorMax        = v; break;
+                case RectTransformFields.PivotPath:            rt.pivot            = v; break;
+            }
+
+            return true;
+        }
+
+        // Returns the object's RectTransform, promoting a plain Transform IN PLACE via
+        // AddComponent(typeof(RectTransform)) (GameObject EntityId + GlobalObjectId + children + P/R/S
+        // all survive — probed in research.md). Returns null when Unity refuses (prefab-instance root:
+        // AddComponent returns null with no Unity-side log), after logging the located error. Never
+        // destroys the GameObject.
+        private static RectTransform? EnsureRectTransform(Transform t, string logicalId)
+        {
+            if (t is RectTransform existing)
+            {
+                return existing;
+            }
+
+            var go = t.gameObject; // capture BEFORE the add: the old Transform is destroyed
+            go.AddComponent(typeof(RectTransform)); // in-place promotion; may return null (prefab instance)
+            if (go.transform is RectTransform promoted)
+            {
+                ConflictSurfacing.LogNote(logicalId,
+                    $"'{go.name}' had a plain Transform and was promoted in place to a RectTransform (same object, " +
+                    "no wipe); its UI layout is now authored by .RectTransform(...).");
+                return promoted;
+            }
+
+            ConflictSurfacing.LogLocatedError(logicalId,
+                $"'{go.name}' must become a RectTransform for its authored .RectTransform(...) layout, but Unity " +
+                "refused the in-place promotion (a prefab-instance root cannot swap its Transform). The layout was " +
+                "NOT applied; the object is unchanged.");
+            return null;
         }
 
         private static void TrySetTag(GameObject go, string tag)

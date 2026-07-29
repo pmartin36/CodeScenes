@@ -65,6 +65,15 @@ namespace SceneBuilder.Core.Diff
         public TransformData Transform { get; init; } = new();
     }
 
+    // b2-t1: RectTransform layout diff, sibling of SetTransform. Transform carries the node's
+    // DESIRED TransformData (all five UI fields); Changed names exactly the per-axis rect channels
+    // that differ post driven-mask (never the whole-field alias, never a base-transform channel).
+    public sealed record SetRectTransform : ChangeOp
+    {
+        public TransformData Transform { get; init; } = new();
+        public ChannelMask Changed { get; init; }
+    }
+
     // M3 component ChangeOps (b4-t1). LogicalId (base) is the owning GameObject's LogicalId.
     public sealed record AddComponent : ChangeOp
     {

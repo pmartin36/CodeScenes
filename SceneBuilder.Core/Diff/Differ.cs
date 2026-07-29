@@ -193,6 +193,23 @@ namespace SceneBuilder.Core.Diff
             var desired = node.Transform;
             var actual = snapshot.Transform;
 
+            // b2-t1/D1/D8: either side is a RectTransform ⇒ AnchoredPosition owns X/Y, so the base
+            // Position.X/Y contribution is suppressed here (RectTransformDiff.EmitEdit covers the five
+            // UI fields instead). The held position can only ever differ on Z; Rotation/Scale keep
+            // spec-23 behavior (base-transform driven bits are Reconciler.MaskDriven's concern, not
+            // this direction's).
+            if (RectTransformDiff.Applies(desired, actual))
+            {
+                var held = RectTransformDiff.HoldAnchoredXY(desired, actual);
+                if (held.Position != actual.Position || desired.Rotation != actual.Rotation || desired.Scale != actual.Scale)
+                {
+                    ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = held });
+                }
+
+                RectTransformDiff.EmitEdit(node.LogicalId, desired, actual, ops);
+                return;
+            }
+
             if (desired.Position == actual.Position && desired.Rotation == actual.Rotation && desired.Scale == actual.Scale)
             {
                 return;
@@ -338,12 +355,14 @@ namespace SceneBuilder.Core.Diff
                 SiblingIndex = siblingIndex,
             });
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
+            RectTransformDiff.EmitCreate(node.LogicalId, node.Transform, ops);
         }
 
         private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, List<ChangeOp> ops)
         {
             ops.Add(new AddNode { LogicalId = node.LogicalId, Name = node.Name, ParentLogicalId = parentLogicalId });
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
+            RectTransformDiff.EmitCreate(node.LogicalId, node.Transform, ops);
 
             if (node.Tag != "Untagged")
             {

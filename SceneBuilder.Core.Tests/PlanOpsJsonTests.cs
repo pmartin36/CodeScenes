@@ -137,6 +137,29 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void SetField_RectTransformPath_SerializesVec2ValueWithKindDiscriminator()
+        {
+            var plan = PlanWith(new SetField
+            {
+                LogicalId = "B",
+                Path = "m_AnchoredPosition",
+                Value = new ValueNode.Vec2(new Vec2(1, 2)),
+            });
+
+            var json = PlanJson.Serialize(plan);
+            var back = PlanJson.Deserialize(json);
+
+            using var doc = JsonDocument.Parse(json);
+            var value = doc.RootElement.GetProperty("ops")[0].GetProperty("value");
+            Assert.Equal("Vec2", value.GetProperty("kind").GetString());
+            var inner = value.GetProperty("value");
+            Assert.Equal(1, inner.GetProperty("x").GetSingle());
+            Assert.Equal(2, inner.GetProperty("y").GetSingle());
+
+            Assert.Equal((SetField)plan.Ops[0], (SetField)back.Ops[0]);
+        }
+
+        [Fact]
         public void SetParent_NullParent_SerializesJsonNull()
         {
             var plan = PlanWith(new SetParent { LogicalId = "B", ParentLogicalId = null });

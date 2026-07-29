@@ -37,6 +37,15 @@ namespace SceneBuilder.Editor
                 $"kept (scene wins); code value {codeValueExpr} preserved in a // CONFLICT: marker.");
         }
 
+        /// <summary>A located, non-fatal note: the plugin changed something structural the user did not
+        /// explicitly ask for, and must not do it silently.</summary>
+        public static void LogNote(string logicalId, string message)
+            => Debug.LogWarning($"[CodeScenes] NOTE on '{logicalId}': {message}");
+
+        /// <summary>A located failure (§7 fail-loud): an authored value could NOT be applied.</summary>
+        public static void LogLocatedError(string logicalId, string message)
+            => Debug.LogError($"[CodeScenes] ERROR on '{logicalId}': {message}");
+
         /// <summary>
         /// The `// CONFLICT:` marker text inserted at the resolved statement (no leading indent, no
         /// trailing newline — the caller owns placement). Preserves the prior CODE value so it is

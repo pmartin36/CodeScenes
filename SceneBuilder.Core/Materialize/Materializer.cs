@@ -17,11 +17,30 @@ namespace SceneBuilder.Core.Materialize
             var passB = new List<PlanOp>();
             var skipped = new List<SkippedField>();
 
+            // b2-t2: pre-scan the rect ops so pass A can stamp CreateObject.TransformKind without
+            // touching AddNode or the Differ. RectTransformDiff.EmitCreate emits a SetRectTransform
+            // for every CREATED rect model node, so the set is complete before pass A runs.
+            // The IsRectTransform guard rejects the D6 promotion op, whose model side is a plain
+            // Transform: a promoted node is already live and must never be stamped as a UI create.
+            var rectLogicalIds = new HashSet<string>();
+            foreach (var op in changeSet.Ops)
+            {
+                if (op is Change.SetRectTransform rect && rect.Transform.IsRectTransform)
+                {
+                    rectLogicalIds.Add(rect.LogicalId);
+                }
+            }
+
             foreach (var op in changeSet.Ops)
             {
                 if (op is Change.AddNode addNode)
                 {
-                    passA.Add(new CreateObject { LogicalId = addNode.LogicalId, Name = addNode.Name });
+                    passA.Add(new CreateObject
+                    {
+                        LogicalId = addNode.LogicalId,
+                        Name = addNode.Name,
+                        TransformKind = rectLogicalIds.Contains(addNode.LogicalId) ? RectTransformFields.Kind : null,
+                    });
                 }
                 else if (op is Change.AddInstance addInstance)
                 {
@@ -94,6 +113,9 @@ namespace SceneBuilder.Core.Materialize
                             Path = "m_LocalScale",
                             Value = new ValueNode.Vec3(setTransform.Transform.Scale),
                         });
+                        break;
+                    case Change.SetRectTransform setRectTransform:
+                        EmitRectTransformOps(setRectTransform, passB);
                         break;
                     case Change.AddComponent addComponent:
                         passB.Add(new AddComponent
@@ -212,6 +234,33 @@ namespace SceneBuilder.Core.Materialize
                 Diagnostics = changeSet.Diagnostics,
                 Conflicts = changeSet.Conflicts,
             };
+        }
+
+        // b2-t2: lowers a matched/create SetRectTransform to one SetField per whole `m_*` path with any
+        // bit set in Changed. D6: a promotion (Transform.IsRectTransform == false) has no authored
+        // layout — lowering it would write RectTransform defaults over the user's live scene layout
+        // AND pin DriftState.CodeAhead true forever, so it lowers to ZERO ops.
+        private static void EmitRectTransformOps(Change.SetRectTransform op, List<PlanOp> passB)
+        {
+            if (!op.Transform.IsRectTransform)
+            {
+                return;
+            }
+
+            foreach (var field in RectTransformFields.All)
+            {
+                if ((op.Changed & field.Mask) == ChannelMask.None)
+                {
+                    continue;
+                }
+
+                passB.Add(new SetField
+                {
+                    LogicalId = op.LogicalId,
+                    Path = field.SerializedPath,
+                    Value = new ValueNode.Vec2(field.Get(op.Transform) ?? field.Default),
+                });
+            }
         }
 
         private static void EmitFieldOp(

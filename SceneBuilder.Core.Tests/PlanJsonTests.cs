@@ -70,6 +70,36 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void CreateObject_RectTransformKind_RoundTripsAndSerializesTransformKind()
+        {
+            var plan = new SceneBuilder.Core.Plan.Plan
+            {
+                SchemaVersion = 1,
+                ScenePath = "Assets/Scenes/Demo.unity",
+                Ops = new PlanOp[]
+                {
+                    new CreateObject { LogicalId = "Panel", Name = "Panel", TransformKind = RectTransformFields.Kind },
+                },
+            };
+
+            var json = PlanJson.Serialize(plan);
+            var back = PlanJson.Deserialize(json);
+
+            Assert.Contains("\"transformKind\":\"RectTransform\"", json.Replace(" ", ""));
+            Assert.Equal((CreateObject)plan.Ops[0], (CreateObject)back.Ops[0]);
+
+            using var doc = JsonDocument.Parse(json);
+            var opElement = doc.RootElement.GetProperty("ops")[0];
+            var propertyCount = 0;
+            foreach (var _ in opElement.EnumerateObject())
+            {
+                propertyCount++;
+            }
+
+            Assert.Equal(4, propertyCount);
+        }
+
+        [Fact]
         public void PlanJson_UnknownOp_FailsLoudWithOpNameAndLocation()
         {
             const string json = "{\n  \"schemaVersion\": 1,\n  \"scenePath\": \"Assets/Scenes/Demo.unity\",\n  \"ops\": [\n    { \"op\": \"Frobnicate\", \"logicalId\": \"Root\", \"name\": \"Root\" }\n  ]\n}";
