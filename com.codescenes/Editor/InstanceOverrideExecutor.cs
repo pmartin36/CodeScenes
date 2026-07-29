@@ -114,17 +114,9 @@ namespace SceneBuilder.Editor
                 return;
             }
 
-            Component? comp = null;
-            if (result.ComponentsByLogicalId.TryGetValue(op.ComponentLogicalId, out var mapped) && mapped != null)
-            {
-                comp = mapped;
-            }
-            else
-            {
-                var typeFullName = StripOrdinal(op.ComponentLogicalId);
-                comp = PrefabInstanceProbe.AddedComponentsOn(root, owner)
-                    .FirstOrDefault(c => c.GetType().FullName == typeFullName);
-            }
+            var typeFullName = StripOrdinal(op.ComponentLogicalId);
+            var comp = PrefabInstanceProbe.AddedComponentsOn(root, owner)
+                .FirstOrDefault(c => c.GetType().FullName == typeFullName);
 
             if (comp != null)
             {

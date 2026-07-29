@@ -184,15 +184,21 @@ namespace SceneBuilder.Editor
             var addedComponents = pin.AddedComponents
                 .Select(a =>
                 {
-                    var (target, type) = NormalizeTargetType(a.Target, usings);
+                    // AddedComponent.Target locates the OWNER sub-object (its ComponentType is always
+                    // "" — PrefabInstanceProbe.ReadAddedComponents never populates it), so there is
+                    // nothing to normalize on Target itself here. The component's own short type token
+                    // lives on Component.Type and is the thing that needs usings-aware resolution
+                    // (e.g. root-target `.AddComponent<Light>()` -> "UnityEngine.Light") so the diff's
+                    // (Target, Type.FullName) key matches the snapshot's live-read FullName key.
+                    var componentType = ResolveComponentTypeToken(a.Component.Type.FullName, usings, out var resolvedType);
                     var component = a.Component;
-                    if (type != null && !string.IsNullOrEmpty(a.Target.ComponentType))
+                    if (resolvedType != null && componentType != a.Component.Type.FullName)
                     {
                         component = ResolveComponent(
-                            component with { Type = component.Type with { FullName = type.FullName! } },
+                            component with { Type = component.Type with { FullName = componentType } },
                             soByType, probes, new Dictionary<string, Dictionary<string, string>>());
                     }
-                    return a with { Target = target, Component = component };
+                    return a with { Component = component };
                 })
                 .ToArray();
 
@@ -218,13 +224,31 @@ namespace SceneBuilder.Editor
                 return (target, null);
             }
 
-            var token = target.ComponentType;
-            var type = ComponentTypeResolver.Resolve(new TypeRef(token), usings, out var ambiguous);
+            var fn = ResolveComponentTypeToken(target.ComponentType, usings, out var type);
+            return (fn == target.ComponentType ? target : target with { ComponentType = fn }, type);
+        }
+
+        // Shared short-token -> usings-resolved-FullName resolution for both an OverrideTarget's
+        // ComponentType (property/removed-component targets) and an AddedComponent's own
+        // ComponentData.Type (b4-t1 fix: the latter was never normalized — AddedComponent.Target.
+        // ComponentType is always "", so gating this resolution on it was a no-op that let a
+        // root-target `.AddComponent<Light>()` keep the short "Light" token, mismatching the
+        // snapshot's live-read FullName key in InstanceOverrideDiff.EmitAddedComponents). An empty
+        // token passes through unresolved (null Type). Unresolved/ambiguous -> located throw,
+        // mirroring ComponentTypeNormalizer.NormalizeComponent.
+        private static string ResolveComponentTypeToken(string token, IReadOnlyList<string> usings, out Type? type)
+        {
+            if (string.IsNullOrEmpty(token))
+            {
+                type = null;
+                return token;
+            }
+
+            type = ComponentTypeResolver.Resolve(new TypeRef(token), usings, out var ambiguous);
 
             if (type != null)
             {
-                var fn = type.FullName!;
-                return (fn == token ? target : target with { ComponentType = fn }, type);
+                return type.FullName!;
             }
 
             if (ambiguous.Count >= 2)

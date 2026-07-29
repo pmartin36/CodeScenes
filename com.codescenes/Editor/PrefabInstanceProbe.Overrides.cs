@@ -278,10 +278,11 @@ namespace SceneBuilder.Editor
                         ChildPath = RelativePath(go, owner),
                     };
 
+                var componentData = SerializedFieldBridge.ReadComponent(instanceComponent, resolveSceneRef);
                 result.Add(new AddedComponent
                 {
                     Target = target,
-                    Component = SerializedFieldBridge.ReadComponent(instanceComponent, resolveSceneRef),
+                    Component = componentData with { LogicalId = componentData.Type.FullName },
                 });
             }
 

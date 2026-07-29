@@ -42,6 +42,7 @@ public class BuildSidecarPrefabTests
 
     private static string Source(string body) => $@"
 using SceneBuilder.Authoring;
+using UnityEngine;
 public class BuildSidecarPrefabScene : ISceneDefinition
 {{
     public void Build(SceneRoot scene)
