@@ -75,6 +75,7 @@ namespace SceneBuilder.Editor
 
         private static readonly object _watcherLock = new();
         private static readonly HashSet<string> _watcherPendingPaths = new();
+        private static bool _watcherRouteSetDirty;
         private static FileSystemWatcher? _watcher;
 
         // Session-local O(changed) snapshot assembler(s), one per builder — a shared instance would
@@ -167,6 +168,7 @@ namespace SceneBuilder.Editor
             watcher.Changed += OnWatcherEvent;
             watcher.Created += OnWatcherEvent;
             watcher.Renamed += OnWatcherEvent;
+            watcher.Deleted += OnWatcherEvent;
             watcher.EnableRaisingEvents = true;
             _watcher = watcher;
         }
@@ -182,21 +184,36 @@ namespace SceneBuilder.Editor
             _watcher.Changed -= OnWatcherEvent;
             _watcher.Created -= OnWatcherEvent;
             _watcher.Renamed -= OnWatcherEvent;
+            _watcher.Deleted -= OnWatcherEvent;
             _watcher.Dispose();
             _watcher = null;
 
             lock (_watcherLock)
             {
                 _watcherPendingPaths.Clear();
+                _watcherRouteSetDirty = false;
             }
         }
 
         /// <summary>Background-thread callback (A1): touches ONLY a lock-guarded set, no Unity calls.</summary>
-        private static void OnWatcherEvent(object sender, FileSystemEventArgs e)
+        private static void OnWatcherEvent(object sender, FileSystemEventArgs e) => EnqueueWatcherPath(e.FullPath, e.ChangeType);
+
+        /// <summary>
+        /// The single choke point for both the real background watcher handler and a deterministic
+        /// test seam (b6-t1). Queues the path for the source-settle debounce and, for a set-changing
+        /// event (Created/Deleted/Renamed — NOT a plain content-save Changed), flags the route set
+        /// dirty so <see cref="DrainWatcherPaths"/> invalidates <see cref="SceneBuilderRouter"/>'s
+        /// memoized route cache on the main thread.
+        /// </summary>
+        internal static void EnqueueWatcherPath(string fullPath, WatcherChangeTypes changeType)
         {
             lock (_watcherLock)
             {
-                _watcherPendingPaths.Add(e.FullPath);
+                _watcherPendingPaths.Add(fullPath);
+                if (changeType != WatcherChangeTypes.Changed)
+                {
+                    _watcherRouteSetDirty = true;
+                }
             }
         }
 
@@ -354,13 +371,25 @@ namespace SceneBuilder.Editor
         private static void DrainWatcherPaths()
         {
             List<string>? drained = null;
+            bool routeSetDirty;
             lock (_watcherLock)
             {
+                routeSetDirty = _watcherRouteSetDirty;
+                _watcherRouteSetDirty = false;
+
                 if (_watcherPendingPaths.Count > 0)
                 {
                     drained = new List<string>(_watcherPendingPaths);
                     _watcherPendingPaths.Clear();
                 }
+            }
+
+            // Invalidate the memoized route set BEFORE the early-out so a delete-only cycle (no
+            // source path enqueued for the settle debounce) still forces the next Discover() to
+            // re-scan SceneBuilderPaths.BuildersDirectory.
+            if (routeSetDirty)
+            {
+                SceneBuilderRouter.Invalidate();
             }
 
             if (drained == null)

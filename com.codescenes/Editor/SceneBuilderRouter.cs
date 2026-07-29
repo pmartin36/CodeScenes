@@ -162,10 +162,20 @@ namespace SceneBuilder.Editor
             return false;
         }
 
+        /// <summary>
+        /// Clears the cached routing table. Production seam (b6-t1): called from the watcher drain
+        /// path on a builder create/delete/rename so a new/removed builder is discovered without a
+        /// domain reload. Also the sole implementation behind <see cref="ResetForTests"/>.
+        /// </summary>
+        public static void Invalidate()
+        {
+            _cache = null;
+        }
+
         /// <summary>Clears the cached routing table — tests that mutate the on-disk builders folder between cases must call this.</summary>
         internal static void ResetForTests()
         {
-            _cache = null;
+            Invalidate();
         }
     }
 }
