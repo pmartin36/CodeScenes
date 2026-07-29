@@ -307,6 +307,12 @@ namespace SceneBuilder.Core.Reconcile
 
         // Mirrors BuilderParser.Instance.cs's ParseOverrideSet key-form parsing (selector vs
         // string-path), just to answer "does THIS .Set(...) target this path", not to lower a value.
+        //
+        // b2-t1: a drop edit's PropertyPath is now the NORMALIZED serialized path (AuthoredPathResolver,
+        // b1-t2) — e.g. "m_Intensity" — while the source's typed `.Set((Light l) => l.intensity, v)`
+        // form still carries the raw member name. Match BOTH the transient "member:<name>" literal form
+        // (AppendInstanceOverride's own render convention + the existing SourcePatchInstanceTests, which
+        // stay valid) AND the normalized form, via NormalizedMemberPathMatches.
         private static bool OverrideSetTargetsPath(InvocationExpressionSyntax setInvocation, string propertyPath)
         {
             var args = setInvocation.ArgumentList.Arguments;
@@ -319,7 +325,8 @@ namespace SceneBuilder.Core.Reconcile
 
             if (keyExpr is ParenthesizedLambdaExpressionSyntax { Body: MemberAccessExpressionSyntax memberAccess })
             {
-                return "member:" + memberAccess.Name.Identifier.Text == propertyPath;
+                var member = memberAccess.Name.Identifier.Text;
+                return "member:" + member == propertyPath || NormalizedMemberPathMatches(member, propertyPath);
             }
 
             if (keyExpr is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
@@ -328,6 +335,27 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             return false;
+        }
+
+        // Mirrors AuthoredPathResolver.ResolvePath's (com.codescenes/Editor) member -> serialized-path
+        // convention WITHOUT a live SerializedObject probe — Core has no Unity dependency, so this
+        // replays the same naming rule instead of re-resolving it: a user-serialized field's path is
+        // the bare member name unchanged; a built-in Unity field is "m_" + Capitalize(member). Either
+        // candidate matching the edit's (already-normalized) PropertyPath is a match.
+        private static bool NormalizedMemberPathMatches(string member, string propertyPath)
+        {
+            if (member == propertyPath)
+            {
+                return true;
+            }
+
+            if (member.Length == 0)
+            {
+                return false;
+            }
+
+            var mangled = "m_" + char.ToUpperInvariant(member[0]) + member.Substring(1);
+            return mangled == propertyPath;
         }
 
         private static bool GenericTypeArgMatches(InvocationExpressionSyntax invocation, string? typeFullName)
