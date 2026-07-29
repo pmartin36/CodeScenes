@@ -45,6 +45,18 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("-1", SourceExpr.IntLiteral(-1));
         }
 
+        [Fact]
+        public void Vec2Literal_FormatsFSuffixedTuple()
+        {
+            Assert.Equal("(10f, 20f)", SourceExpr.Vec2Literal(new Vec2(10, 20)));
+        }
+
+        [Fact]
+        public void Vec2Literal_FractionalComponents_SharesFloatRoundingAndSuffix()
+        {
+            Assert.Equal("(0.5f, -2.25f)", SourceExpr.Vec2Literal(new Vec2(0.5f, -2.25f)));
+        }
+
         // b1-t1: ValueNodeLiteral — per-kind rendering + round-trip through ValueNodeParser.
         // Oracle: text -> SyntaxFactory.ParseExpression -> ValueNodeParser.Parse -> ValueNode,
         // asserted Equal to the original node (spec: emitted syntax must be exactly what the

@@ -143,13 +143,7 @@ namespace SceneBuilder.Core.Parsing
             Layer = builder.Layer,
             Active = builder.Active,
             IsStatic = builder.IsStatic,
-            Transform = new TransformData
-            {
-                Position = builder.Position ?? Vec3.Zero,
-                Rotation = builder.Rotation ?? Quat.Identity,
-                Scale = builder.Scale ?? Vec3.One,
-                DrivenChannels = builder.DrivenChannels,
-            },
+            Transform = BuildTransformData(builder),
             Components = System.Array.Empty<ComponentData>(),
             Children = builder.Children.Where(c => c.IsInstance).Select(BuildNode).ToArray(),
             SourcePrefab = new AssetRef { DisplayPath = builder.SourcePrefabPath ?? "", Guid = builder.SourcePrefabGuid ?? "" },

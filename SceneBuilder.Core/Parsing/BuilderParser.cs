@@ -317,6 +317,9 @@ namespace SceneBuilder.Core.Parsing
                     case "SurfaceSnap":
                         ApplySurfaceSnap(node, args, invocation, ctx);
                         break;
+                    case "RectTransform":
+                        ApplyRectTransform(node, args);
+                        break;
                     default:
                         throw Unreachable();
                 }
@@ -658,13 +661,7 @@ namespace SceneBuilder.Core.Parsing
             Layer = builder.Layer,
             Active = builder.Active,
             IsStatic = builder.IsStatic,
-            Transform = new TransformData
-            {
-                Position = builder.Position ?? Vec3.Zero,
-                Rotation = builder.Rotation ?? Quat.Identity,
-                Scale = builder.Scale ?? Vec3.One,
-                DrivenChannels = builder.DrivenChannels,
-            },
+            Transform = BuildTransformData(builder),
             Components = builder.Components.Select(BuildComponent).ToArray(),
             Children = builder.Children.Select(BuildNode).ToArray(),
         };
@@ -719,6 +716,8 @@ namespace SceneBuilder.Core.Parsing
             public Vec3? Position;
             public Quat? Rotation;
             public Vec3? Scale;
+            public bool IsRectTransform;
+            public readonly Dictionary<string, Vec2> RectFields = new();
             public SourceSpan AnchorSpan;
             public string? Handle;
             public SourceSpan? IdCallSpan;

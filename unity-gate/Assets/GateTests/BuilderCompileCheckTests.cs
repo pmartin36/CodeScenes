@@ -54,6 +54,19 @@ public class CompileCheckScene : ISceneDefinition
     }
 }";
 
+    // b1-t2 (m-ui-recttransform): both call forms from specs/13-recttransform.md must compile
+    // against the real NodeHandle.RectTransform(...) authoring signature.
+    private const string RectTransformSource = @"
+using SceneBuilder.Authoring;
+public class CompileCheckRectTransformScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"").RectTransform(anchoredPos: (-10, -10), sizeDelta: (200, 120), anchorMin: (1, 1), anchorMax: (1, 1), pivot: (1, 1));
+        scene.Add(""Label"").RectTransform(anchoredPos: (0, 0), sizeDelta: (160, 40), pivot: (0.5f, 0.5f));
+    }
+}";
+
     [Test]
     public void CleanSource_CompilesWithNoDiagnostics()
     {
@@ -64,6 +77,16 @@ public class CompileCheckScene : ISceneDefinition
         Assert.IsEmpty(
             errors.Select(e => e.ToString()),
             "Valid builder source reported compile errors — the reference set is not resolving correctly.");
+    }
+
+    [Test]
+    public void RectTransformSource_CompilesWithNoDiagnostics()
+    {
+        var errors = BuilderCompileCheck.Check(RectTransformSource);
+
+        Assert.IsEmpty(
+            errors.Select(e => e.ToString()),
+            "`.RectTransform(...)` call forms from the spec must compile against the real NodeHandle authoring API.");
     }
 
     [Test]

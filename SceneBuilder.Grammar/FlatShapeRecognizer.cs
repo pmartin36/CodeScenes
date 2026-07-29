@@ -181,6 +181,9 @@ namespace SceneBuilder.Grammar
                     case "SurfaceSnap":
                         ApplySurfaceSnap(args, invocation, ctx);
                         break;
+                    case "RectTransform":
+                        ApplyRectTransform(args, ctx);
+                        break;
                     default:
                         Report(ctx, args, SB1002, $"Unsupported builder call '.{method}(...)'");
                         break;

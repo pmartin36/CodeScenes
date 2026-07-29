@@ -13,6 +13,10 @@ namespace SceneBuilder.Core.Reconcile
     /// </summary>
     public static class SourceExpr
     {
+        /// <summary>A tuple literal `(x, y)` with each component formatted via <see cref="Float"/>.</summary>
+        public static string Vec2Literal(Vec2 v) =>
+            "(" + Float(v.X) + ", " + Float(v.Y) + ")";
+
         /// <summary>A tuple literal `(x, y, z)` with each component formatted via <see cref="Float"/>.</summary>
         public static string Vec3Literal(Vec3 v) =>
             "(" + Float(v.X) + ", " + Float(v.Y) + ", " + Float(v.Z) + ")";

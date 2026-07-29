@@ -31,6 +31,15 @@ namespace SceneBuilder.Authoring
             (float x, float y, float z)? rot = null,
             (float x, float y, float z)? scale = null) => this;
 
+        /// <summary>Set the UI layout (RectTransform). Presence of this call marks the node as a
+        /// RectTransform node; omitted arguments stay at Unity's RectTransform defaults.</summary>
+        public NodeHandle RectTransform(
+            (float x, float y)? anchoredPos = null,
+            (float x, float y)? sizeDelta = null,
+            (float x, float y)? anchorMin = null,
+            (float x, float y)? anchorMax = null,
+            (float x, float y)? pivot = null) => this;
+
         /// <summary>
         /// Aspect-locked world size: exactly one of <paramref name="width"/>/<paramref name="height"/>/
         /// <paramref name="depth"/> drives the size, aspect preserved on the other two axes.

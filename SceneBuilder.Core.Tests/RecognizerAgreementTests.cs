@@ -238,6 +238,64 @@ public class SurfaceSnapNoneScene : ISceneDefinition
 }
 ");
 
+            // ---- RectTransform valid cases (b1-t3 — deferred by b1-t2 until the parse arm exists) ----
+            yield return Case("Valid_RectTransform_AllArgs", @"
+public class ValidRectTransformScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"").RectTransform(anchoredPos: (-10, -10), sizeDelta: (200, 120), anchorMin: (1, 1), anchorMax: (1, 1), pivot: (1, 1));
+    }
+}
+");
+            yield return Case("Valid_RectTransform_Bare", @"
+public class ValidRectTransformBareScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"").RectTransform();
+    }
+}
+");
+
+            // ---- RectTransform structural errors (b1-t2) --------------------------------------------
+            yield return Case("RectTransform_UnnamedArg", @"
+public class RectTransformUnnamedScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"").RectTransform((1,2));
+    }
+}
+");
+            yield return Case("RectTransform_UnknownArg", @"
+public class RectTransformUnknownArgScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"").RectTransform(bogus: (1,2));
+    }
+}
+");
+            yield return Case("RectTransform_WrongTupleArity", @"
+public class RectTransformWrongArityScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"").RectTransform(pivot: (1,2,3));
+    }
+}
+");
+            yield return Case("RectTransform_NonLiteralElement", @"
+public class RectTransformNonLiteralScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"").RectTransform(pivot: (a, b));
+    }
+}
+");
+
             // ---- COMPLETENESS EXTENSION: one case per body-grammar throw site NOT already above,
             // so acceptance-parity (recognizer flags IFF parser throws) is proven at EVERY throw
             // the dedup removes. Each body wraps the offending statement in a valid Build shell.

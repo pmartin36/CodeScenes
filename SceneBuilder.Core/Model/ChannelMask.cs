@@ -11,5 +11,23 @@ namespace SceneBuilder.Core.Model
         ScaleY    = 1 << 4,
         ScaleZ    = 1 << 5,
         Scale = ScaleX | ScaleY | ScaleZ,
+
+        AnchoredPositionX = 1 << 6,
+        AnchoredPositionY = 1 << 7,
+        SizeDeltaX        = 1 << 8,
+        SizeDeltaY        = 1 << 9,
+        AnchorMinX        = 1 << 10,
+        AnchorMinY        = 1 << 11,
+        AnchorMaxX        = 1 << 12,
+        AnchorMaxY        = 1 << 13,
+        PivotX            = 1 << 14,
+        PivotY            = 1 << 15,
+
+        AnchoredPosition = AnchoredPositionX | AnchoredPositionY,
+        SizeDelta        = SizeDeltaX        | SizeDeltaY,
+        AnchorMin        = AnchorMinX        | AnchorMinY,
+        AnchorMax        = AnchorMaxX        | AnchorMaxY,
+        Pivot            = PivotX            | PivotY,
+        AllRectFields    = AnchoredPosition | SizeDelta | AnchorMin | AnchorMax | Pivot,
     }
 }
