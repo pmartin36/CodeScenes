@@ -101,7 +101,7 @@ namespace SceneBuilder.Editor
 
             // §M3: resolve transient member:<name> field keys to serialized paths BEFORE any diff,
             // remapping the field-argument spans in lockstep so span-local field patches still match.
-            var (resolved, spans) = AuthoredPathResolver.Resolve(parse.Model, parse.FieldArgumentSpans);
+            var (resolved, spans) = AuthoredPathResolver.Resolve(parse.Model, parse.FieldArgumentSpans, parse.Usings);
 
             // A LOCATED pre-pass, over the desired-but-unlowered model (serialized paths already
             // resolved above, so the thrown message names 'm_Mesh', not 'member:mesh'): throws on the

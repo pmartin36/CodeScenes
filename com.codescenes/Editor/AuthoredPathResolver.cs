@@ -23,6 +23,11 @@ namespace SceneBuilder.Editor
         /// <summary>
         /// Resolves member keys in the model AND remaps the parse's field-argument spans (keyed by the
         /// same member key) in lockstep, so Reconcile's span-local field patching keeps matching.
+        /// Also descends every <see cref="PrefabInstanceNode"/>'s <c>Overrides</c>/<c>AddedComponents</c>/
+        /// <c>RemovedComponents</c>, resolving each <see cref="OverrideTarget.ComponentType"/> short token
+        /// to its usings-resolved FullName and each <c>member:&lt;field&gt;</c>
+        /// <see cref="PropertyOverride.PropertyPath"/> to its serialized path — the b1-t2 fix for the
+        /// silent typed-instance-override drop (M10 short type + nested typed selector).
         /// </summary>
         /// <remarks>
         /// Call this through <see cref="DesiredModelLoader.Load"/>, which is the only product caller —
@@ -33,14 +38,16 @@ namespace SceneBuilder.Editor
         /// </remarks>
         public static (SceneModel Model, IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> Spans) Resolve(
             SceneModel model,
-            IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> fieldArgumentSpans)
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> fieldArgumentSpans,
+            IReadOnlyList<string> usings)
         {
-            var resolved = ResolveModel(model);
+            var resolved = ResolveModel(model, usings);
             var spans = RemapSpans(fieldArgumentSpans, resolved.KeyRewrites);
             return (resolved.Model, spans);
         }
 
-        private static (SceneModel Model, Dictionary<string, Dictionary<string, string>> KeyRewrites) ResolveModel(SceneModel model)
+        private static (SceneModel Model, Dictionary<string, Dictionary<string, string>> KeyRewrites) ResolveModel(
+            SceneModel model, IReadOnlyList<string> usings)
         {
             var probes = new List<GameObject>();
             var soByType = new Dictionary<Type, SerializedObject>();
@@ -48,7 +55,7 @@ namespace SceneBuilder.Editor
 
             try
             {
-                var roots = model.Roots.Select(n => ResolveNode(n, soByType, probes, keyRewrites)).ToArray();
+                var roots = model.Roots.Select(n => ResolveNode(n, soByType, probes, keyRewrites, usings)).ToArray();
                 return (model with { Roots = roots }, keyRewrites);
             }
             finally
@@ -64,11 +71,16 @@ namespace SceneBuilder.Editor
             GameObjectNode node,
             Dictionary<Type, SerializedObject> soByType,
             List<GameObject> probes,
-            Dictionary<string, Dictionary<string, string>> keyRewrites)
+            Dictionary<string, Dictionary<string, string>> keyRewrites,
+            IReadOnlyList<string> usings)
         {
             var components = node.Components.Select(c => ResolveComponent(c, soByType, probes, keyRewrites)).ToArray();
-            var children = node.Children.Select(c => ResolveNode(c, soByType, probes, keyRewrites)).ToArray();
-            return node with { Components = components, Children = children };
+            var children = node.Children.Select(c => ResolveNode(c, soByType, probes, keyRewrites, usings)).ToArray();
+            var rebuilt = node with { Components = components, Children = children };
+
+            return rebuilt is PrefabInstanceNode instance
+                ? NormalizeInstanceOverrides(instance, soByType, probes, usings)
+                : rebuilt;
         }
 
         private static ComponentData ResolveComponent(
@@ -111,10 +123,13 @@ namespace SceneBuilder.Editor
 
         private static SerializedObject GetProbe(TypeRef typeRef, Dictionary<Type, SerializedObject> soByType, List<GameObject> probes)
         {
-            var typeFullName = typeRef.FullName;
             var type = ComponentTypeResolver.Resolve(typeRef)
-                ?? throw new InvalidOperationException($"[SceneBuilder] Cannot resolve component type '{typeFullName}' to resolve authored member paths.");
+                ?? throw new InvalidOperationException($"[SceneBuilder] Cannot resolve component type '{typeRef.FullName}' to resolve authored member paths.");
+            return GetProbe(type, soByType, probes);
+        }
 
+        private static SerializedObject GetProbe(Type type, Dictionary<Type, SerializedObject> soByType, List<GameObject> probes)
+        {
             if (soByType.TryGetValue(type, out var existing))
             {
                 return existing;
@@ -136,12 +151,113 @@ namespace SceneBuilder.Editor
             if (component == null)
             {
                 throw new InvalidOperationException(
-                    $"[SceneBuilder] Could not instantiate a probe of '{typeFullName}' to resolve authored member paths.");
+                    $"[SceneBuilder] Could not instantiate a probe of '{type.FullName}' to resolve authored member paths.");
             }
 
             var so = new SerializedObject(component);
             soByType[type] = so;
             return so;
+        }
+
+        // b1-t2: descends a PrefabInstanceNode's override collections, resolving each OverrideTarget's
+        // short ComponentType -> FullName (usings-aware, matching ComponentTypeNormalizer.NormalizeComponent)
+        // and each PropertyPath's transient "member:<field>" sigil -> serialized path (reusing the same
+        // probe/ResolvePath logic as component fields above). Mirrors the is-PrefabInstanceNode
+        // descend-and-rebuild pattern in NestedOverrideBootstrap.ResolveGameObject.
+        private static PrefabInstanceNode NormalizeInstanceOverrides(
+            PrefabInstanceNode pin,
+            Dictionary<Type, SerializedObject> soByType,
+            List<GameObject> probes,
+            IReadOnlyList<string> usings)
+        {
+            var overrides = pin.Overrides
+                .Select(o =>
+                {
+                    var (target, type) = NormalizeTargetType(o.Target, usings);
+                    var path = type != null
+                        ? NormalizeOverridePath(o.PropertyPath, type, soByType, probes)
+                        : o.PropertyPath;
+                    return o with { Target = target, PropertyPath = path };
+                })
+                .ToArray();
+
+            var addedComponents = pin.AddedComponents
+                .Select(a =>
+                {
+                    var (target, type) = NormalizeTargetType(a.Target, usings);
+                    var component = a.Component;
+                    if (type != null && !string.IsNullOrEmpty(a.Target.ComponentType))
+                    {
+                        component = ResolveComponent(
+                            component with { Type = component.Type with { FullName = type.FullName! } },
+                            soByType, probes, new Dictionary<string, Dictionary<string, string>>());
+                    }
+                    return a with { Target = target, Component = component };
+                })
+                .ToArray();
+
+            var removedComponents = pin.RemovedComponents
+                .Select(t => NormalizeTargetType(t, usings).Target)
+                .ToArray();
+
+            return pin with
+            {
+                Overrides = overrides,
+                AddedComponents = addedComponents,
+                RemovedComponents = removedComponents,
+            };
+        }
+
+        // Resolves an OverrideTarget's short ComponentType to its usings-resolved FullName. A target
+        // with no ComponentType (e.g. a RemovedGameObject's Parent) is returned unchanged with a null
+        // Type. Unresolved/ambiguous -> located throw, mirroring ComponentTypeNormalizer.NormalizeComponent.
+        private static (OverrideTarget Target, Type? Type) NormalizeTargetType(OverrideTarget target, IReadOnlyList<string> usings)
+        {
+            if (string.IsNullOrEmpty(target.ComponentType))
+            {
+                return (target, null);
+            }
+
+            var token = target.ComponentType;
+            var type = ComponentTypeResolver.Resolve(new TypeRef(token), usings, out var ambiguous);
+
+            if (type != null)
+            {
+                var fn = type.FullName!;
+                return (fn == token ? target : target with { ComponentType = fn }, type);
+            }
+
+            if (ambiguous.Count >= 2)
+            {
+                var candidates = string.Join(", ", ambiguous.Select(t => t.FullName).OrderBy(n => n, StringComparer.Ordinal));
+                var example = ambiguous.Select(t => t.FullName).OrderBy(n => n, StringComparer.Ordinal).First();
+                throw new InvalidOperationException(
+                    $"[SceneBuilder] instance override component type '{token}' is AMBIGUOUS — it matches "
+                    + $"{candidates}. Qualify it, e.g. Component<{example}>.");
+            }
+
+            var suggestions = ComponentTypeNormalizer.SuggestQualified(token);
+            var suggestClause = suggestions.Count > 0 ? $" Did you mean '{suggestions[0]}'?" : "";
+            throw new InvalidOperationException(
+                $"[SceneBuilder] cannot resolve instance override component type '{token}'.{suggestClause} "
+                + "Qualify it, or add a matching using.");
+        }
+
+        // Rewrites a PropertyOverride.PropertyPath carrying the transient "member:<field>" sigil to its
+        // real serialized path, reusing GetProbe/ResolvePath exactly as ResolveComponent does for
+        // ordinary component fields. Non-member paths (already serialized, e.g. from a captured scene
+        // edit) pass through unchanged.
+        private static string NormalizeOverridePath(
+            string path, Type resolvedType, Dictionary<Type, SerializedObject> soByType, List<GameObject> probes)
+        {
+            if (!path.StartsWith(MemberSigil, StringComparison.Ordinal))
+            {
+                return path;
+            }
+
+            var so = GetProbe(resolvedType, soByType, probes);
+            var member = path.Substring(MemberSigil.Length);
+            return ResolvePath(so, member, resolvedType.FullName);
         }
 
         // User MonoBehaviour serialized field: path == member name. Built-in: Unity's m_-mangled path
