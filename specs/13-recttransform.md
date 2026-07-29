@@ -241,6 +241,20 @@ public class HudScene : ISceneDefinition {
 - `Append_RectTransformLiteral_UsesSharedSourceExprVec2_FSuffixedFloats`.
 - `RectTransform_FullRoundTrip_IsIdempotent`.
 
+## Test methodology (mandatory)
+The batchmode gate can pass while the behavior is broken live, when a test exercises a scenario that
+never occurs in the product. For this milestone specifically:
+- **Driven-field tests must use real driving components.** An EditMode test for driven suppression
+  creates an actual root `Canvas` (its RectTransform's `sizeDelta` is Canvas-driven) and an actual
+  `LayoutGroup`/`ContentSizeFitter` child, and asserts the adapter reports those fields driven. A test
+  that hand-populates `DrivenChannels` on a fixture proves only Core's mask, never the adapter detection
+  that is the risky half — both layers need their own test.
+- **Cover the failure/revert paths, not just the happy path**: a mapped plain-Transform node that becomes
+  UI (located note, no wipe), a `.RectTransform(…)` argument reverted to its default, and the
+  double-authority suppression (a `m_LocalPosition.x/y`-only drift emitting no `SetTransform`).
+- **Round-trip through the real editor object**, not a POCO stand-in: EditMode tests must Build onto a
+  live `RectTransform` and Sync back from one.
+
 ## Unity confirmation checklist
 1. Author `HudScene` (sample above) with a `Canvas`, `EventSystem`, an anchored `Panel`, and a
    `QuitButton`; trigger Build. *Expected:* the scene gains a Canvas with the Panel/Button under it; the
