@@ -97,6 +97,24 @@ editor never connected or the sync never fired, say so; never infer a pass.
 - If you installed the pipeline package into a shared project, restore its `manifest.json` and
   `packages-lock.json` and remove any stale `Temp/UnityLockfile` when done.
 
+## CORRECTIONS (2026-07-28, from live runs — these SUPERSEDE stale notes below)
+
+- **Multi-scene now works.** The "single-builder / hardwired DemoScene" notes below are OBSOLETE. An
+  isolated `LiveVerify` builder + scene DOES auto-sync (`SceneBuilderRouter` file-scans `SceneBuilders/*.cs`).
+- **New-builder first-build requires a DOMAIN RELOAD.** A freshly created `SceneBuilders/<Name>.cs` is NOT
+  discovered by the running editor until a domain reload (`SceneBuilderRouter.Discover()` caches routes
+  per-domain; the FileSystemWatcher Created event hits the stale cache and no-ops). `unity command recompile`
+  does NOT reload if no `Assets/` script changed. WORKAROUND: `unity command eval --code
+  "UnityEditor.EditorUtility.RequestScriptReload();"`, wait for reload, THEN touch/edit the builder `.cs` to
+  fire the watcher → it cold-builds the scene + creates the sidecar. (This reload requirement is itself a
+  known gap being fixed.)
+- **The command surface is RICHER than documented.** These commands EXIST (verify with `unity list`):
+  `create_prefab` (param `--source` = a scene GameObject path), `instantiate_prefab`, `eval` / `eval_file`
+  (arbitrary C# in the live editor — so there IS an eval), `set_serialized_field`, `set_component_properties`,
+  `add_component` / `remove_component`, `revert_prefab_overrides` / `apply_prefab_overrides`,
+  `save_prefab_contents`. Prefab fixtures no longer need hand-written YAML — build a GameObject then
+  `create_prefab`. Param traps: `delete_asset` uses `--asset`; `set_transform --position` may silently no-op.
+
 ## Project-specific realities (manual test project, verified 2026-07-28) — read before designing a test
 
 - **Auto-sync is single-builder, hardwired to `DemoScene`.** `SceneBuilderAutoSync.BuilderName = "DemoScene"`;
