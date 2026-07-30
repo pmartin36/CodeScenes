@@ -9,29 +9,121 @@
 # A Unity-touching change CANNOT pass without a green Unity result: a missing/failed
 # results.xml is a FAILURE, never "probably fine". A pure-Core change skips Layer 2 and
 # SAYS SO — a skip never masquerades as a Unity pass.
+#
+# Two cheap checks wrap both layers: a lint rejecting pipeline-artifact prose in comments the
+# working diff ADDS, and a cleanliness delta rejecting residue the gate run itself leaves behind.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
 export PATH="$HOME/.dotnet:$PATH"
 
+# ---- Auto-staged build artifacts ----
+# The full set of git-tracked files that a plain `dotnet build SceneBuilder.sln` rewrites, via the
+# post-build Copy targets in SceneBuilder.Core.csproj, SceneBuilder.Grammar.csproj and
+# CodeScenes.Analyzers.csproj. They are BUILD ARTIFACTS of a Core/Grammar/Analyzer change, never
+# source changes, so they can never imply Unity-facing work and they are never evidence that a
+# gate run left the tree dirty. Two checks below key off this list.
+BUILD_ARTIFACTS_RE='^com\.codescenes/(Plugins/(SceneBuilder\.Core|SceneBuilder\.Grammar)\.dll|Analyzers~/(SceneBuilder\.Grammar|CodeScenes\.Analyzers)\.dll)$'
+
 # ---- Decide whether Layer 2 is required ----
-# This MUST be computed BEFORE `dotnet build` below. A Core post-build target restages
-# com.codescenes/Plugins/SceneBuilder.Core.dll, which is git-tracked — so building first makes
-# the gate's own build dirty a path matching the trigger, and EVERY Core change then drags in the
-# multi-minute editor suite.
+# This MUST be computed BEFORE `dotnet build` below. The post-build targets restage git-tracked
+# DLLs — so building first makes the gate's own build dirty a path matching the trigger, and EVERY
+# Core change then drags in the multi-minute editor suite.
 #
-# The staged Core DLL is also excluded from the trigger outright: it is a BUILD ARTIFACT of a Core
-# change, never a source change, so it can never imply Unity-facing work. The exclusion is what
-# holds when the ordering alone is not enough — a DLL left dirty by an earlier build, or a
-# "refresh staged Core DLL" commit landing in the HEAD~1..HEAD diff. Both guards are required.
+# The staged DLLs are also excluded from the trigger outright. The exclusion is what holds when the
+# ordering alone is not enough — a DLL left dirty by an earlier build, or a "refresh staged DLLs"
+# commit landing in the HEAD~1..HEAD diff. Both guards are required.
+#
+# UNTRACKED files are part of the change set. `git diff --name-only` never lists them, so a task
+# consisting only of NEW Unity files (a new MonoBehaviour + its EditMode test) used to leave the
+# trigger cold and silently skip the suite that is the task's whole point.
 # Adding a NEW plugin still triggers Layer 2 via its .meta, which is not excluded.
-changed="$(git diff --name-only HEAD; git diff --name-only HEAD~1 HEAD 2>/dev/null)"
+changed="$(git diff --name-only HEAD; git diff --name-only HEAD~1 HEAD 2>/dev/null; git ls-files --others --exclude-standard)"
 need_unity=0
 [[ "${GATE_FORCE_UNITY:-0}" == "1" ]] && need_unity=1
 echo "$changed" \
-  | grep -vE '^com\.codescenes/Plugins/SceneBuilder\.Core\.dll$' \
+  | grep -vE "$BUILD_ARTIFACTS_RE" \
   | grep -qE '^(com\.codescenes|unity-gate)/' && need_unity=1
+
+# ---- Lint: pipeline-artifact prose in ADDED source lines ----
+# A shipped code comment may describe the file's own CURRENT contract, in present tense. It may
+# never describe pipeline process: another task's id, a handoff artifact, an iteration number, or
+# pending/hand-off state that goes false the moment the work lands.
+#
+# Scoped to lines the WORKING DIFF adds (tracked diff vs HEAD + every untracked .cs), because a
+# repo-wide version would trip over hundreds of pre-existing hits from earlier features and be
+# unshippable. Diff-scoping is what makes it a gate every current and future writer inherits by
+# default, instead of a grep each blueprint re-derives and each task hand-runs.
+PROSE_AWK='
+function emit(f, n, txt,   c, i, t) {
+  # Only the COMMENT part of a line is prose. Code — identifiers, and string literals a test
+  # asserts on — is never matched.
+  c = ""
+  i = index(txt, "//")
+  if (i > 0) c = substr(txt, i)
+  else { t = txt; sub(/^[ \t]+/, "", t); if (t ~ /^\*/ || t ~ /^\/\*/) c = t }
+  if (c == "") return
+  if (c ~ /b[0-9]-t[0-9]/ ||
+      c ~ /research\.md|validator\.md|test-writer\.md|code-writer\.md|tasks\.md|state\.md|scope\/bucket-/ ||
+      c ~ /[Ii]teration [0-9]/ ||
+      c ~ /RED today|red today|not yet built|downstream task|this task|pending task/) {
+    printf "%s:%d: %s\n", f, n, c
+  }
+}
+/^\+\+\+ / { file = substr($0, 7); next }
+/^--- /    { next }
+/^@@ /     { split($0, a, "+"); split(a[2], b, /[, ]/); lineno = b[1] + 0; next }
+/^\+/      { emit(file, lineno, substr($0, 2)); lineno++; next }
+'
+prose_hits="$(
+  {
+    git diff -U0 HEAD -- '*.cs'
+    git ls-files --others --exclude-standard -- '*.cs' | while IFS= read -r f; do
+      printf '+++ b/%s\n@@ -0,0 +1 @@\n' "$f"
+      sed 's/^/+/' "$f"
+    done
+  } | awk "$PROSE_AWK" | grep -E '^(SceneBuilder\.Core|com\.codescenes/|unity-gate/Assets/)'
+)"
+if [[ -n "$prose_hits" ]]; then
+  echo "== Pipeline-artifact prose in added comments =="
+  echo "$prose_hits" | sed 's/^/  /'
+  echo "A code comment describes the file's own CURRENT contract in present tense — never a task id,"
+  echo "a handoff artifact (research.md / validator.md / test-writer.md / tasks.md / state.md /"
+  echo "scope/bucket-*), an iteration number, or pending/handoff state."
+  echo "GATE FAIL: pipeline-artifact prose in added comments"
+  exit 1
+fi
+
+# ---- Cleanliness baseline (compared again after the run) ----
+# Captured BEFORE anything builds, and compared BY DELTA: only files this gate run itself moves
+# from clean to dirty are reported. An absolute "the tree must be clean" check would fire on any
+# legitimately in-flight working tree and make a paused/resumed pipeline impossible.
+dirty_tracked() { git status --porcelain --untracked-files=no | awk '{print $NF}' | grep -vE "$BUILD_ARTIFACTS_RE" | sort; }
+DIRTY_BEFORE="$(dirty_tracked)"
+
+# Fails the gate when the run leaves residue behind: a tracked file it dirtied on its own, or a
+# temp EditMode scene asset an author forgot to delete in [TearDown] (which then dirties the
+# tracked asset catalog on the next regeneration). The check belongs in the gate every test
+# inherits by default, not in each test's TearDown.
+check_clean_after_run() {
+  local leftovers newly_dirty rc=0
+  leftovers="$(ls -1 unity-gate/Assets/GateTests/__*.unity 2>/dev/null)"
+  if [[ -n "$leftovers" ]]; then
+    echo "== Gate run left temp EditMode scene assets behind =="
+    echo "$leftovers" | sed 's/^/  /'
+    echo "  Each EditMode test that saves a temp scene must delete it in [TearDown]."
+    rc=1
+  fi
+  newly_dirty="$(comm -13 <(echo "$DIRTY_BEFORE") <(dirty_tracked))"
+  if [[ -n "$newly_dirty" ]]; then
+    echo "== Gate run dirtied tracked files that were clean before it started =="
+    echo "$newly_dirty" | sed 's/^/  /'
+    echo "  (build artifacts are excluded; these are real writes the run performed)"
+    rc=1
+  fi
+  return $rc
+}
 
 # ---- Layer 1: Core (always) ----
 echo "== Core gate: dotnet build + test =="
@@ -39,6 +131,7 @@ if ! dotnet build SceneBuilder.sln; then echo "GATE FAIL: dotnet build"; exit 1;
 if ! dotnet test  SceneBuilder.sln; then echo "GATE FAIL: dotnet test";  exit 1; fi
 
 if [[ "$need_unity" -eq 0 ]]; then
+  if ! check_clean_after_run; then echo "GATE FAIL: the gate run left the tree dirty"; exit 1; fi
   echo "GATE PASS: Core green (Unity EditMode gate skipped — no com.codescenes/ or unity-gate/ changes)"
   exit 0
 fi
@@ -90,6 +183,8 @@ if [[ "$ucode" -ne 0 || "$result" != "Passed" || "${failed:-1}" != "0" ]]; then
   fi
   exit 1
 fi
+
+if ! check_clean_after_run; then echo "GATE FAIL: the gate run left the tree dirty"; exit 1; fi
 
 echo "GATE PASS: Core + Unity EditMode green (passed=$passed failed=$failed skipped=${skipped:-0})"
 exit 0
