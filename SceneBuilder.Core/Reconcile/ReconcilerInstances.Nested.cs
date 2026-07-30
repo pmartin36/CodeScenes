@@ -118,7 +118,7 @@ namespace SceneBuilder.Core.Reconcile
                 // never be silently dropped. `canHostRectTransformCall: true` — `.AddChild(...)`
                 // returns a NodeHandle, which declares `.RectTransform(...)`. `AddedGameObject.Node`
                 // is a GameObjectNode, which carries no GlobalObjectId.
-                // m-ui-recttransform b4-t1 (iteration 2): `.AddChild(...)` is NodeHandle-hosted
+                // `.AddChild(...)` is NodeHandle-hosted
                 // (canHostRectTransformCall: true makes the baseline unreachable) — state
                 // `prefabBaseline: null` rather than omit it.
                 var (_, rectTransformPayload) = SplitCreatedPayload(

@@ -37,7 +37,7 @@ namespace SceneBuilder.Editor
             internal readonly AddedGameObject[] AddedGameObjects;
             internal readonly OverrideTarget[] RemovedGameObjects;
 
-            // m-ui-recttransform b4-t1 (iteration 2): the prefab ASSET root's transform, read ONLY
+            // The prefab ASSET root's transform, read ONLY
             // when the LIVE root's transform is a RectTransform (a UI prefab) — the baseline
             // SnapshotNode.SourcePrefabTransform carries out to Core so an instance whose layout the
             // prefab already persists reports no unlocalizable-layout Conflict. Null for a non-UI
@@ -90,7 +90,7 @@ namespace SceneBuilder.Editor
 
             var overrides = ReadOverrides(go, source, resolveSceneRef);
 
-            // m-ui-recttransform b4-t1 (iteration 2): the prefab ASSET root's own layout, read
+            // The prefab ASSET root's own layout, read
             // through the ONE live-transform read (LiveTransformRead.Read) off the ALREADY-resolved
             // `source` — never a second GetCorrespondingObjectFromSource/LoadAssetAtPath. Only for a
             // UI instance (live root is a RectTransform); a non-UI instance carries no baseline.

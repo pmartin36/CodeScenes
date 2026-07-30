@@ -11,25 +11,24 @@ using UnityEngine.UI;
 using SceneBuilder.Editor;
 using SceneBuilder.Core.Model;
 
-// m-ui-recttransform b4-t2 (specs/13-recttransform.md checklist item 9, "no churn"): the seam proof
-// that b1-b3's RectTransform support composes end to end against REAL driving components in a live
-// editor. No production change is expected or authorized by this task — every case below pins
-// behavior already shipped by b1-b3, exercised through a real Canvas/CanvasScaler resolution change
-// and a real HorizontalLayoutGroup, never a hand-set DrivenChannels fixture (that belongs to b3-t1).
+// specs/13-recttransform.md checklist item 9, "no churn": the seam proof that RectTransform support
+// composes end to end against REAL driving components in a live editor. No production change is
+// expected or authorized by this task — every case below pins behavior already shipped, exercised
+// through a real Canvas/CanvasScaler resolution change and a real HorizontalLayoutGroup, never a
+// hand-set DrivenChannels fixture (that belongs to RectTransformReadDrivenTests.cs).
 //
-// research.md (iteration 1): all four cases measured GREEN at HEAD via throwaway probes. This file
-// is the durable, in-repo version of those probes. Every PREMISE assertion below exists so a future
-// regression that silently stops driving a value (and would otherwise make the case pass vacuously)
-// fails loudly instead.
+// This file is the durable, in-repo version of the seam proof. Every PREMISE assertion below exists
+// so a future regression that silently stops driving a value (and would otherwise make the case pass
+// vacuously) fails loudly instead.
 //
-// b2-t1 iteration 2 (scope/bucket-b2.md finding 2): this file also hosts the live-editor pin for the
-// bare-`.RectTransform()` forward-promotion fix — a mapped plain-Transform object whose source gains
-// a bare `.RectTransform()` (every field at RectTransformFields.Default*) must still promote in place,
-// reusing FixtureC and the harness above rather than a new file.
+// This file also hosts the live-editor pin for the bare-`.RectTransform()` forward-promotion fix — a
+// mapped plain-Transform object whose source gains a bare `.RectTransform()` (every field at
+// RectTransformFields.Default*) must still promote in place, reusing FixtureC and the harness above
+// rather than a new file.
 //
-// b2-t1 iteration 3 (scope/bucket-b2.md finding 2, the SECOND half): this file also hosts the
-// live-editor pin for the foreign-driven-base-transform hold — a real CanvasScaler-driven scale
-// factor change must not make an unchanged builder emit a growing plan every rebuild.
+// This file also hosts the live-editor pin for the foreign-driven-base-transform hold — a real
+// CanvasScaler-driven scale factor change must not make an unchanged builder emit a growing plan
+// every rebuild.
 public class RoundTripRectTransformDrivenTests
 {
     private const string ScenePath = "Assets/GateTests/__RoundTripRectTransformDrivenTemp.unity";
@@ -41,8 +40,8 @@ public class RoundTripRectTransformDrivenTests
 
     // Fixture A: the spec's HudScene (specs/13-recttransform.md:191-206) MINUS QuitButton's
     // `.Component<Image>(_ => { })`. Without the Image, the very first Sync after Build is already a
-    // fixed point (research.md M1: WITH the Image, Unity's RequireComponent CanvasRenderer harvest
-    // adds noise that is orthogonal to this task's zero-op cycle).
+    // fixed point (WITH the Image, Unity's RequireComponent CanvasRenderer harvest adds noise that
+    // is orthogonal to this task's zero-op cycle).
     private const string FixtureA = @"
 using UnityEngine;
 using UnityEngine.UI;
@@ -186,10 +185,10 @@ public class HudScene : ISceneDefinition {
         Assert.AreEqual(0, result.EditsApplied, $"NOT CONVERGED: a Sync after {what} applied non-zero edits.");
     }
 
-    // Builds the given source into a fresh scene, makes the Canvas genuinely driven (research.md
-    // F2/F4: a Build-created Canvas is NOT driven in batchmode until toggled), runs an optional
-    // per-fixture reflow step, then asserts the FIRST Sync after Build is already a fixed point
-    // (measured true for every fixture in this file — a non-zero value here is a genuine defect).
+    // Builds the given source into a fresh scene, makes the Canvas genuinely driven (a Build-created
+    // Canvas is NOT driven in batchmode until toggled), runs an optional per-fixture reflow step, then
+    // asserts the FIRST Sync after Build is already a fixed point (measured true for every fixture in
+    // this file — a non-zero value here is a genuine defect).
     private Scene BuildAndSettle(string source, Action<Scene> beforeSettle = null)
     {
         File.WriteAllText(_builderPath, source);
@@ -207,7 +206,7 @@ public class HudScene : ISceneDefinition {
         Canvas.ForceUpdateCanvases();
         var canvasRect = (RectTransform)canvasGo.transform;
         Assert.IsNotNull(canvasRect.drivenByObject,
-            "PREMISE (research.md F2/F4): a Build-created Canvas must be driven after the " +
+            "PREMISE: a Build-created Canvas must be driven after the " +
             "enabled-toggle + ForceUpdateCanvases recipe, or every byte-identity assertion below is " +
             "unearned.");
 
@@ -427,10 +426,10 @@ public class HudScene : ISceneDefinition {
     [Test]
     public void MappedPlainTransformPromotedByBareRectTransform_KeepsSameObject_LandsDefaultTable()
     {
-        // b2-t1 iteration 2 (scope/bucket-b2.md finding 2): a BARE `.RectTransform()` call — every
-        // field at RectTransformFields.Default* — must still promote a mapped plain-Transform object
-        // in place. A value-gated diff would compare the plain snapshot's implicit defaults equal to
-        // the model's defaults and emit nothing, silently dropping the authored Kind change forever.
+        // A BARE `.RectTransform()` call — every field at RectTransformFields.Default* — must still
+        // promote a mapped plain-Transform object in place. A value-gated diff would compare the
+        // plain snapshot's implicit defaults equal to the model's defaults and emit nothing, silently
+        // dropping the authored Kind change forever.
         var scene = BuildAndSettle(FixtureC);
 
         var iconGo = Find(scene, "Canvas/Icon");
@@ -458,7 +457,7 @@ public class HudScene : ISceneDefinition {
 
         Assert.IsEmpty(result.Diagnostics, "Promoting a plain Transform via a bare RectTransform() reported diagnostics");
         Assert.Greater(result.PlanOpCount, baselineOpCount,
-            "The bare RectTransform() edit must emit rect ops against the plan (RED: a value-gated diff emits none).");
+            "The bare RectTransform() edit must emit rect ops against the plan — the Kind change, not a value difference, is what the diff keys on.");
         Assert.IsTrue(messages.Any(m => m.Message.Contains("NOTE on 'icon'") && m.Message.Contains("promoted in place")),
             "A located NOTE naming the LogicalId 'icon' and 'promoted in place' must be logged.\nLogs:\n" +
             string.Join("\n", messages.Select(m => m.Message)));
@@ -490,12 +489,12 @@ public class HudScene : ISceneDefinition {
     [Test]
     public void DrivenCanvasScaleFactorChange_RebuildEmitsNoExtraOps_KeepsDrivenScale()
     {
-        // b2-t1 iteration 3 (scope/bucket-b2.md finding 2): a CanvasScaler-driven scale factor is a
-        // driver the plugin does not own and cannot re-baseline (spec 23's re-baseline rationale holds
-        // for FitSize/SurfaceSnap, which PlanExecutor.cs:393-405 explicitly re-baselines on write; it
-        // does not hold for a Canvas/CanvasScaler). Today the Differ compares the RAW live Scale on
-        // the rect branch and emits `SetTransform scale=(1,1,1)` on every Build against an UNCHANGED
-        // builder, which the Canvas immediately re-drives — a never-empty plan, violating checklist
+        // A CanvasScaler-driven scale factor is a driver the plugin does not own and cannot
+        // re-baseline (spec 23's re-baseline rationale holds for FitSize/SurfaceSnap, which
+        // PlanExecutor.cs:393-405 explicitly re-baselines on write; it does not hold for a
+        // Canvas/CanvasScaler). A Position/Scale axis driven by something the model does not author
+        // is held to the live value because nothing re-baselines a driver the plugin does not own, so
+        // a scale-factor change adds no plan op against an unchanged builder — satisfying checklist
         // item 7's "re-Build with no source change is a no-op".
         var scene = BuildAndSettle(FixtureA);
         var sourceBaseline = File.ReadAllText(_builderPath);
@@ -522,8 +521,7 @@ public class HudScene : ISceneDefinition {
 
         Assert.IsEmpty(result.Diagnostics, "Rebuild after a driven scale-factor change reported diagnostics");
         Assert.AreEqual(baselineOpCount, result.PlanOpCount,
-            "RED: a rebuild after a CanvasScaler-driven scale-factor change must not grow the plan — " +
-            "today it adds a SetTransform lowering to three SetFields, clobbering the driven scale.");
+            "A rebuild after a CanvasScaler-driven scale-factor change must not grow the plan.");
         Assert.IsFalse(messages.Any(m => m.Type == LogType.Error),
             "The rebuild must not log any error.\nLogs:\n" + string.Join("\n", messages.Select(m => m.Message)));
         Assert.IsFalse(messages.Any(m => m.Message.Contains("Unhandled SetField")),

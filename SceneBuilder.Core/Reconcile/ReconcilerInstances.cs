@@ -110,7 +110,7 @@ namespace SceneBuilder.Core.Reconcile
             // can never host `.RectTransform(...)` (InstanceHandle has no such member), so
             // `canHostRectTransformCall: false`; SplitCreatedPayload reports the unlocalizable
             // layout as a Conflict instead of silently dropping it or writing the derived
-            // m_LocalPosition into `pos:`. b4-t1 (iteration 2): `node.SourcePrefabTransform` is the
+            // m_LocalPosition into `pos:`. `node.SourcePrefabTransform` is the
             // prefab ASSET's own layout (populated by the adapter at read time) — the ONE site where
             // the baseline is read, so a layout that already matches the asset reports nothing.
             var (transformPayload, _) = SplitCreatedPayload(

@@ -61,7 +61,7 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
-        // m-ui-recttransform b4-t1 (iteration 2): the ONE dispatch point for the SetRectTransform
+        // The ONE dispatch point for the SetRectTransform
         // case (Reconciler.cs `case SetRectTransform:`). RectTransformEdits(...) itself stays pure
         // and unchanged; this wrapper decides whether the model node's authoring construct can host
         // a `.RectTransform(...)` call at all. A PrefabInstanceNode cannot (InstanceHandle has no
@@ -79,10 +79,9 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<Conflict> conflicts)
         {
-            var masked = MaskDriven(model.Transform, live.Transform);
-
             if (CanHostRectTransformCall(model))
             {
+                var masked = MaskDriven(model.Transform, live.Transform);
                 edits.AddRange(RectTransformEdits(logicalId, model.Transform, masked));
                 return;
             }
@@ -96,7 +95,7 @@ namespace SceneBuilder.Core.Reconcile
                 conflicts);
         }
 
-        // m-ui-recttransform b4-t1 (iteration 2): the ONE "which RectTransform fields does this node
+        // The ONE "which RectTransform fields does this node
         // actually LOSE?" computation, shared by the matched path (EmitRectTransformEdits) and the
         // create path (SplitCreatedPayload) — the only place the baseline rule is spelled.
         // `prefabBaseline` null (unresolvable/unknown asset) falls back to comparing against
@@ -136,7 +135,7 @@ namespace SceneBuilder.Core.Reconcile
         // `.RectTransform(...)` call? `.Add(...)`/`.AddChild(...)` (NodeHandle) -> true;
         // `.Instance(...)` (InstanceHandle) -> false. A future create site must state its host
         // explicitly rather than silently inherit one that may be wrong.
-        // `prefabBaseline` also has NO default (m-ui-recttransform b4-t1 iteration 2): the prefab
+        // `prefabBaseline` also has NO default: the prefab
         // ASSET's own layout for an about-to-be-appended prefab-instance root, or null for every
         // NodeHandle-hosted create site (`.Add(...)`/`.AddChild(...)`, where the baseline is
         // unreachable — state it, do not omit it) and for an instance whose asset is unresolvable.

@@ -13,8 +13,7 @@ namespace SceneBuilder.Core.Tests
     // is not lost), a rect layout that cannot be localized to a builder construct (a
     // PrefabInstanceNode root -- InstanceHandle has no `.RectTransform(...)` member) surfaces a
     // located Conflict instead of emitting source that does not compile, and the whole
-    // Reconcile -> Apply -> re-parse -> Reconcile / Materialize loop is idempotent. Fixtures mirror
-    // the measured probes in research.md (m-ui-recttransform/b4-t1).
+    // Reconcile -> Apply -> re-parse -> Reconcile / Materialize loop is idempotent.
     public class RectTransformRoundTripTests
     {
         [Fact]
@@ -220,12 +219,11 @@ public class HudScene : ISceneDefinition
             Assert.Equal("RectTransform", panelNode.Transform!.Kind);
         }
 
-        // b4-t1 iteration 2 (scope/bucket-b4.md finding 2): with the prefab-asset BASELINE left
-        // unset (SourcePrefabTransform == null), the divergence-narrowing rule below has nothing to
-        // compare against, so this pins the UNKNOWN-baseline fallback -- report every free field,
-        // exactly today's (iteration 1) behavior. Its premise is deliberate, not accidental: a test
-        // that sets an equal baseline would legitimately silence this conflict (see
-        // Reconcile_RectTransformOnPrefabInstanceRoot_LayoutMatchesPrefabAsset_NoConflictNoEdit).
+        // With the prefab-asset BASELINE left unset (SourcePrefabTransform == null), the
+        // divergence-narrowing rule has nothing to compare against, so this pins the UNKNOWN-baseline
+        // fallback -- report every free field, regardless of value. Its premise is deliberate, not
+        // accidental: a test that sets an equal baseline would legitimately silence this conflict
+        // (see Reconcile_RectTransformOnPrefabInstanceRoot_LayoutMatchesPrefabAsset_NoConflictNoEdit).
         [Fact]
         public void Reconcile_RectTransformOnPrefabInstanceRoot_UnknownBaseline_YieldsLocatedConflict_AndNoUnappliableEdit()
         {
@@ -283,12 +281,9 @@ public class HudScene : ISceneDefinition
             Assert.DoesNotContain(".RectTransform(", patched);
         }
 
-        // b4-t1 iteration 2, THE fix (scope/bucket-b4.md finding 2): a settled scene whose live
-        // layout already equals the prefab ASSET's own layout has nothing unpersisted -- the asset
-        // itself is the layout's second persistence home, so this must report zero Conflicts and
-        // zero edits, on every sync. RED today: SourcePrefabTransform is not consulted at all, so
-        // the promotion arm always reports every free field regardless of value (measured,
-        // scope/bucket-b4.md probe A).
+        // A settled scene whose live layout already equals the prefab ASSET's own layout has nothing
+        // unpersisted -- the asset itself is the layout's second persistence home, so this reports
+        // zero Conflicts and zero edits, on every sync.
         [Fact]
         public void Reconcile_RectTransformOnPrefabInstanceRoot_LayoutMatchesPrefabAsset_NoConflictNoEdit()
         {
@@ -339,11 +334,9 @@ public class HudScene : ISceneDefinition
             Assert.Empty(again.Patch.Edits);
         }
 
-        // b4-t1 iteration 2: a genuine divergence from the prefab-asset baseline still reports, but
-        // ONLY the diverged field(s) -- narrowing is the point (an unknown baseline names every free
-        // field; a known, diverged baseline names only what actually differs). RED today: the
-        // Reason names every field (sizeDelta/pivot included) because the baseline is never
-        // consulted.
+        // A genuine divergence from the prefab-asset baseline still reports, but ONLY the diverged
+        // field(s) -- narrowing is the point (an unknown baseline names every free field; a known,
+        // diverged baseline names only what actually differs).
         [Fact]
         public void Reconcile_RectTransformOnPrefabInstanceRoot_LayoutDivergesFromPrefabAsset_NamesOnlyDivergedFields()
         {
@@ -397,10 +390,9 @@ public class HudScene : ISceneDefinition
             Assert.DoesNotContain("pivot", conflict.Reason);
         }
 
-        // b4-t1 iteration 2: a field diverging from the baseline ONLY on a driven axis must be held
-        // to the baseline before comparison (the same driven-axis rule the matched-node rect diff
-        // already applies), so it never registers as a divergence. RED today: the baseline is not
-        // consulted at all, so this field is still reported.
+        // A field diverging from the baseline ONLY on a driven axis is held to the baseline before
+        // comparison (the same driven-axis rule the matched-node rect diff already applies), so it
+        // never registers as a divergence.
         [Fact]
         public void Reconcile_RectTransformOnPrefabInstanceRoot_DivergenceOnDrivenAxisOnly_NoConflict()
         {

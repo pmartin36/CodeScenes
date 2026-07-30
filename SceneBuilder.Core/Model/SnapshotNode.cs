@@ -41,7 +41,7 @@ namespace SceneBuilder.Core.Model
 
         public OverrideTarget[] RemovedGameObjects { get; init; } = Array.Empty<OverrideTarget>();
 
-        // m-ui-recttransform b4-t1 (iteration 2): the prefab ASSET root's transform for a
+        // The prefab ASSET root's transform for a
         // prefab-instance root whose live transform is a RectTransform -- the baseline the live
         // layout is compared against, so a settled instance whose layout the prefab asset already
         // persists reports NO unlocalizable-layout Conflict. null for every non-instance node, for a

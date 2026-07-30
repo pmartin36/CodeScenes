@@ -89,9 +89,9 @@ public class UiPrefabInstanceScene : ISceneDefinition
         }
     }
 
-    // m-ui-recttransform b4-t1 (iteration 2): the empty-source build + Assets[] seed steps every
-    // case in this file needs, factored so the three cases do not each clone ~20 lines of setup.
-    // Returns the freshly-instantiated prefab instance's GameObject.
+    // The empty-source build + Assets[] seed steps every case in this file needs, factored so the
+    // three cases do not each clone ~20 lines of setup. Returns the freshly-instantiated prefab
+    // instance's GameObject.
     private GameObject BuildEmptySourceAndInstantiateFixture()
     {
         File.WriteAllText(_builderPath, EmptySource);
@@ -159,12 +159,9 @@ public class UiPrefabInstanceScene : ISceneDefinition
         Assert.AreEqual(beforeSecondSync, File.ReadAllText(_builderPath), "A second Sync with no live change rewrote the file.");
     }
 
-    // m-ui-recttransform b4-t1 (iteration 2, scope/bucket-b4.md finding 2, live half): a mapped UI
-    // prefab instance whose layout is untouched (still exactly its prefab asset's own layout) has
-    // nothing unpersisted -- the asset itself already carries it -- so neither the create-path sync
-    // nor a later matched-path sync may ever report the unlocalizable-layout conflict. RED today:
-    // the adapter never reads the asset baseline, so the promotion arm reports on every sync
-    // regardless of value (measured, scope/bucket-b4.md probe A).
+    // A mapped UI prefab instance whose layout is untouched (still exactly its prefab asset's own
+    // layout) has nothing unpersisted -- the asset itself already carries it -- so neither the
+    // create-path sync nor a later matched-path sync ever reports the unlocalizable-layout conflict.
     [Test]
     public void SceneToCode_UiPrefabInstance_LayoutUntouched_NeverReportsUnlocalizableLayout()
     {
@@ -194,12 +191,9 @@ public class UiPrefabInstanceScene : ISceneDefinition
         Assert.AreEqual(beforeSecondSync, File.ReadAllText(_builderPath), "Matched-path sync with no live change rewrote the file.");
     }
 
-    // m-ui-recttransform b4-t1 (iteration 2, scope/bucket-b4.md finding 2, live half): once mapped,
-    // a genuine divergence from the prefab asset's own layout still reports -- exactly ONE located
-    // conflict -- and writes no source (InstanceHandle has no `.RectTransform(...)` member).
-    // RED today: SourcePrefabTransform is never read, so this already reports today for the wrong
-    // reason (every sync, not "this sync actually diverged") -- this test pins the PARTICULAR
-    // shape (one conflict, no source write) that must survive the fix.
+    // Once mapped, a genuine divergence from the prefab asset's own layout still reports -- exactly
+    // ONE located conflict -- and writes no source (InstanceHandle has no `.RectTransform(...)`
+    // member).
     [Test]
     public void SceneToCode_UiPrefabInstance_LayoutDivergesFromAsset_ReportsOneLocatedConflict_AndWritesNoSource()
     {

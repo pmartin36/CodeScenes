@@ -240,7 +240,7 @@ namespace SceneBuilder.Core.Reconcile
                 Location = location,
             };
 
-        // m-ui-recttransform b4-t1 (iteration 2): a prefab-instance root's RectTransform layout has
+        // A prefab-instance root's RectTransform layout has
         // diverged from what its authoring construct can persist — either the prefab ASSET's own
         // layout (a known, diverged baseline) or, when that baseline is unresolvable, any live value
         // at all (§7: unknown never goes quiet). ONE conflict per NODE per sync (not per field) —
