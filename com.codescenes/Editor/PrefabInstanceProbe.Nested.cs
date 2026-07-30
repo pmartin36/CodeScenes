@@ -255,9 +255,6 @@ namespace SceneBuilder.Editor
         private static GameObjectNode ReadAddedChildNode(GameObject live, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var t = live.transform;
-            var lp = t.localPosition;
-            var lr = t.localRotation;
-            var ls = t.localScale;
 
             var components = new List<ComponentData>();
             foreach (var component in live.GetComponents<Component>())
@@ -283,13 +280,11 @@ namespace SceneBuilder.Editor
                 Layer = live.layer,
                 Active = live.activeSelf,
                 IsStatic = live.isStatic,
-                Transform = new TransformData
-                {
-                    Kind = "Transform",
-                    Position = new Vec3(lp.x, lp.y, lp.z),
-                    Rotation = new Quat(lr.x, lr.y, lr.z, lr.w),
-                    Scale = new Vec3(ls.x, ls.y, ls.z),
-                },
+                // m-ui-recttransform b3-t1 (iteration 2): REAL driven channels, not a hardcoded
+                // ChannelMask.None — a driven axis on an added child must never be authored into
+                // source as if it were a manual edit (matches the root-scene read path exactly, via
+                // the SAME LiveTransformRead.Read(GameObject) entry point).
+                Transform = LiveTransformRead.Read(live),
                 Components = components.ToArray(),
                 Children = children,
             };

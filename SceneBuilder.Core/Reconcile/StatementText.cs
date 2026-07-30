@@ -107,6 +107,17 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
+            // b3-t4: chained `.RectTransform(...)` call — the payload's PRESENCE is what carries
+            // Kind=="RectTransform" into re-parsed source, so a not-fully-driven UI node whose five
+            // values all equal RectTransformFields defaults still gets a BARE `.RectTransform()`.
+            // SourcePrefabPath guard: InstanceHandle has no `.RectTransform(...)` member.
+            // m-ui-recttransform b3-t1 (iteration 2): rendered via the SHARED emitter
+            // (SourcePatchApplier.RectTransform.cs) the AddChild closure also uses.
+            if (edit.RectTransform is { } rect && edit.SourcePrefabPath == null)
+            {
+                chain += "." + RenderRectTransformCall(rect);
+            }
+
             if (edit.SourcePrefabPath == null)
             {
                 if (edit.Tag != null)

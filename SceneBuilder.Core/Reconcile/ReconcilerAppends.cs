@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using SceneBuilder.Core.Diff;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
@@ -173,13 +174,22 @@ namespace SceneBuilder.Core.Reconcile
                         newLogicalId = LogicalIdResolver.Synthesize(parentHandle, node.Name, index);
                     }
 
+                    // b3-t4/§13, extracted m-ui-recttransform b3-t1 (iteration 2): a created UI
+                    // node's payload is driven-masked (D2) and X/Y-held (D1) BEFORE it is split
+                    // between Transform (base GameObject data) and RectTransform (the chained
+                    // `.RectTransform(...)` call) — the ONE such split (SplitCreatedPayload), also
+                    // used by the instance-AddChild create path (ReconcilerInstances.Nested.cs).
+                    var authoringDefaults = new TransformData();
+                    var (transformPayload, rectTransformPayload) = SplitCreatedPayload(node.Transform);
+
                     edits.Add(new AppendStatement
                     {
                         NewLogicalId = newLogicalId,
                         ParentAnchor = parentLogicalId,
                         NewSiblingIndex = siblingIndex,
                         Name = node.Name,
-                        Transform = node.Transform != new TransformData() ? node.Transform : null,
+                        Transform = transformPayload != authoringDefaults ? transformPayload : null,
+                        RectTransform = rectTransformPayload,
                         Active = node.Active != true ? node.Active : null,
                         Tag = node.Tag != "Untagged" ? node.Tag : null,
                         Layer = node.Layer != 0 ? node.Layer : null,

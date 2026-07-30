@@ -118,7 +118,10 @@ namespace SceneBuilder.Editor
         private static GameObject BuildAddedChild(
             GameObject parent, GameObjectNode node, PlanExecutor.ExecutionResult result, IdentityMap map, Scene scene)
         {
-            var go = new GameObject(node.Name);
+            // m-ui-recttransform b3-t1 (iteration 2): create AS a RectTransform when authored
+            // (never a plain GameObject promoted later) — same entry point PlanExecutor.CreateObject
+            // uses, so there is ONE spelling of "create a GameObject for this Kind".
+            var go = LiveTransformWrite.Create(node.Name, node.Transform.Kind);
             go.transform.SetParent(parent.transform, worldPositionStays: false);
 
             TrySetChildTag(go, node.Tag);
@@ -133,6 +136,13 @@ namespace SceneBuilder.Editor
             t.localPosition = new Vector3(position.X, position.Y, position.Z);
             t.localRotation = new Quaternion(rotation.X, rotation.Y, rotation.Z, rotation.W);
             t.localScale = new Vector3(scale.X, scale.Y, scale.Z);
+
+            // D8: the rect write must follow the localPosition/localRotation/localScale writes above
+            // — anchoredPosition re-derives m_LocalPosition and must win.
+            if (go.transform is RectTransform rt)
+            {
+                LiveTransformWrite.ApplyRectFields(rt, node.Transform);
+            }
 
             foreach (var c in node.Components)
             {

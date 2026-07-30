@@ -3,6 +3,7 @@ using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Materialize;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Plan;
+using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Core.Tests
 {
@@ -82,6 +83,17 @@ namespace SceneBuilder.Core.Tests
         {
             var scene = CreatedNode(modelTransform);
             return Materializer.Materialize(scene.Model, scene.Snapshot, scene.Map);
+        }
+
+        // b3-t2: the scene->code counterpart of DiffSingleMatchedNode/MaterializeMatchedNode. Anchors
+        // omitted (Reconciler.Reconcile treats a null anchors dictionary as "skip the MissingAnchor
+        // guard"), so this is only for tests that assert on the emitted SourceEdits themselves, never
+        // on SourcePatchApplier.Apply — a test that also needs to APPLY the edits needs its own
+        // anchor-bearing source and cannot use this helper.
+        public static ReconcileResult ReconcileMatchedNode(TransformData modelTransform, TransformData snapshotTransform)
+        {
+            var scene = MatchedNode(modelTransform, snapshotTransform);
+            return Reconciler.Reconcile(scene.Model, scene.Snapshot, scene.Map);
         }
     }
 }

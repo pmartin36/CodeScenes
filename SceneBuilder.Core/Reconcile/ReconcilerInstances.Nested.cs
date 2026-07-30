@@ -111,6 +111,12 @@ namespace SceneBuilder.Core.Reconcile
                 // empty string literal). The new child NAME stays a string (specs/27).
                 TryRenderScopedSelector(facadeCatalog, prefabGuid, snapshotAdded.Parent.ChildPath, out var parentSelectorExpr);
 
+                // m-ui-recttransform b3-t1 (iteration 2): the SAME create-with-payload split the
+                // plain-append path uses (Reconciler.SplitCreatedPayload) — an added UI child's
+                // layout must ride the SAME AddChild closure a component payload already uses,
+                // never be silently dropped.
+                var (_, rectTransformPayload) = SplitCreatedPayload(snapshotAdded.Node.Transform);
+
                 edits.Add(new AppendInstanceAddChild
                 {
                     Anchor = instanceLogicalId,
@@ -118,6 +124,7 @@ namespace SceneBuilder.Core.Reconcile
                     ParentSelectorExpr = parentSelectorExpr,
                     Name = snapshotAdded.Node.Name,
                     Node = snapshotAdded.Node,
+                    RectTransform = rectTransformPayload,
                 });
             }
 

@@ -384,5 +384,43 @@ public class AppendEmptyBodyScene : ISceneDefinition
             Assert.Equal("New", appended.Name);
         }
 
+        // ---- AppendStatement: RectTransform payload (b3-t4) --------------------------------
+
+        [Fact]
+        public void Append_RectTransformLiteral_UsesSharedSourceExprVec2_FSuffixedFloats()
+        {
+            var source = AppendRootFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var rect = RectTransformFixtures.Rect(
+                anchoredPos: new Vec2(1.5f, 2f),
+                pivot: new Vec2(0.25f, 0.75f));
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new AppendStatement
+                    {
+                        NewLogicalId = "New/1",
+                        NewSiblingIndex = 1,
+                        Name = "New",
+                        RectTransform = rect,
+                    },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            // Literals come FROM SourceExpr.Vec2Literal, not a hardcoded string.
+            Assert.Contains("anchoredPos: " + SourceExpr.Vec2Literal(new Vec2(1.5f, 2f)), result);
+            Assert.Contains("pivot: " + SourceExpr.Vec2Literal(new Vec2(0.25f, 0.75f)), result);
+
+            var reparsed = BuilderParser.Parse(result);
+            var appended = Assert.Single(reparsed.Model.Roots, r => r.Name == "New");
+            Assert.Equal("RectTransform", appended.Transform.Kind);
+            Assert.Equal(new Vec2(1.5f, 2f), appended.Transform.AnchoredPosition);
+            Assert.Equal(new Vec2(0.25f, 0.75f), appended.Transform.Pivot);
+        }
     }
 }

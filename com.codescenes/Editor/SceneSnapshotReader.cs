@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using SceneBuilder.Authoring;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Editor
@@ -79,9 +78,6 @@ namespace SceneBuilder.Editor
         internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var t = go.transform;
-            var lp = t.localPosition;
-            var lr = t.localRotation;
-            var ls = t.localScale;
 
             var isInstanceRoot = PrefabInstanceProbe.IsInstanceRoot(go);
 
@@ -133,14 +129,7 @@ namespace SceneBuilder.Editor
                 Layer = go.layer,
                 Active = go.activeSelf,
                 IsStatic = go.isStatic,
-                Transform = new TransformData
-                {
-                    Kind = "Transform",
-                    Position = new Vec3(lp.x, lp.y, lp.z),
-                    Rotation = new Quat(lr.x, lr.y, lr.z, lr.w),
-                    Scale = new Vec3(ls.x, ls.y, ls.z),
-                    DrivenChannels = DeriveDrivenChannels(go),
-                },
+                Transform = LiveTransformRead.Read(go),
                 Components = components.ToArray(),
                 Children = isInstanceRoot ? Array.Empty<SnapshotNode>() : children,
                 SourcePrefabGuid = sourcePrefabGuid,
@@ -152,40 +141,6 @@ namespace SceneBuilder.Editor
                 AddedGameObjects = addedGameObjects,
                 RemovedGameObjects = removedGameObjects,
             };
-        }
-
-        /// <summary>
-        /// ORs together the driven channels of every ACTIVE-AND-ENABLED FitSize/SurfaceSnap on
-        /// <paramref name="go"/> — the same guard those components' own <c>Evaluate()</c> use
-        /// (<c>isActiveAndEnabled</c>), so "reader says driven" always agrees with "component
-        /// actually drives". A disabled/inactive component contributes nothing (releases its
-        /// channel so a manual edit syncs normally). Mirrors the parse-time mapping in
-        /// <c>SpatialComponents.FitSizeMask</c>/<c>SurfaceSnapMask</c> so desired and actual never diverge.
-        /// </summary>
-        private static ChannelMask DeriveDrivenChannels(GameObject go)
-        {
-            var mask = ChannelMask.None;
-
-            foreach (var sizer in go.GetComponents<FitSize>())
-            {
-                if (sizer.isActiveAndEnabled)
-                {
-                    mask |= SpatialComponents.FitSizeMask;
-                }
-            }
-
-            foreach (var snapper in go.GetComponents<SurfaceSnap>())
-            {
-                if (snapper.isActiveAndEnabled)
-                {
-                    mask |= SpatialComponents.SurfaceSnapMask(
-                        snapper.vertical != SurfaceSnap.Vertical.None,
-                        snapper.horizontal != SurfaceSnap.Horizontal.None,
-                        snapper.depth != SurfaceSnap.Depth.None);
-                }
-            }
-
-            return mask;
         }
     }
 }

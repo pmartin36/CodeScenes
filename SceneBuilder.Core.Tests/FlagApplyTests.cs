@@ -139,5 +139,51 @@ public class RemoveFlagScene : ISceneDefinition
             Assert.True(enemyNode.Active);
             Assert.False(enemyNode.IsStatic);
         }
+
+        private const string ClosureChildFlagFixture = @"
+public class ClosureChildFlagScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Panel"", p => p.Add(""Label""));
+    }
+}
+";
+
+        // m-ui-recttransform b3-t3 (REFINED #2): a statement can carry more than one node's calls
+        // via the `Add(string, Action<NodeHandle>)` configure-closure form. `GetChainExpression`
+        // resolves to the WHOLE enclosing statement's expression, so introducing a flag call anchored
+        // on a CHILD climbs past the closure boundary and appends onto the PARENT's chain instead —
+        // a cross-node corruption shared by every chained-call resolver, not rect-specific (the rect
+        // analog is `Apply_ClosureChildRectPatch_LandsInsideClosure_NotOnParent` in
+        // RectTransformPatchApplyTests.cs).
+        [Fact]
+        public void Apply_IntroduceFlagCall_OnClosureChild_LandsInsideClosure_NotOnParent()
+        {
+            var source = ClosureChildFlagFixture;
+            var anchors = BuilderParser.Parse(source).Anchors;
+
+            var patch = new SourcePatch
+            {
+                Edits = new SourceEdit[]
+                {
+                    new IntroduceFlagCall { Anchor = "Panel/0/Label/0", Flag = FlagKind.Tag, ArgExpr = "\"ChildTag\"" },
+                },
+            };
+
+            var result = SourcePatchApplier.Apply(source, patch, anchors);
+
+            // Correct: the introduced call lands on the CHILD's own chain, inside the closure.
+            Assert.Contains("p.Add(\"Label\").Tag(\"ChildTag\")", result);
+
+            // Wrong (today's bug): the call must NOT land on the outer Panel chain instead.
+            Assert.DoesNotContain("scene.Add(\"Panel\", p => p.Add(\"Label\")).Tag(", result);
+
+            var reparsed = BuilderParser.Parse(result);
+            var panelNode = Assert.Single(reparsed.Model.Roots, r => r.Name == "Panel");
+            Assert.Equal("Untagged", panelNode.Tag);
+            var labelNode = Assert.Single(panelNode.Children, c => c.Name == "Label");
+            Assert.Equal("ChildTag", labelNode.Tag);
+        }
     }
 }

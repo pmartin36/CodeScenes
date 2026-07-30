@@ -28,9 +28,21 @@ namespace SceneBuilder.Core.Reconcile
             // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain
             // instead of `Asset("path")`. Reconcile-time-only, mirroring facadeCatalog — never
             // reaches SourcePatchApplier/SourceExpr-at-apply.
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // b3-t5: LogicalIds of components whose source construct is a chained call
+            // (ParseResult.ChainedComponents) — feeds ComponentReconciler's REORDER-pass guard so
+            // an owner with a chained component never emits an unrepresentable ReorderStatement.
+            // `null` (the default, and every hand-built model/snapshot/map test call) means "no
+            // source information" and keeps today's behavior unchanged.
+            IReadOnlyCollection<string>? chainedComponents = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
+
+            // Converted ONCE, not per-owner: ComponentReconciler.ReconcileComponents runs once per
+            // mapped owner below and every call shares this same set.
+            ISet<string>? chainedComponentSet = chainedComponents == null
+                ? null
+                : new HashSet<string>(chainedComponents, StringComparer.Ordinal);
 
             var logicalIdToGlobalObjectId = identityMap.Entries
                 .Where(e => (e.Kind == "GameObject" || e.Kind == "PrefabInstance") && !string.IsNullOrEmpty(e.GlobalObjectId))
@@ -285,6 +297,19 @@ namespace SceneBuilder.Core.Reconcile
 
                         break;
 
+                    // b3-t2: op.Transform/op.Changed are NOT read — the op carries the MODEL
+                    // transform and a raw-float Changed mask (ChannelMask.None for a promotion), so
+                    // re-deriving from modelByLogicalId + the live entry and comparing CANONICAL
+                    // literals here is authoritative, exactly as it is for SetTransform above.
+                    case SetRectTransform:
+                        if (modelByLogicalId.TryGetValue(op.LogicalId, out var rectModelNode))
+                        {
+                            var rectMasked = MaskDriven(rectModelNode.Transform, entry.Node.Transform);
+                            edits.AddRange(RectTransformEdits(op.LogicalId, rectModelNode.Transform, rectMasked));
+                        }
+
+                        break;
+
                     case Reparent:
                         {
                             string? newParentAnchor = entry.ParentGlobalObjectId != null
@@ -487,7 +512,8 @@ namespace SceneBuilder.Core.Reconcile
                     conflicts,
                     skippedFields,
                     addedAssets,
-                    assetCatalog);
+                    assetCatalog,
+                    chainedComponentSet);
             }
 
             DetectAppends(
@@ -808,6 +834,14 @@ namespace SceneBuilder.Core.Reconcile
         // to emit an edit that provably rewrites text to itself.
         private static IEnumerable<SourceEdit> TransformEdits(string logicalId, TransformData model, TransformData snapshot)
         {
+            // D1: either side is a RectTransform -> AnchoredPosition owns X/Y, so `pos:` may only
+            // ever carry a genuine Z drift. Held BEFORE the canonical comparison below so a UI
+            // node's derived m_LocalPosition.x/y can never reach `.Transform(pos:)`.
+            if (RectTransformDiff.Applies(model, snapshot))
+            {
+                snapshot = RectTransformDiff.HoldAnchoredXY(snapshot, model);
+            }
+
             var modelPos = SourceExpr.Vec3Literal(model.Position);
             var snapshotPos = SourceExpr.Vec3Literal(snapshot.Position);
             if (!string.Equals(modelPos, snapshotPos, StringComparison.Ordinal))
@@ -850,7 +884,10 @@ namespace SceneBuilder.Core.Reconcile
                 (d & ChannelMask.ScaleX) != 0 ? model.Scale.X : snapshot.Scale.X,
                 (d & ChannelMask.ScaleY) != 0 ? model.Scale.Y : snapshot.Scale.Y,
                 (d & ChannelMask.ScaleZ) != 0 ? model.Scale.Z : snapshot.Scale.Z);
-            return snapshot with { Position = pos, Scale = scale };
+
+            // D5: per-axis rect-field driven hold, delegated to the shipped table-driven
+            // implementation (never re-implement the loop here).
+            return RectTransformFields.MaskDrivenRect(model, snapshot with { Position = pos, Scale = scale });
         }
 
         private static void FlattenSnapshot(SnapshotNode[] nodes, string? parentGoid, Dictionary<string, SnapshotEntry> snapshotByGoid)

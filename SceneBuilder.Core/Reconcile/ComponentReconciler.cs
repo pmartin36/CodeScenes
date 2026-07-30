@@ -48,7 +48,11 @@ namespace SceneBuilder.Core.Reconcile
             // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain
             // instead of `Asset("path")`. Optional/trailing so every pre-existing call site/test
             // stays green unchanged.
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // b3-t5: LogicalIds of this owner's components whose source construct is a chained
+            // call (Reconciler.cs's converted ParseResult.ChainedComponents). `null` = "no source
+            // information" (every hand-built test call), identical contract to componentAnchors.
+            ISet<string>? chainedComponents = null)
         {
             // b4-t1: canonicalize FitSize-before-SurfaceSnap BEFORE the ADD/REORDER passes so both emit
             // in canonical order and the REORDER pass compares canonical-vs-canonical for the
@@ -165,8 +169,15 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
-            // (3) REORDER: only when the represented set is unchanged (no add/remove above).
-            if (managedKeySet.SetEquals(snapshotKeySet))
+            // (3) REORDER: only when the represented set is unchanged (no add/remove above), AND
+            // (b3-t5) no source component on this owner is a CHAINED call — its physical order is
+            // partly frozen inside another statement (research.md M1: a chained component's
+            // anchor resolves to its ENCLOSING statement, so ReorderStatement's absolute component
+            // index would move a SIBLING scene-graph statement instead), so the owner's absolute
+            // component order is unrepresentable and no reorder is emitted for it at all — never a
+            // partial/best-effort one. Same family, same shape as the b7-t1 canonical-order guard
+            // this condition already carries.
+            if (managedKeySet.SetEquals(snapshotKeySet) && !HasChainedComponent(sourceComps, chainedComponents))
             {
                 var sourceIndexByKey = new Dictionary<(string TypeFullName, int Ordinal), int>();
                 for (var i = 0; i < sourceComps.Length; i++)
@@ -374,6 +385,27 @@ namespace SceneBuilder.Core.Reconcile
                     }
                 }
             }
+        }
+
+        // b3-t5: whether ANY of this owner's SOURCE components is a chained call — `chained` is
+        // `null` for "no source information" (every hand-built test model), which is never
+        // treated as chained (identical null contract to componentAnchors elsewhere in this file).
+        private static bool HasChainedComponent(ComponentData[] sourceComps, ISet<string>? chained)
+        {
+            if (chained == null)
+            {
+                return false;
+            }
+
+            foreach (var component in sourceComps)
+            {
+                if (chained.Contains(component.LogicalId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         // b4-t3: the ONE place the liveness/pending/dangling decision for a snapshot ObjectRef is

@@ -98,9 +98,7 @@ namespace SceneBuilder.Editor
                 {
                     case CreateObject create:
                     {
-                        var go = create.TransformKind == RectTransformFields.Kind
-                            ? new GameObject(create.Name, typeof(RectTransform))
-                            : new GameObject(create.Name);
+                        var go = LiveTransformWrite.Create(create.Name, create.TransformKind);
                         if (scene.IsValid() && go.scene != scene)
                         {
                             SceneManager.MoveGameObjectToScene(go, scene);
@@ -435,16 +433,7 @@ namespace SceneBuilder.Editor
                 return true; // located error already surfaced; object left alive
             }
 
-            var v = new Vector2(vec.Value.X, vec.Value.Y);
-            switch (op.Path)
-            {
-                case RectTransformFields.AnchoredPositionPath: rt.anchoredPosition = v; break;
-                case RectTransformFields.SizeDeltaPath:        rt.sizeDelta        = v; break;
-                case RectTransformFields.AnchorMinPath:        rt.anchorMin        = v; break;
-                case RectTransformFields.AnchorMaxPath:        rt.anchorMax        = v; break;
-                case RectTransformFields.PivotPath:            rt.pivot            = v; break;
-            }
-
+            LiveTransformWrite.SetRectField(rt, op.Path, vec.Value);
             return true;
         }
 

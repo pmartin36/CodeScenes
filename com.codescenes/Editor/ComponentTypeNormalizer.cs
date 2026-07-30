@@ -58,6 +58,7 @@ namespace SceneBuilder.Editor
                 NodeAnchors = parse.NodeAnchors,
                 Ambiguities = parse.Ambiguities,
                 Usings = parse.Usings,
+                ChainedComponents = parse.ChainedComponents,
             };
         }
 

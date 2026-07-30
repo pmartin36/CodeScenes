@@ -58,8 +58,18 @@ namespace SceneBuilder.Core.Parsing
         // `Alias`, no `StaticKeyword`), rendered dotted ("UnityEngine", "UnityEngine.UI"),
         // in document order. Source-level only — NEVER enters SceneModel/CanonicalJson/
         // identity; the adapter (b2) reads it to resolve short Component<T> names.
-        // Population is BuilderParser's job (ParseCore); this default (always empty) is a
-        // compile-only stub for the test-writer's RED tests.
+        // Population is BuilderParser's job (BuilderParser.cs:89,103, BuilderParser.Parse/
+        // ParseCore).
         public IReadOnlyList<string> Usings { get; init; } = new List<string>();
+
+        // b3-t5: the LogicalId of every parsed component whose source construct is a CHAINED call
+        // (`.Component<T>`/`.FitSize`/`.SurfaceSnap` inside an `Add`/`Instance` chain, a
+        // multi-component chain, or an expression-bodied configure lambda) rather than its own
+        // statement (`crate.Component<T>(...);`). A statement-scoped edit
+        // (RemoveStatement/ReorderStatement) anchored on one of these must never resolve against
+        // its ENCLOSING statement (see SourcePatchApplier.AnchorChain.cs). Populated by
+        // BuilderParser.cs:102 via BuildChainedComponents/CollectChainedComponents
+        // (BuilderParser.Projections.cs).
+        public IReadOnlyCollection<string> ChainedComponents { get; init; } = new List<string>();
     }
 }

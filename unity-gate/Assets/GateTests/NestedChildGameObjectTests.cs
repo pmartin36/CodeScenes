@@ -139,6 +139,65 @@ public class NestedChildGameObjectTests
             "Barrel GlobalObjectId changed — AddInstanceChild must never disturb an unrelated sub-object");
     }
 
+    private static GameObjectNode RectTransformHudNode => new()
+    {
+        LogicalId = "Tank/Hud",
+        Name = "Hud",
+        Transform = new TransformData
+        {
+            Kind = RectTransformFields.Kind,
+            AnchoredPosition = new Vec2(12f, -8f),
+            SizeDelta = new Vec2(200f, 80f),
+            AnchorMin = new Vec2(0f, 1f),
+            AnchorMax = new Vec2(0f, 1f),
+            Pivot = new Vec2(0f, 1f),
+        },
+    };
+
+    // m-ui-recttransform b3-t1 (iteration 2, research.md): a UI child added inside a prefab
+    // instance must actually BECOME a RectTransform live, not a plain Transform — today
+    // InstanceOverrideExecutor.Children.cs's BuildAddedChild always does `new GameObject(name)`
+    // and writes only localPosition/rotation/scale, so an authored `.RectTransform(...)` payload
+    // is silently ignored on Build.
+    [Test]
+    public void AddChild_UiNode_CreatesRectTransformChild_AppliesAuthoredLayout()
+    {
+        var scene = EditorSceneManager.GetActiveScene();
+        var tank = InstantiateAndMapTank(scene, out var map);
+        var leftTurret = tank.transform.Find("LeftTurret").gameObject;
+        var goidTankBefore = GlobalObjectId.GetGlobalObjectIdSlow(tank).ToString();
+        var goidTurretBefore = GlobalObjectId.GetGlobalObjectIdSlow(leftTurret).ToString();
+
+        var plan = new Plan
+        {
+            Ops = new PlanOp[]
+            {
+                new AddInstanceChild { LogicalId = "Tank", Target = LeftTurretTarget, Node = RectTransformHudNode },
+            },
+        };
+
+        PlanExecutor.Execute(plan, map, scene);
+
+        var hud = leftTurret.transform.Find("Hud");
+        Assert.IsNotNull(hud, "AddInstanceChild did not create a live \"Hud\" child under LeftTurret");
+        Assert.IsInstanceOf<RectTransform>(hud!,
+            "A child whose authored Node.Transform.Kind==\"RectTransform\" must be created AS a RectTransform, not promoted-never plain Transform");
+
+        var rt = (RectTransform)hud;
+        Assert.AreEqual(new Vector2(12f, -8f), rt.anchoredPosition);
+        Assert.AreEqual(new Vector2(200f, 80f), rt.sizeDelta);
+        Assert.AreEqual(new Vector2(0f, 1f), rt.anchorMin);
+        Assert.AreEqual(new Vector2(0f, 1f), rt.anchorMax);
+        Assert.AreEqual(new Vector2(0f, 1f), rt.pivot);
+
+        Assert.IsTrue(PrefabUtility.IsAddedGameObjectOverride(hud.gameObject),
+            "AddInstanceChild did not register the RectTransform child as an in-place AddedGameObjects override");
+        Assert.AreEqual(goidTankBefore, GlobalObjectId.GetGlobalObjectIdSlow(tank).ToString(),
+            "Tank GlobalObjectId changed — AddInstanceChild must never re-instantiate the outer instance");
+        Assert.AreEqual(goidTurretBefore, GlobalObjectId.GetGlobalObjectIdSlow(leftTurret).ToString(),
+            "LeftTurret GlobalObjectId changed — AddInstanceChild must never re-instantiate the nested instance");
+    }
+
     [Test]
     public void RemoveChild_SourceAntenna_RecordsRemovedGameObject_NoReinstantiate()
     {

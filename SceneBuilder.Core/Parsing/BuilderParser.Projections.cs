@@ -205,6 +205,37 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
+        // Builds one entry per parsed component whose source construct is a CHAINED call
+        // (`!StatementAnchored`), value = the component's LogicalId — mirrors
+        // BuildComponentAnchors/CollectComponentAnchors exactly, but collects a HashSet of ids
+        // instead of an anchor dictionary. Feeds ComponentReconciler's REORDER-pass guard (b3-t5).
+        private static IReadOnlyCollection<string> BuildChainedComponents(List<NodeBuilder> roots)
+        {
+            var chained = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var root in roots)
+            {
+                CollectChainedComponents(root, chained);
+            }
+
+            return chained;
+        }
+
+        private static void CollectChainedComponents(NodeBuilder node, HashSet<string> chained)
+        {
+            foreach (var component in node.Components)
+            {
+                if (!component.StatementAnchored)
+                {
+                    chained.Add(component.LogicalId);
+                }
+            }
+
+            foreach (var child in node.Children)
+            {
+                CollectChainedComponents(child, chained);
+            }
+        }
+
         // Builds one componentLogicalId -> (fieldKey -> value SourceSpan) entry per parsed
         // component, pre-order (mirrors BuildComponentAnchors/CollectComponentAnchors) — feed-
         // forward for b5's span-local field-argument patching.

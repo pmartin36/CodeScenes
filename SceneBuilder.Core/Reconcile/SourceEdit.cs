@@ -61,6 +61,13 @@ namespace SceneBuilder.Core.Reconcile
 
         // Non-default GameObject data. null => omit from emitted source (keep it clean).
         public TransformData? Transform { get; init; }
+
+        // b3-t4/§13: driven-masked UI layout to render as a chained `.RectTransform(...)`.
+        // null => emit no call (non-UI node, or every rect axis driven). Its PRESENCE is what
+        // carries Kind=="RectTransform" into re-parsed source, so a UI node whose five values all
+        // equal the RectTransformFields defaults still renders a BARE `.RectTransform()`.
+        public TransformData? RectTransform { get; init; }
+
         public bool? Active { get; init; }
         public string? Tag { get; init; }
         public int? Layer { get; init; }
@@ -312,6 +319,12 @@ namespace SceneBuilder.Core.Reconcile
         public string ParentSelectorExpr { get; init; } = ""; // Rendered parent arg: `sel => sel.A.B` or a quoted string.
         public string Name { get; init; } = ""; // AddedGameObject.Node.Name.
         public GameObjectNode Node { get; init; } = new(); // Payload; components rendered into cfg closure (b4-t3).
+
+        // m-ui-recttransform b3-t1 (iteration 2): driven-masked, X/Y-held UI layout to render as a
+        // chained `cfg.RectTransform(...)` call INSIDE the AddChild closure, mirroring
+        // AppendStatement.RectTransform verbatim in shape and doc intent. null => emit no call
+        // (non-UI added child, or every rect axis driven).
+        public TransformData? RectTransform { get; init; }
     }
 
     // Top-level `.RemoveChild(<child>)`. The child is rendered as the typed façade selector

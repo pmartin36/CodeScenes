@@ -13,11 +13,16 @@ namespace SceneBuilder.Core.Diff
         public static bool Applies(TransformData model, TransformData snapshot)
             => model.IsRectTransform || snapshot.IsRectTransform;
 
-        // D8: the model's transform with Position X/Y held to the snapshot's live anchor-derived
-        // values, Z from the model. AnchoredPosition owns X/Y for a rect node; base Position.X/Y is
-        // never independently diffed.
-        public static TransformData HoldAnchoredXY(TransformData model, TransformData snapshot)
-            => model with { Position = new Vec3(snapshot.Position.X, snapshot.Position.Y, model.Position.Z) };
+        // D8: `target`'s transform with Position X/Y held to `xyFrom`'s values, Z from `target`.
+        // AnchoredPosition owns X/Y for a rect node; base Position.X/Y is never independently
+        // diffed. Both directions call this with the roles swapped: code->scene passes
+        // (desired, actual) (Differ.cs:203) so the materialized transform's X/Y follows the live
+        // anchor-derived position; scene->code passes (snapshot, model) (Reconciler.TransformEdits)
+        // so a UI node's derived m_LocalPosition.x/y can never reach `.Transform(pos:)` — only a
+        // genuine Z drift can. Only call site per direction is positional, so the rename is
+        // source-compatible.
+        public static TransformData HoldAnchoredXY(TransformData target, TransformData xyFrom)
+            => target with { Position = new Vec3(xyFrom.Position.X, xyFrom.Position.Y, target.Position.Z) };
 
         // Per-axis channels that differ, reading an unset field on either side as its
         // RectTransformFields.Default* value (R3). Callers pass an ALREADY driven-masked snapshot

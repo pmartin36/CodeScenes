@@ -66,6 +66,7 @@ namespace SceneBuilder.Core.Parsing
             var anchors = BuildAnchors(ctx.Roots);
             var nodeAnchors = BuildNodeAnchors(ctx.Roots);
             var componentAnchors = BuildComponentAnchors(ctx.Roots);
+            var chainedComponents = BuildChainedComponents(ctx.Roots);
             var flagPresence = BuildFlagPresence(ctx.Roots);
             var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
             var handles = BuildHandles(ctx.Roots);
@@ -99,7 +100,7 @@ namespace SceneBuilder.Core.Parsing
                 .Concat(ctx.FacadeConflicts)
                 .ToList();
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities, Usings = usings };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities, Usings = usings, ChainedComponents = chainedComponents };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -173,11 +174,11 @@ namespace SceneBuilder.Core.Parsing
                         throw Unreachable();
                     }
 
-                    ProcessBuilderChain(declarator.Initializer.Value, declarator.Identifier.Text, ctx);
+                    ProcessBuilderChain(declarator.Initializer.Value, declarator.Identifier.Text, ctx, statementLevel: true);
                     break;
 
                 case ExpressionStatementSyntax exprStatement:
-                    ProcessBuilderChain(exprStatement.Expression, null, ctx);
+                    ProcessBuilderChain(exprStatement.Expression, null, ctx, statementLevel: true);
                     break;
 
                 default:
@@ -185,7 +186,12 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
-        private static void ProcessBuilderChain(ExpressionSyntax expression, string? handleName, ParserContext ctx)
+        // b3-t5: `statementLevel` is true only when `expression` IS the statement's whole RHS/
+        // expression (the two ProcessStatement arms above) — never for a same-statement closure
+        // body (ProcessClosure's expression-body arm keeps the default FALSE: that shape has no
+        // statement list of its own, so a component reached through it can never be its own
+        // statement). Feeds the setter-only arm's StatementAnchored marking below.
+        private static void ProcessBuilderChain(ExpressionSyntax expression, string? handleName, ParserContext ctx, bool statementLevel = false)
         {
             var (receiver, calls) = UnwrapChain(expression);
 
@@ -217,6 +223,19 @@ namespace SceneBuilder.Core.Parsing
             if (explicitId != null)
             {
                 node.LogicalId = explicitId;
+            }
+
+            // b3-t5: a lone `handle.Component<T>(...)`/`.FitSize(...)`/`.SurfaceSnap(...)` call
+            // that IS this statement's whole expression is the "own statement" shape
+            // (`crate.Component<T>(...);`) — the ONLY case a RemoveStatement/ReorderStatement
+            // anchored on it may safely resolve against the ENCLOSING statement. Two or more
+            // chained calls on one statement (`crate.Component<A>().Component<B>();`) each still
+            // live partly inside a chain another call also occupies, so none of them qualifies;
+            // they stay StatementAnchored = false (the pinned default) like every other chained
+            // shape.
+            if (statementLevel && calls.Count == 1 && calls[0].Method is "Component" or "FitSize" or "SurfaceSnap")
+            {
+                node.Components[node.Components.Count - 1].StatementAnchored = true;
             }
 
             if (handleName != null)
@@ -753,6 +772,15 @@ namespace SceneBuilder.Core.Parsing
             public SourceSpan AnchorSpan;
             public readonly List<KeyValuePair<string, ValueNode>> Fields = new();
             public readonly List<KeyValuePair<string, SourceSpan>> FieldValueSpans = new();
+
+            // b3-t5: true only for a lone `handle.Component<T>(...)`/`.FitSize(...)`/
+            // `.SurfaceSnap(...)` call that is its OWN statement — set by ProcessBuilderChain's
+            // setter-only arm. DEFAULT FALSE (pinned): every other source shape (chained onto an
+            // `Add`/`Instance` chain, a multi-component chain, an expression-bodied configure
+            // lambda) is treated conservatively as chained, because ONLY the statement-form case
+            // has a source construct a RemoveStatement/ReorderStatement can safely resolve
+            // against its enclosing statement for.
+            public bool StatementAnchored;
         }
 
         private sealed class ParserContext

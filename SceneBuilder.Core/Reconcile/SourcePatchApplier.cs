@@ -187,82 +187,94 @@ namespace SceneBuilder.Core.Reconcile
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var consumed = new HashSet<PatchArgument>();
-            var byAnchor = new Dictionary<string, List<PatchArgument>>();
+            var groups = new List<(string Anchor, ArgumentCall Call, List<PatchArgument> Args)>();
 
             foreach (var edit in patch.Edits.OfType<PatchArgument>())
             {
-                // `name` patches the Add("...") argument, not the transform chain. Anything outside
-                // pos/rot/scale is left to ResolvePatchArgument so it reports the precise failure.
-                if (Array.IndexOf(TransformPositionalArgs, edit.ArgName) < 0)
+                // `name` patches the Add("...") argument, not a chained call. Anything CallFor
+                // doesn't recognize is left to ResolvePatchArgument so it reports the precise failure.
+                var call = CallFor(edit.ArgName);
+                if (call == null)
                 {
                     continue;
                 }
 
-                var statement = FindAnchorInvocation(root, anchors, edit.Anchor).FirstAncestorOrSelf<StatementSyntax>();
-                if (statement == null || FindTransformInvocation(statement) != null)
+                var anchorInvocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+                var chainRoot = AnchorChainRoot(anchorInvocation);
+                if (FindChainCall(chainRoot, call.MethodName) != null)
                 {
                     continue;
                 }
 
-                if (!byAnchor.TryGetValue(edit.Anchor, out var group))
+                var existing = groups.FirstOrDefault(g => g.Anchor == edit.Anchor && g.Call == call);
+                if (existing.Args == null)
                 {
-                    group = new List<PatchArgument>();
-                    byAnchor[edit.Anchor] = group;
+                    existing = (edit.Anchor, call, new List<PatchArgument>());
+                    groups.Add(existing);
                 }
 
-                group.Add(edit);
+                existing.Args.Add(edit);
                 consumed.Add(edit);
             }
 
-            foreach (var (anchor, group) in byAnchor)
+            // One anchor may need BOTH calls introduced in the same sync (e.g. a promoted node with
+            // no `.Transform(...)` either) — folded into a SINGLE applier per anchor, chaining
+            // Transform first then RectTransform, because two independent appliers replacing the
+            // same tracked chain expression would lose tracking and NRE on GetCurrentNode(...).
+            foreach (var anchorGroup in groups.GroupBy(g => g.Anchor))
             {
-                ResolveIntroduceTransformCall(root, anchors, anchor, group, allTargets, appliers);
+                var ordered = anchorGroup
+                    .OrderBy(g => g.Call == TransformCall ? 0 : 1)
+                    .Select(g => (g.Call, g.Args))
+                    .ToList();
+                ResolveIntroduceCalls(root, anchors, anchorGroup.Key, ordered, allTargets, appliers);
             }
 
             return consumed;
         }
 
-        private static void ResolveIntroduceTransformCall(
+        private static void ResolveIntroduceCalls(
             CompilationUnitSyntax root,
             IReadOnlyDictionary<string, SourceSpan> anchors,
             string anchor,
-            List<PatchArgument> args,
+            List<(ArgumentCall Call, List<PatchArgument> Args)> calls,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var invocation = FindAnchorInvocation(root, anchors, anchor);
-            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
-                ?? throw Fail(invocation, $"Anchor '{anchor}' is not inside a statement.");
-
-            var chainExpr = GetChainExpression(statement);
-
-            // Canonical pos/rot/scale order with named arguments, so the emission is indistinguishable
-            // from hand-authored `.Transform(pos: (...), scale: (...))` — including when only the
-            // later args are present, where positional syntax would be wrong.
-            var ordered = TransformPositionalArgs
-                .Select(name => args.FirstOrDefault(a => a.ArgName == name))
-                .Where(a => a != null)
-                .ToList();
+            var chainExpr = AnchorChainRoot(invocation);
 
             allTargets.Add(chainExpr);
             appliers.Add(currentRoot =>
             {
                 var current = currentRoot.GetCurrentNode(chainExpr)!;
+                var trailingTrivia = current.GetTrailingTrivia();
+                ExpressionSyntax chain = current.WithoutTrailingTrivia();
 
-                var argList = SyntaxFactory.ArgumentList(
-                    SyntaxFactory.SeparatedList(ordered.Select(a =>
-                        SyntaxFactory.Argument(SyntaxFactory.ParseExpression(a!.NewExpr))
-                            .WithNameColon(SyntaxFactory.NameColon(SyntaxFactory.IdentifierName(a.ArgName))))));
+                foreach (var (call, args) in calls)
+                {
+                    // Canonical argument order with named arguments, so the emission is
+                    // indistinguishable from a hand-authored call — including when only later args
+                    // are present, where positional syntax would be wrong.
+                    var ordered = call.PositionalArgs
+                        .Select(name => args.FirstOrDefault(a => a.ArgName == name))
+                        .Where(a => a != null)
+                        .ToList();
 
-                var newCall = SyntaxFactory.InvocationExpression(
+                    var argList = SyntaxFactory.ArgumentList(
+                        SyntaxFactory.SeparatedList(ordered.Select(a =>
+                            SyntaxFactory.Argument(SyntaxFactory.ParseExpression(a!.NewExpr))
+                                .WithNameColon(SyntaxFactory.NameColon(SyntaxFactory.IdentifierName(a.ArgName))))));
+
+                    chain = SyntaxFactory.InvocationExpression(
                         SyntaxFactory.MemberAccessExpression(
                             SyntaxKind.SimpleMemberAccessExpression,
-                            current.WithoutTrailingTrivia(),
-                            SyntaxFactory.IdentifierName("Transform")),
-                        argList)
-                    .WithTrailingTrivia(current.GetTrailingTrivia());
+                            chain,
+                            SyntaxFactory.IdentifierName(call.MethodName)),
+                        argList);
+                }
 
-                return currentRoot.ReplaceNode(current, newCall);
+                return currentRoot.ReplaceNode(current, chain.WithTrailingTrivia(trailingTrivia));
             });
         }
 
@@ -288,16 +300,18 @@ namespace SceneBuilder.Core.Reconcile
                 return;
             }
 
-            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
-                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+            var chainRoot = AnchorChainRoot(invocation);
 
-            var transformInvocation = FindTransformInvocation(statement);
-            if (transformInvocation == null)
+            // Fall back to TransformCall so an unrecognized ArgName's failure text is unchanged
+            // (CallFor only returns null for "name", already handled above).
+            var call = CallFor(edit.ArgName) ?? TransformCall;
+            var callInvocation = FindChainCall(chainRoot, call.MethodName);
+            if (callInvocation == null)
             {
-                throw Fail(statement, $"No .Transform(...) call found for anchor '{edit.Anchor}'.");
+                throw Fail(chainRoot, $"No .{call.MethodName}(...) call found for anchor '{edit.Anchor}'.");
             }
 
-            var (existingArg, _) = FindTransformArgument(transformInvocation.ArgumentList, edit.ArgName);
+            var (existingArg, _) = FindTransformArgument(callInvocation.ArgumentList, edit.ArgName, call.PositionalArgs);
             if (existingArg != null)
             {
                 var oldExpr = existingArg.Expression;
@@ -311,30 +325,26 @@ namespace SceneBuilder.Core.Reconcile
             }
             else
             {
-                var argList = transformInvocation.ArgumentList;
+                var argList = callInvocation.ArgumentList;
                 allTargets.Add(argList);
                 appliers.Add(currentRoot =>
                 {
                     var current = currentRoot.GetCurrentNode(argList)!;
-                    var replacement = InsertTransformArgument(current, edit.ArgName, edit.NewExpr);
+                    var replacement = InsertTransformArgument(current, edit.ArgName, edit.NewExpr, call.PositionalArgs);
                     return currentRoot.ReplaceNode(current, replacement);
                 });
             }
         }
 
-        private static InvocationExpressionSyntax? FindTransformInvocation(StatementSyntax statement)
-        {
-            return FindFlagInvocation(statement, "Transform");
-        }
-
-        private static (ArgumentSyntax? Argument, int Index) FindTransformArgument(ArgumentListSyntax argList, string argName)
+        private static (ArgumentSyntax? Argument, int Index) FindTransformArgument(
+            ArgumentListSyntax argList, string argName, string[] positionalArgs)
         {
             for (var i = 0; i < argList.Arguments.Count; i++)
             {
                 var arg = argList.Arguments[i];
                 var name = arg.NameColon != null
                     ? arg.NameColon.Name.Identifier.Text
-                    : (i < TransformPositionalArgs.Length ? TransformPositionalArgs[i] : null);
+                    : (i < positionalArgs.Length ? positionalArgs[i] : null);
 
                 if (name == argName)
                 {
@@ -345,9 +355,10 @@ namespace SceneBuilder.Core.Reconcile
             return (null, -1);
         }
 
-        private static ArgumentListSyntax InsertTransformArgument(ArgumentListSyntax argList, string argName, string newExpr)
+        private static ArgumentListSyntax InsertTransformArgument(
+            ArgumentListSyntax argList, string argName, string newExpr, string[] positionalArgs)
         {
-            var canonicalIndex = Array.IndexOf(TransformPositionalArgs, argName);
+            var canonicalIndex = Array.IndexOf(positionalArgs, argName);
             var newArgument = SyntaxFactory.Argument(
                 SyntaxFactory.NameColon(argName),
                 default,
@@ -359,8 +370,8 @@ namespace SceneBuilder.Core.Reconcile
             {
                 var existingName = arguments[i].NameColon != null
                     ? arguments[i].NameColon!.Name.Identifier.Text
-                    : (i < TransformPositionalArgs.Length ? TransformPositionalArgs[i] : null);
-                var existingCanonical = existingName != null ? Array.IndexOf(TransformPositionalArgs, existingName) : int.MaxValue;
+                    : (i < positionalArgs.Length ? positionalArgs[i] : null);
+                var existingCanonical = existingName != null ? Array.IndexOf(positionalArgs, existingName) : int.MaxValue;
 
                 if (existingCanonical > canonicalIndex)
                 {
@@ -552,6 +563,20 @@ namespace SceneBuilder.Core.Reconcile
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+
+            // b3-t5 guard 2: a component anchored on a call CHAINED inside somebody else's
+            // statement has no representable absolute position of its own — moving the ENCLOSING
+            // statement would silently reorder whichever real scene-graph sibling happens to sit
+            // next to it (research.md M1). No-op rather than throw: a PatchException here would
+            // abort the whole patch over one unrepresentable cosmetic reorder, dropping the user's
+            // real edits along with it. (Guard 1, ComponentReconciler's REORDER-pass gate, is meant
+            // to keep this from ever being reached; this is the structural backstop for a caller
+            // that forgot to thread ChainedComponents.)
+            if (IsChainedNonStatementCall(invocation))
+            {
+                return;
+            }
+
             var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
                 ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
 
@@ -565,7 +590,16 @@ namespace SceneBuilder.Core.Reconcile
 
             appliers.Add(currentRoot =>
             {
-                var currentStatement = currentRoot.GetCurrentNode(statement)!;
+                // b3-t5 (M3): the statement-removal applier can land EARLIER in this same batch
+                // (a parent GameObject removed alongside a closure-authored child that resolves to
+                // the SAME statement, Reconciler.cs's DetectRemovals cascade) — by the time this
+                // applier runs, the tracked statement may already be gone. No-op rather than throw,
+                // for the same reason the chained arm below already null-guards.
+                var currentStatement = currentRoot.GetCurrentNode(statement);
+                if (currentStatement == null)
+                {
+                    return currentRoot;
+                }
 
                 // The receiver is read at APPLY time: a MoveStatement earlier in this same batch may
                 // already have re-pointed this statement at a different parent, and the reorder must
@@ -596,14 +630,60 @@ namespace SceneBuilder.Core.Reconcile
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
+
+            // b3-t5 guard 2: a chained call's anchor is NOT its own statement — deleting the
+            // enclosing statement would remove the node/handle it creates along with every OTHER
+            // chained call on it, and can leave source that no longer compiles (research.md M2).
+            // Splice ONLY this call out of its chain, via the same shape ResolveRemoveFlagCall /
+            // IdCollisionHealer already use for a dead `.Id(...)`/flag call — EXCEPT the one shape
+            // where splicing itself would corrupt the source (see ConfigureLambdaArgumentToRemove's
+            // doc in SourcePatchApplier.AnchorChain.cs), which removes the whole configure-lambda
+            // argument instead.
+            if (IsChainedNonStatementCall(invocation))
+            {
+                if (ConfigureLambdaArgumentToRemove(invocation) is { } lambdaArgument)
+                {
+                    allTargets.Add(lambdaArgument);
+                    appliers.Add(currentRoot =>
+                    {
+                        var current = currentRoot.GetCurrentNode(lambdaArgument);
+                        if (current == null)
+                        {
+                            return currentRoot;
+                        }
+
+                        var argumentList = (ArgumentListSyntax)current.Parent!;
+                        var newArgumentList = argumentList.WithArguments(argumentList.Arguments.Remove(current));
+                        return currentRoot.ReplaceNode(argumentList, newArgumentList);
+                    });
+                    return;
+                }
+
+                allTargets.Add(invocation);
+                appliers.Add(currentRoot =>
+                {
+                    // The owner's own RemoveStatement can land EARLIER in this same batch
+                    // (Reconciler.cs's DetectRemovals cascade emits the owner first, its chained
+                    // components second) — by the time this applier runs, the enclosing statement
+                    // (and this invocation with it) may already be gone.
+                    var current = currentRoot.GetCurrentNode(invocation);
+                    return current == null ? currentRoot : RemoveTrailingInvocation(currentRoot, current);
+                });
+                return;
+            }
+
             var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
                 ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
 
             allTargets.Add(statement);
             appliers.Add(currentRoot =>
             {
-                var current = currentRoot.GetCurrentNode(statement)!;
-                return currentRoot.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;
+                // b3-t5 (M3): the SAME batch can carry a RemoveStatement for a closure-authored
+                // parent AND one for each of its Kind=="Component"/"GameObject" dependents that
+                // resolve to this SAME statement (Reconciler.cs's DetectRemovals cascade) — by the
+                // time a later applier in the batch runs, this statement may already be gone.
+                var current = currentRoot.GetCurrentNode(statement);
+                return current == null ? currentRoot : currentRoot.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;
             });
         }
 
@@ -700,12 +780,11 @@ namespace SceneBuilder.Core.Reconcile
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
-            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
-                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+            var chainRoot = AnchorChainRoot(invocation);
 
             var flagName = FlagName(edit.Flag);
-            var flagInvocation = FindFlagInvocation(statement, flagName)
-                ?? throw Fail(statement, $"No .{flagName}(...) call found for anchor '{edit.Anchor}'.");
+            var flagInvocation = FindChainCall(chainRoot, flagName)
+                ?? throw Fail(chainRoot, $"No .{flagName}(...) call found for anchor '{edit.Anchor}'.");
 
             if (flagInvocation.ArgumentList.Arguments.Count < 1)
             {
@@ -732,10 +811,7 @@ namespace SceneBuilder.Core.Reconcile
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
-            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
-                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
-
-            var chainExpr = GetChainExpression(statement);
+            var chainExpr = AnchorChainRoot(invocation);
             var flagName = FlagName(edit.Flag);
 
             allTargets.Add(chainExpr);
@@ -771,12 +847,11 @@ namespace SceneBuilder.Core.Reconcile
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
-            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
-                ?? throw Fail(invocation, $"Anchor '{edit.Anchor}' is not inside a statement.");
+            var chainRoot = AnchorChainRoot(invocation);
 
             var flagName = FlagName(edit.Flag);
-            var flagInvocation = FindFlagInvocation(statement, flagName)
-                ?? throw Fail(statement, $"No .{flagName}(...) call found for anchor '{edit.Anchor}'.");
+            var flagInvocation = FindChainCall(chainRoot, flagName)
+                ?? throw Fail(chainRoot, $"No .{flagName}(...) call found for anchor '{edit.Anchor}'.");
 
             allTargets.Add(flagInvocation);
             appliers.Add(currentRoot =>
@@ -799,25 +874,6 @@ namespace SceneBuilder.Core.Reconcile
         }
 
         // ---- Flag helpers -----------------------------------------------------------------------
-
-        private static InvocationExpressionSyntax? FindFlagInvocation(StatementSyntax statement, string flagName)
-        {
-            return statement.DescendantNodes()
-                .OfType<InvocationExpressionSyntax>()
-                .FirstOrDefault(inv => inv.Expression is MemberAccessExpressionSyntax member
-                    && member.Name.Identifier.Text == flagName);
-        }
-
-        private static ExpressionSyntax GetChainExpression(StatementSyntax statement)
-        {
-            return statement switch
-            {
-                ExpressionStatementSyntax exprStatement => exprStatement.Expression,
-                LocalDeclarationStatementSyntax localDeclaration
-                    => localDeclaration.Declaration.Variables[0].Initializer!.Value,
-                _ => throw Fail(statement, $"Statement is not a fluent chain expression or declaration."),
-            };
-        }
 
         private static string FlagName(FlagKind flag) => flag switch
         {

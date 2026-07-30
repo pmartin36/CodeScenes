@@ -208,7 +208,8 @@ namespace SceneBuilder.Editor
                 fieldArgumentSpans: fieldArgumentSpans,
                 handles: parse.Handles,
                 facadeCatalog: facadeCatalog,
-                assetCatalog: assetCatalog);
+                assetCatalog: assetCatalog,
+                chainedComponents: parse.ChainedComponents);
 
             // m-nested-props b7-t2: a NestedOverrideBootstrap Conflict (below-root target with no live
             // sub-object) is folded in here — the SAME located-conflict channel the reconcile itself
@@ -435,7 +436,8 @@ namespace SceneBuilder.Editor
                 fieldArgumentSpans: baselineLoaded.FieldArgumentSpans,
                 handles: baselineLoaded.Parse.Handles,
                 facadeCatalog: facadeCatalog,
-                assetCatalog: assetCatalog);
+                assetCatalog: assetCatalog,
+                chainedComponents: baselineLoaded.Parse.ChainedComponents);
 
             var sceneKeys = new HashSet<FieldKey>(
                 sceneReconcile.Patch.Edits
@@ -477,7 +479,8 @@ namespace SceneBuilder.Editor
                 fieldArgumentSpans: newLoaded.FieldArgumentSpans,
                 handles: newLoaded.Parse.Handles,
                 facadeCatalog: facadeCatalog,
-                assetCatalog: assetCatalog);
+                assetCatalog: assetCatalog,
+                chainedComponents: newLoaded.Parse.ChainedComponents);
 
             // Resolves the AUTHORED GameObject name (e.g. "Box") for the located-error message — the
             // LogicalId itself is the resolved HANDLE when the statement declares one (e.g. `var box =

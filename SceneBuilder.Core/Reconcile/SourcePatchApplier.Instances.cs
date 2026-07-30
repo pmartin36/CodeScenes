@@ -11,7 +11,7 @@ namespace SceneBuilder.Core.Reconcile
     // m10-b4-t1: instance-root override-authoring resolvers (AppendInstanceOverride /
     // AppendInstanceAddComponent / AppendInstanceRemoveComponent / DropInstanceCall). Third
     // partial-class file so the existing private helpers on SourcePatchApplier
-    // (FindAnchorInvocation, GetChainExpression, RemoveTrailingInvocation, Fail) are reused
+    // (FindAnchorInvocation, AnchorChainRoot, RemoveTrailingInvocation, Fail) are reused
     // directly — mirrors ComponentPatchApplier.cs's comment on why this is a separate file.
     public static partial class SourcePatchApplier
     {
@@ -132,10 +132,7 @@ namespace SceneBuilder.Core.Reconcile
             List<Func<SyntaxNode, SyntaxNode>> appliers)
         {
             var invocation = FindAnchorInvocation(root, anchors, anchor);
-            var statement = invocation.FirstAncestorOrSelf<StatementSyntax>()
-                ?? throw Fail(invocation, $"Anchor '{anchor}' is not inside a statement.");
-
-            var chainExpr = GetChainExpression(statement);
+            var chainExpr = AnchorChainRoot(invocation);
 
             allTargets.Add(chainExpr);
             appliers.Add(currentRoot =>
@@ -171,7 +168,7 @@ namespace SceneBuilder.Core.Reconcile
         private static string RenderAddChildCall(AppendInstanceAddChild appendAddChild)
         {
             var call = $"AddChild({AddChildParentArg(appendAddChild)}, {SourceExpr.StringLiteral(appendAddChild.Name)}";
-            var closure = RenderAddChildClosure(appendAddChild.Node);
+            var closure = RenderAddChildClosure(appendAddChild);
             return closure is null ? call + ")" : $"{call}, {closure})";
         }
 
@@ -186,21 +183,29 @@ namespace SceneBuilder.Core.Reconcile
 
         // Reuses ComponentPatchApplier's RenderComponentClosureArgs (same partial class) for each
         // component's field-set — one renderer, no reinvented field-value formatting. Null when
-        // there are zero representable components, so the caller keeps the exact 2-arg AddChild
-        // form (PrefabInstanceReconcileTests.cs:712 regression guard).
-        private static string? RenderAddChildClosure(GameObjectNode node)
+        // there is neither a rect payload nor a representable component, so the caller keeps the
+        // exact 2-arg AddChild form (PrefabInstanceReconcileTests.cs:712 regression guard).
+        // m-ui-recttransform b3-t1 (iteration 2): the rect call (when present) renders FIRST,
+        // sharing the same call-list/closure-form machinery a component payload already uses —
+        // §13 one-pass convergence for rect + component on the SAME added child.
+        private static string? RenderAddChildClosure(AppendInstanceAddChild edit)
         {
-            var components = ComponentReconciler.ExcludeTransform(node.Components);
-            if (components.Length == 0)
+            var calls = new List<string>();
+
+            if (edit.RectTransform is { } rect)
+            {
+                calls.Add("cfg." + RenderRectTransformCall(rect));
+            }
+
+            var components = ComponentReconciler.ExcludeTransform(edit.Node.Components);
+            calls.AddRange(components.Select(c => $"cfg.Component<{c.Type.FullName}>{RenderComponentClosureArgs(c.Fields, null)}"));
+
+            if (calls.Count == 0)
             {
                 return null;
             }
 
-            var calls = components
-                .Select(c => $"cfg.Component<{c.Type.FullName}>{RenderComponentClosureArgs(c.Fields, null)}")
-                .ToArray();
-
-            return calls.Length == 1
+            return calls.Count == 1
                 ? $"cfg => {calls[0]}"
                 : $"cfg => {{ {string.Join(" ", calls.Select(c => c + ";"))} }}";
         }
