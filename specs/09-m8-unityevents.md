@@ -13,10 +13,40 @@
 >   never matches `nameof`. So M8's job is to build the authoring + Core round-trip surface that makes
 >   these diagnostics bind and fire. The out-of-scope line "signature validation deferred to a later
 >   analyzer" is now backwards and void: the analyzer waits on M8, not the reverse.
-> - **Still genuinely OPEN / unbuilt:** the target model itself, a *capturable component handle*. Today
->   `Component<T>(...)` returns a fluent `NodeHandle`, not a handle carrying a component `LogicalId`
->   (`com.codescenes/Runtime/NodeHandle.cs`); M8 must add that. The Core round-trip
->   (`ValueNode.UnityEventListeners`, `SetUnityEvent`, adapter read/write) is unbuilt, as specified below.
+> - **Target model RESOLVED 2026-07-30 (was "still open").** Grounded in shipped code it is one new
+>   authoring type plus a resolution change, NOT a model change:
+>   - `ComponentHandle<T>` already exists (`com.codescenes/Runtime/ComponentHandle.cs:14`) as the
+>     configuration handle passed INTO `Component<T>(c => ...)`.
+>   - `ObjectRef(string? TargetLogicalId)` (`SceneBuilder.Core/Model/ValueNode.cs:130`) is already just a
+>     LogicalId string with nothing restricting it to GameObjects, and the IdentityMap already carries
+>     `Kind=="Component"` entries.
+>
+>   Add `ComponentRef<T>`, captured off a node via `NodeHandle.Ref<T>(int ordinal = 0)`:
+>   ```csharp
+>   var opener = scene.Add("Door").Component<DoorOpener>(_ => { }).Ref<DoorOpener>();
+>   scene.Add("QuitButton").Component<Button>(b => b.OnClick(opener, o => o.Open()));
+>   ```
+>   `Ref<T>()` needs its own name because `Component<T>()` is taken (`NodeHandle.cs:87`) and returns
+>   `NodeHandle`; C# cannot overload on return type. The ordinal maps onto the existing component
+>   LogicalId scheme (Type.FullName + ordinal-within-type), so two components of one type on one
+>   GameObject stay addressable — the reason the explicit-handle decision was banked over inferring the
+>   component from the lambda's receiver type. `ComponentRef<T>` is reference-only, deliberately distinct
+>   from `ComponentHandle<T>`, so the compiler rejects configuring a component from outside its lambda.
+>
+>   Still open for the build to settle: the dynamic form. `h => h.SetValue` is a method GROUP, not an
+>   `Action<T>`, so check what the shipped `TryFindMethodLambdaArg` does with a method group before
+>   fixing the parameter type.
+> - **Still unbuilt:** the Core round-trip (`ValueNode.UnityEventListeners`, `SetUnityEvent`, adapter
+>   read/write) as specified below.
+>
+> ### DECOMPOSITION CONSTRAINT (learned from M-UI, 2026-07-30 — do not ignore)
+> **Component-target resolution is this milestone's cross-cutting invariant.** "A listener target is a
+> component `LogicalId`, not a GameObject `LogicalId`" must hold in authoring, parse, the model, the
+> differ, materialize, adapter read, adapter write, and reconcile. Give it **ONE owning task with ONE
+> shared implementation that every other task calls.** Do NOT restate it as per-task guidance.
+> M-UI stated its equivalent invariant (X/Y belongs to `anchoredPosition`) as guidance across six tasks;
+> the seam pass then kept finding the task that forgot, re-opened committed buckets, and the milestone
+> ran ~22 hours and ~13M tokens. That is the specific failure this constraint exists to prevent.
 > - **Reuse, do not reinvent:** the `.OnEvent(x => x.onValueChanged, …)` event-field selector is the same
 >   member-chain-from-source parser shipped for façade selectors and `.Set(x => x.field)`. Asset targets
 >   and object-mode asset arguments ride the shipped typed asset catalog (spec 28, emit-typed-by-default
