@@ -110,6 +110,32 @@ A field a user cannot set is not author intent and must not reach builder source
 - TMP — not installed in the test project.
 - Proving the dual sorting-layer emission (needs a second sorting layer in `TagManager.asset`).
 
+## DECOMPOSITION CONSTRAINT (learned from M-UI — do not ignore)
+
+These six classes are not six independent bugs. They collapse onto **two shared mechanisms**, and each
+mechanism gets **ONE owning task with ONE shared implementation that every other task calls.** Do NOT
+restate either as per-task guidance.
+
+**Owner 1 — the per-type default template.** `GetDefaultFieldMap` is used in two places today and is
+wrong in both roles. C2 and C3 are the same object seen twice: C3 is the template being built from the
+wrong construction path, C2 is that template being used as a *read* filter when it should only inform
+the *emit* side. One task owns the template: build it the way the editor does, expose it to
+`PlanExecutor` creation and to emit-side omission, and remove it from the read path. C2 and C3 are then
+consequences, not separate fixes.
+
+**Owner 2 — the value representation contract.** C1 and C4 are both read and emit disagreeing about
+what a value *is*. Today `ReadEnum`, `WriteEnum` and the source emitter each decide independently, so a
+native enum reads as `Int`, writes by display-string match, and emits text that binds to the wrong
+overload. One task owns the round trip for a serialized property: what `ValueNode` it becomes, what
+source text that emits, and what parsing that text yields — with the invariant that **read → model →
+emit → parse → write returns the original value and compiles.** C1 and C4 are then instances.
+
+C5 (type resolution) and C6 (the visibility rule) are genuinely independent and can be their own tasks.
+
+M-UI stated its invariant as guidance across six tasks; the seam pass kept finding the one that forgot,
+re-opened committed buckets, and the milestone ran ~22 hours and ~13M tokens. That is what this
+constraint exists to prevent.
+
 ## Suggested order
 C2 and C4 first (divergent scene, broken builder file), then C1 and C3 (both Canvas-facing and
 entangled through the default template), then C5 and C6.
