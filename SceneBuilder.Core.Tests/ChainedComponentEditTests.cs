@@ -230,7 +230,7 @@ public class StatementFormScene : ISceneDefinition
 
         // ---- (2) Apply-side: RemoveStatement/ReorderStatement anchored on a chained call ----
 
-        // research.md M2's exact fixture: QuitButton chains .Component<Image>(...) onto its own
+        // Fixture: QuitButton chains .Component<Image>(...) onto its own
         // creation statement; CanvasRenderer is a separate statement-form component; a second
         // child "Other" follows QuitButton under Panel.
         private const string ChainedRemoveFixture = @"
@@ -381,15 +381,13 @@ public class TwoChainedComponentsScene : ISceneDefinition
             Assert.Contains("panel.Add(\"Other\");", result);
         }
 
-        // m-ui-recttransform b3-t5 (iteration 4, routed from validator.md iteration 3's BLOCKING
-        // finding): the THIRD shape IsChainedNonStatementCall's own doc comment enumerates
-        // (expression-bodied configure lambda) was previously misclassified as "own statement"
-        // because its receiver is a bare identifier just like `crate.Component<T>(...);` — the
-        // parse-side predicate (StatementAnchored) already got this right (see
-        // Parse_ChainedComponentCall_IsChained_StatementFormIsNot's meshFilterId assertion); this
-        // pins the apply-side copy to agree, on the exact shape the product itself emits
-        // (SourcePatchApplier.Instances.cs:198-200's `cfg => cfg.Component<T>(...)` for a
-        // one-component prefab child).
+        // m-ui-recttransform b3-t5: the THIRD shape IsChainedNonStatementCall's own doc comment
+        // enumerates (expression-bodied configure lambda), whose receiver is a bare identifier
+        // just like `crate.Component<T>(...);` — the parse-side predicate (StatementAnchored)
+        // and the apply-side copy agree on this shape (see
+        // Parse_ChainedComponentCall_IsChained_StatementFormIsNot's meshFilterId assertion), the
+        // exact shape the product itself emits (SourcePatchApplier.Instances.cs:198-200's
+        // `cfg => cfg.Component<T>(...)` for a one-component prefab child).
         private const string ChainedLambdaRemoveFixture = @"
 public class ChainedLambdaRemoveScene : ISceneDefinition
 {
@@ -417,8 +415,7 @@ public class ChainedLambdaRemoveScene : ISceneDefinition
 
             var result = SourcePatchApplier.Apply(source, patch, anchors);
 
-            // Pre-fix, the whole `scene.Add("X", x => ...);` statement was deleted, taking node
-            // "X" with it. The node's declaration must survive; only the component call is removed.
+            // Node "X"'s declaration must survive; only the component call is removed.
             var reparsed = BuilderParser.Parse(result);
             var nodeX = FindNode(reparsed.Model.Roots, "X");
             Assert.NotNull(nodeX);
@@ -426,14 +423,9 @@ public class ChainedLambdaRemoveScene : ISceneDefinition
             Assert.Contains("scene.Add(\"Other\");", result);
         }
 
-        // m-ui-recttransform b3-t5 (iteration 5, routed from validator.md iteration 4's BLOCKING
-        // finding): iteration 4's fix for the single-call expression-lambda shape above
-        // (Apply_RemoveChainedExpressionLambdaComponentCall_KeepsTheNodeStatement) removes the
-        // WHOLE lambda argument whenever the anchored call is a SimpleLambdaExpressionSyntax
-        // expression body, without checking that the anchor is the body's ONLY call. When the
-        // lambda body is itself a chain and the anchor is its outermost link, everything else in
-        // that chain must survive — a sibling Component call (this fixture) or, per the next test,
-        // a whole child GameObject.
+        // m-ui-recttransform b3-t5: when the lambda body is itself a chain and the anchor is its
+        // outermost link, only that link is spliced — a sibling Component call (this fixture) or,
+        // per the next test, a whole child GameObject survives.
         private const string MultiCallExpressionLambdaFixture = @"
 public class MultiLambdaScene : ISceneDefinition
 {
@@ -461,8 +453,7 @@ public class MultiLambdaScene : ISceneDefinition
 
             var result = SourcePatchApplier.Apply(source, patch, anchors);
 
-            // Pre-fix, the whole `scene.Add("X", x => ...);` statement was deleted, taking the
-            // MeshFilter the user never touched with it. Only the BoxCollider link may go.
+            // Only the BoxCollider link goes; the MeshFilter the user never touched survives.
             var expected = source.Replace(
                 "        scene.Add(\"X\", x => x.Component<UnityEngine.MeshFilter>().Component<UnityEngine.BoxCollider>());\n",
                 "        scene.Add(\"X\", x => x.Component<UnityEngine.MeshFilter>());\n");
@@ -506,8 +497,7 @@ public class AddChainScene : ISceneDefinition
 
             var result = SourcePatchApplier.Apply(source, patch, anchors);
 
-            // Pre-fix, the whole `scene.Add("P", p => ...);` statement was deleted, taking the
-            // child GameObject "L" the user's `p.Add("L")` created with it.
+            // The child GameObject "L" the user's `p.Add("L")` created must survive.
             var expected = source.Replace(
                 "        scene.Add(\"P\", p => p.Add(\"L\").Component<UnityEngine.MeshFilter>());\n",
                 "        scene.Add(\"P\", p => p.Add(\"L\"));\n");
@@ -555,7 +545,7 @@ public class AddChainScene : ISceneDefinition
         // ---- (3) Apply-side, M2: a closure-authored CHILD NODE (not just a component) chained on
         // the configure lambda's bottom link ----
 
-        // research.md M2's F2 fixture: Btn is authored as the SOLE link of Panel's configure
+        // Fixture: Btn is authored as the SOLE link of Panel's configure
         // closure. Deleting Btn (a GameObject RemoveStatement, not a component one) must collapse
         // the whole configure argument to Panel's bare creation call — never destroy Panel's own
         // statement, which is what an enclosing-statement resolution would do.
@@ -585,9 +575,8 @@ public class ClosureAuthoredChildScene : ISceneDefinition
 
             var result = SourcePatchApplier.Apply(source, patch, anchors);
 
-            // Pre-fix, `IsChainedNonStatementCall` returned false for a node-creating call chained
-            // at statement level, so this resolved against the ENCLOSING statement and deleted the
-            // whole `scene.Add("Panel", ...);` line, taking "Other" untouched but Panel gone.
+            // Deleting Btn collapses Panel's configure argument to its bare creation call; Panel's
+            // own statement and "Other" are untouched.
             var expected = source.Replace(
                 "        scene.Add(\"Panel\", p => p.Add(\"Btn\"));\n",
                 "        scene.Add(\"Panel\");\n");
@@ -610,7 +599,7 @@ public class ClosureChildWithComponentScene : ISceneDefinition
 }
 ";
 
-        // research.md M2's F2' cascade: removing the closure-authored child NODE and its own
+        // Cascade: removing the closure-authored child NODE and its own
         // cascaded component in the SAME batch (Reconciler's real DetectRemovals cascade) must
         // converge to the bare parent creation call regardless of which edit is emitted first.
         [Theory]
@@ -654,10 +643,10 @@ public class ClosureAuthoredParentChildScene : ISceneDefinition
 }
 ";
 
-        // research.md M3a: the SAME batch carries a RemoveStatement for the closure-authored PARENT
+        // The SAME batch carries a RemoveStatement for the closure-authored PARENT
         // (resolved via the statement arm) and one for its closure-authored CHILD (resolved via the
-        // lambda-argument-removal branch) — both landing on the SAME physical statement. Pre-fix
-        // this threw NullReferenceException out of Apply, aborting every other edit in the sync.
+        // lambda-argument-removal branch) — both landing on the SAME physical statement.
+        // Apply must not throw: a throw here aborts every other edit in the same sync.
         [Fact]
         public void Apply_RemoveClosureAuthoredParentAndChild_DoesNotThrow()
         {
@@ -699,7 +688,7 @@ public class BlockClosureParentTwoChildrenScene : ISceneDefinition
 }
 ";
 
-        // research.md M3b: block-closure form of the same cascade — the parent's own statement AND
+        // Block-closure form of the same cascade: the parent's own statement AND
         // both of its block-scoped children's own (nested) statements are removed in one batch.
         [Fact]
         public void Apply_RemoveBlockClosureParentAndChildren_DoesNotThrow()
@@ -753,7 +742,7 @@ public class BlockClosureParentTwoChildrenScene : ISceneDefinition
             Assert.Contains("scene.Add(\"Other\");", result);
         }
 
-        // research.md M2 reorder (O1): a ReorderStatement anchored on a closure-authored child has
+        // A ReorderStatement anchored on a closure-authored child has
         // no representable absolute position of its own — applying it must be a pure no-op, never a
         // reorder of the ENCLOSING statement among the roots (which would silently move "Other").
         [Fact]
@@ -844,8 +833,7 @@ public class BlockClosureParentTwoChildrenScene : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(source, recon1.Patch, anchors);
 
-            // Pre-fix, the whole Panel statement (and Other, via a root-order corruption) could be
-            // lost here; the fix must leave exactly Panel (bare) and Other.
+            // Exactly Panel (bare) and Other survive.
             Assert.Contains("scene.Add(\"Panel\");", patched);
             Assert.Contains("scene.Add(\"Other\");", patched);
 
@@ -915,8 +903,7 @@ public class BlockClosureParentTwoChildrenScene : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(source, recon1.Patch, anchors);
 
-            // Pre-fix, the whole `scene.Add("X", x => ...);` statement (and the MeshFilter the user
-            // never touched) was deleted here.
+            // The MeshFilter the user never touched survives.
             Assert.Contains("scene.Add(\"X\", x => x.Component<UnityEngine.MeshFilter>());", patched);
             Assert.Contains("scene.Add(\"Other\");", patched);
 
@@ -938,9 +925,8 @@ public class BlockClosureParentTwoChildrenScene : ISceneDefinition
         [Fact]
         public void Apply_ReorderChainedComponent_LeavesSourceUnchanged()
         {
-            // research.md M1's exact corruption fixture: applying the two ReorderStatements
-            // Reconcile would (pre-guard-1) emit for this owner directly against the applier
-            // (guard 2, the forgotten-wiring case) must be a no-op — never a reorder that also
+            // Corruption fixture: applying the two ReorderStatements Reconcile would emit for this
+            // owner directly against the applier is a no-op — never a reorder that also
             // silently moves "Other" out from under Panel.
             var source = ChainedRemoveFixture;
             var parsed = BuilderParser.Parse(source);

@@ -180,7 +180,16 @@ namespace SceneBuilder.Core.Reconcile
                     // `.RectTransform(...)` call) — the ONE such split (SplitCreatedPayload), also
                     // used by the instance-AddChild create path (ReconcilerInstances.Nested.cs).
                     var authoringDefaults = new TransformData();
-                    var (transformPayload, rectTransformPayload) = SplitCreatedPayload(node.Transform);
+                    // m-ui-recttransform b4-t1 (iteration 2): a plain `.Add(...)` is NodeHandle-hosted
+                    // (canHostRectTransformCall: true makes the baseline unreachable) — state
+                    // `prefabBaseline: null` rather than omit it.
+                    var (transformPayload, rectTransformPayload) = SplitCreatedPayload(
+                        node.Transform,
+                        canHostRectTransformCall: true,
+                        prefabBaseline: null,
+                        newLogicalId,
+                        node.GlobalObjectId,
+                        conflicts);
 
                     edits.Add(new AppendStatement
                     {

@@ -7,18 +7,17 @@ namespace SceneBuilder.Core.Reconcile
     // ANCHORED NODE'S OWN fluent chain, never its enclosing STATEMENT. A statement can carry more
     // than one node's calls via the `Add(string, Action<NodeHandle>)` configure-closure form
     // (NodeHandle.Add — com.codescenes/Runtime/NodeHandle.cs; parsed by BuilderParser.cs:344-359),
-    // so the previous statement-scoped lookup (FindFlagInvocation/GetChainExpression) silently
-    // rewrote a child's call when patching the parent, or vice versa. These two helpers replace
-    // that pair with a spine-only walk that never crosses a lambda-body / argument-list boundary.
+    // so resolution is scoped to the anchor's own chain: these two helpers are a spine-only walk
+    // that never crosses a lambda-body / argument-list boundary.
     public static partial class SourcePatchApplier
     {
         // The outermost expression that is still THIS anchor's fluent chain. Ascends only through
         // `receiver.Name(...)` links whose RECEIVER is the node we came from, so it stops at a lambda
         // body / argument boundary — the point where the enclosing statement starts describing a
         // DIFFERENT node.
-        //   `var p = scene.Add("P").Transform(...);`   anchor scene.Add("P")  -> the whole chain (as before)
-        //   `scene.Add("P", p => p.Add("L"));`          anchor p.Add("L")      -> `p.Add("L")`   (was: the outer chain)
-        //   `scene.Add("P", p => p.Add("L"));`          anchor scene.Add("P",…)-> the outer chain (unchanged)
+        //   `var p = scene.Add("P").Transform(...);`   anchor scene.Add("P")  -> the whole chain
+        //   `scene.Add("P", p => p.Add("L"));`          anchor p.Add("L")      -> `p.Add("L")`
+        //   `scene.Add("P", p => p.Add("L"));`          anchor scene.Add("P",…)-> the outer chain
         private static ExpressionSyntax AnchorChainRoot(InvocationExpressionSyntax anchorInvocation)
         {
             ExpressionSyntax chain = anchorInvocation;
@@ -34,8 +33,7 @@ namespace SceneBuilder.Core.Reconcile
 
         // Spine-only lookup: walks Invocation -> MemberAccess -> receiver down the chain and never
         // enters an argument list, so a `.RectTransform(...)` inside a configure closure can never be
-        // mistaken for the anchored node's own call. Replaces FindFlagInvocation's DescendantNodes()
-        // search.
+        // mistaken for the anchored node's own call.
         private static InvocationExpressionSyntax? FindChainCall(ExpressionSyntax chainRoot, string methodName)
         {
             var expr = chainRoot;
@@ -52,18 +50,17 @@ namespace SceneBuilder.Core.Reconcile
             return null;
         }
 
-        // m-ui-recttransform b3-t5 (iteration 3): whether `anchorInvocation` is a call CHAINED
+        // m-ui-recttransform b3-t5: whether `anchorInvocation` is a call CHAINED
         // inside somebody ELSE's statement — a component/spatial call on an `Add`/`Instance` chain,
         // a multi-link chain, or an expression-bodied configure lambda — rather than its own
         // statement. A RemoveStatement/ReorderStatement anchored on a TRUE result must never resolve
         // against `FirstAncestorOrSelf<StatementSyntax>()` — that statement belongs to a DIFFERENT
-        // node/handle and destroying or moving it corrupts the scene graph (research.md M1/M2).
+        // node/handle and destroying or moving it corrupts the scene graph.
         // Purely syntactic — needs no parse-time data, so this guard cannot be bypassed by a caller
         // forgetting to thread ParseResult.ChainedComponents.
         //
-        // ONE predicate over the anchor's OWN CHAIN ROOT (previously this tested statement-levelness
-        // of the ANCHOR itself, which is only equivalent to testing the chain root when the anchor
-        // IS the outermost link — the bug behind a whole family of node-anchor corruptions):
+        // ONE predicate over the anchor's OWN CHAIN ROOT (not over the anchor itself: the two
+        // coincide only when the anchor IS the outermost link):
         //   (a) the chain root is not a statement's own expression -> the anchor lives inside
         //       somebody else's statement (a configure-lambda body / an argument) -> CHAINED;
         //   (b) another call sits BELOW the anchor on the same statement spine (its own receiver is
@@ -97,8 +94,8 @@ namespace SceneBuilder.Core.Reconcile
         // node (its payload or its descendants), never the call's own receiver. The SAME two names
         // the parser dispatches on (BuilderParser.cs) and StatementPlacement.cs spells.
         // `InstanceHandle.AddChild` is DELIBERATELY EXCLUDED: measured, the parser attributes calls
-        // chained after an `AddChild` to the INSTANCE, not the child, so splicing (today's behavior
-        // for that shape) is correct there — do not "complete" this set with it.
+        // chained after an `AddChild` to the INSTANCE, not the child, so splicing that shape is
+        // correct — do not "complete" this set with it.
         private static bool IsNodeCreatingCall(InvocationExpressionSyntax call) =>
             call.Expression is MemberAccessExpressionSyntax ma && ma.Name.Identifier.Text is "Add" or "Instance";
 

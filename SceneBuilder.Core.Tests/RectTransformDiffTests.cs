@@ -92,18 +92,83 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
-        public void Diff_RectNode_DrivenBaseTransformChannels_StillEmitsAuthoredTransform()
+        public void Diff_RectNode_AuthoredIntentDrivenBaseChannels_StillEmitsAuthoredTransform()
         {
-            // Guard (spec 23, pre-existing): base-transform driven bits (Scale/PositionX/Y) are NOT
-            // consumed by the Differ — a rect node with a scale drift still emits the full authored
-            // scale even when flagged driven on those base channels.
+            // Guard, RESTATED (scope/bucket-b2.md finding 2 corrected the rule stated in the old name/
+            // comment here — base-transform driven bits ARE now consumed by the Differ, per-axis, but
+            // ONLY when they are foreign to the model's own authored intent). A base-transform driven
+            // bit reported on the MODEL side too (authored FitSize/SurfaceSnap intent — spec 23) still
+            // emits the full authored value: the component re-drives from that write, because the
+            // adapter re-baselines FitSize/SurfaceSnap on it (PlanExecutor.cs:393-405).
             var driven = ChannelMask.Scale | ChannelMask.PositionX | ChannelMask.PositionY;
-            var model = Rect(scale: new Vec3(2, 2, 2), driven: driven);
-            var snapshot = Rect(scale: new Vec3(5, 5, 5), driven: driven);
+            var authoredModel = Rect(scale: new Vec3(2, 2, 2), driven: driven);
+            var authoredSnapshot = Rect(scale: new Vec3(5, 5, 5), driven: driven);
+
+            var authoredChangeSet = DiffSingleMatchedNode(authoredModel, authoredSnapshot);
+
+            var setTransform = Assert.Single(authoredChangeSet.Ops.OfType<SetTransform>());
+            Assert.Equal(new Vec3(2, 2, 2), setTransform.Transform.Scale);
+
+            // Counterpart, SAME values: the driven bits reported by the SNAPSHOT ALONE (a driver the
+            // builder does not author, e.g. Canvas/CanvasScaler — the plugin cannot re-baseline it) are
+            // held to the live value instead, and emit NOTHING. The pair is the whole rule in one screen.
+            var foreignModel = Rect(scale: new Vec3(2, 2, 2));
+            var foreignSnapshot = Rect(scale: new Vec3(5, 5, 5), driven: driven);
+
+            var foreignChangeSet = DiffSingleMatchedNode(foreignModel, foreignSnapshot);
+
+            Assert.Empty(foreignChangeSet.Ops);
+        }
+
+        [Fact]
+        public void Diff_RectNode_ForeignDrivenBaseChannels_UnchangedModel_ProducesNoOp()
+        {
+            // scope/bucket-b2.md finding 2 (measured probe Q1): a ScreenSpaceOverlay Canvas whose
+            // scale factor is not 1 drives its OWN base Position AND Scale (CanvasScaler) — a driver
+            // the builder never authors (model.DrivenChannels == None). An otherwise-unchanged model
+            // must therefore hold BOTH axes to the live value and emit nothing. Today the Differ
+            // compares the raw live Scale and emits `SetTransform scale=(1,1,1)`, clobbering the
+            // driven scale on every Build.
+            var model = Rect();
+            var snapshot = Rect(
+                position: new Vec3(480, 270, 0),
+                scale: new Vec3(2, 2, 2),
+                sizeDelta: new Vec2(960, 540),
+                driven: ChannelMask.AllRectFields | ChannelMask.PositionX | ChannelMask.PositionY | ChannelMask.PositionZ | ChannelMask.Scale);
+
+            var changeSet = DiffSingleMatchedNode(model, snapshot);
+
+            Assert.Empty(changeSet.Ops);
+        }
+
+        [Fact]
+        public void Diff_RectNode_ForeignDrivenScaleAxis_FreeAxisChanged_HoldsLiveDrivenAxis()
+        {
+            // Probe Q4: the per-axis archetype. Only ScaleX is foreign-driven; ScaleY/Z are free and
+            // genuinely changed. The emitted transform must hold the driven X axis to the LIVE value
+            // (5) and carry the model's free Y/Z (2, 2) — never the raw model value on X (today: 2).
+            var model = Rect(scale: new Vec3(2, 2, 2));
+            var snapshot = Rect(scale: new Vec3(5, 1, 1), driven: ChannelMask.ScaleX);
 
             var changeSet = DiffSingleMatchedNode(model, snapshot);
 
             var setTransform = Assert.Single(changeSet.Ops.OfType<SetTransform>());
+            Assert.Equal(new Vec3(5, 2, 2), setTransform.Transform.Scale);
+        }
+
+        [Fact]
+        public void Diff_RectNode_ForeignDrivenScale_ZDrift_EmitsSetTransformKeepingLiveScale()
+        {
+            // Probe Q6: a genuine Z drift still emits (D8's z-drift path), and the payload must carry
+            // the LIVE driven scale (2,2,2), not the model's own default (1,1,1) — a SetTransform
+            // triggered by an unrelated axis must not clobber a foreign-driven Scale in the same op.
+            var model = Rect(position: new Vec3(0, 0, 5));
+            var snapshot = Rect(position: new Vec3(7, 9, 0), scale: new Vec3(2, 2, 2), driven: ChannelMask.Scale);
+
+            var changeSet = DiffSingleMatchedNode(model, snapshot);
+
+            var setTransform = Assert.Single(changeSet.Ops.OfType<SetTransform>());
+            Assert.Equal(new Vec3(7, 9, 5), setTransform.Transform.Position);
             Assert.Equal(new Vec3(2, 2, 2), setTransform.Transform.Scale);
         }
 
@@ -121,6 +186,38 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(ChannelMask.None, rectOp.Changed);
             Assert.False(rectOp.Transform.IsRectTransform);
             Assert.Empty(changeSet.Ops.OfType<SetTransform>());
+        }
+
+        [Fact]
+        public void Diff_MatchedRectModel_PlainSnapshot_AllValuesAtDefault_EmitsAllRectFields()
+        {
+            // b2-t1 iteration 2 (scope/bucket-b2.md finding 2): a matched node whose model authors a
+            // bare `.RectTransform()` (every field at RectTransformFields.Default*) against a live
+            // PLAIN Transform must still promote — value-equality with the default table does NOT
+            // mean the live object is already correct, since it has no rect fields at all.
+            var model = Rect();
+            var snapshot = new TransformData { Kind = "Transform", Position = Vec3.Zero };
+
+            var changeSet = DiffSingleMatchedNode(model, snapshot);
+
+            var rectOp = Assert.Single(changeSet.Ops.OfType<SetRectTransform>());
+            Assert.Equal(ChannelMask.AllRectFields, rectOp.Changed);
+            Assert.True(rectOp.Transform.IsRectTransform);
+            Assert.Empty(changeSet.Ops.OfType<SetTransform>());
+        }
+
+        [Fact]
+        public void Diff_MatchedRectModel_PlainSnapshot_NonDefaultValue_StillEmitsAllRectFields()
+        {
+            // A kind change asserts the WHOLE rect state, never just the differing field — the
+            // adapter's promotion writes all five fields in one pass regardless of which one moved.
+            var model = Rect(sizeDelta: new Vec2(200, 120));
+            var snapshot = new TransformData { Kind = "Transform", Position = Vec3.Zero };
+
+            var changeSet = DiffSingleMatchedNode(model, snapshot);
+
+            var rectOp = Assert.Single(changeSet.Ops.OfType<SetRectTransform>());
+            Assert.Equal(ChannelMask.AllRectFields, rectOp.Changed);
         }
 
         [Fact]

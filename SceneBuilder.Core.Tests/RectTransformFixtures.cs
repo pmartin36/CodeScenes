@@ -7,10 +7,9 @@ using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Core.Tests
 {
-    // b2-t2/R4: hoisted from RectTransformDiffTests.cs (b2-t1) so the diff, materialize and
-    // (future) reconcile tests share one source of the rect TransformData/model/snapshot/map
-    // fixtures. Assertions in RectTransformDiffTests.cs / RectTransformMaterializeTests.cs are
-    // UNCHANGED by this hoist.
+    // b2-t2: the shared rect TransformData / model / snapshot / IdentityMap fixtures for the Core
+    // RectTransform diff, materialize and reconcile tests - one source, so no rect test re-declares
+    // the trio.
     internal static class RectTransformFixtures
     {
         // The model/snapshot/map trio every rect Core test drives Differ/Materializer with.

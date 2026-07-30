@@ -8,8 +8,7 @@ namespace SceneBuilder.Core.Tests
 {
     // b2-t2: lowering SetRectTransform to the five constrained SetField paths, the D6 promotion
     // skip, D8's transform-write x/y hold-back proven end-to-end through Materialize, and
-    // CreateObject.TransformKind. Fixtures via RectTransformFixtures (hoisted from b2-t1; the
-    // model/snapshot/map trio hoisted in the b2-t2 re-run, R4 close-out).
+    // CreateObject.TransformKind. Model/snapshot/map fixtures come from RectTransformFixtures.
     public class RectTransformMaterializeTests
     {
         [Fact]
@@ -59,6 +58,22 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void Materialize_MatchedRectModel_PlainSnapshot_LowersToAllFiveRectFieldPaths()
+        {
+            // b2-t1 iteration 2: the forward-promotion op (model rect / live plain, even at
+            // all-default values) must lower to all five constrained rect SetFields, mirroring
+            // Materialize_SetRectTransform_LowersToConstrainedRectFieldPaths above.
+            var model = RectTransformFixtures.Rect();
+            var snapshot = new TransformData { Kind = "Transform", Position = Vec3.Zero };
+
+            var plan = MaterializeMatchedNode(model, snapshot);
+
+            var rectPaths = plan.Ops.OfType<SetField>().Select(op => op.Path).ToHashSet();
+            var expected = RectTransformFields.All.Select(f => f.SerializedPath).ToHashSet();
+            Assert.Equal(expected, rectPaths);
+        }
+
+        [Fact]
         public void Materialize_PromotionSetRectTransform_LowersToZeroOps()
         {
             // D6: model side is Kind=="Transform" (never authored as UI); snapshot is a live
@@ -92,12 +107,11 @@ namespace SceneBuilder.Core.Tests
             var create = Assert.Single(plan.Ops.OfType<CreateObject>());
             Assert.Equal(RectTransformFields.Kind, create.TransformKind);
 
-            // A bare `.RectTransform()` at all five defaults still carries the kind, and (F1) now
-            // lowers to the five rect SetFields exactly once each: EmitCreate always owns all five
-            // fields on create, since the prior m_LocalPosition write re-derives anchoredPosition
-            // from the parent's rect even when every field equals its default (see
-            // RectTransformDiffTests). CreateObject still carries TransformKind — the adapter never
-            // infers UI-ness from a SetField path.
+            // A bare `.RectTransform()` at all five defaults still carries the kind and lowers to the
+            // five rect SetFields exactly once each: EmitCreate owns all five fields on create, since
+            // the prior m_LocalPosition write re-derives anchoredPosition from the parent's rect even
+            // when every field equals its default (see RectTransformDiffTests). CreateObject carries
+            // TransformKind - the adapter never infers UI-ness from a SetField path.
             var bareModel = RectTransformFixtures.Rect();
             var barePlan = MaterializeCreatedNode(bareModel);
             var bareCreate = Assert.Single(barePlan.Ops.OfType<CreateObject>());

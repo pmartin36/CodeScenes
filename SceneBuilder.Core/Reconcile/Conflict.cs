@@ -24,7 +24,14 @@ namespace SceneBuilder.Core.Reconcile
         // b7-t2: a below-root override/added-component/removed-component/removed-child Target (or
         // AddedGameObject.Parent) whose ChildPath resolves to NO live sub-object under a LIVE prefab
         // instance root (see NestedOverrideBootstrap). Never a silent drop.
-        UnresolvedNestedSelector
+        UnresolvedNestedSelector,
+
+        // m-ui-recttransform b4-t1: a matched node's RectTransform layout differs but the node's
+        // authoring construct cannot host a `.RectTransform(...)` call (a PrefabInstanceNode root --
+        // InstanceHandle has no such member, see InstanceHandle.cs). Emitting the edit would produce
+        // source that does not compile, so it is surfaced as a located Conflict instead and NO edit
+        // is emitted.
+        UnlocalizableRectTransform
     }
 
     public sealed record Conflict

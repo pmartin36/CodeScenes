@@ -16,7 +16,7 @@ using SceneBuilder.Editor;
 // contract) against live RectTransforms. Covers Unity confirmation checklist items 3 (drag), 4
 // (resize), 5 (anchor/pivot change), 8 (created UI child appends a RectTransform Add(...)).
 //
-// Fixture note (research.md iteration 2, M1-M3): the fixture is the spec's HudScene VERBATIM
+// Fixture note: the fixture is the spec's HudScene VERBATIM
 // (specs/13-recttransform.md:191-206), including QuitButton's chained `.Component<Image>(_ => {
 // })`. Unity's `RequireComponent` adds CanvasRenderer to a live Image, so the FIRST Sync after
 // Build harvests it as a separate `quitButton.Component<UnityEngine.CanvasRenderer>();` statement —
@@ -125,10 +125,10 @@ public class HudScene : ISceneDefinition {
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
     }
 
-    // Builds the fixture into a fresh scene, makes the Canvas genuinely driven (research.md F2/F4:
-    // a Build-created Canvas is NOT driven in batchmode until toggled), Syncs ONCE to harvest
-    // Unity's RequireComponent CanvasRenderer onto QuitButton (research.md M3), and returns the
-    // scene from that SETTLED baseline — a second Sync from here must be a clean fixed point.
+    // Builds the fixture into a fresh scene, makes the Canvas genuinely driven (a Build-created
+    // Canvas is NOT driven in batchmode until toggled), Syncs ONCE to harvest Unity's
+    // RequireComponent CanvasRenderer onto QuitButton, and returns the scene from that SETTLED
+    // baseline — a second Sync from here must be a clean fixed point.
     private Scene BuildAndSettle()
     {
         File.WriteAllText(_builderPath, BuilderSource);
@@ -146,7 +146,7 @@ public class HudScene : ISceneDefinition {
         Canvas.ForceUpdateCanvases();
         var canvasRect = (RectTransform)canvasGo.transform;
         Assert.IsNotNull(canvasRect.drivenByObject,
-            "PREMISE (research.md F2/F4): a Build-created Canvas must be driven after the " +
+            "PREMISE: a Build-created Canvas must be driven after the " +
             "enabled-toggle + ForceUpdateCanvases recipe, or the baseline-no-op assumption below is " +
             "unearned and every 'only this line changed' assertion in this file is meaningless.");
 
@@ -258,7 +258,7 @@ public class HudScene : ISceneDefinition {
         panel.anchorMax = Vector2.zero;
         panel.pivot = Vector2.zero;
 
-        // A1 (research.md, REFINED): setting anchorMin/anchorMax/pivot through script properties
+        // Setting anchorMin/anchorMax/pivot through script properties
         // moves the DERIVED localPosition, never the STORED anchoredPosition/sizeDelta. Assert what
         // actually happened on the live object before asserting the source text — do not emulate the
         // Inspector's rect-preserving SetAnchorSmart.

@@ -37,6 +37,13 @@ namespace SceneBuilder.Editor
             internal readonly AddedGameObject[] AddedGameObjects;
             internal readonly OverrideTarget[] RemovedGameObjects;
 
+            // m-ui-recttransform b4-t1 (iteration 2): the prefab ASSET root's transform, read ONLY
+            // when the LIVE root's transform is a RectTransform (a UI prefab) — the baseline
+            // SnapshotNode.SourcePrefabTransform carries out to Core so an instance whose layout the
+            // prefab already persists reports no unlocalizable-layout Conflict. Null for a non-UI
+            // instance or an instance whose source asset cannot be resolved.
+            internal readonly TransformData? SourcePrefabTransform;
+
             internal InstanceReadResult(
                 string? sourcePrefabGuid,
                 PrefabInstanceKey key,
@@ -45,7 +52,8 @@ namespace SceneBuilder.Editor
                 AddedComponent[] addedComponents,
                 OverrideTarget[] removedComponents,
                 AddedGameObject[] addedGameObjects,
-                OverrideTarget[] removedGameObjects)
+                OverrideTarget[] removedGameObjects,
+                TransformData? sourcePrefabTransform)
             {
                 SourcePrefabGuid = sourcePrefabGuid;
                 Key = key;
@@ -55,6 +63,7 @@ namespace SceneBuilder.Editor
                 RemovedComponents = removedComponents;
                 AddedGameObjects = addedGameObjects;
                 RemovedGameObjects = removedGameObjects;
+                SourcePrefabTransform = sourcePrefabTransform;
             }
         }
 
@@ -81,10 +90,19 @@ namespace SceneBuilder.Editor
 
             var overrides = ReadOverrides(go, source, resolveSceneRef);
 
+            // m-ui-recttransform b4-t1 (iteration 2): the prefab ASSET root's own layout, read
+            // through the ONE live-transform read (LiveTransformRead.Read) off the ALREADY-resolved
+            // `source` — never a second GetCorrespondingObjectFromSource/LoadAssetAtPath. Only for a
+            // UI instance (live root is a RectTransform); a non-UI instance carries no baseline.
+            TransformData? sourcePrefabTransform = source != null && go.transform is RectTransform
+                ? LiveTransformRead.Read(source)
+                : null;
+
             return new InstanceReadResult(
                 guid, key, overrides.OpaqueOverrides, overrides.StructuredOverrides,
                 overrides.AddedComponents, overrides.RemovedComponents,
-                overrides.AddedGameObjects, overrides.RemovedGameObjects);
+                overrides.AddedGameObjects, overrides.RemovedGameObjects,
+                sourcePrefabTransform);
         }
 
         private static string FormatModification(GameObject? root, PropertyModification mod)

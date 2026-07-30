@@ -108,6 +108,7 @@ namespace SceneBuilder.Editor
             var removedComponents = Array.Empty<OverrideTarget>();
             var addedGameObjects = Array.Empty<AddedGameObject>();
             var removedGameObjects = Array.Empty<OverrideTarget>();
+            TransformData? sourcePrefabTransform = null;
             if (isInstanceRoot)
             {
                 var instance = PrefabInstanceProbe.ReadInstanceRoot(go, resolveSceneRef);
@@ -119,6 +120,7 @@ namespace SceneBuilder.Editor
                 removedComponents = instance.RemovedComponents;
                 addedGameObjects = instance.AddedGameObjects;
                 removedGameObjects = instance.RemovedGameObjects;
+                sourcePrefabTransform = instance.SourcePrefabTransform;
             }
 
             return new SnapshotNode
@@ -140,6 +142,7 @@ namespace SceneBuilder.Editor
                 RemovedComponents = removedComponents,
                 AddedGameObjects = addedGameObjects,
                 RemovedGameObjects = removedGameObjects,
+                SourcePrefabTransform = sourcePrefabTransform,
             };
         }
     }

@@ -7,11 +7,10 @@ namespace SceneBuilder.Core.Tests
 {
     // b3-t3: SourcePatchApplier applies RectTransform PatchArguments (patch/insert/introduce/fold),
     // formatting-preservingly, resolved against the anchored NODE's OWN fluent chain rather than its
-    // enclosing STATEMENT. The statement-scoped lookup (FindFlagInvocation/GetChainExpression) is
-    // wrong whenever a statement contains more than one node's calls — the `Add(string,
+    // enclosing STATEMENT. A statement can carry more than one node's calls via the `Add(string,
     // Action<NodeHandle>)` configure-closure form, which is parser-supported (BuilderParser.cs:344-
-    // 359) and used throughout the suite. See research.md REFINED #2 for the two corruption cases
-    // this task fixes.
+    // 359) and used throughout the suite, so resolution cannot cross-write between a parent and its
+    // configure-closure child.
     public class RectTransformPatchApplyTests
     {
         // ---- Deliverable clauses already generalized by b3-t2's ArgumentCall plumbing -------------
@@ -206,11 +205,10 @@ public class PartialCallScene : ISceneDefinition
             Assert.Equal("root-1", conflict.LogicalId);
         }
 
-        // ---- REFINED #2: the genuine cross-node corruption this task fixes -----------------------
+        // ---- Configure-closure boundary: resolution never crosses it in either direction ----------
         // A statement can carry more than one node's calls via the `Add(string, Action<NodeHandle>)`
-        // configure-closure form. The statement-scoped `FindFlagInvocation`/`GetChainExpression`
-        // cannot tell which node's call it found; resolution must be scoped to the anchored node's
-        // OWN fluent chain instead.
+        // configure-closure form. Resolution is scoped to the anchored node's OWN fluent chain, so a
+        // parent's edit can never land on a child's call and vice versa.
 
         [Fact]
         public void Apply_ClosureChildRectPatch_LandsInsideClosure_NotOnParent()
@@ -242,7 +240,7 @@ public class ClosureChildScene : ISceneDefinition
                 "p.Add(\"Label\").RectTransform(anchoredPos:(9f, 9f))",
                 result);
 
-            // Wrong (today's bug): the call must NOT land on the outer Panel chain instead.
+            // The introduced call must not land on the outer Panel chain.
             Assert.DoesNotContain(
                 "scene.Add(\"Panel\", p => p.Add(\"Label\")).RectTransform(",
                 result);

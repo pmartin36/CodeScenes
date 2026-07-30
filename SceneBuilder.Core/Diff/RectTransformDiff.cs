@@ -24,50 +24,58 @@ namespace SceneBuilder.Core.Diff
         public static TransformData HoldAnchoredXY(TransformData target, TransformData xyFrom)
             => target with { Position = new Vec3(xyFrom.Position.X, xyFrom.Position.Y, target.Position.Z) };
 
-        // Per-axis channels that differ, reading an unset field on either side as its
-        // RectTransformFields.Default* value (R3). Callers pass an ALREADY driven-masked snapshot
-        // (RectTransformFields.MaskDrivenRect), so a driven axis compares equal by construction.
-        public static ChannelMask ChangedChannels(TransformData model, TransformData snapshot)
-        {
-            var changed = ChannelMask.None;
-            foreach (var field in RectTransformFields.All)
-            {
-                var m = field.Get(model) ?? field.Default;
-                var s = field.Get(snapshot) ?? field.Default;
+        // b2-t1/i3: a base Position/Scale channel the SNAPSHOT reports driven that the MODEL's own
+        // DrivenChannels does NOT also claim is "driven by something the builder does not author" —
+        // e.g. a CanvasScaler re-driving a Canvas's scale. The plugin cannot re-baseline a driver it
+        // does not own (unlike FitSize/SurfaceSnap, which PlanExecutor re-baselines on write), so that
+        // axis must be held to the live value rather than clobbered. A channel driven on BOTH sides
+        // (authored FitSize/SurfaceSnap intent) is excluded — spec 23 still writes it in full.
+        public static ChannelMask ForeignDrivenBase(TransformData model, TransformData snapshot)
+            => snapshot.DrivenChannels & ~model.DrivenChannels & DrivenTransform.BaseChannels;
 
-                if (m.X != s.X)
-                {
-                    changed |= field.MaskX;
-                }
+        // code->scene ONLY (the scene->code counterpart is Reconciler.MaskDriven). Composes D8's X/Y
+        // anchored-position hold with the foreign-driven-base hold above; both live in one returned
+        // TransformData so Differ.EmitTransformEdit's condition and its emitted payload are provably
+        // the same object.
+        public static TransformData HoldForWrite(TransformData model, TransformData snapshot)
+            => DrivenTransform.HoldBase(HoldAnchoredXY(model, snapshot), snapshot, ForeignDrivenBase(model, snapshot));
 
-                if (m.Y != s.Y)
-                {
-                    changed |= field.MaskY;
-                }
-            }
-
-            return changed;
-        }
-
-        // Matched path (called from Differ.EmitTransformEdit).
+        // Matched path (called from Differ.EmitTransformEdit). Three sibling arms, kind-mismatch
+        // checked BEFORE the value compare — mirrors EmitCreate's "kind differs -> assert the whole
+        // rect state" rule so a kind change can never be short-circuited by a coincidental value
+        // match on either side.
         public static void EmitEdit(string logicalId, TransformData model, TransformData snapshot, List<ChangeOp> ops)
         {
-            if (model.IsRectTransform)
+            if (!model.IsRectTransform)
             {
-                var masked = RectTransformFields.MaskDrivenRect(model, snapshot);
-                var changed = ChangedChannels(model, masked);
-                if (changed != ChannelMask.None)
-                {
-                    ops.Add(new SetRectTransform { LogicalId = logicalId, Transform = model, Changed = changed });
-                }
-
+                // R6/D6: snapshot.IsRectTransform, model is plain Transform — the promotion.
+                // Unconditional: this is how b3-t2 detects a demotion and how b2-t2 knows to skip
+                // lowering (Transform.Kind == "Transform"). Never compares channels; Changed carries
+                // no meaning for a promotion.
+                ops.Add(new SetRectTransform { LogicalId = logicalId, Transform = model, Changed = ChannelMask.None });
                 return;
             }
 
-            // R6/D6: snapshot.IsRectTransform, model is plain Transform — the promotion. Unconditional:
-            // this is how b3-t2 detects a demotion and how b2-t2 knows to skip lowering (Transform.Kind
-            // == "Transform"). Never compares channels; Changed carries no meaning for a promotion.
-            ops.Add(new SetRectTransform { LogicalId = logicalId, Transform = model, Changed = ChannelMask.None });
+            if (!snapshot.IsRectTransform)
+            {
+                // b2: model is a RectTransform, the live object still carries a plain Transform —
+                // forward promotion. Unconditional, NOT value-gated: a bare `.RectTransform()` (all
+                // five args at RectTransformFields.Default*) compares EQUAL to a plain snapshot's
+                // unset fields (read as Default via ChangedChannels), so a value compare here would
+                // emit zero ops and silently drop the promotion forever — the adapter's in-place
+                // promotion (PlanExecutor.EnsureRectTransform) is reachable ONLY through a rect
+                // SetField. Every value the live object is missing must be asserted, so Changed is
+                // the whole rect state, not the differing subset.
+                ops.Add(new SetRectTransform { LogicalId = logicalId, Transform = model, Changed = ChannelMask.AllRectFields });
+                return;
+            }
+
+            var masked = RectTransformFields.MaskDrivenRect(model, snapshot);
+            var changed = RectTransformFields.ChangedChannels(model, masked);
+            if (changed != ChannelMask.None)
+            {
+                ops.Add(new SetRectTransform { LogicalId = logicalId, Transform = model, Changed = changed });
+            }
         }
 
         // Create path (called from Differ.EmitCreate / EmitCreateInstance). No snapshot; ALWAYS emits

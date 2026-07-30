@@ -7,15 +7,13 @@ using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Editor;
 
-// m-ui-recttransform b3-t5 (research.md M1/M2/M3, routed from scope/bucket-b3.md +
-// validator.md iteration 5's BLOCKING finding): the mandatory Unity-boundary coverage for the
-// SourcePatchApplier fix that stops a RemoveStatement anchored on a CLOSURE-AUTHORED node/component
-// from destroying its enclosing statement (a whole parent GameObject, or a sibling component the
-// user never touched). Four prior gate-green iterations shipped this corruption class because
-// nothing drove a real Inspector delete against closure-authored source — these two tests do.
-// Harness follows RoundTripStructuralTests.cs exactly: a temp builder .cs + temp sidecar in a
-// system temp dir (never the real Assets/SceneBuilder/DemoScene.cs), an EmptyScene per test, and
-// [TearDown] cleanup.
+// m-ui-recttransform b3-t5: the mandatory Unity-boundary coverage for the SourcePatchApplier
+// guard that stops a RemoveStatement anchored on a CLOSURE-AUTHORED node/component from
+// rewriting anything more than that call: a real Inspector delete against closure-authored
+// source rewrites only that call and never its enclosing statement. Harness follows
+// RoundTripStructuralTests.cs exactly: a temp builder .cs + temp sidecar in a system temp dir
+// (never the real Assets/SceneBuilder/DemoScene.cs), an EmptyScene per test, and [TearDown]
+// cleanup.
 public class ClosureAuthoredDeleteSyncTests
 {
     private const string ScenePath = "Assets/GateTests/__ClosureAuthoredDeleteTemp.unity";
@@ -73,10 +71,9 @@ public class ClosureAuthoredDeleteScene : ISceneDefinition
         }
     }
 
-    // M2 (remove): deleting a closure-authored UI CHILD in the Inspector must rewrite only that
+    // Deleting a closure-authored UI CHILD in the Inspector must rewrite only that
     // child's own creation call out of the parent's configure closure — never destroy the parent
-    // Panel's own statement. Pre-fix the whole Panel statement was deleted from source, and a
-    // subsequent Build removed Panel from the scene along with it.
+    // Panel's own statement.
     [Test]
     public void SceneToCode_DeletedClosureAuthoredUiChild_KeepsTheParentPanel()
     {
@@ -113,10 +110,9 @@ public class ClosureAuthoredDeleteScene : ISceneDefinition
             "Panel is missing from a re-Build of the rewritten source — the parent was destroyed along with the child.");
     }
 
-    // M1 (remove): deleting ONE component chained inside an expression-lambda configure closure
+    // Deleting ONE component chained inside an expression-lambda configure closure
     // must leave every sibling component the user never touched — including one authored on the
-    // SAME chain. Pre-fix, removing BoxCollider deleted the whole `scene.Add("Rig", x => ...)`
-    // statement, taking the untouched MeshFilter with it.
+    // SAME chain.
     [Test]
     public void SceneToCode_DeletedComponentFromChainedClosure_KeepsTheSiblingComponent()
     {

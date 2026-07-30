@@ -304,8 +304,7 @@ namespace SceneBuilder.Core.Reconcile
                     case SetRectTransform:
                         if (modelByLogicalId.TryGetValue(op.LogicalId, out var rectModelNode))
                         {
-                            var rectMasked = MaskDriven(rectModelNode.Transform, entry.Node.Transform);
-                            edits.AddRange(RectTransformEdits(op.LogicalId, rectModelNode.Transform, rectMasked));
+                            EmitRectTransformEdits(op.LogicalId, goid, rectModelNode, entry.Node, anchors, edits, conflicts);
                         }
 
                         break;
@@ -867,7 +866,8 @@ namespace SceneBuilder.Core.Reconcile
         // b4-t2: driven axes never sync scene->source: hold the source model's value on each driven
         // axis so it cannot differ, while free axes still reflect the scene. snapshot.DrivenChannels
         // is enabled-coupled (b6); default None returns the snapshot unchanged for every non-spatial
-        // node.
+        // node. b2-t1/i3: the base-channel hold is shared with the code->scene direction
+        // (RectTransformDiff.HoldForWrite) via DrivenTransform.HoldBase — never re-implement it here.
         private static TransformData MaskDriven(TransformData model, TransformData snapshot)
         {
             var d = snapshot.DrivenChannels;
@@ -876,18 +876,9 @@ namespace SceneBuilder.Core.Reconcile
                 return snapshot;
             }
 
-            var pos = new Vec3(
-                (d & ChannelMask.PositionX) != 0 ? model.Position.X : snapshot.Position.X,
-                (d & ChannelMask.PositionY) != 0 ? model.Position.Y : snapshot.Position.Y,
-                (d & ChannelMask.PositionZ) != 0 ? model.Position.Z : snapshot.Position.Z);
-            var scale = new Vec3(
-                (d & ChannelMask.ScaleX) != 0 ? model.Scale.X : snapshot.Scale.X,
-                (d & ChannelMask.ScaleY) != 0 ? model.Scale.Y : snapshot.Scale.Y,
-                (d & ChannelMask.ScaleZ) != 0 ? model.Scale.Z : snapshot.Scale.Z);
-
             // D5: per-axis rect-field driven hold, delegated to the shipped table-driven
             // implementation (never re-implement the loop here).
-            return RectTransformFields.MaskDrivenRect(model, snapshot with { Position = pos, Scale = scale });
+            return RectTransformFields.MaskDrivenRect(model, DrivenTransform.HoldBase(snapshot, model, d));
         }
 
         private static void FlattenSnapshot(SnapshotNode[] nodes, string? parentGoid, Dictionary<string, SnapshotEntry> snapshotByGoid)

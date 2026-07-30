@@ -105,6 +105,22 @@ namespace SceneBuilder.Core.Reconcile
                     ? propertyName
                     : null;
 
+            // m-ui-recttransform b3-t4 (iteration 2): the THIRD create-payload call site
+            // (scope/bucket-b4.md finding 1) — a prefab-instance root, authored as `.Instance(...)`,
+            // can never host `.RectTransform(...)` (InstanceHandle has no such member), so
+            // `canHostRectTransformCall: false`; SplitCreatedPayload reports the unlocalizable
+            // layout as a Conflict instead of silently dropping it or writing the derived
+            // m_LocalPosition into `pos:`. b4-t1 (iteration 2): `node.SourcePrefabTransform` is the
+            // prefab ASSET's own layout (populated by the adapter at read time) — the ONE site where
+            // the baseline is read, so a layout that already matches the asset reports nothing.
+            var (transformPayload, _) = SplitCreatedPayload(
+                node.Transform,
+                canHostRectTransformCall: false,
+                prefabBaseline: node.SourcePrefabTransform,
+                newLogicalId,
+                node.GlobalObjectId,
+                conflicts);
+
             edits.Add(new AppendStatement
             {
                 NewLogicalId = newLogicalId,
@@ -113,7 +129,7 @@ namespace SceneBuilder.Core.Reconcile
                 Name = node.Name,
                 SourcePrefabPath = path,
                 SourcePropertyName = sourcePropertyName,
-                Transform = node.Transform != new TransformData() ? node.Transform : null,
+                Transform = transformPayload != new TransformData() ? transformPayload : null,
                 Active = null,
                 Tag = null,
                 Layer = null,
@@ -173,7 +189,7 @@ namespace SceneBuilder.Core.Reconcile
             ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, assetCatalog);
             ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, assetCatalog);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
-            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
+            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts);
             ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
         }
 

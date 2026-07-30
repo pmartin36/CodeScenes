@@ -564,14 +564,14 @@ namespace SceneBuilder.Core.Reconcile
         {
             var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
 
-            // b3-t5 guard 2: a component anchored on a call CHAINED inside somebody else's
+            // b3-t5: a component anchored on a call CHAINED inside somebody else's
             // statement has no representable absolute position of its own — moving the ENCLOSING
             // statement would silently reorder whichever real scene-graph sibling happens to sit
-            // next to it (research.md M1). No-op rather than throw: a PatchException here would
+            // next to it. No-op rather than throw: a PatchException here would
             // abort the whole patch over one unrepresentable cosmetic reorder, dropping the user's
-            // real edits along with it. (Guard 1, ComponentReconciler's REORDER-pass gate, is meant
-            // to keep this from ever being reached; this is the structural backstop for a caller
-            // that forgot to thread ChainedComponents.)
+            // real edits along with it. ComponentReconciler's REORDER-pass gate
+            // (ComponentReconciler.cs:390) keeps this unreached whenever ParseResult.ChainedComponents
+            // is threaded; this is the structural backstop for a caller that does not thread it.
             if (IsChainedNonStatementCall(invocation))
             {
                 return;
@@ -590,7 +590,7 @@ namespace SceneBuilder.Core.Reconcile
 
             appliers.Add(currentRoot =>
             {
-                // b3-t5 (M3): the statement-removal applier can land EARLIER in this same batch
+                // b3-t5: the statement-removal applier can land EARLIER in this same batch
                 // (a parent GameObject removed alongside a closure-authored child that resolves to
                 // the SAME statement, Reconciler.cs's DetectRemovals cascade) — by the time this
                 // applier runs, the tracked statement may already be gone. No-op rather than throw,
@@ -631,9 +631,9 @@ namespace SceneBuilder.Core.Reconcile
         {
             var invocation = FindAnchorInvocation(root, anchors, edit.Anchor);
 
-            // b3-t5 guard 2: a chained call's anchor is NOT its own statement — deleting the
+            // b3-t5: a chained call's anchor is NOT its own statement — deleting the
             // enclosing statement would remove the node/handle it creates along with every OTHER
-            // chained call on it, and can leave source that no longer compiles (research.md M2).
+            // chained call on it, and can leave source that no longer compiles.
             // Splice ONLY this call out of its chain, via the same shape ResolveRemoveFlagCall /
             // IdCollisionHealer already use for a dead `.Id(...)`/flag call — EXCEPT the one shape
             // where splicing itself would corrupt the source (see ConfigureLambdaArgumentToRemove's
@@ -678,7 +678,7 @@ namespace SceneBuilder.Core.Reconcile
             allTargets.Add(statement);
             appliers.Add(currentRoot =>
             {
-                // b3-t5 (M3): the SAME batch can carry a RemoveStatement for a closure-authored
+                // b3-t5: the SAME batch can carry a RemoveStatement for a closure-authored
                 // parent AND one for each of its Kind=="Component"/"GameObject" dependents that
                 // resolve to this SAME statement (Reconciler.cs's DetectRemovals cascade) — by the
                 // time a later applier in the batch runs, this statement may already be gone.

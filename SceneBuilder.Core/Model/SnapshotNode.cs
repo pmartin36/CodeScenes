@@ -40,5 +40,13 @@ namespace SceneBuilder.Core.Model
         public AddedGameObject[] AddedGameObjects { get; init; } = Array.Empty<AddedGameObject>();
 
         public OverrideTarget[] RemovedGameObjects { get; init; } = Array.Empty<OverrideTarget>();
+
+        // m-ui-recttransform b4-t1 (iteration 2): the prefab ASSET root's transform for a
+        // prefab-instance root whose live transform is a RectTransform -- the baseline the live
+        // layout is compared against, so a settled instance whose layout the prefab asset already
+        // persists reports NO unlocalizable-layout Conflict. null for every non-instance node, for a
+        // non-UI instance, and for an instance whose source asset cannot be resolved; null means
+        // UNKNOWN, and Core then reports (never goes quiet on an unknown baseline).
+        public TransformData? SourcePrefabTransform { get; init; } = null;
     }
 }

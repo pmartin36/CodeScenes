@@ -87,7 +87,8 @@ namespace SceneBuilder.Core.Reconcile
             string instanceLogicalId,
             FacadeCatalog? facadeCatalog,
             string? prefabGuid,
-            List<SourceEdit> edits)
+            List<SourceEdit> edits,
+            List<Conflict> conflicts)
         {
             var modelKeys = new HashSet<(OverrideTarget Parent, string Name)>();
             foreach (var modelAdded in model.AddedGameObjects)
@@ -114,8 +115,19 @@ namespace SceneBuilder.Core.Reconcile
                 // m-ui-recttransform b3-t1 (iteration 2): the SAME create-with-payload split the
                 // plain-append path uses (Reconciler.SplitCreatedPayload) — an added UI child's
                 // layout must ride the SAME AddChild closure a component payload already uses,
-                // never be silently dropped.
-                var (_, rectTransformPayload) = SplitCreatedPayload(snapshotAdded.Node.Transform);
+                // never be silently dropped. `canHostRectTransformCall: true` — `.AddChild(...)`
+                // returns a NodeHandle, which declares `.RectTransform(...)`. `AddedGameObject.Node`
+                // is a GameObjectNode, which carries no GlobalObjectId.
+                // m-ui-recttransform b4-t1 (iteration 2): `.AddChild(...)` is NodeHandle-hosted
+                // (canHostRectTransformCall: true makes the baseline unreachable) — state
+                // `prefabBaseline: null` rather than omit it.
+                var (_, rectTransformPayload) = SplitCreatedPayload(
+                    snapshotAdded.Node.Transform,
+                    canHostRectTransformCall: true,
+                    prefabBaseline: null,
+                    instanceLogicalId,
+                    globalObjectId: null,
+                    conflicts);
 
                 edits.Add(new AppendInstanceAddChild
                 {

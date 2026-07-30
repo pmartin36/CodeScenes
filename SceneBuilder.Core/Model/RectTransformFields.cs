@@ -142,6 +142,33 @@ namespace SceneBuilder.Core.Model
             return false;
         }
 
+        /// <summary>Per-axis channels that differ, reading an unset field on either side as its
+        /// RectTransformFields.Default* value. Symmetric. The DIFFER passes an already driven-masked
+        /// snapshot as `right` (RectTransformDiff.EmitEdit); the adapter's code-side merge passes two
+        /// parsed DESIRED transforms (SceneBuilderSync.DiffDesiredFields). One spelling — never
+        /// re-implement the loop.</summary>
+        public static ChannelMask ChangedChannels(TransformData left, TransformData right)
+        {
+            var changed = ChannelMask.None;
+            foreach (var field in All)
+            {
+                var l = field.Get(left) ?? field.Default;
+                var r = field.Get(right) ?? field.Default;
+
+                if (l.X != r.X)
+                {
+                    changed |= field.MaskX;
+                }
+
+                if (l.Y != r.Y)
+                {
+                    changed |= field.MaskY;
+                }
+            }
+
+            return changed;
+        }
+
         /// <summary>offsetMin == anchoredPosition - sizeDelta * pivot (Unity's own formula,
         /// RectTransform.bindings.cs). anchorMin/anchorMax deliberately DO NOT participate: offsets are
         /// relative to the anchors, so the anchor values cancel. Derived on demand, never stored

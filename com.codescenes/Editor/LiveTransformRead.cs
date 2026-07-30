@@ -58,7 +58,7 @@ namespace SceneBuilder.Editor
         /// PositionX/Y/Z / ScaleX/Y/Z bit, because Reconciler.MaskDriven can only hold what is flagged —
         /// without it a ScreenSpaceOverlay Canvas emits a `pos:` patch every sync from its
         /// Canvas-driven m_LocalPosition. Returns None for a plain Transform.</summary>
-        internal static ChannelMask RectDrivenChannels(Transform t)
+        private static ChannelMask RectDrivenChannels(Transform t)
         {
             if (t is not RectTransform rt)
             {

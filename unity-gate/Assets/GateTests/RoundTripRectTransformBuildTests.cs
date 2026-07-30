@@ -13,13 +13,13 @@ using SceneBuilder.Editor;
 
 // b2-t4: code->scene EditMode round-trip for the spec's HudScene sample (specs/13-recttransform.md
 // checklist items 1, 2, 6, 7). Drives the REAL SceneBuilderBuild.Run against a live editor scene
-// (harness mirrored from RoundTripSpatialSyncTests.cs). RED at HEAD: RectTransformDiff.EmitCreate
-// only emits a SetRectTransform's Changed for fields differing from the RectTransform DEFAULT table,
-// but the create plan writes m_LocalPosition FIRST, which RE-DERIVES anchoredPosition from the
-// parent's rect on a RectTransform, so "equal to the default" does not mean "already correct on the
-// live object" (research.md b2-t4, F1). QuitButton authors anchoredPos:(0,0) — equal to the default —
-// so at HEAD it lands at (100,60), not the authored (0,0). Fix: EmitCreate must always emit
-// Changed = ChannelMask.AllRectFields on create (SceneBuilder.Core/Diff/RectTransformDiff.cs:71-80).
+// (harness mirrored from RoundTripSpatialSyncTests.cs). On create, the plan writes m_LocalPosition
+// FIRST, which RE-DERIVES anchoredPosition from the parent's rect on a RectTransform, so a field
+// equal to the RectTransform default must still be written or the live value diverges from the
+// authored one (QuitButton authors anchoredPos:(0,0), equal to the default). For that reason
+// RectTransformDiff.EmitCreate emits Changed = ChannelMask.AllRectFields unconditionally on create
+// (SceneBuilder.Core/Diff/RectTransformDiff.cs:75-86), which is what test 1 below verifies against
+// the live QuitButton.anchoredPosition.
 public class RoundTripRectTransformBuildTests
 {
     private const string ScenePath = "Assets/GateTests/__RoundTripRectTransformBuildTemp.unity";
@@ -210,13 +210,19 @@ public class HudScene : ISceneDefinition {{
         Assert.AreEqual(20f, rt.localPosition.y, Tol, "Panel.localPosition.y after anchoredPos edit");
     }
 
-    // Checklist 7 (scoped per research.md F2): a rebuild with NO source change is an OBSERVABLE no-op
-    // — identical scene bytes, identical sidecar bytes, identical live rect values and instance ids.
-    // NOTE: this deliberately does NOT assert BuildResult.PlanOpCount == 0. SceneSnapshotReader does
-    // not yet read RectTransform fields (that is b3-t1's TOUCHES), so every rebuild still re-emits a
-    // SetRectTransform against the model vs. the reader's all-default snapshot — the plan is never
-    // literally empty until b3-t1 lands. The zero-plan-op half of this checklist item is b4-t2's
-    // deliverable ("a Build->Sync->Build->Sync cycle with no user edit produces zero scene ops").
+    // Checklist 7 (code->scene half, specs/13-recttransform.md:275-276): a rebuild with NO source
+    // change is idempotent, asserted OBSERVABLY: identical scene bytes, identical sidecar bytes,
+    // identical live rect values, identical instance ids.
+    // NOTE: this deliberately does NOT assert BuildResult.PlanOpCount == 0. A settled rebuild of THIS
+    // fixture is not zero ops for a reason that has nothing to do with RectTransform: D-1,
+    // com.codescenes/Editor/SerializedFieldBridge.cs:48-62 (ReadComponent) prunes every read field
+    // whose value equals a freshly-constructed instance's default, and this fixture authors
+    // .Component<Canvas>(c => c.Set("m_RenderMode", 0)), where 0 IS the default, so that field is
+    // pruned from every snapshot read and re-emits one SetField on every Build, forever
+    // (pre-existing, pre-feature; tracked in .agent_handoffs/m-ui-recttransform/scope/bucket-b4.md as
+    // D-1). The op-count assertion is owned by
+    // RoundTripRectTransformDrivenTests.BuildSyncBuildSync_NoUserEdit_EmitsNoRectOps_AndNoSourceEdits,
+    // which pins it on a fixture without the Image so any rect or transform churn is visible there.
     [Test]
     public void Rebuild_NoSourceChange_LeavesSceneAndSidecarByteIdentical()
     {

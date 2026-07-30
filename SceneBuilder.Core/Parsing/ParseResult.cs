@@ -13,10 +13,10 @@ namespace SceneBuilder.Core.Parsing
 
         public IReadOnlyDictionary<string, SourceSpan> Anchors { get; init; } = new Dictionary<string, SourceSpan>();
 
-        // b3-t1 stub: one entry per parsed component, keyed by the component's LogicalId,
+        // b3-t1: one entry per parsed component, keyed by the component's LogicalId,
         // slicing the source to its `.Component<T>(...)` call. Kept SEPARATE from Anchors
-        // (GameObject-only). Population is BuilderParser's job (CollectComponentAnchors);
-        // this default (always empty) is a compile-only stub for the test-writer's RED tests.
+        // (GameObject-only). Populated by BuilderParser (BuildComponentAnchors,
+        // BuilderParser.cs:68), assigned at :103.
         public IReadOnlyDictionary<string, SourceSpan> ComponentAnchors { get; init; } = new Dictionary<string, SourceSpan>();
 
         // One entry per parsed node, keyed by the SAME final LogicalId as Anchors, recording
@@ -27,20 +27,18 @@ namespace SceneBuilder.Core.Parsing
         // SourceSpan (b3-t2). Feed-forward for b5's span-local field-argument patching.
         public IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> FieldArgumentSpans { get; init; } = new Dictionary<string, IReadOnlyDictionary<string, SourceSpan>>();
 
-        // b1-t1 stub: one entry per parsed node with an AUTHORED handle (a `var x = ...`
+        // b1-t1: one entry per parsed node with an AUTHORED handle (a `var x = ...`
         // declaration at the two ctx.Handles[handleName]=node registration spots), keyed by
         // the node's FINAL LogicalId, mapping to its handle (var) name. Closure-parameter
-        // transient bindings (e.g. `m => ...`) must NOT appear here. Population is
-        // BuilderParser's job (BuildHandles/CollectHandles); this default (always empty) is
-        // a compile-only stub for the test-writer's RED tests.
+        // transient bindings (e.g. `m => ...`) must NOT appear here. Populated by BuilderParser
+        // (BuildHandles, BuilderParser.cs:72), assigned at :103.
         public IReadOnlyDictionary<string, string> Handles { get; init; } = new Dictionary<string, string>();
 
-        // b1-t2 stub: one NodeAnchor per parsed node, pre-order/document order, NEVER collapsed
+        // b1-t2: one NodeAnchor per parsed node, pre-order/document order, NEVER collapsed
         // by LogicalId — two nodes resolving to the same LogicalId (a colliding hand-authored
         // `.Id(...)`) produce TWO entries here, unlike Anchors (a dict, which collapses them to
-        // one). Population is BuilderParser's job (BuildNodeAnchors/CollectNodeAnchors); this
-        // default (always empty) is a compile-only stub for the test-writer's RED tests. Feeds
-        // b1-t3 (DuplicateLogicalIdConflicts) and b3-t1 (IdCollisionHealer).
+        // one). Populated by BuilderParser (BuildNodeAnchors, BuilderParser.cs:67), assigned at
+        // :103. Feeds b1-t3 (DuplicateLogicalIdConflicts) and b3-t1 (IdCollisionHealer).
         public IReadOnlyList<NodeAnchor> NodeAnchors { get; init; } = new List<NodeAnchor>();
 
         // Sibling groups this file CANNOT distinguish: >= 2 same-named siblings under one parent with
@@ -54,7 +52,7 @@ namespace SceneBuilder.Core.Parsing
         // consumer's — Build REFUSES (never guesses), Sync HEALS.
         public IReadOnlyList<Conflict> Ambiguities { get; init; } = new List<Conflict>();
 
-        // b1-t1 stub (unqualified-type-names): file-scope PLAIN `using` directives (no
+        // b1-t1 (unqualified-type-names): file-scope PLAIN `using` directives (no
         // `Alias`, no `StaticKeyword`), rendered dotted ("UnityEngine", "UnityEngine.UI"),
         // in document order. Source-level only — NEVER enters SceneModel/CanonicalJson/
         // identity; the adapter (b2) reads it to resolve short Component<T> names.

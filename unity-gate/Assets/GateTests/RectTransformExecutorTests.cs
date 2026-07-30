@@ -213,8 +213,11 @@ public class RectTransformExecutorTests
             },
         };
 
-        // Non-default values (G1): a bare-default RectTransform() model never emits a SetField at
-        // all, so this task's promotion contract needs at least one authored non-default field.
+        // Non-default values (G1): this test drives PlanExecutor directly with a hand-built Plan
+        // carrying all five rect SetFields, so the landed-value assertions below are meaningful
+        // regardless of which values were authored. (The Differ's OWN decision to emit all five
+        // fields for a bare, all-default `.RectTransform()` promotion is pinned separately in
+        // RectTransformDiffTests/RectTransformMaterializeTests, per b2-t1 iteration 2.)
         var writePlan = new Plan
         {
             Ops = FiveRectFields("Plain",

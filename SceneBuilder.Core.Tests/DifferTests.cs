@@ -430,6 +430,33 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(new Vec3(2, 2, 2), setTransform.Transform.Scale);
         }
 
+        // b2-t1 iteration 3 (scope/bucket-b2.md finding 2): confinement guard. The new foreign-driven
+        // base-transform hold lives ONLY on the rect branch (RectTransformDiff.Applies, gated on
+        // Kind=="RectTransform" on either side). A PLAIN node with the identical snapshot-only-driven
+        // shape must be completely unaffected — full authored transform still wins, exactly as this
+        // file's other spec-23 cases already require for this Kind.
+        [Fact]
+        public void Diff_PlainNode_SnapshotOnlyDrivenScale_StillEmitsAuthoredTransform()
+        {
+            var desiredTransform = new TransformData { Position = new Vec3(0, 0, 0), Scale = new Vec3(2, 2, 2), DrivenChannels = ChannelMask.None };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Transform = desiredTransform };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var snapshotTransform = new TransformData { Position = new Vec3(0, 0, 0), Scale = new Vec3(5, 5, 5), DrivenChannels = ChannelMask.Scale };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Transform = snapshotTransform };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setTransform = Assert.Single(changeSet.Ops.OfType<SetTransform>(), op => op.LogicalId == "root-1");
+            Assert.Equal(new Vec3(2, 2, 2), setTransform.Transform.Scale);
+        }
+
         [Fact]
         public void Diff_SurfaceSnapDownNode_PositionYDrift_ProducesPositionYOp()
         {

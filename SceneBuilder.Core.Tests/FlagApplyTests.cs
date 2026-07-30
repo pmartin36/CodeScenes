@@ -150,11 +150,10 @@ public class ClosureChildFlagScene : ISceneDefinition
 }
 ";
 
-        // m-ui-recttransform b3-t3 (REFINED #2): a statement can carry more than one node's calls
-        // via the `Add(string, Action<NodeHandle>)` configure-closure form. `GetChainExpression`
-        // resolves to the WHOLE enclosing statement's expression, so introducing a flag call anchored
-        // on a CHILD climbs past the closure boundary and appends onto the PARENT's chain instead —
-        // a cross-node corruption shared by every chained-call resolver, not rect-specific (the rect
+        // A statement can carry more than one node's calls via the
+        // `Add(string, Action<NodeHandle>)` configure-closure form, so introducing a flag call
+        // anchored on a CHILD resolves against the CHILD's own chain, not the enclosing statement —
+        // the same invariant every chained-call resolver relies on, not rect-specific (the rect
         // analog is `Apply_ClosureChildRectPatch_LandsInsideClosure_NotOnParent` in
         // RectTransformPatchApplyTests.cs).
         [Fact]
@@ -176,7 +175,7 @@ public class ClosureChildFlagScene : ISceneDefinition
             // Correct: the introduced call lands on the CHILD's own chain, inside the closure.
             Assert.Contains("p.Add(\"Label\").Tag(\"ChildTag\")", result);
 
-            // Wrong (today's bug): the call must NOT land on the outer Panel chain instead.
+            // The introduced call must not land on the outer Panel chain instead.
             Assert.DoesNotContain("scene.Add(\"Panel\", p => p.Add(\"Label\")).Tag(", result);
 
             var reparsed = BuilderParser.Parse(result);

@@ -240,6 +240,27 @@ namespace SceneBuilder.Core.Reconcile
                 Location = location,
             };
 
+        // m-ui-recttransform b4-t1 (iteration 2): a prefab-instance root's RectTransform layout has
+        // diverged from what its authoring construct can persist — either the prefab ASSET's own
+        // layout (a known, diverged baseline) or, when that baseline is unresolvable, any live value
+        // at all (§7: unknown never goes quiet). ONE conflict per NODE per sync (not per field) —
+        // Reconciler.RectTransform.cs's EmitRectTransformEdits/SplitCreatedPayload call this once
+        // with every unpersisted field's ArgName, never per-field. `fieldArgNames` is in canonical
+        // RectTransformFields.All order.
+        public static Conflict UnlocalizableRectTransform(
+            string logicalId, string? globalObjectId, IEnumerable<string> fieldArgNames, SourceSpan? location) =>
+            new()
+            {
+                Kind = ConflictKind.UnlocalizableRectTransform,
+                LogicalId = logicalId,
+                GlobalObjectId = globalObjectId,
+                Reason = $"Cannot write RectTransform layout back to source for prefab instance '{logicalId}' " +
+                    $"(fields: {string.Join(", ", fieldArgNames)}): the live layout is not the prefab asset's own, " +
+                    "and a `.Instance(...)` statement has no `.RectTransform(...)` call to hold it (§7). It was NOT " +
+                    "written. Move the layout into the prefab asset, or author the object with `scene.Add(...)`.",
+                Location = location,
+            };
+
         public static Conflict UnanchorableComponentEdit(string componentLogicalId, string editKind) =>
             new()
             {

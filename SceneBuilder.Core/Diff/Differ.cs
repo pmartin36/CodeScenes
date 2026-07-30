@@ -185,9 +185,13 @@ namespace SceneBuilder.Core.Diff
 
         // b1-t1: unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
         // The scene->code direction (Reconciler.MaskDriven / SceneSnapshotReader.DeriveDrivenChannels)
-        // is the ONLY place a driven FitSize/SurfaceSnap channel is held back from source; here, the
-        // code->scene direction always emits the full authored transform when it drifts from the live
-        // snapshot on ANY channel, so FitSize/SurfaceSnap re-drive from the authored start every sync.
+        // holds a driven FitSize/SurfaceSnap channel back from source; here, the code->scene direction
+        // emits the full authored transform when it drifts from the live snapshot on any channel the
+        // model itself claims driven, so FitSize/SurfaceSnap re-drive from the authored start every
+        // sync. The ONE exception is the rect branch below (b2-t1/i3): a base Position/Scale axis
+        // driven by something the model does NOT author (e.g. a CanvasScaler) is held to the live
+        // value instead of clobbered, because nothing here re-baselines a driver the plugin does not
+        // own.
         private static void EmitTransformEdit(GameObjectNode node, SnapshotNode snapshot, List<ChangeOp> ops)
         {
             var desired = node.Transform;
@@ -195,13 +199,17 @@ namespace SceneBuilder.Core.Diff
 
             // b2-t1/D1/D8: either side is a RectTransform ⇒ AnchoredPosition owns X/Y, so the base
             // Position.X/Y contribution is suppressed here (RectTransformDiff.EmitEdit covers the five
-            // UI fields instead). The held position can only ever differ on Z; Rotation/Scale keep
-            // spec-23 behavior (base-transform driven bits are Reconciler.MaskDriven's concern, not
-            // this direction's).
+            // UI fields instead). b2-t1/i3: a base Position/Scale axis the snapshot reports driven by a
+            // driver the model's own DrivenChannels does not claim (RectTransformDiff.ForeignDrivenBase)
+            // is additionally held to the live value — a Canvas/CanvasScaler re-drives its own scale and
+            // the plugin cannot re-baseline it, so writing the authored default would dirty the scene on
+            // every sync. A base channel driven on BOTH sides (authored FitSize/SurfaceSnap, spec 23) is
+            // unaffected: the full authored value is still emitted because the adapter re-baselines that
+            // driver on write.
             if (RectTransformDiff.Applies(desired, actual))
             {
-                var held = RectTransformDiff.HoldAnchoredXY(desired, actual);
-                if (held.Position != actual.Position || desired.Rotation != actual.Rotation || desired.Scale != actual.Scale)
+                var held = RectTransformDiff.HoldForWrite(desired, actual);
+                if (held.Position != actual.Position || held.Rotation != actual.Rotation || held.Scale != actual.Scale)
                 {
                     ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = held });
                 }
