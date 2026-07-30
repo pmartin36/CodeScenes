@@ -98,15 +98,15 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Reconcile_RectTransform_LocalPositionXYDrift_ProducesNoPosPatch()
         {
-            // Regression lock (already green): an X/Y-only drift never reaches the Reconciler at
-            // all — Differ.cs already suppresses the SetTransform op for a rect node.
+            // An X/Y-only drift never reaches the Reconciler at all — Differ.cs suppresses the
+            // SetTransform op for a rect node.
             var model = Rect(position: new Vec3(0, 0, 0));
             var xyOnlyDrift = Rect(position: new Vec3(5, 7, 0));
 
             Assert.Empty(ReconcileMatchedNode(model, xyOnlyDrift).Patch.Edits);
 
-            // D1, the RED half: a genuine Z drift must still hold X/Y to the MODEL's values, not the
-            // snapshot's anchor-derived m_LocalPosition.
+            // A genuine Z drift must still hold X/Y to the MODEL's values, not the snapshot's
+            // anchor-derived m_LocalPosition.
             var zDrift = Rect(position: new Vec3(5, 7, 3));
 
             var result = ReconcileMatchedNode(model, zDrift);

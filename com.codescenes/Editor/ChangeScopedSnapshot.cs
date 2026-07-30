@@ -52,7 +52,7 @@ namespace SceneBuilder.Editor
             }
 
             _nodeByGoEntityId = nodeByGoEntityId;
-            return new SceneSnapshot { SchemaVersion = 1, Roots = roots.ToArray() };
+            return SceneSnapshotReader.FromRoots(roots.ToArray());
         }
 
         /// <summary>
@@ -128,7 +128,7 @@ namespace SceneBuilder.Editor
             }
 
             _nodeByGoEntityId = nodeByGoEntityId;
-            return new SceneSnapshot { SchemaVersion = 1, Roots = roots.ToArray() };
+            return SceneSnapshotReader.FromRoots(roots.ToArray());
         }
 
         private static void CacheDescendants(GameObject go, SnapshotNode node, Dictionary<EntityId, SnapshotNode> nodeByGoEntityId)

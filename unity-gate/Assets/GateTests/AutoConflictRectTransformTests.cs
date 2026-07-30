@@ -9,16 +9,14 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
-// m-ui-recttransform b3-t2 (iteration 2, research.md): the auto-sync 3-way conflict merge
-// (SceneBuilderSync.RunConflictAware / KeyOfSourceEdit / DiffDesiredFields / KeysOfChangeOp) never
-// learned the five RectTransform argument names. Two defects, reproduced here against the REAL
-// merge over a live RectTransform (AutoConflictTests' two-phase build + ExecuteBothChanged pattern):
-//   (a) a rect PatchArgument (anchoredPos/sizeDelta/anchorMin/anchorMax/pivot) is unattributable
-//       (KeyOfSourceEdit returns null) and is therefore ALWAYS kept — silently reverting a
-//       concurrent code-only rect edit with no marker, no error.
-//   (b) DiffDesiredFields' whole-record TransformData compare fires SetTransform on a rect-only
-//       code edit; KeysOfChangeOp claims transform.pos/rot/scale for it, so a rect-only code edit
-//       spuriously "conflicts" with an unrelated concurrent scene-side rotation of the SAME node.
+// The auto-sync 3-way conflict merge (SceneBuilderSync.RunConflictAware / KeyOfSourceEdit /
+// DiffDesiredFields / KeysOfChangeOp) attributes the five RectTransform authoring arguments as
+// field-level keys. These cases drive the REAL merge over a live RectTransform (AutoConflictTests'
+// two-phase build + ExecuteBothChanged) and lock:
+//   - a rect field is attributable on both sides, so a code-only rect edit is never reverted by an
+//     unattributable scene edit;
+//   - the base transform and the rect fields are diffed separately, so a rect-only code edit never
+//     claims transform.pos/rot/scale.
 public class AutoConflictRectTransformTests
 {
     private const string BuilderName = "AutoConflictRectScene";
@@ -76,11 +74,10 @@ public class AutoConflictRectScene : ISceneDefinition
     }
 
     /// <summary>
-    /// A minimal fixture (research.md iteration 2): a root Panel authored ONLY with
-    /// <c>.RectTransform(...)</c> (no Canvas, no <c>Component&lt;Image&gt;</c>, so no
-    /// RequireComponent harvest churn) plus a second root Beta carrying a Rigidbody, two-phase per
-    /// AutoConflictTests' BuildTwoMassObjects so Beta's mass field targets an already-durable,
-    /// mapped component.
+    /// A minimal fixture: a root Panel authored ONLY with <c>.RectTransform(...)</c> (no Canvas, no
+    /// <c>Component&lt;Image&gt;</c>, so no RequireComponent harvest churn) plus a second root Beta
+    /// carrying a Rigidbody, two-phase per AutoConflictTests' BuildTwoMassObjects so Beta's mass
+    /// field targets an already-durable, mapped component.
     /// </summary>
     private Scene BuildPanelAndBeta()
     {
@@ -106,10 +103,8 @@ public class AutoConflictRectScene : ISceneDefinition
         return EditorSceneManager.GetActiveScene();
     }
 
-    // Defect (a): a rect PatchArgument is unattributable (KeyOfSourceEdit returns null for
-    // anchoredPos/sizeDelta/...) and is therefore ALWAYS kept regardless of attribution — the
-    // "applicable" reconcile's revert-to-live edit silently clobbers a concurrent code-only rect
-    // edit before it ever reaches the merge's field-level logic.
+    // A scene-side edit to an unrelated object must not revert a code-only rect edit: the rect
+    // PatchArgument is attributable, so the merge sees code as the sole authority for that field.
     [Test]
     public void Conflict_RectFieldChangedInCodeOnly_SurvivesCycle_AndMaterializesToLiveRect()
     {
@@ -151,10 +146,9 @@ public class AutoConflictRectScene : ISceneDefinition
             "Panel.anchoredPosition after the surviving code edit materializes");
     }
 
-    // Same-field-same-object overlap must still resolve scene-wins with the prior CODE value
-    // preserved (as a Vec2 literal, SourceExpr.Vec2Literal) in an inline `// CONFLICT:` marker and a
-    // located Console error — never silently discarded (which is what defect (a) does today: the
-    // unattributable edit is kept with no marker and no error, so the code's value is lost).
+    // Same-field-same-object overlap resolves scene-wins, with the prior CODE value preserved as a
+    // SourceExpr.Vec2Literal in an inline `// CONFLICT:` marker plus one located Console error —
+    // the code value stays recoverable.
     [Test]
     public void Conflict_RectSameFieldBothSides_SceneWins_PreservesCodeVec2InMarker_LocatesError()
     {
@@ -198,9 +192,8 @@ public class AutoConflictRectScene : ISceneDefinition
             "Scene-wins: the live rect must keep the scene value on the conflicting field, not revert to the code value.");
     }
 
-    // Defect (b): DiffDesiredFields' whole-record TransformData compare fires SetTransform on a
-    // rect-only code edit; KeysOfChangeOp claims transform.pos/rot/scale for it, so a rect-only code
-    // edit spuriously "conflicts" with an unrelated concurrent scene-side rotation of the SAME node.
+    // A rect-only code edit and a base-transform-only scene edit on the SAME node touch different
+    // field keys: SetRectTransform claims only its changed rect fields, so no overlap and no marker.
     [Test]
     public void Conflict_RectOnlyCodeEdit_DoesNotClaimBaseTransformKeys_NoSpuriousConflict()
     {

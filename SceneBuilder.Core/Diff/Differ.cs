@@ -11,6 +11,8 @@ namespace SceneBuilder.Core.Diff
     {
         private sealed record SnapshotEntry(SnapshotNode Node, string? ParentGlobalObjectId, int SiblingIndex);
 
+        private static readonly Dictionary<string, FieldMap> EmptyTypeDefaults = new();
+
         public static ChangeSet Diff(SceneModel desired, SceneSnapshot actual, IdentityMap identityMap)
         {
             var logicalIdToGlobalObjectId = identityMap.Entries
@@ -24,12 +26,22 @@ namespace SceneBuilder.Core.Diff
             var snapshotByGoid = new Dictionary<string, SnapshotEntry>();
             FlattenSnapshot(actual.Roots, null, snapshotByGoid);
 
+            // Per-TYPE default field templates (b4-t2/D-1): a field a builder authors AT its type's
+            // constructed default is pruned from every live component read (SerializedFieldBridge.
+            // ReadComponent), so "absent from Fields" must be resolved against the type's default
+            // template, not treated as unconditionally changed. Keyed on Type.FullName, the same key
+            // EmitComponentEdits already matches components on. Grouped defensively (first wins) —
+            // SceneSnapshotReader.FromRoots emits at most one entry per type.
+            var typeDefaults = actual.ComponentDefaults
+                .GroupBy(c => c.Type.FullName)
+                .ToDictionary(g => g.Key, g => g.First().Fields);
+
             var visitedGoids = new HashSet<string>();
             var ops = new List<ChangeOp>();
             var diagnostics = new List<Diagnostic>();
             var conflicts = new List<Conflict>();
 
-            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics, conflicts);
+            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, ops, diagnostics, conflicts);
 
             foreach (var kv in snapshotByGoid)
             {
@@ -71,6 +83,7 @@ namespace SceneBuilder.Core.Diff
             Dictionary<string, SnapshotEntry> snapshotByGoid,
             HashSet<string> visitedGoids,
             IdentityMap identityMap,
+            Dictionary<string, FieldMap> typeDefaults,
             List<ChangeOp> ops,
             List<Diagnostic> diagnostics,
             List<Conflict> conflicts)
@@ -89,7 +102,7 @@ namespace SceneBuilder.Core.Diff
                     && snapshotByGoid.TryGetValue(goid, out var entry))
                 {
                     visitedGoids.Add(goid);
-                    EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, ops);
+                    EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, typeDefaults, ops);
 
                     // b3-t2: matched PrefabInstanceNode ⇒ diff its structured override collections
                     // (Overrides/AddedComponents/RemovedComponents) against the matched snapshot's.
@@ -124,7 +137,7 @@ namespace SceneBuilder.Core.Diff
                     EmitCreate(node, parentLogicalId, identityMap, ops);
                 }
 
-                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, ops, diagnostics, conflicts);
+                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, ops, diagnostics, conflicts);
             }
         }
 
@@ -135,6 +148,7 @@ namespace SceneBuilder.Core.Diff
             Dictionary<string, string> logicalIdToGlobalObjectId,
             SnapshotEntry entry,
             IdentityMap identityMap,
+            Dictionary<string, FieldMap> typeDefaults,
             List<ChangeOp> ops)
         {
             var snapshot = entry.Node;
@@ -180,7 +194,7 @@ namespace SceneBuilder.Core.Diff
                 ops.Add(new Reorder { LogicalId = node.LogicalId, SiblingIndex = siblingIndex });
             }
 
-            EmitComponentEdits(node, snapshot, identityMap, ops);
+            EmitComponentEdits(node, snapshot, identityMap, typeDefaults, ops);
         }
 
         // b1-t1: unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
@@ -233,7 +247,7 @@ namespace SceneBuilder.Core.Diff
         // component's own LogicalId. Transform is excluded from the actual side (never authored,
         // never removed/reordered). Removed-component identity is resolved from the IdentityMap's
         // Component entries (managed gate), never synthesized.
-        private static void EmitComponentEdits(GameObjectNode node, SnapshotNode snapshot, IdentityMap identityMap, List<ChangeOp> ops)
+        private static void EmitComponentEdits(GameObjectNode node, SnapshotNode snapshot, IdentityMap identityMap, Dictionary<string, FieldMap> typeDefaults, List<ChangeOp> ops)
         {
             var ownerLogicalId = node.LogicalId;
             var desiredComps = node.Components;
@@ -274,7 +288,16 @@ namespace SceneBuilder.Core.Diff
                     var actualComponent = actualComps[actualIndex];
                     foreach (var field in desiredComponent.Fields)
                     {
-                        if (!actualComponent.Fields.TryGetValue(field.Key, out var actualValue) || actualValue != field.Value)
+                        // b4-t2/D-1: a field absent from the live component's Fields is not
+                        // automatically "changed" — ReadComponent prunes exactly the fields that equal
+                        // the type's constructed default, so an absent field resolves against the
+                        // per-type default template (populated on ComponentDefaults) before falling
+                        // back to "unknown, emit anyway". A live Fields entry, when present, always
+                        // wins over the template regardless of its value.
+                        var known = actualComponent.Fields.TryGetValue(field.Key, out var actualValue)
+                            || (typeDefaults.TryGetValue(actualComponent.Type.FullName, out var defaults)
+                                && defaults.TryGetValue(field.Key, out actualValue));
+                        if (!known || actualValue != field.Value)
                         {
                             setFieldOps.Add(new SetField
                             {
@@ -395,7 +418,9 @@ namespace SceneBuilder.Core.Diff
             // A newly-created node has no snapshot; diffing its components against an empty
             // snapshot emits an AddComponent (carrying each field) for every authored component,
             // matching the mapped path's emission. Children are handled by WalkDesired's recursion.
-            EmitComponentEdits(node, new SnapshotNode(), identityMap, ops);
+            // No matched component exists on an empty snapshot, so the type-defaults map is never
+            // consulted here — an empty map keeps that explicit.
+            EmitComponentEdits(node, new SnapshotNode(), identityMap, EmptyTypeDefaults, ops);
         }
     }
 }

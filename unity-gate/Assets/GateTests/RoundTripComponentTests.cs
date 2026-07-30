@@ -367,4 +367,102 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsNotNull(rb, "Component on a brand-new object was not materialized in a one-pass build");
         Assert.AreEqual(5f, rb.mass, "Authored mass=5 did not materialize on the one-pass-created Rigidbody");
     }
+
+    // 10. Nested enum field (scene->code) — a field whose runtime type is a NESTED enum
+    //     (UnityEngine.UI.ContentSizeFitter.FitMode) must Sync into source using the C# member-access
+    //     spelling (`.`), never the CLR reflection spelling (`+`) Unity's own Type.FullName reports —
+    //     the `+` form does not compile as a member-access chain (CS0103/CS0119). A second Sync with no
+    //     further scene edit must be a fixed point.
+    [Test]
+    public void SceneToCode_ChangedNestedEnumField_EmitsCompilableSourceSpelling_SecondSyncNoOp()
+    {
+        // Phase 1: build the object alone so it is mapped in the sidecar.
+        File.WriteAllText(_builderPath, Source("        var box = scene.Add(\"Box\");"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        // Phase 2: author the component + nested-enum field onto the existing object and rebuild.
+        // ContentSizeFitter carries [RequireComponent(typeof(RectTransform))], so materializing it
+        // promotes Box to a RectTransform; the first Sync below legitimately harvests a
+        // .RectTransform(...) call and must be allowed to settle before the field is measured.
+        File.WriteAllText(_builderPath, Source(
+            "        var box = scene.Add(\"Box\");\n" +
+            "        box.Component<UnityEngine.UI.ContentSizeFitter>(c => c.Set(\"m_VerticalFit\", UnityEngine.UI.ContentSizeFitter.FitMode.MinSize));"));
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        var boxAfterAuthoring = FindRoot(EditorSceneManager.GetActiveScene(), "Box");
+        Assert.IsNotNull(boxAfterAuthoring, "Box was not created by SceneBuilderBuild.Run");
+        var fitter = boxAfterAuthoring.GetComponent<UnityEngine.UI.ContentSizeFitter>();
+        Assert.IsNotNull(fitter, "Authored ContentSizeFitter was not materialized on Box");
+        Assert.AreEqual(UnityEngine.UI.ContentSizeFitter.FitMode.MinSize, fitter.verticalFit,
+            "Authored m_VerticalFit=MinSize was not materialized");
+
+        // Settle the RectTransform-promotion harvest before measuring the enum field.
+        EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        fitter.verticalFit = UnityEngine.UI.ContentSizeFitter.FitMode.PreferredSize;
+
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsTrue(result.Changed, "Sync reported no change despite an edited nested-enum field value");
+
+        var rewritten = File.ReadAllText(_builderPath);
+        StringAssert.Contains("UnityEngine.UI.ContentSizeFitter.FitMode.PreferredSize", rewritten,
+            "Builder source did not pick up the new FitMode value in the compilable dotted spelling.\n" + rewritten);
+        StringAssert.DoesNotContain("ContentSizeFitter+FitMode", rewritten,
+            "Builder source carries the non-compiling CLR '+' spelling of the nested enum.\n" + rewritten);
+
+        var secondSync = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsFalse(secondSync.Changed, "A second Sync with no further edit changed the source (non-convergent).");
+        Assert.AreEqual(0, secondSync.PatchEdits, "A second Sync with no further edit produced edits (churn).");
+        Assert.AreEqual(0, secondSync.EditsApplied, "A second Sync with no further edit applied edits (churn).");
+    }
+
+    // 11. Native enum field, no managed FieldInfo (scene->code) — a field like
+    //     Rigidbody.m_CollisionDetection has no backing managed enum, so the adapter reads it as a raw
+    //     int (b4-t2). Moving it away from its constructed default must harvest it into source as a
+    //     bare `.Set("m_CollisionDetection", <int>)`, and the value must author back correctly on the
+    //     next code->scene build. A second Sync with no further edit must be a fixed point.
+    [Test]
+    public void SceneToCode_ChangedNativeEnumField_IntroducesIntSetter_SecondSyncNoOp()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var box = scene.Add(\"Box\");\n" +
+            "        box.Component<UnityEngine.Rigidbody>(rb => rb.Set(\"m_Mass\", 5f));"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        var box = FindRoot(EditorSceneManager.GetActiveScene(), "Box");
+        Assert.IsNotNull(box, "Box was not created by SceneBuilderBuild.Run");
+        var rb = box.GetComponent<Rigidbody>();
+        Assert.IsNotNull(rb, "Authored Rigidbody was not materialized on Box");
+
+        // PREMISE: only a value AWAY from the constructed default survives ReadComponent's prune.
+        Assert.AreEqual(CollisionDetectionMode.Discrete, rb.collisionDetectionMode,
+            "Rigidbody.collisionDetectionMode must start at its constructed default (Discrete) for this test to prove anything.");
+
+        rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
+
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsTrue(result.Changed, "Sync reported no change despite a native enum field moved off its constructed default");
+
+        var rewritten = File.ReadAllText(_builderPath);
+        StringAssert.Contains(".Set(\"m_CollisionDetection\", 1)", rewritten,
+            "Builder source did not harvest the native enum field as a raw int setter.\n" + rewritten);
+        StringAssert.Contains(".Set(\"m_Mass\", 5f)", rewritten,
+            "Pre-existing authored field did not survive the closure rewrite.\n" + rewritten);
+
+        var secondSync = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsFalse(secondSync.Changed, "A second Sync with no further edit changed the source (non-convergent).");
+        Assert.AreEqual(0, secondSync.PatchEdits, "A second Sync with no further edit produced edits (churn).");
+        Assert.AreEqual(0, secondSync.EditsApplied, "A second Sync with no further edit applied edits (churn).");
+
+        // Close the loop code->scene: the harvested int must author back correctly and rebuilding is a fixed point.
+        var rebuildResult = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.AreEqual(0, rebuildResult.PlanOpCount, "Rebuilding from the harvested source produced scene ops (non-convergent code->scene).");
+        var rbAfterRebuild = FindRoot(EditorSceneManager.GetActiveScene(), "Box").GetComponent<Rigidbody>();
+        Assert.AreEqual(CollisionDetectionMode.Continuous, rbAfterRebuild.collisionDetectionMode,
+            "The harvested native enum value did not author back onto the rebuilt Rigidbody.");
+    }
 }

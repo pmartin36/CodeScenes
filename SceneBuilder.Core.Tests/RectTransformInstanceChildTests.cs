@@ -9,12 +9,12 @@ using static SceneBuilder.Core.Tests.RectTransformFixtures;
 
 namespace SceneBuilder.Core.Tests
 {
-    // m-ui-recttransform b3-t1 (iteration 2, research.md "the routed question, answered: YES"):
-    // a UI child added inside a prefab instance must carry its RectTransform payload through the
-    // SAME create-with-payload seam ReconcileConflictTests.CreateWithPayload_AddedChildWithComponent_ConvergesInOnePass
-    // already proves for components. Today RenderAddChildClosure (SourcePatchApplier.Instances.cs)
-    // renders components only, so the five authored rect fields are silently dropped scene->code
-    // (scope/bucket-b3.md SEVERITY low finding, routed to research).
+    // A UI child added inside a prefab instance carries its RectTransform payload through the SAME
+    // create-with-payload seam ReconcileConflictTests.CreateWithPayload_AddedChildWithComponent_ConvergesInOnePass
+    // proves for components: ReconcilerInstances.Nested.cs splits the created payload with
+    // canHostRectTransformCall: true onto AppendInstanceAddChild.RectTransform, and
+    // SourcePatchApplier.Instances.cs's RenderAddChildClosure renders `cfg.RectTransform(...)` ahead of
+    // the component calls inside the one AddChild closure.
     public class RectTransformInstanceChildTests
     {
         private const string PrefabGuid = "guid-hud-prefab";

@@ -623,5 +623,180 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(new Vec3(1, 2, 3), setTransform.Transform.Position);
             Assert.Equal(new Vec3(2, 2, 2), setTransform.Transform.Scale);
         }
+
+        [Fact]
+        public void Diff_FieldAuthoredAtTypeDefault_AbsentFromSnapshot_EmitsNoSetField()
+        {
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Canvas#0",
+                Type = new TypeRef("UnityEngine.Canvas"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_RenderMode", ValueNode.Primitive.Int(0)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef("UnityEngine.Canvas"),
+                Fields = FieldMap.Empty,
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var componentDefaults = new[]
+            {
+                new ComponentData
+                {
+                    Type = new TypeRef("UnityEngine.Canvas"),
+                    Fields = new FieldMap(new[]
+                    {
+                        new KeyValuePair<string, ValueNode>("m_RenderMode", ValueNode.Primitive.Int(0)),
+                    }),
+                },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot }, ComponentDefaults = componentDefaults };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            Assert.Empty(changeSet.Ops.OfType<SetField>());
+        }
+
+        [Fact]
+        public void Diff_FieldAuthoredAboveTypeDefault_AbsentFromSnapshot_StillEmitsSetField()
+        {
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Canvas#0",
+                Type = new TypeRef("UnityEngine.Canvas"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_RenderMode", ValueNode.Primitive.Int(1)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef("UnityEngine.Canvas"),
+                Fields = FieldMap.Empty,
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var componentDefaults = new[]
+            {
+                new ComponentData
+                {
+                    Type = new TypeRef("UnityEngine.Canvas"),
+                    Fields = new FieldMap(new[]
+                    {
+                        new KeyValuePair<string, ValueNode>("m_RenderMode", ValueNode.Primitive.Int(0)),
+                    }),
+                },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot }, ComponentDefaults = componentDefaults };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("m_RenderMode", setField.Path);
+            Assert.Equal(ValueNode.Primitive.Int(1), setField.Value);
+        }
+
+        [Fact]
+        public void Diff_SnapshotFieldWins_OverTypeDefaultTemplate()
+        {
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Rigidbody#0",
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(1f)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef("UnityEngine.Rigidbody"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(8f)),
+                }),
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            var componentDefaults = new[]
+            {
+                new ComponentData
+                {
+                    Type = new TypeRef("UnityEngine.Rigidbody"),
+                    Fields = new FieldMap(new[]
+                    {
+                        new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(1f)),
+                    }),
+                },
+            };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot }, ComponentDefaults = componentDefaults };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("m_Mass", setField.Path);
+            Assert.Equal(ValueNode.Primitive.Float(1f), setField.Value);
+        }
+
+        [Fact]
+        public void Diff_NoComponentDefaults_AbsentFieldStillCountsAsChanged()
+        {
+            var desiredComponent = new ComponentData
+            {
+                LogicalId = "root-1/UnityEngine.Canvas#0",
+                Type = new TypeRef("UnityEngine.Canvas"),
+                Fields = new FieldMap(new[]
+                {
+                    new KeyValuePair<string, ValueNode>("m_RenderMode", ValueNode.Primitive.Int(0)),
+                }),
+            };
+            var root = new GameObjectNode { LogicalId = "root-1", Name = "Root", Components = new[] { desiredComponent } };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new[] { root } };
+
+            var actualComponent = new ComponentData
+            {
+                Type = new TypeRef("UnityEngine.Canvas"),
+                Fields = FieldMap.Empty,
+            };
+            var snapshotRoot = new SnapshotNode { GlobalObjectId = "goid-root", Name = "Root", Components = new[] { actualComponent } };
+            // No ComponentDefaults supplied — defaults to Array.Empty<ComponentData>().
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotRoot } };
+
+            var map = new IdentityMap
+            {
+                Entries = new[] { new IdentityMapEntry { LogicalId = "root-1", GlobalObjectId = "goid-root", Kind = "GameObject" } },
+            };
+
+            var changeSet = Differ.Diff(model, snapshot, map);
+
+            var setField = Assert.Single(changeSet.Ops.OfType<SetField>());
+            Assert.Equal("m_RenderMode", setField.Path);
+            Assert.Equal(ValueNode.Primitive.Int(0), setField.Value);
+        }
     }
 }

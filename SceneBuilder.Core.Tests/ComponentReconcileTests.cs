@@ -514,6 +514,94 @@ public class Scene4 : ISceneDefinition
             Assert.Empty(result.Skipped);
         }
 
+        // b4-t2: a native serialized enum (no managed FieldInfo, e.g. Canvas.m_RenderMode) reads
+        // through the adapter as ValueNode.Primitive.Int, so scene->code harvests it through the
+        // same IntroduceComponentField path as any other snapshot-only field. Same archetype as
+        // Reconcile_NewlyDetectedField_EmitsIntroduceComponentField above, pinned for the enum-int
+        // shape specifically.
+        private const string CanvasSource = @"
+public class Scene5 : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var root = scene.Add(""Root"").Component<UnityEngine.Canvas>(c => c.Set(""m_SortingOrder"", 3));
+    }
+}
+";
+
+        private static SceneSnapshot CanvasSnapshotWithUnauthoredRenderMode() => new()
+        {
+            SchemaVersion = 1,
+            Roots = new[]
+            {
+                new SnapshotNode
+                {
+                    GlobalObjectId = "goid-root",
+                    Name = "Root",
+                    Components = new[]
+                    {
+                        new ComponentData
+                        {
+                            LogicalId = "unused",
+                            Type = new TypeRef("UnityEngine.Canvas"),
+                            Fields = new FieldMap(new[]
+                            {
+                                new KeyValuePair<string, ValueNode>("m_SortingOrder", ValueNode.Primitive.Int(3)),
+                                new KeyValuePair<string, ValueNode>("m_RenderMode", ValueNode.Primitive.Int(0)),
+                            }),
+                        },
+                    },
+                },
+            },
+        };
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyNativeEnumInt_IntroducesOneFieldWithRawIntValue()
+        {
+            var (parsed, map) = ParseWithMappedRootAndComponent(CanvasSource, "UnityEngine.Canvas");
+            var componentLogicalId = "root/UnityEngine.Canvas#0";
+            var snapshot = CanvasSnapshotWithUnauthoredRenderMode();
+
+            var result = Reconciler.Reconcile(
+                parsed.Model, snapshot, map, parsed.Anchors, null, null, parsed.ComponentAnchors, parsed.FieldArgumentSpans);
+
+            var introduce = Assert.Single(result.Patch.Edits.OfType<IntroduceComponentField>());
+            Assert.Equal(componentLogicalId, introduce.Anchor);
+            Assert.Equal("m_RenderMode", introduce.FieldKey);
+            Assert.Equal(ValueNode.Primitive.Int(0), introduce.Value);
+            Assert.Null(introduce.NewExpr);
+
+            Assert.Empty(result.Patch.Edits.OfType<PatchComponentField>());
+            Assert.Empty(result.Conflicts);
+            Assert.Empty(result.Skipped);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyNativeEnumInt_AppliedSourceReparsesAndConverges()
+        {
+            var (parsed, map) = ParseWithMappedRootAndComponent(CanvasSource, "UnityEngine.Canvas");
+            var snapshot = CanvasSnapshotWithUnauthoredRenderMode();
+
+            var result = Reconciler.Reconcile(
+                parsed.Model, snapshot, map, parsed.Anchors, null, null, parsed.ComponentAnchors, parsed.FieldArgumentSpans);
+
+            var patched = SourcePatchApplier.Apply(CanvasSource, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
+
+            Assert.Contains(".Set(\"m_RenderMode\", 0)", patched);
+            Assert.DoesNotContain("\"m_RenderMode\", 0f", patched);
+
+            var (reparsed, reparsedMap) = ParseWithMappedRootAndComponent(patched, "UnityEngine.Canvas");
+            var reparsedComponent = Assert.Single(Assert.Single(reparsed.Model.Roots).Components);
+            Assert.Equal(ValueNode.Primitive.Int(0), reparsedComponent.Fields["m_RenderMode"]);
+            Assert.Equal(ValueNode.Primitive.Int(3), reparsedComponent.Fields["m_SortingOrder"]);
+
+            var secondResult = Reconciler.Reconcile(
+                reparsed.Model, snapshot, reparsedMap, reparsed.Anchors, null, null, reparsed.ComponentAnchors, reparsed.FieldArgumentSpans);
+
+            Assert.Empty(secondResult.Patch.Edits);
+            Assert.Empty(secondResult.Conflicts);
+        }
+
         // ---- b2-t3: non-localizable component edit -> Conflict (spec line ~159) ----
 
         // Primary case: a managed Component entry is being removed (absent from the snapshot),

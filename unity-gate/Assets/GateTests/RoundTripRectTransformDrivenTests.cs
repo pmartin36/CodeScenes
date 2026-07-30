@@ -12,10 +12,9 @@ using SceneBuilder.Editor;
 using SceneBuilder.Core.Model;
 
 // specs/13-recttransform.md checklist item 9, "no churn": the seam proof that RectTransform support
-// composes end to end against REAL driving components in a live editor. No production change is
-// expected or authorized by this task — every case below pins behavior already shipped, exercised
-// through a real Canvas/CanvasScaler resolution change and a real HorizontalLayoutGroup, never a
-// hand-set DrivenChannels fixture (that belongs to RectTransformReadDrivenTests.cs).
+// composes end to end against REAL driving components in a live editor, exercised through a real
+// Canvas/CanvasScaler resolution change and a real HorizontalLayoutGroup, never a hand-set
+// DrivenChannels fixture (that belongs to RectTransformReadDrivenTests.cs).
 //
 // This file is the durable, in-repo version of the seam proof. Every PREMISE assertion below exists
 // so a future regression that silently stops driving a value (and would otherwise make the case pass
@@ -50,7 +49,10 @@ using SceneBuilder.Authoring;
 public class HudScene : ISceneDefinition {
     public void Build(SceneRoot scene) {
         var canvas = scene.Add(""Canvas"")
-                          .Component<Canvas>(c => c.Set(""m_RenderMode"", 0))
+                          .Component<Canvas>(c => {
+                              c.Set(""m_RenderMode"", 0);
+                              c.Set(""m_PixelPerfect"", false);
+                          })
                           .Component<CanvasScaler>(_ => { })
                           .Component<GraphicRaycaster>(_ => { });
         scene.Add(""EventSystem"").Component<EventSystem>(_ => { });
@@ -330,6 +332,15 @@ public class HudScene : ISceneDefinition {
         var sourceBaseline = File.ReadAllText(_builderPath);
         var sidecarBaseline = File.ReadAllText(_sidecarPath);
 
+        StringAssert.Contains("m_RenderMode", sourceBaseline,
+            "PREMISE: the fixture must still author a native enum field whose value DIFFERS from its " +
+            "type's constructed default (m_RenderMode: authored 0, default 2), or this case stops " +
+            "covering the read/write-asymmetry archetype it exists for.");
+        StringAssert.Contains("m_PixelPerfect", sourceBaseline,
+            "PREMISE: the fixture must still author a component field AT its type's constructed " +
+            "default value (m_PixelPerfect: authored false, default false), or this case stops " +
+            "covering the type-default-template archetype it exists for.");
+
         var panel = (RectTransform)Find(scene, "Canvas/Panel").transform;
         var button = (RectTransform)Find(scene, "Canvas/Panel/QuitButton").transform;
         var panelApBefore = panel.anchoredPosition;
@@ -345,10 +356,11 @@ public class HudScene : ISceneDefinition {
 
         var rebuild1 = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
         Assert.IsEmpty(rebuild1.Diagnostics, "Rebuild with no source change reported diagnostics");
-        Assert.AreEqual(1, rebuild1.PlanOpCount,
-            "A settled rebuild must emit exactly the ONE pre-existing SetField m_RenderMode op " +
-            "(D-1, a pre-existing defect reported up, unrelated to RectTransform); any rect/transform " +
-            "churn pushes this to 2 or more.");
+        Assert.AreEqual(0, rebuild1.PlanOpCount,
+            "A settled rebuild must be a fixed point: zero plan ops, including the native enum field " +
+            "authored away from its type's default value (m_RenderMode) and the field authored AT its " +
+            "type's default value (m_PixelPerfect); any rect/transform churn, or a regression of the " +
+            "native-enum read or the default-field template, pushes this above zero.");
 
         AssertSyncIsNoOp(scene, "the first rebuild with no source change");
         Assert.AreEqual(sourceBaseline, File.ReadAllText(_builderPath), "Source must stay byte-identical across the cycle.");
@@ -356,7 +368,7 @@ public class HudScene : ISceneDefinition {
 
         var rebuild2 = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
         Assert.IsEmpty(rebuild2.Diagnostics, "Second rebuild with no source change reported diagnostics");
-        Assert.AreEqual(1, rebuild2.PlanOpCount, "The rebuild's op count must be stable at 1, not growing, across repeated cycles.");
+        Assert.AreEqual(0, rebuild2.PlanOpCount, "The rebuild's op count must be stable at zero, not growing, across repeated cycles.");
 
         AssertSyncIsNoOp(scene, "the second rebuild with no source change");
 

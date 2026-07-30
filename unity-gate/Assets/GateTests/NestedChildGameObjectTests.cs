@@ -154,11 +154,11 @@ public class NestedChildGameObjectTests
         },
     };
 
-    // m-ui-recttransform b3-t1 (iteration 2, research.md): a UI child added inside a prefab
-    // instance must actually BECOME a RectTransform live, not a plain Transform — today
-    // InstanceOverrideExecutor.Children.cs's BuildAddedChild always does `new GameObject(name)`
-    // and writes only localPosition/rotation/scale, so an authored `.RectTransform(...)` payload
-    // is silently ignored on Build.
+    // A UI child added inside a prefab instance is created AS a RectTransform live, never a plain
+    // Transform: InstanceOverrideExecutor.Children.cs's BuildAddedChild creates through
+    // LiveTransformWrite.Create(name, Kind) and then applies the five authored rect fields via
+    // LiveTransformWrite.ApplyRectFields, after the localPosition/rotation/scale writes (D8 — an
+    // anchoredPosition write re-derives m_LocalPosition and must win).
     [Test]
     public void AddChild_UiNode_CreatesRectTransformChild_AppliesAuthoredLayout()
     {

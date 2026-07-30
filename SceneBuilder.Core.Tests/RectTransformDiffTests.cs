@@ -94,12 +94,11 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Diff_RectNode_AuthoredIntentDrivenBaseChannels_StillEmitsAuthoredTransform()
         {
-            // Guard, RESTATED (scope/bucket-b2.md finding 2 corrected the rule stated in the old name/
-            // comment here — base-transform driven bits ARE now consumed by the Differ, per-axis, but
-            // ONLY when they are foreign to the model's own authored intent). A base-transform driven
-            // bit reported on the MODEL side too (authored FitSize/SurfaceSnap intent — spec 23) still
-            // emits the full authored value: the component re-drives from that write, because the
-            // adapter re-baselines FitSize/SurfaceSnap on it (PlanExecutor.cs:393-405).
+            // Base-transform driven bits are consumed by the Differ, per-axis, but ONLY when they are
+            // foreign to the model's own authored intent. A base-transform driven bit reported on the
+            // MODEL side too (authored FitSize/SurfaceSnap intent — spec 23) still emits the full
+            // authored value: the component re-drives from that write, because the adapter re-baselines
+            // FitSize/SurfaceSnap on it (PlanExecutor.cs:393-405).
             var driven = ChannelMask.Scale | ChannelMask.PositionX | ChannelMask.PositionY;
             var authoredModel = Rect(scale: new Vec3(2, 2, 2), driven: driven);
             var authoredSnapshot = Rect(scale: new Vec3(5, 5, 5), driven: driven);
@@ -123,12 +122,10 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Diff_RectNode_ForeignDrivenBaseChannels_UnchangedModel_ProducesNoOp()
         {
-            // scope/bucket-b2.md finding 2 (measured probe Q1): a ScreenSpaceOverlay Canvas whose
-            // scale factor is not 1 drives its OWN base Position AND Scale (CanvasScaler) — a driver
-            // the builder never authors (model.DrivenChannels == None). An otherwise-unchanged model
-            // must therefore hold BOTH axes to the live value and emit nothing. Today the Differ
-            // compares the raw live Scale and emits `SetTransform scale=(1,1,1)`, clobbering the
-            // driven scale on every Build.
+            // A ScreenSpaceOverlay Canvas at a non-unit scale factor drives its own base Position and
+            // Scale (CanvasScaler); the builder never authors that driver
+            // (model.DrivenChannels == None), so an otherwise-unchanged model holds both axes to the
+            // live value and emits nothing.
             var model = Rect();
             var snapshot = Rect(
                 position: new Vec3(480, 270, 0),
@@ -144,9 +141,9 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Diff_RectNode_ForeignDrivenScaleAxis_FreeAxisChanged_HoldsLiveDrivenAxis()
         {
-            // Probe Q4: the per-axis archetype. Only ScaleX is foreign-driven; ScaleY/Z are free and
-            // genuinely changed. The emitted transform must hold the driven X axis to the LIVE value
-            // (5) and carry the model's free Y/Z (2, 2) — never the raw model value on X (today: 2).
+            // The per-axis archetype: only ScaleX is foreign-driven, ScaleY/Z are free and genuinely
+            // changed, so the emitted transform carries the LIVE value on the driven X axis and the
+            // model's own values on the free Y/Z.
             var model = Rect(scale: new Vec3(2, 2, 2));
             var snapshot = Rect(scale: new Vec3(5, 1, 1), driven: ChannelMask.ScaleX);
 
@@ -159,9 +156,9 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Diff_RectNode_ForeignDrivenScale_ZDrift_EmitsSetTransformKeepingLiveScale()
         {
-            // Probe Q6: a genuine Z drift still emits (D8's z-drift path), and the payload must carry
-            // the LIVE driven scale (2,2,2), not the model's own default (1,1,1) — a SetTransform
-            // triggered by an unrelated axis must not clobber a foreign-driven Scale in the same op.
+            // A genuine Z drift still emits (D8's z-drift path), and the payload must carry the LIVE
+            // driven scale (2,2,2), not the model's own default (1,1,1) — a SetTransform triggered by
+            // an unrelated axis must not clobber a foreign-driven Scale in the same op.
             var model = Rect(position: new Vec3(0, 0, 5));
             var snapshot = Rect(position: new Vec3(7, 9, 0), scale: new Vec3(2, 2, 2), driven: ChannelMask.Scale);
 
@@ -191,10 +188,10 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Diff_MatchedRectModel_PlainSnapshot_AllValuesAtDefault_EmitsAllRectFields()
         {
-            // b2-t1 iteration 2 (scope/bucket-b2.md finding 2): a matched node whose model authors a
-            // bare `.RectTransform()` (every field at RectTransformFields.Default*) against a live
-            // PLAIN Transform must still promote — value-equality with the default table does NOT
-            // mean the live object is already correct, since it has no rect fields at all.
+            // A matched node whose model authors a bare `.RectTransform()` (every field at
+            // RectTransformFields.Default*) against a live PLAIN Transform must still promote —
+            // value-equality with the default table does NOT mean the live object is already
+            // correct, since it has no rect fields at all.
             var model = Rect();
             var snapshot = new TransformData { Kind = "Transform", Position = Vec3.Zero };
 

@@ -40,7 +40,53 @@ namespace SceneBuilder.Editor
                 roots.Add(ReadNode(go, resolveId, resolveSceneRef));
             }
 
-            return new SceneSnapshot { SchemaVersion = 1, Roots = roots.ToArray() };
+            return FromRoots(roots.ToArray());
+        }
+
+        /// <summary>
+        /// The one <see cref="SceneSnapshot"/> construction factory every producer (cold read here,
+        /// <see cref="ChangeScopedSnapshot"/>'s cold and incremental assembles) routes through, so the
+        /// per-type default-field templates (<see cref="SceneSnapshot.ComponentDefaults"/>) are
+        /// populated for every caller by construction rather than opted into per site. Walks the
+        /// already-assembled tree (no Unity API calls beyond what building <paramref name="roots"/>
+        /// already made), collects the distinct component type full names present, and asks
+        /// <see cref="SerializedFieldBridge.TryGetDefaultTemplate"/> for each — O(components) over an
+        /// already-built tree, no SerializedObject work of its own. Invariant:
+        /// <see cref="SerializedFieldBridge.TryGetDefaultTemplate"/> answers only for a type whose
+        /// default-field map already ran in this domain; that holds because
+        /// <c>ChangeScopedSnapshot.AssembleIncremental</c> falls back to a cold assemble whenever its
+        /// node cache is null, and both caches are process state that dies together on a domain reload —
+        /// so a cold read (which calls <see cref="SerializedFieldBridge.ReadComponent"/> for every
+        /// component in the tree) always precedes a <see cref="FromRoots"/> call in the same domain.
+        /// </summary>
+        internal static SceneSnapshot FromRoots(SnapshotNode[] roots)
+        {
+            var typeNames = new SortedSet<string>(StringComparer.Ordinal);
+            CollectComponentTypeNames(roots, typeNames);
+
+            var defaults = new List<ComponentData>(typeNames.Count);
+            foreach (var typeName in typeNames)
+            {
+                if (SerializedFieldBridge.TryGetDefaultTemplate(typeName, out var fields))
+                {
+                    defaults.Add(new ComponentData { Type = new TypeRef(typeName), Fields = fields });
+                }
+            }
+
+            return new SceneSnapshot { SchemaVersion = 1, Roots = roots, ComponentDefaults = defaults.ToArray() };
+        }
+
+        private static void CollectComponentTypeNames(SnapshotNode[] nodes, SortedSet<string> typeNames)
+        {
+            foreach (var node in nodes)
+            {
+                foreach (var component in node.Components)
+                {
+                    typeNames.Add(component.Type.FullName);
+                }
+
+                CollectComponentTypeNames(node.Children, typeNames);
+            }
         }
 
         internal static SnapshotNode ReadNode(GameObject go, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)

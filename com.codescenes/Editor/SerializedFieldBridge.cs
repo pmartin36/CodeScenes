@@ -38,6 +38,21 @@ namespace SceneBuilder.Editor
         // supported fields (no default-filtering) for it.
         private static readonly Dictionary<Type, IReadOnlyDictionary<string, ValueNode>?> DefaultFieldCache = new();
 
+        // The same per-type default values as DefaultFieldCache, keyed by Type.FullName and shaped as
+        // a FieldMap — the reconstruction template a Differ-side comparison needs for a field
+        // ReadComponent pruned. Populated from the identical dictionary GetDefaultFieldMap already
+        // builds, so pruning and template stay consistent by construction: a type with no template
+        // (construction failed) is exactly a type nothing was pruned for either.
+        private static readonly Dictionary<string, FieldMap> DefaultTemplatesByTypeName = new();
+
+        /// <summary>
+        /// The per-type default field template a live component's ReadComponent pruning compares
+        /// against, keyed by <see cref="Type.FullName"/>. Absent (returns false) for a type whose
+        /// default instance could not be constructed — nothing was pruned for it either.
+        /// </summary>
+        internal static bool TryGetDefaultTemplate(string typeFullName, out FieldMap fields) =>
+            DefaultTemplatesByTypeName.TryGetValue(typeFullName, out fields!);
+
         // ---- Read (component -> ComponentData) ---------------------------------------------
 
         public static ComponentData ReadComponent(Component component, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
@@ -161,13 +176,16 @@ namespace SceneBuilder.Editor
                 var defaultComponent = temp.AddComponent(type);
                 if (defaultComponent is not null)
                 {
-                    var dict = new Dictionary<string, ValueNode>();
+                    var dict = new Dictionary<string, ValueNode>(); // O(1) prune index ReadComponent hits per field
+                    var templateEntries = new List<KeyValuePair<string, ValueNode>>(); // ordered Core-model FieldMap template
                     foreach (var field in CollectFields(new SerializedObject(defaultComponent)))
                     {
                         dict[field.Key] = field.Value;
+                        templateEntries.Add(field);
                     }
 
                     map = dict;
+                    DefaultTemplatesByTypeName[type.FullName!] = new FieldMap(templateEntries);
                 }
             }
             catch
@@ -251,8 +269,10 @@ namespace SceneBuilder.Editor
             var type = ResolveFieldType(p.serializedObject.targetObject, p.propertyPath);
             if (type == null || !type.IsEnum)
             {
-                // Cannot resolve the managed enum type (e.g. built-in native field) — preserve verbatim.
-                return new ValueNode.Unsupported(p.intValue.ToString());
+                // A native serialized enum (no managed FieldInfo backs the path, e.g. Canvas.m_RenderMode):
+                // read the raw value as an Int, the same shape WritePrimitive writes back through
+                // SerializedProperty.intValue and the same shape `c.Set("m_RenderMode", 0)` authors.
+                return ValueNode.Primitive.Int(p.intValue);
             }
 
             var isFlags = type.IsDefined(typeof(FlagsAttribute), false);

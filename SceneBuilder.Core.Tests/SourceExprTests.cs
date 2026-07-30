@@ -207,6 +207,37 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal(node, Roundtrip(text));
         }
 
+        // A nested type's TypeFullName is a type IDENTITY that admits two spellings: the CLR
+        // reflection form (`+`, e.g. what Type.FullName reports) and the C# source form (`.`).
+        // Only the source form compiles as a member-access chain, so it must be what renders here
+        // regardless of which spelling the node was constructed with, and the rendered text must
+        // parse back to an EQUAL node.
+        [Fact]
+        public void ValueNodeLiteral_NestedEnumSingleMember_RendersSourceSpellingAndRoundtrips()
+        {
+            var node = new ValueNode.Enum("UnityEngine.UI.ContentSizeFitter+FitMode", new[] { "PreferredSize" }, IsFlags: false);
+
+            var text = SourceExpr.ValueNodeLiteral(node);
+
+            Assert.Equal("UnityEngine.UI.ContentSizeFitter.FitMode.PreferredSize", text);
+            Assert.Equal(node, Roundtrip(text));
+        }
+
+        [Fact]
+        public void ValueNodeLiteral_NestedEnumFlags_RendersSourceSpellingAndRoundtrips()
+        {
+            // Members must already be in ordinal order: ValueNodeParser.ParseFlagsEnum sorts on
+            // parse, so an unsorted node would fail round-trip equality for an unrelated reason.
+            var node = new ValueNode.Enum("UnityEngine.UI.ContentSizeFitter+FitMode", new[] { "MinSize", "PreferredSize" }, IsFlags: true);
+
+            var text = SourceExpr.ValueNodeLiteral(node);
+
+            Assert.Equal(
+                "UnityEngine.UI.ContentSizeFitter.FitMode.MinSize | UnityEngine.UI.ContentSizeFitter.FitMode.PreferredSize",
+                text);
+            Assert.Equal(node, Roundtrip(text));
+        }
+
         [Fact]
         public void ValueNodeLiteral_Vec2_RoundtripsIncludingNegativeComponent()
         {

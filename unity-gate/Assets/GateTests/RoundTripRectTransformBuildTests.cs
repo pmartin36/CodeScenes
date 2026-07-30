@@ -213,14 +213,9 @@ public class HudScene : ISceneDefinition {{
     // Checklist 7 (code->scene half, specs/13-recttransform.md:275-276): a rebuild with NO source
     // change is idempotent, asserted OBSERVABLY: identical scene bytes, identical sidecar bytes,
     // identical live rect values, identical instance ids.
-    // NOTE: this deliberately does NOT assert BuildResult.PlanOpCount == 0. A settled rebuild of THIS
-    // fixture is not zero ops for a reason that has nothing to do with RectTransform: D-1,
-    // com.codescenes/Editor/SerializedFieldBridge.cs:48-62 (ReadComponent) prunes every read field
-    // whose value equals a freshly-constructed instance's default, and this fixture authors
-    // .Component<Canvas>(c => c.Set("m_RenderMode", 0)), where 0 IS the default, so that field is
-    // pruned from every snapshot read and re-emits one SetField on every Build, forever
-    // (pre-existing, pre-feature; tracked in .agent_handoffs/m-ui-recttransform/scope/bucket-b4.md as
-    // D-1). The op-count assertion is owned by
+    // This case does not assert BuildResult.PlanOpCount == 0; this fixture carries the spec's Image,
+    // whose RequireComponent CanvasRenderer harvest is orthogonal noise to a settled rebuild's op
+    // count. The op-count == 0 assertion is owned by
     // RoundTripRectTransformDrivenTests.BuildSyncBuildSync_NoUserEdit_EmitsNoRectOps_AndNoSourceEdits,
     // which pins it on a fixture without the Image so any rect or transform churn is visible there.
     [Test]

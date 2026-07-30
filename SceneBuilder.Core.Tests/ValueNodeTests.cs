@@ -111,6 +111,22 @@ namespace SceneBuilder.Core.Tests
             Assert.NotEqual(a, differentType);
         }
 
+        // TypeFullName is a type IDENTITY, not an opaque string: the CLR reflection spelling
+        // (`+` between an outer and a nested type, e.g. what Type.FullName reports and what the
+        // adapter's live enum read hands over) and the C# source spelling (`.`, what a parsed
+        // builder file and SourceExpr's rendering use) name the SAME type and must compare equal
+        // and hash equal. TypeFullName itself must read back in the source spelling.
+        [Fact]
+        public void Enum_ClrNestedSpellingAndSourceSpelling_AreTheSameValue()
+        {
+            var clrSpelled = new ValueNode.Enum("UnityEngine.UI.ContentSizeFitter+FitMode", new[] { "PreferredSize" }, IsFlags: false);
+            var sourceSpelled = new ValueNode.Enum("UnityEngine.UI.ContentSizeFitter.FitMode", new[] { "PreferredSize" }, IsFlags: false);
+
+            Assert.Equal("UnityEngine.UI.ContentSizeFitter.FitMode", clrSpelled.TypeFullName);
+            Assert.Equal(sourceSpelled, clrSpelled);
+            Assert.Equal(sourceSpelled.GetHashCode(), clrSpelled.GetHashCode());
+        }
+
         [Fact]
         public void Unsupported_RawTokenEquality()
         {

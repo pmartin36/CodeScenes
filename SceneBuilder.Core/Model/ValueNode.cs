@@ -71,6 +71,21 @@ namespace SceneBuilder.Core.Model
 
         public sealed record Enum(string TypeFullName, IReadOnlyList<string> Members, bool IsFlags) : ValueNode
         {
+            // TypeFullName is a type IDENTITY in C# SOURCE spelling: a nested type is separated by
+            // '.' (UnityEngine.UI.ContentSizeFitter.FitMode), never the CLR reflection '+'. Producers
+            // may hand over either form (the adapter reads Type.FullName; SpatialComponents' constants
+            // mirror the runtime FullName); canonicalizing here is what makes equality, hashing,
+            // SourceExpr's rendering and ValueNodeParser's parse-back agree on one spelling.
+            private readonly string _typeFullName = Canonicalize(TypeFullName);
+
+            public string TypeFullName
+            {
+                get => _typeFullName;
+                init => _typeFullName = Canonicalize(value);
+            }
+
+            private static string Canonicalize(string typeFullName) => typeFullName.Replace('+', '.');
+
             public bool Equals(Enum? other) =>
                 other is not null
                 && string.Equals(TypeFullName, other.TypeFullName, StringComparison.Ordinal)
