@@ -22,6 +22,9 @@ namespace SceneBuilder.Editor
     public static class SerializedFieldBridge
     {
         // Internal Unity bookkeeping — never surfaced as a field (would corrupt diffs).
+        // The last three used to be filtered for free by the old NextVisible walk: they carry the
+        // native hidden flag, so an inspector-visibility walk never reached them. The walk now
+        // enumerates every SERIALIZED property (see CollectFields), so they are named explicitly.
         private static readonly HashSet<string> Bookkeeping = new()
         {
             "m_Script",
@@ -30,6 +33,37 @@ namespace SceneBuilder.Editor
             "m_PrefabInstance",
             "m_PrefabAsset",
             "m_GameObject",
+            "m_EditorHideFlags",
+            "m_EditorClassIdentifier",
+            "m_Name",
+        };
+
+        // Renderer state Unity REGENERATES from a lightmap bake / static batching / editor selection.
+        // It is serialized and hidden, but it is build output, not authored data: round-tripping it
+        // would write bake results into the builder source and then push those stale results back
+        // onto the scene on the next code->scene rebuild. Excluded by name, deliberately narrow —
+        // every OTHER hidden property is captured.
+        private static readonly HashSet<string> DerivedBuildState = new()
+        {
+            "m_LightmapIndex",
+            "m_LightmapIndexDynamic",
+            "m_LightmapTilingOffset",
+            "m_LightmapTilingOffsetDynamic",
+            "m_StaticBatchInfo",
+            "m_StaticBatchRoot",
+            "m_SelectedEditorRenderState",
+        };
+
+        // Components authored through a dedicated closed-keyword call (`.FitSize(height: 2f)`,
+        // `.SurfaceSnap(down: true)`) rather than `.Component<T>(c => c.Set(...))`. Their authoring
+        // grammar has a FIXED argument set, so a field outside it cannot be rendered back into source:
+        // the writer emits `.FitSize(m_Enabled: false)` and the parser then rejects its own output.
+        // m_Enabled is the only property the serialized walk reaches on them that the grammar cannot
+        // express (disabling a FitSize releases its channel — that is what syncs, via the transform).
+        private static readonly HashSet<string> ClosedGrammarComponents = new()
+        {
+            SpatialComponents.FitSizeTypeName,
+            SpatialComponents.SurfaceSnapTypeName,
         };
 
         // Per-type default-field reference maps (propertyPath -> default ValueNode), built once by
@@ -113,16 +147,36 @@ namespace SceneBuilder.Editor
         // Collects the supported, non-bookkeeping top-level serialized fields of a component as
         // (propertyPath -> ValueNode) pairs. Shared by the real-component read path and the
         // default-reference builder so both filter identically.
+        //
+        // Walks with Next, NOT NextVisible. NextVisible yields exactly what a DEFAULT inspector would
+        // draw, so every property a custom editor draws by hand — Canvas.m_SortingOrder /
+        // m_SortingLayerID / m_TargetDisplay, Rigidbody.m_Constraints, Renderer sorting — and every
+        // property drawn outside the property list (m_Enabled, in the component header) was invisible
+        // to the reader. Scene->code diffs for those fields were therefore always empty: the editor
+        // value changed and the sync answered "Scene already matches code". Serialized state, not
+        // inspector-visible state, is what round-trips, so the filtering is by explicit name
+        // (Bookkeeping / DerivedBuildState) rather than by Unity's inspector-drawing flag.
         private static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
+            // Derived here (not passed in) so the real-component read and the default-template build
+            // filter identically by construction — a divergence would prune against a template that
+            // never had the field.
+            var typeName = so.targetObject == null ? null : so.targetObject.GetType().FullName;
+            var closedGrammar = typeName != null && ClosedGrammarComponents.Contains(typeName);
+
             var it = so.GetIterator();
             var enterChildren = true;
-            while (it.NextVisible(enterChildren))
+            while (it.Next(enterChildren))
             {
-                enterChildren = false; // top-level visible properties only; nesting handled in ReadProperty
-                if (Bookkeeping.Contains(it.propertyPath))
+                enterChildren = false; // top-level properties only; nesting handled in ReadProperty
+                if (Bookkeeping.Contains(it.propertyPath) || DerivedBuildState.Contains(it.propertyPath))
+                {
+                    continue;
+                }
+
+                if (closedGrammar && it.propertyPath == "m_Enabled")
                 {
                     continue;
                 }
@@ -316,7 +370,11 @@ namespace SceneBuilder.Editor
             var end = p.GetEndProperty();
             var childDepth = p.depth + 1;
             var enterChildren = true;
-            while (it.NextVisible(enterChildren) && !SerializedProperty.EqualContents(it, end))
+
+            // Next, not NextVisible — same rule as CollectFields one level down: a struct's hidden
+            // children (e.g. StaticBatchInfo's firstSubMesh/subMeshCount) are serialized state and
+            // must not disappear from the read just because no inspector draws them.
+            while (it.Next(enterChildren) && !SerializedProperty.EqualContents(it, end))
             {
                 enterChildren = false;
                 if (it.depth == childDepth)
