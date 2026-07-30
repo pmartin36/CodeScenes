@@ -223,51 +223,82 @@ namespace SceneBuilder.Core.Reconcile
                 return;
             }
 
-            if (arguments.Count == 0)
-            {
-                allTargets.Add(invocation);
-                appliers.Add(currentRoot =>
-                {
-                    var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(invocation)!;
-                    var lambdaText = $"c => {BuildSetCallText("c", edit.FieldKey, valueExpr)}";
-                    var lambdaArg = SyntaxFactory.Argument(SyntaxFactory.ParseExpression(lambdaText));
-                    var newArgList = SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(lambdaArg));
-                    return currentRoot.ReplaceNode(current, current.WithArgumentList(newArgList));
-                });
-                return;
-            }
-
-            if (arguments.Count != 1 || arguments[0].Expression is not SimpleLambdaExpressionSyntax lambda)
+            if (arguments.Count != 0
+                && (arguments.Count != 1 || arguments[0].Expression is not SimpleLambdaExpressionSyntax))
             {
                 throw Fail(invocation, $"Unsupported component closure form for anchor '{edit.Anchor}'; expected a lambda like `c => ...`.");
             }
 
-            var receiver = lambda.Parameter.Identifier.Text;
-
-            allTargets.Add(lambda);
+            // EVERY IntroduceComponentField on one component rewrites the SAME `.Component<T>(...)`
+            // invocation, and a batch routinely carries several of them — the user sets two fields on
+            // one component in a single editor action. So the invocation is the only node worth
+            // tracking, and the closure's shape MUST be read from the CURRENT root inside the applier:
+            // by the time the second edit runs, an empty argument list has grown a lambda and an
+            // expression-bodied lambda has become a block. Branching on the ORIGINAL tree's shape
+            // instead made the second edit either dereference a lambda the first edit had replaced
+            // (NullReferenceException, which wedged every subsequent sync) or overwrite the first
+            // edit's whole argument list (the zero-arg form's silent dropped edit).
+            allTargets.Add(invocation);
             appliers.Add(currentRoot =>
             {
-                var currentLambda = (SimpleLambdaExpressionSyntax)currentRoot.GetCurrentNode(lambda)!;
+                var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(invocation)!;
+                var currentArguments = current.ArgumentList.Arguments;
 
-                if (currentLambda.Body is BlockSyntax block)
+                if (currentArguments.Count == 0)
                 {
-                    var indent = block.Statements.Count > 0 ? IndentOf(block.Statements[0]) : IndentOf(block) + "    ";
-                    var newStatement = SyntaxFactory.ParseStatement($"{BuildSetCallText(receiver, edit.FieldKey, valueExpr)};")
-                        .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
-                        .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
-                    var newBlock = block.AddStatements(newStatement);
-                    return currentRoot.ReplaceNode(currentLambda, currentLambda.WithBody(newBlock));
+                    var lambdaText = $"c => {BuildSetCallText("c", edit.FieldKey, valueExpr)}";
+                    var lambdaArg = SyntaxFactory.Argument(SyntaxFactory.ParseExpression(lambdaText));
+                    var newArgList = SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(lambdaArg));
+                    return currentRoot.ReplaceNode(current, current.WithArgumentList(newArgList));
                 }
 
-                var exprBody = (ExpressionSyntax)currentLambda.Body;
-                var originalText = exprBody.WithoutTrivia().ToFullString();
-                var newSetText = BuildSetCallText(receiver, edit.FieldKey, valueExpr);
-                var blockText = $"{{ {originalText}; {newSetText}; }}";
-                var newLambda = (SimpleLambdaExpressionSyntax)SyntaxFactory.ParseExpression($"{receiver} => {blockText}")
-                    .WithTriviaFrom(currentLambda);
+                if (currentArguments.Count != 1 || currentArguments[0].Expression is not SimpleLambdaExpressionSyntax currentLambda)
+                {
+                    throw Fail(current, $"Unsupported component closure form for anchor '{edit.Anchor}'; expected a lambda like `c => ...`.");
+                }
 
-                return currentRoot.ReplaceNode(currentLambda, newLambda);
+                var receiver = currentLambda.Parameter.Identifier.Text;
+                var newSetText = BuildSetCallText(receiver, edit.FieldKey, valueExpr);
+
+                var newBody = currentLambda.Body is BlockSyntax block
+                    ? AppendToClosureBlock(block, newSetText)
+                    : ExpressionBodyToBlock((ExpressionSyntax)currentLambda.Body, newSetText);
+
+                return currentRoot.ReplaceNode(currentLambda, currentLambda.WithBody(newBody));
             });
+        }
+
+        // Appends one `c.Set(...)` statement to an existing closure block, matching the block's own
+        // layout: a one-line `{ ...; }` closure stays on one line, a multi-line block keeps its
+        // per-statement indentation.
+        private static BlockSyntax AppendToClosureBlock(BlockSyntax block, string newSetText)
+        {
+            var statement = SyntaxFactory.ParseStatement($"{newSetText};");
+
+            if (block.ToFullString().Contains('\n'))
+            {
+                var indent = block.Statements.Count > 0 ? IndentOf(block.Statements[0]) : IndentOf(block) + "    ";
+                return block.AddStatements(statement
+                    .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
+                    .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n")));
+            }
+
+            return block.AddStatements(statement.WithTrailingTrivia(SyntaxFactory.Space));
+        }
+
+        // Rewrites `c => c.Set(a)` into `c => { c.Set(a); c.Set(b); }` REUSING the authored body's
+        // syntax node rather than re-parsing its text, so a PatchComponentField tracking a value node
+        // inside that body in the same batch still resolves after this rewrite.
+        private static BlockSyntax ExpressionBodyToBlock(ExpressionSyntax body, string newSetText)
+        {
+            var existing = SyntaxFactory.ExpressionStatement(body.WithoutTrivia())
+                .WithTrailingTrivia(SyntaxFactory.Space);
+            var added = SyntaxFactory.ParseStatement($"{newSetText};")
+                .WithTrailingTrivia(SyntaxFactory.Space);
+
+            return SyntaxFactory.Block(existing, added)
+                .WithOpenBraceToken(SyntaxFactory.Token(SyntaxKind.OpenBraceToken)
+                    .WithTrailingTrivia(SyntaxFactory.Space));
         }
 
         private static string BuildSetCallText(string receiver, string fieldKey, string valueExpr)
