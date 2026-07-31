@@ -10,8 +10,13 @@ using SceneBuilder.Core.Model;
 // AssetReferenceResolverObjectRefReadTests.cs's role for the object-ref read. A serialized enum whose
 // managed FieldInfo cannot be resolved (a native class field, e.g. Canvas.m_RenderMode) reads as
 // ValueNode.Primitive.Int(intValue) — the same shape WriteField consumes — while a managed enum field
-// keeps reading as ValueNode.Enum. Read and write therefore agree on native enums, and the per-type
-// default template carries them at their constructed value.
+// keeps reading as ValueNode.Enum. Read and write therefore agree on native enums.
+// ReadComponent no longer prunes ANY default-valued field (unconditional, unfiltered read —
+// the decision to omit a default value moved to the emit side, ComponentDefaultOmission). The
+// per-type default template (SceneSnapshot.ComponentDefaults) is built by ComponentDefaultTemplate,
+// which constructs through Create — the same primitive PlanExecutor creates components with — so a
+// native enum's "constructed default" reflects Create's EditorCreationDefaults overlay, not a raw
+// AddComponent.
 public class SerializedFieldNativeEnumReadTests
 {
     private const string ScenePath = "Assets/GateTests/__NativeEnumReadTemp.unity";
@@ -41,7 +46,9 @@ public class SerializedFieldNativeEnumReadTests
     {
         var go = new GameObject("Canvas");
         var canvas = go.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay; // 0 — NOT a freshly-constructed default (WorldSpace, 2)
+        canvas.renderMode = RenderMode.WorldSpace; // 2 — Create's overlay makes ScreenSpaceOverlay(0)
+                                                    // the template default, so WorldSpace is now the
+                                                    // "away from default" value this test needs.
         SaveActiveScene();
 
         var data = SerializedFieldBridge.ReadComponent(canvas);
@@ -51,7 +58,7 @@ public class SerializedFieldNativeEnumReadTests
             "dropped as Unsupported.");
         Assert.IsNotInstanceOf<ValueNode.Unsupported>(node,
             "A native enum property must not read back as Unsupported (it has a working write path).");
-        Assert.AreEqual(ValueNode.Primitive.Int(0), node,
+        Assert.AreEqual(ValueNode.Primitive.Int(2), node,
             "A native enum must read as the raw SerializedProperty.intValue, the same shape " +
             "WriteField already consumes for it.");
     }
@@ -79,7 +86,9 @@ public class SerializedFieldNativeEnumReadTests
     public void Read_LiveScene_ComponentDefaultsCarriesCanvasTemplateIncludingNativeEnum()
     {
         var go = new GameObject("Canvas");
-        go.AddComponent<Canvas>(); // left at its constructed default: m_RenderMode=WorldSpace(2), m_PixelPerfect=false
+        go.AddComponent<Canvas>(); // left at its constructed default: m_PixelPerfect=false. The template's
+                                    // m_RenderMode default is ScreenSpaceOverlay(0), from Create's overlay —
+                                    // NOT this GameObject's own raw AddComponent value (WorldSpace, 2).
         SaveActiveScene();
 
         var snapshot = SceneSnapshotReader.Read(EditorSceneManager.GetActiveScene());
@@ -97,8 +106,10 @@ public class SerializedFieldNativeEnumReadTests
 
         Assert.IsTrue(canvasDefaults.Fields.TryGetValue("m_RenderMode", out var renderMode),
             "The Canvas template must carry m_RenderMode at its constructed default — a native enum " +
-            "reads as an int, and the template is built from the same CollectFields walk that builds " +
-            "ReadComponent's prune index.");
-        Assert.AreEqual(ValueNode.Primitive.Int(2), renderMode);
+            "reads as an int, and the template is built from ComponentDefaultTemplate.Create, which " +
+            "applies the ScreenSpaceOverlay overlay.");
+        Assert.AreEqual(ValueNode.Primitive.Int(0), renderMode,
+            "The template's m_RenderMode default is ScreenSpaceOverlay(0) via Create's overlay, not " +
+            "the raw AddComponent default (WorldSpace, 2).");
     }
 }

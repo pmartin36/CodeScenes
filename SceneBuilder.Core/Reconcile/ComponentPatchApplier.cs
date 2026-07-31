@@ -9,8 +9,8 @@ using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    // AppendComponentStatement resolution (b3-t1), PatchComponentField / IntroduceComponentField
-    // resolution (b3-t2). Second partial-class file so the existing private helpers on
+    // AppendComponentStatement resolution, PatchComponentField / IntroduceComponentField
+    // resolution. Second partial-class file so the existing private helpers on
     // SourcePatchApplier (FindAnchorInvocation, BuildHandleDeclaration, IndentOf, BodyIndent, Fail)
     // are reused directly — no visibility changes, no duplication.
     public static partial class SourcePatchApplier
@@ -25,7 +25,7 @@ namespace SceneBuilder.Core.Reconcile
             Dictionary<string, SyntaxAnnotation> lastSiblingByParent,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers,
-            // b7-t2: threaded down to the RenderComponentClosureArgs fallback — see SourcePatchApplier
+            // Threaded down to the RenderComponentClosureArgs fallback — see SourcePatchApplier
             // .Apply's doc comment on assetCatalog.
             AssetCatalog? assetCatalog = null)
         {
@@ -101,9 +101,9 @@ namespace SceneBuilder.Core.Reconcile
         private static string BuildComponentStatementText(
             AppendComponentStatement edit, string receiver, AssetCatalog? assetCatalog = null)
         {
-            // b4-t1: FitSize/SurfaceSnap always render as their dedicated fluent call — never the
+            // FitSize/SurfaceSnap always render as their dedicated fluent call — never the
             // generic .Component<T> form, which would fail to stamp TransformData.DrivenChannels
-            // on re-parse and defeat b3 driven-suppression.
+            // on re-parse and defeat driven-suppression.
             if (SpatialComponentSource.IsSpatial(edit.TypeFullName))
             {
                 return SpatialComponentSource.RenderStatement(receiver, edit.TypeFullName, edit.Fields, edit.FieldExpressions);
@@ -113,7 +113,7 @@ namespace SceneBuilder.Core.Reconcile
             return $"{call}{RenderComponentClosureArgs(edit.Fields, edit.FieldExpressions, assetCatalog)};";
         }
 
-        // m10-b4-t1: extracted from BuildComponentStatementText so AppendInstanceAddComponent
+        // Extracted from BuildComponentStatementText so AppendInstanceAddComponent
         // (SourcePatchApplier.Instances.cs) renders its `.AddComponent<T>(...)` closure
         // byte-identically to `.Component<T>(...)`'s — one renderer, two call sites.
         // Returns the PARENTHESIZED argument list: `()`, `(c => c.Set("k", v))`, or
@@ -126,10 +126,10 @@ namespace SceneBuilder.Core.Reconcile
                 return "()";
             }
 
-            // b4-t3: FieldExpressions carries a pre-rendered override for a field SourceExpr
+            // FieldExpressions carries a pre-rendered override for a field SourceExpr
             // cannot format context-free (an ObjectRef handle argument) — consulted first, with
             // ValueNodeLiteral as the unchanged fallback for every other field.
-            // b7-t2: the fallback must ALSO carry the catalog — a field never pre-rendered into
+            // The fallback must ALSO carry the catalog — a field never pre-rendered into
             // FieldExpressions (e.g. a List<AssetRef> like `m_Materials`, whose per-element catalog
             // lookup only ValueNodeLiteral's own recursive List arm performs) still needs it to
             // resolve to the typed `Assets.<...>` chain instead of the `Asset("path")` fallback.
@@ -149,7 +149,7 @@ namespace SceneBuilder.Core.Reconcile
             return $"(c => {{ {sets} }})";
         }
 
-        // ---- PatchComponentField (b3-t2) ---------------------------------------------------
+        // ---- PatchComponentField -----------------------------------------------------------
 
         private static void ResolvePatchComponentField(
             CompilationUnitSyntax root,
@@ -181,7 +181,7 @@ namespace SceneBuilder.Core.Reconcile
             });
         }
 
-        // ---- IntroduceComponentField (b3-t2) -----------------------------------------------
+        // ---- IntroduceComponentField ---------------------------------------------------------
 
         private static void ResolveIntroduceComponentField(
             CompilationUnitSyntax root,
@@ -189,21 +189,21 @@ namespace SceneBuilder.Core.Reconcile
             IntroduceComponentField edit,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers,
-            // b7-t2: threaded down to the ValueNodeLiteral fallback below — see SourcePatchApplier
+            // Threaded down to the ValueNodeLiteral fallback below — see SourcePatchApplier
             // .Apply's doc comment on assetCatalog.
             AssetCatalog? assetCatalog = null)
         {
             var invocation = FindComponentInvocation(root, anchors, edit.Anchor);
             var arguments = invocation.ArgumentList.Arguments;
 
-            // b4-t3: pre-rendered ObjectRef override (mirrors AppendComponentStatement.FieldExpressions'
+            // Pre-rendered ObjectRef override (mirrors AppendComponentStatement.FieldExpressions'
             // pattern) — SourceExpr.ValueNodeLiteral has no ObjectRef arm and stays pure/context-free,
             // so anything context-dependent or side-effecting is pre-rendered at EMIT time.
-            // b7-t2: the fallback must ALSO carry the catalog — see RenderComponentClosureArgs's
+            // The fallback must ALSO carry the catalog — see RenderComponentClosureArgs's
             // identical comment.
             var valueExpr = edit.NewExpr ?? SourceExpr.ValueNodeLiteral(edit.Value, assetCatalog);
 
-            // b7-t1 fix: a dedicated `.FitSize(...)/.SurfaceSnap(...)` call has ALL-named-argument shape
+            // A dedicated `.FitSize(...)/.SurfaceSnap(...)` call has ALL-named-argument shape
             // (SpatialComponentSource.RenderArguments), never the generic `c => ...` closure the
             // fallback below expects — introducing a previously-absent field (e.g. toggling a
             // SurfaceSnap flag from unset->true) must append a new named argument in that SAME
@@ -306,6 +306,63 @@ namespace SceneBuilder.Core.Reconcile
             return $"{receiver}.Set({SourceExpr.StringLiteral(fieldKey)}, {valueExpr})";
         }
 
+        // ---- RemoveComponentField --------------------------------------------------------------
+
+        // Resolves the `.Set(...)` invocation from ValueSpan against the ORIGINAL tree; the removal
+        // SHAPE (delete the sole argument vs. delete one statement from a block) is decided INSIDE
+        // the applier, from the CURRENT root, never here — a same-batch IntroduceComponentField on
+        // the SAME component can rewrite an expression-bodied closure into a block before this
+        // applier runs. Reuses SourcePatchApplier.ConfigureLambdaArgumentToRemove
+        // verbatim; do not write a second sole-link detector.
+        private static void ResolveRemoveComponentField(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            RemoveComponentField edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var textSpan = TextSpan.FromBounds(edit.ValueSpan.Start, edit.ValueSpan.Start + edit.ValueSpan.Length);
+            var target = root.FindNode(textSpan, getInnermostNodeForTie: true);
+
+            var setInvocation = target.FirstAncestorOrSelf<InvocationExpressionSyntax>(inv =>
+                    inv.Expression is MemberAccessExpressionSyntax ma && ma.Name.Identifier.Text == "Set")
+                ?? throw Fail(root, $"Could not resolve the .Set(...) call for field '{edit.FieldKey}' on '{edit.Anchor}'.");
+
+            allTargets.Add(setInvocation);
+            appliers.Add(currentRoot =>
+            {
+                var current = currentRoot.GetCurrentNode(setInvocation);
+                if (current == null)
+                {
+                    // Already gone — e.g. a same-batch removal on the SAME field, or the enclosing
+                    // component/statement was itself removed earlier in this batch.
+                    return currentRoot;
+                }
+
+                if (ConfigureLambdaArgumentToRemove(current) is { } soleArgument)
+                {
+                    var soleArgumentList = (ArgumentListSyntax)soleArgument.Parent!;
+                    var withoutSoleArgument = soleArgumentList.WithArguments(soleArgumentList.Arguments.Remove(soleArgument));
+                    return currentRoot.ReplaceNode(soleArgumentList, withoutSoleArgument);
+                }
+
+                if (current.Parent is ExpressionStatementSyntax statement && statement.Parent is BlockSyntax block)
+                {
+                    if (block.Statements.Count == 1 && block.Statements[0] == statement
+                        && block.Parent is SimpleLambdaExpressionSyntax { Parent: ArgumentSyntax lambdaArgument })
+                    {
+                        var lambdaArgumentList = (ArgumentListSyntax)lambdaArgument.Parent!;
+                        var withoutLambdaArgument = lambdaArgumentList.WithArguments(lambdaArgumentList.Arguments.Remove(lambdaArgument));
+                        return currentRoot.ReplaceNode(lambdaArgumentList, withoutLambdaArgument);
+                    }
+
+                    return currentRoot.ReplaceNode(block, block.WithStatements(block.Statements.Remove(statement)));
+                }
+
+                throw Fail(current, $"Unsupported component closure form for anchor '{edit.Anchor}'.");
+            });
+        }
+
         // A component LogicalId is always synthesized "{ownerLogicalId}/{TypeFullName}#{ordinal}"
         // (BuilderParser.AssignComponentLogicalIds) — the one place an anchor string reliably encodes
         // its component's type without threading TypeFullName onto IntroduceComponentField itself.
@@ -327,9 +384,9 @@ namespace SceneBuilder.Core.Reconcile
             return SpatialComponentSource.IsSpatial(typeFullName);
         }
 
-        // ---- Component-aware anchor resolution (b3-t2) ---------------------------------------
+        // ---- Component-aware anchor resolution -------------------------------------------------
 
-        // b3-t3 folded the component-dot fallback into the shared FindAnchorInvocation
+        // Folds the component-dot fallback into the shared FindAnchorInvocation
         // (SourcePatchApplier.cs), which now resolves both GameObject and component anchors.
         // Kept as a thin delegate so this file's one caller (ResolveIntroduceComponentField)
         // doesn't need to change.

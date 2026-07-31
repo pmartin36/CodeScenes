@@ -14,10 +14,10 @@ using SceneBuilder.Editor;
 // checklist items 11, 12, 13, 14, 18, and the sync half of 19 (specs/19-spatial-authoring-components.md).
 // Drives the FULL loop (code->scene via SceneBuilderBuild.Run, scene->code via
 // EmittedCodeCompiles.SyncAndAssertCompiles) against a live editor scene. Mirrors
-// RoundTripObjectRefTests.cs's harness verbatim. b1-b6 production for M-Spatial is already landed
-// (research.md confirms); these tests are expected to PASS on first run — this file IS the mandatory
+// RoundTripObjectRefTests.cs's harness verbatim. Production for M-Spatial is already landed; these
+// tests are expected to PASS on first run — this file IS the mandatory
 // full-loop gate coverage (CLAUDE.md hard requirement), not a RED test driving new production. A
-// failure here is a genuine Unity-boundary escape and routes to the owning b2-b6 production task.
+// failure here is a genuine Unity-boundary escape.
 //
 // Synchronous EditMode does NOT tick [ExecuteAlways].Update() — every geometry- or back-solve-dependent
 // assertion explicitly calls component.Evaluate() (RoundTripSpatialTests.cs's established pattern).
@@ -89,7 +89,8 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         return source.Substring(start, i - start);
     }
 
-    // SerializedFieldBridge.GetDefaultFieldMap lazily instantiates a throwaway MonoBehaviour instance
+    // ComponentDefaultTemplate.Register (formerly SerializedFieldBridge.GetDefaultFieldMap)
+    // lazily instantiates a throwaway MonoBehaviour instance
     // (bare GameObject, no MeshFilter/Renderer) the FIRST time a component type is snapshot-read, to
     // compute a per-type default-field map — cached for the rest of the domain's lifetime. For
     // FitSize/SurfaceSnap (both [ExecuteAlways] with an OnValidate that logs a located error against that

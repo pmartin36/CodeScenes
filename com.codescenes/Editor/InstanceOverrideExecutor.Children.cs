@@ -152,7 +152,7 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                var comp = go.AddComponent(type);
+                var comp = ComponentDefaultTemplate.Create(go, type);
                 if (comp == null)
                 {
                     continue;

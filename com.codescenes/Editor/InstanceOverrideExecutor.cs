@@ -52,7 +52,7 @@ namespace SceneBuilder.Editor
                 return;
             }
 
-            var comp = owner.AddComponent(type);
+            var comp = ComponentDefaultTemplate.Create(owner, type);
             if (comp == null)
             {
                 return;

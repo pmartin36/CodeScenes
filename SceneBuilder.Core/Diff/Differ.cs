@@ -26,11 +26,13 @@ namespace SceneBuilder.Core.Diff
             var snapshotByGoid = new Dictionary<string, SnapshotEntry>();
             FlattenSnapshot(actual.Roots, null, snapshotByGoid);
 
-            // Per-TYPE default field templates (b4-t2/D-1): a field a builder authors AT its type's
-            // constructed default is pruned from every live component read (SerializedFieldBridge.
-            // ReadComponent), so "absent from Fields" must be resolved against the type's default
-            // template, not treated as unconditionally changed. Keyed on Type.FullName, the same key
-            // EmitComponentEdits already matches components on. Grouped defensively (first wins) —
+            // Per-TYPE default field templates. ReadComponent no longer prunes —
+            // every live component's Fields carries every serialized field, including ones at their
+            // type default — so this is now a BACKSTOP, not the main path: it resolves a field
+            // genuinely absent from a partial/hand-built snapshot's Fields (any producer other than
+            // the live adapter read) against the type's default template, rather than treating it as
+            // unconditionally changed. Keyed on Type.FullName, the same key EmitComponentEdits
+            // already matches components on. Grouped defensively (first wins) —
             // SceneSnapshotReader.FromRoots emits at most one entry per type.
             var typeDefaults = actual.ComponentDefaults
                 .GroupBy(c => c.Type.FullName)
@@ -88,7 +90,7 @@ namespace SceneBuilder.Core.Diff
             List<Diagnostic> diagnostics,
             List<Conflict> conflicts)
         {
-            // b6-t1: siblingIndex counts only nodes MATCHED to a live snapshot entry, not raw source
+            // siblingIndex counts only nodes MATCHED to a live snapshot entry, not raw source
             // position. A desired node absent from the live snapshot (EmitCreate below — either
             // genuinely new, or scene-deleted but kept in source because a cross-object field still
             // references its handle, see Reconciler.DetectRemovals) occupies no slot in the live
@@ -104,7 +106,7 @@ namespace SceneBuilder.Core.Diff
                     visitedGoids.Add(goid);
                     EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, typeDefaults, ops);
 
-                    // b3-t2: matched PrefabInstanceNode ⇒ diff its structured override collections
+                    // Matched PrefabInstanceNode ⇒ diff its structured override collections
                     // (Overrides/AddedComponents/RemovedComponents) against the matched snapshot's.
                     // All in-place (pass-B) — never re-instantiates.
                     if (node is PrefabInstanceNode instanceNode)
@@ -112,7 +114,7 @@ namespace SceneBuilder.Core.Diff
                         InstanceOverrideDiff.Emit(instanceNode, entry.Node, ops, conflicts);
                     }
 
-                    // b3-t2: OpaqueOverrides is READ-ONLY (M10) — never diffed into an op, only
+                    // OpaqueOverrides is READ-ONLY (M10) — never diffed into an op, only
                     // flagged. Diffing it would emit a spurious SetField and corrupt the preserved
                     // token. The live snapshot is the authoritative source of overrides (desired
                     // parsed from code carries none).
@@ -197,12 +199,12 @@ namespace SceneBuilder.Core.Diff
             EmitComponentEdits(node, snapshot, identityMap, typeDefaults, ops);
         }
 
-        // b1-t1: unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
+        // Unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
         // The scene->code direction (Reconciler.MaskDriven / SceneSnapshotReader.DeriveDrivenChannels)
         // holds a driven FitSize/SurfaceSnap channel back from source; here, the code->scene direction
         // emits the full authored transform when it drifts from the live snapshot on any channel the
         // model itself claims driven, so FitSize/SurfaceSnap re-drive from the authored start every
-        // sync. The ONE exception is the rect branch below (b2-t1/i3): a base Position/Scale axis
+        // sync. The ONE exception is the rect branch below: a base Position/Scale axis
         // driven by something the model does NOT author (e.g. a CanvasScaler) is held to the live
         // value instead of clobbered, because nothing here re-baselines a driver the plugin does not
         // own.
@@ -211,9 +213,9 @@ namespace SceneBuilder.Core.Diff
             var desired = node.Transform;
             var actual = snapshot.Transform;
 
-            // b2-t1/D1/D8: either side is a RectTransform ⇒ AnchoredPosition owns X/Y, so the base
+            // Either side is a RectTransform ⇒ AnchoredPosition owns X/Y, so the base
             // Position.X/Y contribution is suppressed here (RectTransformDiff.EmitEdit covers the five
-            // UI fields instead). b2-t1/i3: a base Position/Scale axis the snapshot reports driven by a
+            // UI fields instead). A base Position/Scale axis the snapshot reports driven by a
             // driver the model's own DrivenChannels does not claim (RectTransformDiff.ForeignDrivenBase)
             // is additionally held to the live value — a Canvas/CanvasScaler re-drives its own scale and
             // the plugin cannot re-baseline it, so writing the authored default would dirty the scene on
@@ -240,7 +242,7 @@ namespace SceneBuilder.Core.Diff
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = desired });
         }
 
-        // Diffs components on a matched GameObject (b4-t1). Component correspondence between
+        // Diffs components on a matched GameObject. Component correspondence between
         // desired and actual is by (Type.FullName, ordinal-within-that-type) — this exactly
         // reconstructs the LogicalId scheme the parser assigns
         // (BuilderParser.AssignComponentLogicalIds), so desired-side identity is just the
@@ -288,9 +290,10 @@ namespace SceneBuilder.Core.Diff
                     var actualComponent = actualComps[actualIndex];
                     foreach (var field in desiredComponent.Fields)
                     {
-                        // b4-t2/D-1: a field absent from the live component's Fields is not
-                        // automatically "changed" — ReadComponent prunes exactly the fields that equal
-                        // the type's constructed default, so an absent field resolves against the
+                        // A field absent from the live component's Fields is not
+                        // automatically "changed". The live adapter read no longer prunes, so
+                        // this backstop now fires only for a snapshot from some OTHER producer whose
+                        // Fields is genuinely partial — it resolves the absent field against the
                         // per-type default template (populated on ComponentDefaults) before falling
                         // back to "unknown, emit anyway". A live Fields entry, when present, always
                         // wins over the template regardless of its value.
@@ -373,7 +376,7 @@ namespace SceneBuilder.Core.Diff
             return keys;
         }
 
-        // b3-t1: unmatched PrefabInstanceNode ⇒ instantiate-not-create. No SetName/SetTag/SetLayer/
+        // Unmatched PrefabInstanceNode ⇒ instantiate-not-create. No SetName/SetTag/SetLayer/
         // SetActive/SetStatic and no EmitComponentEdits — v1 instances carry no authored Components,
         // so the only emitted edit beyond the instantiate itself is the root transform.
         private static void EmitCreateInstance(PrefabInstanceNode node, string? parentLogicalId, int siblingIndex, List<ChangeOp> ops)

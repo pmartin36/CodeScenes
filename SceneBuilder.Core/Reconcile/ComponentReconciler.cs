@@ -9,12 +9,11 @@ namespace SceneBuilder.Core.Reconcile
     // Snapshot+map-driven component pass for MAPPED owners (owner already has a GameObject
     // IdentityMap entry). Mirrors Reconciler.DetectAppends/DetectRemovals architecturally but
     // does NOT consume Differ's component ChangeOps (those are Materialize-directed: desired
-    // side = source -> scene; Reconcile needs the inverse, scene -> source. See
-    // b2-t1/research.md Verdict on assumptions).
+    // side = source -> scene; Reconcile needs the inverse, scene -> source.
     internal static class ComponentReconciler
     {
-        // b2-t1 fills add/remove/reorder; b2-t2 adds the field-value loop; b2-t3 adds the
-        // conflict path. Keep the signature stable across all three.
+        // Handles add/remove/reorder, the field-value loop, and the conflict path. Keep the
+        // signature stable across all call sites.
         internal static void ReconcileComponents(
             string ownerLogicalId,
             ComponentData[] sourceComponents,
@@ -22,14 +21,14 @@ namespace SceneBuilder.Core.Reconcile
             IdentityMap identityMap,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans,
-            // b4-t2: two scene-derived membership sets, built ONCE by Reconciler and threaded through
+            // Two scene-derived membership sets, built ONCE by Reconciler and threaded through
             // every call. sceneLiveTargets = "object exists in the current scene" (Detection 1, a
             // deleted source target). resolvableTargets = "reference can be honored to a real object"
-            // (Detection 2, a phantom snapshot target) — a strict superset of sceneLiveTargets. See
-            // research.md b4-t2 for why the two predicates are NOT interchangeable.
+            // (Detection 2, a phantom snapshot target) — a strict superset of sceneLiveTargets. The
+            // two predicates are NOT interchangeable.
             ISet<string> sceneLiveTargets,
             ISet<string> resolvableTargets,
-            // b4-t3: same-batch create-candidate identities (unmapped snapshot GlobalObjectIds —
+            // Same-batch create-candidate identities (unmapped snapshot GlobalObjectIds —
             // about to be mapped by DetectAppends THIS pass). A ref to one of these is PENDING, not
             // dangling: it resolves on the guaranteed second Sync. Distinct address space from
             // resolvableTargets (LogicalIds) — see Reconciler.cs pendingTargets build site.
@@ -45,16 +44,21 @@ namespace SceneBuilder.Core.Reconcile
             List<Conflict> conflicts,
             List<SkippedField> skippedFields,
             List<AssetEntry> addedAssets,
-            // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain
+            // Catalogued AssetRef fields render as their typed `Assets.<...>` member chain
             // instead of `Asset("path")`. Optional/trailing so every pre-existing call site/test
             // stays green unchanged.
             AssetCatalog? assetCatalog = null,
-            // b3-t5: LogicalIds of this owner's components whose source construct is a chained
+            // LogicalIds of this owner's components whose source construct is a chained
             // call (Reconciler.cs's converted ParseResult.ChainedComponents). `null` = "no source
             // information" (every hand-built test call), identical contract to componentAnchors.
-            ISet<string>? chainedComponents = null)
+            ISet<string>? chainedComponents = null,
+            // The ONE per-type default-field index (ComponentDefaultOmission.Index.Build,
+            // built ONCE per Reconciler.Reconcile), threaded through to EmitComponentAppend and the
+            // introduce branch below. `null` = Index.Empty semantics — keep every field (every
+            // hand-built test call that doesn't supply ComponentDefaults stays green unchanged).
+            ComponentDefaultOmission.Index? defaults = null)
         {
-            // b4-t1: canonicalize FitSize-before-SurfaceSnap BEFORE the ADD/REORDER passes so both emit
+            // Canonicalize FitSize-before-SurfaceSnap BEFORE the ADD/REORDER passes so both emit
             // in canonical order and the REORDER pass compares canonical-vs-canonical for the
             // spatial pair (never churns on live GetComponents order).
             var snapshotComps = SpatialComponentSource.OrderForEmit(ExcludeTransform(snapshotComponents));
@@ -82,7 +86,7 @@ namespace SceneBuilder.Core.Reconcile
             // harvests only fields that actually changed). Guards the (1) ADD harvest below from
             // double-counting/leaking identity-equal asset refs when the IdentityMap simply
             // hasn't recorded this component's entry yet (edit emission is unaffected).
-            // b7-t1 fix: the REORDER pass (3) below compares source physical order against
+            // The REORDER pass (3) below compares source physical order against
             // snapshotComps' CANONICAL (FitSize-before-SurfaceSnap) order — so source must be canonicalized
             // identically, or an untouched node whose live GetComponents() order simply differs from
             // canonical (e.g. authored MeshFilter/MeshRenderer/FitSize/SurfaceSnap) spuriously looks
@@ -128,7 +132,7 @@ namespace SceneBuilder.Core.Reconcile
                     resolvableTargets,
                     pendingTargets,
                     conflicts,
-                    // b4-t3: this component is ALSO present in source at the same key precisely when
+                    // This component is ALSO present in source at the same key precisely when
                     // the FIELD-VALUE DIFF pass (4) below is ALSO about to run for it (the identical
                     // sourceKeySet.Contains(key) test as `harvestSink` above) — that pass already
                     // reports every dangling field of an in-source component, so this path must not
@@ -139,7 +143,8 @@ namespace SceneBuilder.Core.Reconcile
                     edits,
                     addedEntries,
                     harvestSink,
-                    assetCatalog);
+                    assetCatalog,
+                    defaults);
 
                 // Only the FIRST component statement carries the introduction.
                 introduceOwnerHandle = false;
@@ -170,12 +175,12 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             // (3) REORDER: only when the represented set is unchanged (no add/remove above), AND
-            // (b3-t5) no source component on this owner is a CHAINED call — its physical order is
-            // partly frozen inside another statement (research.md M1: a chained component's
+            // No source component on this owner is a CHAINED call — its physical order is
+            // partly frozen inside another statement (a chained component's
             // anchor resolves to its ENCLOSING statement, so ReorderStatement's absolute component
             // index would move a SIBLING scene-graph statement instead), so the owner's absolute
             // component order is unrepresentable and no reorder is emitted for it at all — never a
-            // partial/best-effort one. Same family, same shape as the b7-t1 canonical-order guard
+            // partial/best-effort one. Same family, same shape as the canonical-order guard
             // this condition already carries.
             if (managedKeySet.SetEquals(snapshotKeySet) && !HasChainedComponent(sourceComps, chainedComponents))
             {
@@ -241,7 +246,7 @@ namespace SceneBuilder.Core.Reconcile
                             continue;
                         }
 
-                        // b4-t2 Detection 1: the source handle's target vanished from the scene (Unity
+                        // Detection 1: the source handle's target vanished from the scene (Unity
                         // nulls the field when its referenced GameObject is deleted) -> a located
                         // DanglingReference conflict, NEVER a silent NodeHandle.None patch. A target
                         // that IS still live falls through to the ordinary None-patch below (legit clear).
@@ -254,7 +259,7 @@ namespace SceneBuilder.Core.Reconcile
                             continue;
                         }
 
-                        // b4-t2 Detection 2 (refactored b4-t3 onto the shared classifier): the
+                        // Detection 2 (handled through the shared classifier): the
                         // snapshot points at a target that resolves to nothing (no live map entry, no
                         // model node, no known handle) -> a located DanglingReference conflict, never
                         // a phantom-handle render. A same-batch create-candidate (not yet mapped,
@@ -271,6 +276,16 @@ namespace SceneBuilder.Core.Reconcile
                             var danglingTarget = ((ValueNode.ObjectRef)snapVal).TargetLogicalId;
                             conflicts.Add(ConflictDetector.DanglingReference(
                                 sourceComp.LogicalId, fieldKey, danglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
+                        // The live value returned to the type's constructed default — remove
+                        // the `.Set(...)` from source rather than patch it to the default literal
+                        // (spec 32 C2). ONE decision function owns not-default / closed-grammar /
+                        // span-present / span-absent; a `true` result fully handles this field.
+                        if (ComponentDefaultOmission.TryEmitDefaultReset(
+                            sourceComp, fieldKey, snapVal, defaults, fieldArgumentSpans, edits, conflicts))
+                        {
                             continue;
                         }
 
@@ -307,8 +322,17 @@ namespace SceneBuilder.Core.Reconcile
                     }
                     else
                     {
-                        // Newly-detected field: present in snapshot, absent from source. b4-t3
-                        // (Finding 1): an ObjectRef here must classify the same as Detection 2 above —
+                        // Newly-detected field: present in snapshot, absent from source. A
+                        // field being newly AUTHORED that equals the type's constructed default is
+                        // omitted entirely — never introduced (this never applies to a field already
+                        // present in source, only to what's about to be newly authored).
+                        if (defaults != null && defaults.IsDefault(sourceComp.Type.FullName, fieldKey, snapVal))
+                        {
+                            continue;
+                        }
+
+                        // Newly-detected field: present in snapshot, absent from source. An ObjectRef
+                        // here must classify the same as Detection 2 above —
                         // resolvable/null pre-renders a handle-aware NewExpr (the applier's
                         // ValueNodeLiteral has no ObjectRef arm and would throw), pending defers
                         // silently, dangling reports a located conflict and emits nothing.
@@ -339,55 +363,10 @@ namespace SceneBuilder.Core.Reconcile
                         CollectAssetEntries(snapVal, addedAssets);
                     }
                 }
-
-                // b6-t1: a source-authored ObjectRef field that REGRESSED to its type default (null)
-                // live is invisible to the loop above — SerializedFieldBridge default-filters a
-                // null-valued reference field out of the snapshot entirely (indistinguishable from
-                // "never touched" at that layer, which has no source-model context to tell the two
-                // apart). Absent-from-snapshot + non-null in source can ONLY mean the live value is
-                // now the type default (ObjectRef(null)): were it still authored-and-live, it would
-                // compare equal above and never have been filtered; were it live-but-different, it
-                // would be present in the snapshot and handled above. So this reconstructs the exact
-                // same dangling-vs-clear branch (Detection 1) against the implied ObjectRef(null).
-                foreach (var (fieldKey, srcVal) in sourceComp.Fields)
-                {
-                    if (snapshotComp.Fields.ContainsKey(fieldKey))
-                    {
-                        continue; // already handled by the loop above.
-                    }
-
-                    if (srcVal is not ValueNode.ObjectRef(var srcTarget) || srcTarget == null)
-                    {
-                        continue;
-                    }
-
-                    if (!sceneLiveTargets.Contains(srcTarget))
-                    {
-                        conflicts.Add(ConflictDetector.DanglingReference(
-                            sourceComp.LogicalId, fieldKey, srcTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
-                        continue;
-                    }
-
-                    if (fieldArgumentSpans != null
-                        && fieldArgumentSpans.TryGetValue(sourceComp.LogicalId, out var regressedCompSpans)
-                        && regressedCompSpans.TryGetValue(fieldKey, out var regressedValueSpan))
-                    {
-                        edits.Add(new PatchComponentField
-                        {
-                            Anchor = sourceComp.LogicalId,
-                            ValueSpan = regressedValueSpan,
-                            NewExpr = "NodeHandle.None",
-                        });
-                    }
-                    else if (fieldArgumentSpans != null)
-                    {
-                        conflicts.Add(ConflictDetector.UnanchorableComponentEdit(sourceComp.LogicalId, $"patch field '{fieldKey}'"));
-                    }
-                }
             }
         }
 
-        // b3-t5: whether ANY of this owner's SOURCE components is a chained call — `chained` is
+        // Whether ANY of this owner's SOURCE components is a chained call — `chained` is
         // `null` for "no source information" (every hand-built test model), which is never
         // treated as chained (identical null contract to componentAnchors elsewhere in this file).
         private static bool HasChainedComponent(ComponentData[] sourceComps, ISet<string>? chained)
@@ -408,7 +387,7 @@ namespace SceneBuilder.Core.Reconcile
             return false;
         }
 
-        // b4-t3: the ONE place the liveness/pending/dangling decision for a snapshot ObjectRef is
+        // The ONE place the liveness/pending/dangling decision for a snapshot ObjectRef is
         // made — present-field Detection 2, the introduce-field branch, and the append loop all
         // route through this instead of re-inlining `!resolvableTargets.Contains(...) /
         // pendingTargets.Contains(...)` a fourth time.
@@ -430,7 +409,7 @@ namespace SceneBuilder.Core.Reconcile
             return pendingTargets.Contains(target) ? RefResolution.Pending : RefResolution.Dangling;
         }
 
-        // b4-t1: gate for the EmitComponentAppend pre-render branch above — a project AssetRef whose
+        // Gate for the EmitComponentAppend pre-render branch above — a project AssetRef whose
         // (Guid, FileId) resolves in the catalog must be pre-rendered into FieldExpressions (its typed
         // member chain), same as an ObjectRef. Built-ins never hit the reverse lookup.
         internal static bool IsCataloguedAssetRef(ValueNode value, AssetCatalog? assetCatalog) =>
@@ -438,10 +417,12 @@ namespace SceneBuilder.Core.Reconcile
             && r is { IsBuiltin: false }
             && assetCatalog?.TryGetMember(r.Guid, SourceExpr.CatalogLookupFileId(r), out _, out _, out _) == true;
 
-        // b4-t2: the identical span lookup used by the span-based patch emission below, reused for a
+        // The identical span lookup used by the span-based patch emission below, reused for a
         // DanglingReference conflict's Location. Emitted even when the span is absent (returns null) —
-        // "never a silent null" outranks having a located span (research.md CLEANLINESS).
-        private static SourceSpan? DanglingFieldSpan(
+        // "never a silent null" outranks having a located span.
+        // internal (not private): ComponentDefaultOmission.TryEmitDefaultReset reuses this
+        // SAME lookup for its own conflict Location, rather than re-deriving it.
+        internal static SourceSpan? DanglingFieldSpan(
             string componentLogicalId,
             string fieldKey,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans) =>
@@ -451,7 +432,7 @@ namespace SceneBuilder.Core.Reconcile
                 ? valueSpan
                 : null;
 
-        // b4-t1: renders a changed field's replacement expression. SourceExpr.ValueNodeLiteral has
+        // Renders a changed field's replacement expression. SourceExpr.ValueNodeLiteral has
         // no ObjectRef arm (it is a pure, context-free formatter) because rendering an ObjectRef is
         // BOTH context-dependent (needs the handle table) and side-effecting (may need to introduce
         // a handle on the target) — neither belongs in a pure formatter, so this intercepts
@@ -479,7 +460,7 @@ namespace SceneBuilder.Core.Reconcile
                 return handle ?? targetLogicalId;
             }
 
-            // b4-t2: a FitSize/SurfaceSnap field patch/introduce must render through the dedicated
+            // A FitSize/SurfaceSnap field patch/introduce must render through the dedicated
             // formatter (SourceExpr.Float/Vec3Literal) so it stays byte-identical to the append
             // form — never the generic ValueNodeLiteral fallback.
             return SpatialComponentSource.IsSpatial(typeFullName)
@@ -487,7 +468,7 @@ namespace SceneBuilder.Core.Reconcile
                 : SourceExpr.ValueNodeLiteral(value, assetCatalog);
         }
 
-        // §13 one-pass attach (b4-t1) reuses this for the just-appended owner: same
+        // §13 one-pass attach reuses this for the just-appended owner: same
         // `{owner}/{Type}#{ordinal}` id scheme, same AppendComponentStatement + Component
         // AddedEntry shape as the mapped-owner ADD path above — kept in exactly one place.
         internal static void EmitComponentAppend(
@@ -504,17 +485,17 @@ namespace SceneBuilder.Core.Reconcile
             // Distinct from `ordinal`, which counts only same-TYPED components and keys the id.
             int siblingIndex,
             FieldMap fields,
-            // b4-t3: reused verbatim from RenderFieldValue below — resolves/introduces a handle for
+            // Reused verbatim from RenderFieldValue below — resolves/introduces a handle for
             // an ObjectRef field's target. Side-effecting; called only for a field actually emitted.
             System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             ISet<string> resolvableTargets,
-            // b4-t3: same-batch create-candidate identities — a field targeting one of these is
+            // Same-batch create-candidate identities — a field targeting one of these is
             // PENDING, not dangling (converges on the guaranteed second Sync). Same set
             // ReconcileComponents/ClassifySnapshotRef consult; not a second liveness notion.
             ISet<string> pendingTargets,
-            // b4-t3: only appended to when `reportUnresolvable` — see below.
+            // Only appended to when `reportUnresolvable` — see below.
             List<Conflict> conflicts,
-            // b4-t3: true only when this append has NO overlapping FIELD-VALUE DIFF pass to report a
+            // True only when this append has NO overlapping FIELD-VALUE DIFF pass to report a
             // dangling field for it (a genuinely-new object, DetectAppends). False for the
             // mapped-owner ADD-path call when the component is ALSO in source, because that overlap's
             // dangling fields are already reported by Detection 2 / the introduce branch — reporting
@@ -525,13 +506,21 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<IdentityMapEntry> addedEntries,
             List<AssetEntry>? addedAssets,
-            // b4-t1: catalogued AssetRef fields pre-render into FieldExpressions the same way
+            // Catalogued AssetRef fields pre-render into FieldExpressions the same way
             // ObjectRef fields already do — extends the existing pre-render gate below.
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // Filter `fields` to the subset off the type's constructed default BEFORE the
+            // ObjectRef pre-render loop below, so filteredFields/FieldExpressions are built from the
+            // emitted set — a component all of whose fields are at default appends as a bare
+            // `.Component<T>()`. `null` = Index.Empty = keep every
+            // field (every hand-built test call stays green unchanged).
+            ComponentDefaultOmission.Index? defaults = null)
         {
             var componentLogicalId = $"{ownerEffectiveId}/{typeFullName}#{ordinal}";
 
-            // b4-t3: pre-render every ObjectRef field's expression at EMIT time (mirroring
+            fields = ComponentDefaultOmission.OmitDefaults(typeFullName, fields, defaults);
+
+            // Pre-render every ObjectRef field's expression at EMIT time (mirroring
             // RenderFieldValue's field-diff use below) instead of leaving it in Fields for
             // SourceExpr.ValueNodeLiteral to throw on at apply time. `filteredFields` stays null
             // (reuse `fields` unchanged) unless a field is actually dropped.
@@ -563,7 +552,7 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     // A same-batch create-candidate not yet mapped — omit and converge on the
                     // guaranteed second Sync, by which point the target is mapped and the ref wires
-                    // through the ordinary FIELD-VALUE DIFF pass (b4-t1/b4-t3) as a ONE-OFF patch.
+                    // through the ordinary FIELD-VALUE DIFF pass as a ONE-OFF patch.
                     filteredFields ??= new List<KeyValuePair<string, ValueNode>>(fields.Take(i));
                     continue;
                 }
@@ -672,7 +661,7 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
-        // b4-t1: single choke-point harvest of every populated AssetRef reachable from a
+        // Single choke-point harvest of every populated AssetRef reachable from a
         // snapshot ValueNode flowing into an emitted source edit. Cleared (AssetRef(null)),
         // empty-Guid, and built-in refs contribute nothing — a built-in's DisplayPath is a
         // live-derived object name, never a project path, and has no place in the asset

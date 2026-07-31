@@ -100,7 +100,7 @@ namespace SceneBuilder.Core.Reconcile
             return conflicts;
         }
 
-        // Colliding LogicalIds (b1-t3): two or more nodes whose authored `var` handle / explicit
+        // Colliding LogicalIds: two or more nodes whose authored `var` handle / explicit
         // `.Id(...)` resolve to the SAME id. Unlike DuplicateNameConflicts (positional-only ids,
         // always `Name/index`), a collision here is on a HAND-AUTHORED id, so it is disjoint by
         // construction from that detector — a positional id can never appear in this grouping.
@@ -222,7 +222,7 @@ namespace SceneBuilder.Core.Reconcile
                 Location = location,
             };
 
-        // b3-t3: the source prefab's default for an overridden property drifted since the override
+        // The source prefab's default for an overridden property drifted since the override
         // was recorded, and the live instance value now sits at the NEW default. Named
         // "instance > target > propertyPath" per #9/checklist #6. The detection logic itself lives
         // in InstanceOverrideDiff.DetectStaleOverrides, which calls this factory.
@@ -269,6 +269,24 @@ namespace SceneBuilder.Core.Reconcile
                 GlobalObjectId = null,
                 Reason = $"Cannot {editKind} for component '{componentLogicalId}': not localizable to a single source construct (§7).",
                 Location = null,
+            };
+
+        // A closed-grammar component (FitSize/SurfaceSnap) has a live field that returned to
+        // its type default, but its dedicated fluent call throws on an empty argument list -- there
+        // is no compiling form for "removed". Reuses MissingSourceAnchor's kind: same family as
+        // UnanchorableComponentEdit ("no source construct can express this edit"), just with a
+        // located span when one is available.
+        public static Conflict UnremovableClosedGrammarField(
+            string componentLogicalId, string fieldKey, SourceSpan? location) =>
+            new()
+            {
+                Kind = ConflictKind.MissingSourceAnchor,
+                LogicalId = componentLogicalId,
+                GlobalObjectId = null,
+                Reason = $"Cannot remove field '{fieldKey}' for component '{componentLogicalId}': its closed-grammar " +
+                    "authoring call (FitSize/SurfaceSnap) has no compiling form for an empty argument list. The " +
+                    "live value returned to its default; the setter was NOT removed and NOT patched (§7).",
+                Location = location,
             };
     }
 }

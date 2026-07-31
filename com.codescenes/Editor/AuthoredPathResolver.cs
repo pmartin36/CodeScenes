@@ -140,12 +140,12 @@ namespace SceneBuilder.Editor
 
             // GameObject.GetComponent(Type) can return a Unity FAKE-NULL (a live C# reference wrapping a
             // null native pointer) when the component is absent — the C# `??` operator does NOT treat that
-            // as null, so it must be checked with Unity's overloaded `== null` or AddComponent is skipped
-            // and `new SerializedObject(fake-null)` throws "Object at index 0 is null".
+            // as null, so it must be checked with Unity's overloaded `== null` or ComponentDefaultTemplate.Create
+            // is skipped and `new SerializedObject(fake-null)` throws "Object at index 0 is null".
             var component = probe.GetComponent(type);
             if (component == null)
             {
-                component = probe.AddComponent(type);
+                component = ComponentDefaultTemplate.Create(probe, type);
             }
 
             if (component == null)

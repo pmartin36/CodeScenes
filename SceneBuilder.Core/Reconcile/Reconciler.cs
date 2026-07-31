@@ -9,7 +9,7 @@ using SceneBuilder.Core.Parsing;
 namespace SceneBuilder.Core.Reconcile
 {
     // DetectAppends (incl. its recursion) lives in ReconcilerAppends.cs — a pure split to keep this
-    // file under the project's file-size budget after b4-t3 threaded `pendingTargets` through it.
+    // file under the project's file-size budget after threading `pendingTargets` through it.
     public static partial class Reconciler
     {
         private sealed record SnapshotEntry(SnapshotNode Node, string? ParentGlobalObjectId, int SiblingIndex);
@@ -25,15 +25,15 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>>? fieldArgumentSpans = null,
             IReadOnlyDictionary<string, string>? handles = null,
             FacadeCatalog? facadeCatalog = null,
-            // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain
+            // Catalogued AssetRef fields render as their typed `Assets.<...>` member chain
             // instead of `Asset("path")`. Reconcile-time-only, mirroring facadeCatalog — never
             // reaches SourcePatchApplier/SourceExpr-at-apply.
             AssetCatalog? assetCatalog = null,
-            // b3-t5: LogicalIds of components whose source construct is a chained call
+            // LogicalIds of components whose source construct is a chained call
             // (ParseResult.ChainedComponents) — feeds ComponentReconciler's REORDER-pass guard so
             // an owner with a chained component never emits an unrepresentable ReorderStatement.
             // `null` (the default, and every hand-built model/snapshot/map test call) means "no
-            // source information" and keeps today's behavior unchanged.
+            // source information" and keeps the existing behavior unchanged.
             IReadOnlyCollection<string>? chainedComponents = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
@@ -44,6 +44,11 @@ namespace SceneBuilder.Core.Reconcile
                 ? null
                 : new HashSet<string>(chainedComponents, StringComparer.Ordinal);
 
+            // The ONE per-type default-field index, built ONCE per Reconcile (an O(1) lookup
+            // constraint) and threaded to every emit site that decides what to
+            // omit from a newly-authored field set.
+            var defaultsIndex = ComponentDefaultOmission.Index.Build(actual.ComponentDefaults);
+
             var logicalIdToGlobalObjectId = identityMap.Entries
                 .Where(e => (e.Kind == "GameObject" || e.Kind == "PrefabInstance") && !string.IsNullOrEmpty(e.GlobalObjectId))
                 .ToDictionary(e => e.LogicalId, e => e.GlobalObjectId);
@@ -52,7 +57,7 @@ namespace SceneBuilder.Core.Reconcile
                 .GroupBy(kv => kv.Value)
                 .ToDictionary(g => g.Key, g => g.First().Key);
 
-            // m6-b4-t1: source-prefab GUID -> last-known asset path, re-deriving the
+            // Source-prefab GUID -> last-known asset path, re-deriving the
             // `.Instance(path)` argument for a snapshot-only prefab-instance root. First-wins on a
             // (shouldn't-happen) duplicate guid, skips entries with no guid.
             var prefabPathByGuid = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -257,7 +262,7 @@ namespace SceneBuilder.Core.Reconcile
                     || !snapshotByGoid.TryGetValue(goid, out var entry))
                 {
                     // Unmapped or missing-from-snapshot targets are create/delete-in-scene
-                    // artifacts (b2-t4 handles the conflict); no sync-back edit here.
+                    // artifacts (handled as a conflict); no sync-back edit here.
                     continue;
                 }
 
@@ -297,7 +302,7 @@ namespace SceneBuilder.Core.Reconcile
 
                         break;
 
-                    // b3-t2: op.Transform/op.Changed are NOT read — the op carries the MODEL
+                    // op.Transform/op.Changed are NOT read — the op carries the MODEL
                     // transform and a raw-float Changed mask (ChannelMask.None for a promotion), so
                     // re-deriving from modelByLogicalId + the live entry and comparing CANONICAL
                     // literals here is authoritative, exactly as it is for SetTransform above.
@@ -426,7 +431,7 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
-            // b4-t2: two scene-derived membership sets for ObjectRef dangling-reference detection,
+            // Two scene-derived membership sets for ObjectRef dangling-reference detection,
             // built ONCE and threaded into every ReconcileComponents call below.
             //   sceneLiveTargets: "object exists in the current scene" — the SAME liveness predicate
             //     DetectRemovals uses (a mapped entry whose GlobalObjectId is still in the snapshot).
@@ -450,13 +455,12 @@ namespace SceneBuilder.Core.Reconcile
                 resolvableTargets.UnionWith(handles.Keys);
             }
 
-            // b4-t3: same-batch create-candidate identities — snapshot nodes present in the scene
+            // Same-batch create-candidate identities — snapshot nodes present in the scene
             // but with no IdentityMap entry yet (about to be mapped by DetectAppends THIS pass). A
             // ref to one of these is PENDING, not dangling: it resolves on the guaranteed second
             // Sync once DetectAppends maps it. DISTINCT address space from resolvableTargets
             // (LogicalIds): an ObjectRef to an unmapped target carries the target's
-            // GlobalObjectId — its only identity before DetectAppends runs (b4-t3/research.md B5
-            // CONTRACT) — never a LogicalId.
+            // GlobalObjectId — its only identity before DetectAppends runs — never a LogicalId.
             var pendingTargets = new HashSet<string>(
                 snapshotByGoid.Keys.Where(goid => !globalObjectIdToLogicalId.ContainsKey(goid)),
                 StringComparer.Ordinal);
@@ -475,9 +479,9 @@ namespace SceneBuilder.Core.Reconcile
                     ? ownerModel.Components
                     : System.Array.Empty<ComponentData>();
 
-                // m10-b4-t2: a mapped PrefabInstance root has its own override membership diff
+                // A mapped PrefabInstance root has its own override membership diff
                 // (snapshot=truth append / model-only drop) — never the plain component pass, whose
-                // snapshot Components is always empty for an instance root anyway (b3-t2's finding).
+                // snapshot Components is always empty for an instance root anyway.
                 if (ownerModel is PrefabInstanceNode instanceModel)
                 {
                     ReconcileInstanceOverrides(
@@ -490,7 +494,8 @@ namespace SceneBuilder.Core.Reconcile
                         edits,
                         conflicts,
                         addedAssets,
-                        assetCatalog);
+                        assetCatalog,
+                        defaultsIndex);
                     continue;
                 }
 
@@ -512,7 +517,8 @@ namespace SceneBuilder.Core.Reconcile
                     skippedFields,
                     addedAssets,
                     assetCatalog,
-                    chainedComponentSet);
+                    chainedComponentSet,
+                    defaultsIndex);
             }
 
             DetectAppends(
@@ -536,7 +542,8 @@ namespace SceneBuilder.Core.Reconcile
                 addedAssets,
                 prefabPathByGuid,
                 facadeCatalog,
-                assetCatalog);
+                assetCatalog,
+                defaultsIndex);
 
             // THE write-path chokepoint for duplicate sibling names.
             //
@@ -551,7 +558,7 @@ namespace SceneBuilder.Core.Reconcile
             // A fix at any one of those call sites would leave the other two silently destroying data.
             EnsureNoAmbiguousDuplicateNames(actual.Roots);
 
-            // b6-t1: every LogicalId targeted by an ObjectRef field ANYWHERE in the source model —
+            // Every LogicalId targeted by an ObjectRef field ANYWHERE in the source model —
             // cross-object references live outside the structural parent/child + owner/component
             // dependency graph DetectRemovals otherwise walks, so a handle can be "still needed" by a
             // sibling's field without being a structural dependent of it. Consulted below so a
@@ -646,7 +653,7 @@ namespace SceneBuilder.Core.Reconcile
 
             // The mapped arm of the retired `InjectExplicitId`: the unmapped (same-batch append) arm
             // is DEAD — a duplicate append already heads its own handle via DetectAppends' third
-            // `headsHandle` clause (b2-t2), so a positional append never reaches this pass.
+            // `headsHandle` clause, so a positional append never reaches this pass.
             void InjectHandle(SnapshotNode node)
             {
                 var goid = node.GlobalObjectId;
@@ -701,8 +708,7 @@ namespace SceneBuilder.Core.Reconcile
         // Symmetric to DetectAppends: walks the IdentityMap (code-side objects) looking for
         // GameObject entries whose GlobalObjectId is absent from the live snapshot - i.e.
         // scene-deleted objects. Emits one RemoveStatement + one RemovedLogicalIds entry per
-        // deleted object. Independent of Differ's ops (see research.md for why RemoveNode
-        // cannot be used here).
+        // deleted object. Independent of Differ's ops (RemoveNode cannot be used here).
         // A deleted entry that still heads a handle referenced by a surviving child (a
         // GameObject child whose own GlobalObjectId is still present in the snapshot) cannot
         // be removed - doing so would break the surviving child's statement. Such entries
@@ -724,7 +730,7 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, SourceSpan>? anchors,
             IReadOnlyDictionary<string, SourceSpan>? componentAnchors,
             IReadOnlyDictionary<string, SnapshotEntry> snapshotByGoid,
-            // b6-t1: LogicalIds targeted by an ObjectRef field anywhere in the source model — see call
+            // LogicalIds targeted by an ObjectRef field anywhere in the source model — see call
             // site. A deleted owner still named by a surviving field argument cannot be removed either;
             // ComponentReconciler's field-diff pass (Detection 1, restored for the same
             // default-filtered-out-of-snapshot case this removal would otherwise race) already reports
@@ -764,7 +770,7 @@ namespace SceneBuilder.Core.Reconcile
                     && !string.IsNullOrEmpty(d.GlobalObjectId)
                     && snapshotByGoid.ContainsKey(d.GlobalObjectId));
 
-                // b6-t1: a field elsewhere in the source still names this handle. The owner is gone
+                // A field elsewhere in the source still names this handle. The owner is gone
                 // from the scene, so ComponentReconciler's field-diff pass already reports a located
                 // DanglingReference for that field (Detection 1) — this only has to leave the
                 // declaration standing so the still-authored argument keeps resolving, never CS0103.
@@ -863,10 +869,10 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
-        // b4-t2: driven axes never sync scene->source: hold the source model's value on each driven
+        // Driven axes never sync scene->source: hold the source model's value on each driven
         // axis so it cannot differ, while free axes still reflect the scene. snapshot.DrivenChannels
-        // is enabled-coupled (b6); default None returns the snapshot unchanged for every non-spatial
-        // node. b2-t1/i3: the base-channel hold is shared with the code->scene direction
+        // is enabled-coupled; default None returns the snapshot unchanged for every non-spatial
+        // node. The base-channel hold is shared with the code->scene direction
         // (RectTransformDiff.HoldForWrite) via DrivenTransform.HoldBase — never re-implement it here.
         private static TransformData MaskDriven(TransformData model, TransformData snapshot)
         {

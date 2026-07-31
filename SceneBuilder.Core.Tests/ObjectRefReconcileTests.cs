@@ -7,7 +7,7 @@ using Xunit;
 
 namespace SceneBuilder.Core.Tests
 {
-    // b4-t1: matched-field (present in BOTH source and snapshot) ObjectRef rewire/null path ->
+    // Matched-field (present in BOTH source and snapshot) ObjectRef rewire/null path ->
     // handle-aware PatchComponentField rendering. Mirrors AssetRefReconcileTests.cs harness.
     public class ObjectRefReconcileTests
     {
@@ -111,13 +111,13 @@ namespace SceneBuilder.Core.Tests
             Assert.Empty(result.Patch.Edits.OfType<IntroduceHandle>());
         }
 
-        // spec #7: target cleared to None in the scene -> patch rewrites the argument to
-        // NodeHandle.None. door-1 must be a LIVE scene object here (mapped + present in the
-        // snapshot) — otherwise this is a b4-t2 dangling delete, not a legit clear
-        // (research.md b4-t2: "b4-t2 MUST update that ONE test to make door-1 a live scene
-        // object; then it stays a legit None").
+        // spec #7, NO-DEFAULTS leg (never drop what you have no basis to
+        // drop): with no ComponentDefaults supplied, a target cleared to None in the scene still
+        // patches the argument to NodeHandle.None -- today's behavior, pinned unchanged. door-1
+        // must be a LIVE scene object here (mapped + present in the snapshot) — otherwise this is
+        // a dangling delete, not a legit clear.
         [Fact]
-        public void Reconcile_ClearedToNone_PatchesArgumentToNodeHandleNone()
+        public void Reconcile_ClearedToNone_NoDefaults_PatchesArgumentToNodeHandleNone()
         {
             var sourceValue = new ValueNode.ObjectRef("door-1");
             var doorRoot = new GameObjectNode { LogicalId = "door-1", Name = "Door" };
@@ -143,6 +143,51 @@ namespace SceneBuilder.Core.Tests
 
             var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
             Assert.Equal("NodeHandle.None", patch.NewExpr);
+            Assert.Empty(result.Conflicts.Where(c => c.Kind == ConflictKind.DanglingReference));
+        }
+
+        // spec #7, WITH-DEFAULTS leg: ObjectRef(null) IS the type default for a reference
+        // field. With ComponentDefaults carrying that default, the SAME clear-to-None emits a
+        // RemoveComponentField instead -- the `.Set(x => x.target, ...)` call disappears from
+        // source rather than being patched to NodeHandle.None.
+        [Fact]
+        public void Reconcile_ClearedToNone_WithDefaults_EmitsRemovalNotPatch()
+        {
+            var sourceValue = new ValueNode.ObjectRef("door-1");
+            var doorRoot = new GameObjectNode { LogicalId = "door-1", Name = "Door" };
+            var (model, map, componentLogicalId) = MappedRootWithObjectRefField(sourceValue, new[] { doorRoot });
+            map = map with
+            {
+                Entries = map.Entries.Append(
+                    new IdentityMapEntry { LogicalId = "door-1", GlobalObjectId = "goid-door", Kind = "GameObject" }).ToArray(),
+            };
+
+            var snapshotValue = new ValueNode.ObjectRef(null);
+            var snapshot = SnapshotWithObjectRefField(snapshotValue);
+            snapshot = snapshot with
+            {
+                Roots = snapshot.Roots.Append(
+                    new SnapshotNode { GlobalObjectId = "goid-door", Name = "Door" }).ToArray(),
+                ComponentDefaults = new[]
+                {
+                    new ComponentData
+                    {
+                        LogicalId = "template",
+                        Type = new TypeRef(ComponentTypeFullName),
+                        Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(FieldKey, new ValueNode.ObjectRef(null)) }),
+                    },
+                },
+            };
+
+            var handles = new Dictionary<string, string> { ["door-1"] = "door" };
+
+            var result = Reconciler.Reconcile(
+                model, snapshot, map, null, null, null, null, FieldSpans(componentLogicalId), handles);
+
+            Assert.Empty(result.Patch.Edits.OfType<PatchComponentField>());
+            var removal = Assert.Single(result.Patch.Edits.OfType<RemoveComponentField>());
+            Assert.Equal(componentLogicalId, removal.Anchor);
+            Assert.Equal(FieldKey, removal.FieldKey);
             Assert.Empty(result.Conflicts.Where(c => c.Kind == ConflictKind.DanglingReference));
         }
 

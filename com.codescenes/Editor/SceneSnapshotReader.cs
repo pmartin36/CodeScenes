@@ -49,15 +49,20 @@ namespace SceneBuilder.Editor
         /// per-type default-field templates (<see cref="SceneSnapshot.ComponentDefaults"/>) are
         /// populated for every caller by construction rather than opted into per site. Walks the
         /// already-assembled tree (no Unity API calls beyond what building <paramref name="roots"/>
-        /// already made), collects the distinct component type full names present, and asks
-        /// <see cref="SerializedFieldBridge.TryGetDefaultTemplate"/> for each — O(components) over an
+        /// already made), collects the type full name of EVERY <see cref="ComponentData"/> the
+        /// snapshot carries on ANY channel — including a prefab instance's
+        /// <see cref="SnapshotNode.AddedComponents"/> / <see cref="SnapshotNode.AddedGameObjects"/>,
+        /// not just <see cref="SnapshotNode.Components"/> / <see cref="SnapshotNode.Children"/> — and
+        /// asks <see cref="ComponentDefaultTemplate.TryGet"/> for each — O(components) over an
         /// already-built tree, no SerializedObject work of its own. Invariant:
-        /// <see cref="SerializedFieldBridge.TryGetDefaultTemplate"/> answers only for a type whose
-        /// default-field map already ran in this domain; that holds because
+        /// <see cref="ComponentDefaultTemplate.TryGet"/> answers only for a type whose template has
+        /// already been registered in this domain; that holds because
         /// <c>ChangeScopedSnapshot.AssembleIncremental</c> falls back to a cold assemble whenever its
         /// node cache is null, and both caches are process state that dies together on a domain reload —
-        /// so a cold read (which calls <see cref="SerializedFieldBridge.ReadComponent"/> for every
-        /// component in the tree) always precedes a <see cref="FromRoots"/> call in the same domain.
+        /// so a cold read (which calls <see cref="SerializedFieldBridge.ReadComponent"/>, which calls
+        /// <see cref="ComponentDefaultTemplate.Register"/>, for every component in the tree, including
+        /// the ones reachable only through instance override channels) always precedes a
+        /// <see cref="FromRoots"/> call in the same domain.
         /// </summary>
         internal static SceneSnapshot FromRoots(SnapshotNode[] roots)
         {
@@ -67,7 +72,7 @@ namespace SceneBuilder.Editor
             var defaults = new List<ComponentData>(typeNames.Count);
             foreach (var typeName in typeNames)
             {
-                if (SerializedFieldBridge.TryGetDefaultTemplate(typeName, out var fields))
+                if (ComponentDefaultTemplate.TryGet(typeName, out var fields))
                 {
                     defaults.Add(new ComponentData { Type = new TypeRef(typeName), Fields = fields });
                 }
@@ -85,7 +90,30 @@ namespace SceneBuilder.Editor
                     typeNames.Add(component.Type.FullName);
                 }
 
+                foreach (var added in node.AddedComponents)
+                {
+                    typeNames.Add(added.Component.Type.FullName);
+                }
+
+                foreach (var addedGo in node.AddedGameObjects)
+                {
+                    CollectComponentTypeNames(addedGo.Node, typeNames);
+                }
+
                 CollectComponentTypeNames(node.Children, typeNames);
+            }
+        }
+
+        private static void CollectComponentTypeNames(GameObjectNode node, SortedSet<string> typeNames)
+        {
+            foreach (var component in node.Components)
+            {
+                typeNames.Add(component.Type.FullName);
+            }
+
+            foreach (var child in node.Children)
+            {
+                CollectComponentTypeNames(child, typeNames);
             }
         }
 

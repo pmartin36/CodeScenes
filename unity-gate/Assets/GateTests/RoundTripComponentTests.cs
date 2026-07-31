@@ -235,8 +235,10 @@ public class RoundTripScene : ISceneDefinition
         var rewritten = File.ReadAllText(_builderPath);
         StringAssert.Contains(".Component<UnityEngine.Rigidbody>", rewritten,
             "Builder source did not gain the Rigidbody attach.\n" + rewritten);
-        // A fresh Rigidbody equals its throwaway default on every field, so nothing survives the
-        // default-filter — no .Set(...) noise, and specifically no m_Mass dump.
+        // A fresh Rigidbody equals its throwaway default on every field. ReadComponent itself no
+        // longer filters — the omission moved to the emit side, ComponentDefaultOmission,
+        // applied in EmitComponentAppend — so nothing survives into the appended source: no .Set(...)
+        // noise, and specifically no m_Mass dump.
         StringAssert.DoesNotContain(".Set(", rewritten,
             "Builder source dumped default field setters for a fresh component.\n" + rewritten);
         StringAssert.DoesNotContain("m_Mass", rewritten,
@@ -420,7 +422,7 @@ public class RoundTripScene : ISceneDefinition
 
     // 11. Native enum field, no managed FieldInfo (scene->code) — a field like
     //     Rigidbody.m_CollisionDetection has no backing managed enum, so the adapter reads it as a raw
-    //     int (b4-t2). Moving it away from its constructed default must harvest it into source as a
+    //     int. Moving it away from its constructed default must harvest it into source as a
     //     bare `.Set("m_CollisionDetection", <int>)`, and the value must author back correctly on the
     //     next code->scene build. A second Sync with no further edit must be a fixed point.
     [Test]
@@ -438,7 +440,9 @@ public class RoundTripScene : ISceneDefinition
         var rb = box.GetComponent<Rigidbody>();
         Assert.IsNotNull(rb, "Authored Rigidbody was not materialized on Box");
 
-        // PREMISE: only a value AWAY from the constructed default survives ReadComponent's prune.
+        // PREMISE: ReadComponent does not prune; the constructed default must still be
+        // Discrete so the value moved below asserts something real, but it is emit-side omission
+        // (ComponentDefaultOmission), not the read, that would otherwise have kept this quiet.
         Assert.AreEqual(CollisionDetectionMode.Discrete, rb.collisionDetectionMode,
             "Rigidbody.collisionDetectionMode must start at its constructed default (Discrete) for this test to prove anything.");
 

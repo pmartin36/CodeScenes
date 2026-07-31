@@ -187,7 +187,7 @@ namespace SceneBuilder.Editor
                             var type = ComponentTypeResolver.Resolve(add.Type);
                             if (type != null)
                             {
-                                var comp = ownerGo.AddComponent(type);
+                                var comp = ComponentDefaultTemplate.Create(ownerGo, type);
                                 if (comp != null)
                                 {
                                     result.ComponentsByLogicalId[add.LogicalId] = comp;
@@ -377,7 +377,7 @@ namespace SceneBuilder.Editor
             }
         }
 
-        // b1-t1: writes the full authored vector unconditionally — the code->scene direction no
+        // Writes the full authored vector unconditionally — the code->scene direction no
         // longer masks driven channels (see spec 23). Scene->code suppression of driven channels
         // still lives entirely in Reconciler.MaskDriven / SceneSnapshotReader.DeriveDrivenChannels.
         private static void ApplyTransformField(Transform t, SetField op)
@@ -391,7 +391,7 @@ namespace SceneBuilder.Editor
             {
                 case ValueNode.Vec3 v when op.Path == "m_LocalPosition":
                     t.localPosition = new Vector3(v.Value.X, v.Value.Y, v.Value.Z);
-                    // b4-t1: this raw write bypasses SurfaceSnap.Evaluate() entirely (it may land on a
+                    // This raw write bypasses SurfaceSnap.Evaluate() entirely (it may land on a
                     // frozen driven-channel placeholder far from the live resolved position, e.g. a
                     // rebuild after Reconciler.MaskDriven froze the source's Y). Reset the sibling
                     // component's self-write baseline so its NEXT Evaluate() treats this materialize
@@ -438,10 +438,10 @@ namespace SceneBuilder.Editor
         }
 
         // Returns the object's RectTransform, promoting a plain Transform IN PLACE via
-        // AddComponent(typeof(RectTransform)) (GameObject EntityId + GlobalObjectId + children + P/R/S
-        // all survive — probed in research.md). Returns null when Unity refuses (prefab-instance root:
-        // AddComponent returns null with no Unity-side log), after logging the located error. Never
-        // destroys the GameObject.
+        // ComponentDefaultTemplate.Create(go, typeof(RectTransform)) (GameObject EntityId +
+        // GlobalObjectId + children + P/R/S all survive). Returns null when
+        // Unity refuses (prefab-instance root: the creation primitive returns null with no Unity-side
+        // log), after logging the located error. Never destroys the GameObject.
         private static RectTransform? EnsureRectTransform(Transform t, string logicalId)
         {
             if (t is RectTransform existing)
@@ -450,7 +450,7 @@ namespace SceneBuilder.Editor
             }
 
             var go = t.gameObject; // capture BEFORE the add: the old Transform is destroyed
-            go.AddComponent(typeof(RectTransform)); // in-place promotion; may return null (prefab instance)
+            ComponentDefaultTemplate.Create(go, typeof(RectTransform)); // in-place promotion; may return null (prefab instance)
             if (go.transform is RectTransform promoted)
             {
                 ConflictSurfacing.LogNote(logicalId,

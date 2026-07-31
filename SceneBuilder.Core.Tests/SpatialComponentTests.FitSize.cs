@@ -4,8 +4,8 @@ using Xunit;
 
 namespace SceneBuilder.Core.Tests
 {
-    // b3-t1: net-new FitSize enum-shape/idempotence pins, split into a sibling partial to keep
-    // SpatialComponentTests.cs under the file-size budget (research.md FILES_NEW).
+    // FitSize enum-shape/idempotence pins, split into a sibling partial to keep
+    // SpatialComponentTests.cs under the file-size budget.
     public partial class SpatialComponentTests
     {
         private const string FitSizeWidthSource = @"
@@ -20,7 +20,7 @@ public class FitSizeWidthScene : ISceneDefinition
 
         // Pins the EXACT ValueNode.Enum shape SerializedFieldBridge.ReadEnum yields for a Unity enum
         // field (TypeFullName + single-member list + IsFlags=false) — a Primitive.Int would never
-        // value-equal this and would churn/break idempotence (research.md REFINED finding).
+        // value-equal this and would churn/break idempotence.
         [Fact]
         public void Parse_FitSizeHeight_ProducesReaderShapedEnumModeValue()
         {
@@ -33,9 +33,9 @@ public class FitSizeWidthScene : ISceneDefinition
         }
 
         // A width-authored FitSize's `mode` field must be present and equal Enum(["Width"]) — this is
-        // what lets APPEND (via SerializedFieldBridge's default-value pruning) recover the
+        // what lets APPEND (via emit-side ComponentDefaultOmission) recover the
         // width/height/depth keyword: with Mode.None at index 0, every authored mode is != default
-        // and always survives the prune (research.md's REFINED finding on why None must be index 0).
+        // and always survives omission.
         [Fact]
         public void Parse_FitSizeWidth_YieldsModeWidthField()
         {

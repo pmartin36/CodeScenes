@@ -7,7 +7,7 @@ using Xunit;
 
 namespace SceneBuilder.Core.Tests
 {
-    // b4-t2: ConflictKind.DanglingReference detection — a source handle whose target vanished
+    // ConflictKind.DanglingReference detection — a source handle whose target vanished
     // from the scene, or a snapshot target that resolves to nothing, must report a located
     // conflict and suppress the would-be silent-null / phantom-handle patch. Rewire-vs-delete
     // (a live different target) and a legit clear-to-None (target still alive) must NOT report
@@ -29,8 +29,8 @@ namespace SceneBuilder.Core.Tests
         // extraLiveTargets: (LogicalId, Goid) pairs mapped AND present in the snapshot roots —
         // genuinely alive in the scene.
         // extraDeadTargets: (LogicalId, Goid) pairs mapped in the IdentityMap but ABSENT from the
-        // snapshot roots — deleted from the scene (but still authored in the source model, per
-        // research.md: a delete does not remove the statement).
+        // snapshot roots — deleted from the scene (but still authored in the source model, since
+        // a delete does not remove the statement).
         private static Fixture BuildFixture(
             ValueNode sourceValue,
             ValueNode snapshotValue,
@@ -110,7 +110,7 @@ namespace SceneBuilder.Core.Tests
                 [ComponentLogicalId] = new Dictionary<string, SourceSpan> { [FieldKey] = new SourceSpan(0, 10) },
             };
 
-        // Detection 1 / deliverable #8, checklist #4: source handle's target ("door-1") has been
+        // Detection 1: source handle's target ("door-1") has been
         // deleted from the scene (still authored in source + `handles`, but its IdentityMap
         // entry's GlobalObjectId is absent from the snapshot) -> a located DanglingReference
         // conflict naming source-object/field/missing-target, NEVER a silent NodeHandle.None patch.
@@ -183,10 +183,12 @@ namespace SceneBuilder.Core.Tests
             Assert.DoesNotContain(result.Conflicts, c => c.Kind == ConflictKind.DanglingReference);
         }
 
-        // Sibling of the corrected b4-t1 test: a target cleared to None while it is STILL a live
-        // scene object is a legit clear, not a delete -> None patch, no conflict.
+        // NO-DEFAULTS leg: a target cleared to None while it is STILL a live scene object is a
+        // legit clear, not a delete ->
+        // with no ComponentDefaults supplied, that stays a None patch, no conflict (pinned
+        // unchanged; never drop what you have no basis to drop).
         [Fact]
-        public void ClearedToNone_LiveTarget_IsLegitNone()
+        public void ClearedToNone_LiveTarget_NoDefaults_IsLegitNonePatch()
         {
             var doorRoot = new GameObjectNode { LogicalId = "door-1", Name = "Door" };
             var fixture = BuildFixture(
@@ -203,6 +205,46 @@ namespace SceneBuilder.Core.Tests
 
             var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
             Assert.Equal("NodeHandle.None", patch.NewExpr);
+            Assert.Empty(result.Conflicts);
+        }
+
+        // WITH-DEFAULTS leg: the legit-clear-vs-dangling distinction survives verbatim
+        // (still no DanglingReference), but with ComponentDefaults carrying ObjectRef(null) as the
+        // type default, the edit KIND changes to a removal -- the `.Set(...)` call disappears
+        // instead of patching to NodeHandle.None.
+        [Fact]
+        public void ClearedToNone_LiveTarget_WithDefaults_EmitsRemovalNotPatch()
+        {
+            var doorRoot = new GameObjectNode { LogicalId = "door-1", Name = "Door" };
+            var fixture = BuildFixture(
+                sourceValue: new ValueNode.ObjectRef("door-1"),
+                snapshotValue: new ValueNode.ObjectRef(null),
+                extraModelRoots: new[] { doorRoot },
+                extraLiveTargets: new[] { ("door-1", "goid-door") },
+                extraDeadTargets: System.Array.Empty<(string, string)>());
+
+            fixture.Snapshot = fixture.Snapshot with
+            {
+                ComponentDefaults = new[]
+                {
+                    new ComponentData
+                    {
+                        LogicalId = "template",
+                        Type = new TypeRef(ComponentTypeFullName),
+                        Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(FieldKey, new ValueNode.ObjectRef(null)) }),
+                    },
+                },
+            };
+
+            var handles = new Dictionary<string, string> { ["door-1"] = "door" };
+
+            var result = Reconciler.Reconcile(
+                fixture.Model, fixture.Snapshot, fixture.Map, null, null, null, null, FieldSpans(), handles);
+
+            Assert.Empty(result.Patch.Edits.OfType<PatchComponentField>());
+            var removal = Assert.Single(result.Patch.Edits.OfType<RemoveComponentField>());
+            Assert.Equal(ComponentLogicalId, removal.Anchor);
+            Assert.Equal(FieldKey, removal.FieldKey);
             Assert.Empty(result.Conflicts);
         }
     }

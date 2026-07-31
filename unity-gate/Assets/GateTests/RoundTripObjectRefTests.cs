@@ -17,7 +17,7 @@ using SceneBuilder.Core.Reconcile;
 // RoundTripComponentTests / RoundTripAssetRefTests harness verbatim (temp builder .cs + sidecar in a
 // system temp dir, EmptyScene per test, [SetUp]/[TearDown] cleanup).
 //
-// b1-b5 production for M5 is already landed (confirmed by research.md); these tests are expected to
+// b1-b5 production for M5 is already landed; these tests are expected to
 // PASS on first run — this file IS the mandatory full-loop gate coverage (CLAUDE.md hard requirement),
 // not a RED test driving new production. A failure here is a genuine Unity-boundary escape.
 public class RoundTripObjectRefTests
@@ -120,10 +120,14 @@ public class RoundTripObjectRefScene : ISceneDefinition
             "Builder source still carries the old 'door' handle argument.\n" + rewritten);
     }
 
-    // 3. Clear a target to None in the scene (scene->code): the source argument becomes
-    //    NodeHandle.None (the target object itself stays alive — this is a legit clear, not dangling).
+    // 3. Clear a target to None in the scene (scene->code): ObjectRef(null) IS the type
+    //    default for a reference field (the live adapter template always carries it), so clearing
+    //    a target REMOVES the `.Set(x => x.target, ...)` call from source entirely rather than
+    //    patching it to NodeHandle.None (the target object itself stays alive — this is a legit
+    //    clear, not dangling). Renamed from SceneToCode_ClearedTargetToNone_WritesNodeHandleNone
+    //    because writing an explicit NodeHandle.None setter breaks against the real adapter.
     [Test]
-    public void SceneToCode_ClearedTargetToNone_WritesNodeHandleNone()
+    public void SceneToCode_ClearedTargetToNone_RemovesSetterFromSource()
     {
         File.WriteAllText(_builderPath, Source(
             "        var door = scene.Add(\"Door\");\n" +
@@ -142,8 +146,16 @@ public class RoundTripObjectRefScene : ISceneDefinition
         Assert.IsTrue(result.Changed, "Sync reported no change despite a cleared reference field");
 
         var rewritten = File.ReadAllText(_builderPath);
-        StringAssert.Contains("NodeHandle.None", rewritten,
-            "Builder source did not write NodeHandle.None for a cleared reference field.\n" + rewritten);
+        StringAssert.DoesNotContain("x.target", rewritten,
+            "Builder source still carries a `.Set(x => x.target, ...)` call for a field returned to its type default (null) -- it should have been removed, not patched.\n" + rewritten);
+        StringAssert.Contains(".Component<DoorOpener>()", rewritten,
+            "Builder source did not collapse to a bare `.Component<DoorOpener>()` after removing its sole setter.\n" + rewritten);
+
+        var second = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsFalse(second.Changed,
+            "NOT CONVERGED: a Sync immediately after the removal, with no further scene change, reported Changed=true.");
+        Assert.AreEqual(0, second.PatchEdits,
+            "NOT CONVERGED: the no-op re-sync's reconcile produced " + second.PatchEdits + " patch edit(s).");
     }
 
     // 4. Delete the referenced GameObject (scene->code): a loud, located ConflictKind.DanglingReference

@@ -3,9 +3,9 @@ using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    // m-nested-props b4-t2: below-root ("nested", Target.ChildPath != "") membership diff for a
+    // Below-root ("nested", Target.ChildPath != "") membership diff for a
     // MAPPED PrefabInstance — the scoped-`.On` twin of ReconcilerInstances.cs's root emit, plus the
-    // (previously missing, see research.md) child-GameObject add/remove machinery. Split into its
+    // child-GameObject add/remove machinery. Split into its
     // own partial-class file per the M10 partial-file precedent.
     public static partial class Reconciler
     {
@@ -88,7 +88,11 @@ namespace SceneBuilder.Core.Reconcile
             FacadeCatalog? facadeCatalog,
             string? prefabGuid,
             List<SourceEdit> edits,
-            List<Conflict> conflicts)
+            List<Conflict> conflicts,
+            // A snapshot-only added child's components carry
+            // every serialized field the same as any other emission site; filtered here the same way
+            // before the AppendInstanceAddChild.Node is built.
+            ComponentDefaultOmission.Index? defaults = null)
         {
             var modelKeys = new HashSet<(OverrideTarget Parent, string Name)>();
             foreach (var modelAdded in model.AddedGameObjects)
@@ -112,7 +116,7 @@ namespace SceneBuilder.Core.Reconcile
                 // empty string literal). The new child NAME stays a string (specs/27).
                 TryRenderScopedSelector(facadeCatalog, prefabGuid, snapshotAdded.Parent.ChildPath, out var parentSelectorExpr);
 
-                // m-ui-recttransform b3-t1 (iteration 2): the SAME create-with-payload split the
+                // The SAME create-with-payload split the
                 // plain-append path uses (Reconciler.SplitCreatedPayload) — an added UI child's
                 // layout must ride the SAME AddChild closure a component payload already uses,
                 // never be silently dropped. `canHostRectTransformCall: true` — `.AddChild(...)`
@@ -135,7 +139,7 @@ namespace SceneBuilder.Core.Reconcile
                     ParentPath = snapshotAdded.Parent.ChildPath,
                     ParentSelectorExpr = parentSelectorExpr,
                     Name = snapshotAdded.Node.Name,
-                    Node = snapshotAdded.Node,
+                    Node = OmitDefaultsFromNode(snapshotAdded.Node, defaults),
                     RectTransform = rectTransformPayload,
                 });
             }
@@ -155,6 +159,30 @@ namespace SceneBuilder.Core.Reconcile
                     PropertyPath = modelAdded.Node.Name,
                 });
             }
+        }
+
+        // Applies ComponentDefaultOmission the same way every other emission site does,
+        // to a snapshot-only added child's own components before it is carried into an
+        // AppendInstanceAddChild edit (one of the four
+        // emission sites, not covered by ComponentReconciler.EmitComponentAppend).
+        private static GameObjectNode OmitDefaultsFromNode(GameObjectNode node, ComponentDefaultOmission.Index? defaults)
+        {
+            if (node.Components.Length == 0)
+            {
+                return node;
+            }
+
+            var filtered = new ComponentData[node.Components.Length];
+            for (var i = 0; i < node.Components.Length; i++)
+            {
+                var component = node.Components[i];
+                filtered[i] = component with
+                {
+                    Fields = ComponentDefaultOmission.OmitDefaults(component.Type.FullName, component.Fields, defaults),
+                };
+            }
+
+            return node with { Components = filtered };
         }
 
         // Scene->code diff for RemovedGameObjects: mirrors ReconcileRemovedComponents exactly

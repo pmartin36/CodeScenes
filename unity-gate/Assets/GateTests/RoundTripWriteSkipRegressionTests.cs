@@ -10,7 +10,7 @@ using UnityEngine.TestTools;
 using SceneBuilder.Authoring;
 using SceneBuilder.Editor;
 
-// b1-t2 (specs/completed/23-fitsize-surfacesnap-transform-authority.md) — the headline gate coverage
+// The headline gate coverage (specs/completed/23-fitsize-surfacesnap-transform-authority.md) that
 // the v1 scene-write suppression bug escaped. Per the spec's own bug report (specs/completed/23-...
 // line 15-19): the materialize write-skip zeroed the Crate's authored Y, so the Crate built EMBEDDED
 // in the floor — and SurfaceSnap's raycast/fallback-scan both search from the Crate's OWN current
@@ -102,7 +102,8 @@ public class WriteSkipRegressionScene : ISceneDefinition
         }
     }
 
-    // SerializedFieldBridge.GetDefaultFieldMap lazily instantiates a throwaway MonoBehaviour instance
+    // ComponentDefaultTemplate.Register (formerly SerializedFieldBridge.GetDefaultFieldMap)
+    // lazily instantiates a throwaway MonoBehaviour instance
     // the FIRST time a component type is snapshot-read, to compute a per-type default-field map —
     // cached for the rest of the domain's lifetime. For FitSize/SurfaceSnap this fires exactly ONCE
     // per type, non-deterministically on whichever [Test] happens to build one first. Warm it up

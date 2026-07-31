@@ -62,7 +62,7 @@ namespace SceneBuilder.Editor
             public BuilderDiagnostic[] CompileErrors { get; set; } = System.Array.Empty<BuilderDiagnostic>();
 
             /// <summary>
-            /// b6-t1: canonical `"{logicalId}.{fieldKey}"` keys resolved as a TRUE both-sides conflict by
+            /// Canonical `"{logicalId}.{fieldKey}"` keys resolved as a TRUE both-sides conflict by
             /// <see cref="RunConflictAware"/> (empty for the plain <see cref="Run"/> overloads, which never
             /// compute a conflict set). Scene-wins already decided the written value; this is telemetry —
             /// the prior code value lives in the source's `// CONFLICT:` marker, not here.
@@ -158,11 +158,11 @@ namespace SceneBuilder.Editor
             var source = File.ReadAllText(builderPath);
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
 
-            // b5-t5: load the façade manifest ONCE per Sync and thread it through every parse/reconcile
+            // Loads the façade manifest ONCE per Sync and threads it through every parse/reconcile
             // seam below, so a typed `Instance(Prefabs.X)`/`.On(sel => ...)` resolves instead of refusing,
-            // and a scene edit of a façade-registered prefab instance can EMIT the typed form (b4-t4).
+            // and a scene edit of a façade-registered prefab instance can EMIT the typed form.
             var facadeCatalog = FacadeCatalogLoader.Load();
-            // b6-t3: load the asset manifest ONCE per Sync, alongside the façade catalog, and thread it
+            // Loads the asset manifest ONCE per Sync, alongside the façade catalog, and threads it
             // through the same parse/reconcile seams so a typed `Assets.Group.X` member resolves.
             var assetCatalog = AssetCatalogLoader.Load();
 
@@ -211,7 +211,7 @@ namespace SceneBuilder.Editor
                 assetCatalog: assetCatalog,
                 chainedComponents: parse.ChainedComponents);
 
-            // m-nested-props b7-t2: a NestedOverrideBootstrap Conflict (below-root target with no live
+            // A NestedOverrideBootstrap Conflict (below-root target with no live
             // sub-object) is folded in here — the SAME located-conflict channel the reconcile itself
             // surfaces, never a silent drop.
             var conflicts = loaded.BootstrapConflicts.Count > 0
@@ -336,7 +336,7 @@ namespace SceneBuilder.Editor
             return merged;
         }
 
-        // ---- b6-t1: conflict-aware combined (scene+code) sync -------------------------------------
+        // ---- Conflict-aware combined (scene+code) sync -------------------------------------
 
         /// <summary>Owning-GameObject LogicalId -&gt; authored Name, for located-error messages.</summary>
         private static void FlattenNames(
@@ -351,7 +351,7 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
-        /// Combined scene+code sync for a both-sides-changed cycle (b6-t1, spec checklist #9, #10):
+        /// Combined scene+code sync for a both-sides-changed cycle (spec checklist #9, #10):
         /// 3-way field-level merge of <paramref name="baselineSource"/>/<paramref name="baselineSnapshot"/>
         /// (last-converged), <paramref name="builderPath"/>'s CURRENT on-disk source (the code edits) and
         /// <paramref name="liveSnapshot"/> (the scene edits). Every non-overlapping field applies in its
@@ -361,7 +361,7 @@ namespace SceneBuilder.Editor
         /// (<see cref="SourcePatchApplier"/>, <see cref="SceneBuilderPaths.WriteIfChanged"/>,
         /// <see cref="UpdateSidecar"/>, <see cref="BuilderCompileCheck"/>). Does NOT push code-only fields
         /// into the scene — the caller runs <see cref="SceneBuilderBuild.Run"/> against the source this
-        /// writes for that (research.md step 3), so a single write tail keeps writing the authority for
+        /// writes for that, so a single write tail keeps writing the authority for
         /// EACH side simple: this method owns the source, Build owns the scene.
         /// </summary>
         public static SyncResult RunConflictAware(
@@ -376,10 +376,10 @@ namespace SceneBuilder.Editor
             var newSource = File.ReadAllText(builderPath);
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
 
-            // b5-t5: load the façade manifest ONCE per RunConflictAware and thread it through every
+            // Loads the façade manifest ONCE per RunConflictAware and threads it through every
             // parse/reconcile seam below — see Run's identical comment.
             var facadeCatalog = FacadeCatalogLoader.Load();
-            // b6-t3: load the asset manifest ONCE per RunConflictAware, alongside the façade catalog —
+            // Loads the asset manifest ONCE per RunConflictAware, alongside the façade catalog —
             // see Run's identical comment.
             var assetCatalog = AssetCatalogLoader.Load();
 
@@ -410,15 +410,14 @@ namespace SceneBuilder.Editor
 
             // CODE-changed keys+ops: the NEW (on-disk) desired vs the BASELINE DESIRED (both parsed
             // from source, never live-scene) — exactly the fields the user edited in code since
-            // convergence. Deliberately NOT `Differ.Diff(newDesired, baselineSnapshot, ...)` (what
-            // research.md's blueprint proposed): `SerializedFieldBridge.ReadComponent` omits any live
-            // field that equals its type's freshly-constructed DEFAULT (e.g. a Rigidbody's default
-            // mass IS 1) from a snapshot's `Fields` map entirely, and `Differ`'s component walk treats
-            // "absent from actual" as "changed" — so a field a builder explicitly authors AT the
-            // type's default value (a common, ordinary case, not an edge case) reads as code-changed
-            // on EVERY cycle even when the source line never moved. `baselineLoaded.Desired` never
-            // drops a field this way (both sides are parsed source, never default-filtered), so
-            // comparing desired-vs-desired is exact where desired-vs-snapshot is not.
+            // convergence. Deliberately NOT `Differ.Diff(newDesired, baselineSnapshot, ...)`: a DESIRED
+            // model's `Fields` map carries ONLY the fields a builder statement explicitly authors, while
+            // a snapshot (`SerializedFieldBridge.ReadComponent` does not default-filter) carries EVERY
+            // readable field regardless of default status — comparing that partial map against a full
+            // one would read every field the builder never authored as code-changed on EVERY cycle,
+            // even when the source line never moved. `baselineLoaded.Desired` is exactly as partial as
+            // `newLoaded.Desired` (both are parsed source), so comparing desired-vs-desired is exact
+            // where desired-vs-snapshot is not.
             var codeOps = DiffDesiredFields(baselineLoaded.Desired, newLoaded.Desired);
             var codeOpsByKey = new Dictionary<FieldKey, ChangeOp>();
             foreach (var op in codeOps)
@@ -460,7 +459,7 @@ namespace SceneBuilder.Editor
                 if (key == null)
                 {
                     // Unattributable (structural: append/move/reorder/remove/introduce-*) — always
-                    // kept, same as the single-direction Run: this task's merge is field-level only.
+                    // kept, same as the single-direction Run: this merge is field-level only.
                     keptEdits.Add(edit);
                     continue;
                 }
@@ -485,7 +484,7 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            // m-nested-props b7-t2: fold newLoaded's NestedOverrideBootstrap conflicts in — `applicable`
+            // Folds newLoaded's NestedOverrideBootstrap conflicts in — `applicable`
             // reconciles `newLoaded.Desired`, so its below-root targets are the ones that may have
             // failed to resolve against the live instance.
             var syncConflicts = newLoaded.BootstrapConflicts.Count > 0
@@ -527,8 +526,9 @@ namespace SceneBuilder.Editor
                     // Re-resolve spans against the JUST-PATCHED text (a scene-value literal can differ
                     // in length from the code literal it replaced) before inserting marker lines.
                     var patchedLoaded = DesiredModelLoader.Load(patchedSource, map, facadeCatalog, assetCatalog);
+                    var patchedAnchors = MergeAnchors(patchedLoaded.Parse.Anchors, patchedLoaded.Parse.ComponentAnchors);
                     patchedSource = InsertConflictMarkers(
-                        patchedSource, patchedLoaded.FieldArgumentSpans, patchedLoaded.Parse.Anchors, conflicts);
+                        patchedSource, patchedLoaded.FieldArgumentSpans, patchedAnchors, conflicts);
 
                     foreach (var c in conflicts)
                     {

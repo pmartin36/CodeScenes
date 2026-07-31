@@ -116,6 +116,9 @@ namespace SceneBuilder.Core.Reconcile
                     case IntroduceComponentField introduceComponentField:
                         ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers, assetCatalog);
                         break;
+                    case RemoveComponentField removeComponentField:
+                        ResolveRemoveComponentField(root, anchors, removeComponentField, allTargets, appliers);
+                        break;
                     case AppendInstanceOverride or AppendInstanceAddComponent or AppendInstanceRemoveComponent
                         or AppendInstanceAddChild or AppendInstanceRemoveChild or AppendScopedOn:
                         // Already folded into a combined chained-call append (or a scoped-On

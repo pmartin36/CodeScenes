@@ -17,7 +17,11 @@ namespace SceneBuilder.Editor
     /// <summary>
     /// The M3 <see cref="SerializedProperty"/> dispatch layer (read + write). Converts a live
     /// component's serialized fields to/from Core <see cref="ValueNode"/>s, dispatching on
-    /// <see cref="SerializedPropertyType"/> per M3's table. Bookkeeping properties are skipped on read.
+    /// <see cref="SerializedPropertyType"/> per M3's table. Bookkeeping properties are skipped on
+    /// read; a field at its type default is NOT skipped — <see cref="ReadComponent"/> reports it
+    /// unconditionally (spec C2). The decision to OMIT a default-valued field from what gets
+    /// AUTHORED is made emit-side, by <see cref="SceneBuilder.Core.Reconcile.ComponentReconciler"/>,
+    /// fed by <see cref="ComponentDefaultTemplate"/> via <see cref="SceneSnapshot.ComponentDefaults"/>.
     /// </summary>
     public static class SerializedFieldBridge
     {
@@ -66,54 +70,21 @@ namespace SceneBuilder.Editor
             SpatialComponents.SurfaceSnapTypeName,
         };
 
-        // Per-type default-field reference maps (propertyPath -> default ValueNode), built once by
-        // instantiating a throwaway component and cached by System.Type. A null entry means the
-        // default instance could not be constructed for that type — fall back to capturing all
-        // supported fields (no default-filtering) for it.
-        private static readonly Dictionary<Type, IReadOnlyDictionary<string, ValueNode>?> DefaultFieldCache = new();
-
-        // The same per-type default values as DefaultFieldCache, keyed by Type.FullName and shaped as
-        // a FieldMap — the reconstruction template a Differ-side comparison needs for a field
-        // ReadComponent pruned. Populated from the identical dictionary GetDefaultFieldMap already
-        // builds, so pruning and template stay consistent by construction: a type with no template
-        // (construction failed) is exactly a type nothing was pruned for either.
-        private static readonly Dictionary<string, FieldMap> DefaultTemplatesByTypeName = new();
-
-        /// <summary>
-        /// The per-type default field template a live component's ReadComponent pruning compares
-        /// against, keyed by <see cref="Type.FullName"/>. Absent (returns false) for a type whose
-        /// default instance could not be constructed — nothing was pruned for it either.
-        /// </summary>
-        internal static bool TryGetDefaultTemplate(string typeFullName, out FieldMap fields) =>
-            DefaultTemplatesByTypeName.TryGetValue(typeFullName, out fields!);
-
         // ---- Read (component -> ComponentData) ---------------------------------------------
 
         public static ComponentData ReadComponent(Component component, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
+            // Registration only — never filters this read. Ensures ComponentDefaultTemplate has a
+            // template for every type reachable from a snapshot, so SceneSnapshotReader.FromRoots can
+            // populate SceneSnapshot.ComponentDefaults for it.
+            ComponentDefaultTemplate.Register(component.GetType());
+
             var fields = CollectFields(new SerializedObject(component), resolveSceneRef);
-            var defaults = GetDefaultFieldMap(component.GetType());
-
-            var kept = new List<KeyValuePair<string, ValueNode>>(fields.Count);
-            foreach (var field in fields)
-            {
-                // Skip fields whose value equals a freshly-constructed default instance's value
-                // (ValueNode is a record, so value-equality holds). When no default reference is
-                // available (construction failed), keep everything — never drop user data.
-                if (defaults != null
-                    && defaults.TryGetValue(field.Key, out var defaultValue)
-                    && defaultValue.Equals(field.Value))
-                {
-                    continue;
-                }
-
-                kept.Add(field);
-            }
 
             return new ComponentData
             {
                 Type = BuildTypeRef(component),
-                Fields = new FieldMap(kept),
+                Fields = new FieldMap(fields),
             };
         }
 
@@ -145,8 +116,11 @@ namespace SceneBuilder.Editor
         }
 
         // Collects the supported, non-bookkeeping top-level serialized fields of a component as
-        // (propertyPath -> ValueNode) pairs. Shared by the real-component read path and the
-        // default-reference builder so both filter identically.
+        // (propertyPath -> ValueNode) pairs. Shared by the real-component read path
+        // (ReadComponent) and ComponentDefaultTemplate.Register's template build, so both read
+        // identically and a live component's fields and its type's default template can never
+        // diverge in SHAPE (only in value). Internal — ComponentDefaultTemplate is its only other
+        // caller.
         //
         // Walks with Next, NOT NextVisible. NextVisible yields exactly what a DEFAULT inspector would
         // draw, so every property a custom editor draws by hand — Canvas.m_SortingOrder /
@@ -156,7 +130,7 @@ namespace SceneBuilder.Editor
         // value changed and the sync answered "Scene already matches code". Serialized state, not
         // inspector-visible state, is what round-trips, so the filtering is by explicit name
         // (Bookkeeping / DerivedBuildState) rather than by Unity's inspector-drawing flag.
-        private static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        internal static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
@@ -211,54 +185,6 @@ namespace SceneBuilder.Editor
             ValueNode.Nested nested => nested.Fields.Any(kv => ContainsUnsupported(kv.Value)),
             _ => false,
         };
-
-        // Builds (and caches) the default-value reference map for a component type by adding a
-        // throwaway instance to a hidden GameObject. Returns null (cached) when the type cannot be
-        // instantiated standalone, signalling the caller to skip default-filtering for it.
-        private static IReadOnlyDictionary<string, ValueNode>? GetDefaultFieldMap(Type type)
-        {
-            if (DefaultFieldCache.TryGetValue(type, out var cached))
-            {
-                return cached;
-            }
-
-            IReadOnlyDictionary<string, ValueNode>? map = null;
-            GameObject? temp = null;
-            try
-            {
-                temp = new GameObject { hideFlags = HideFlags.HideAndDontSave };
-                var defaultComponent = temp.AddComponent(type);
-                if (defaultComponent is not null)
-                {
-                    var dict = new Dictionary<string, ValueNode>(); // O(1) prune index ReadComponent hits per field
-                    var templateEntries = new List<KeyValuePair<string, ValueNode>>(); // ordered Core-model FieldMap template
-                    foreach (var field in CollectFields(new SerializedObject(defaultComponent)))
-                    {
-                        dict[field.Key] = field.Value;
-                        templateEntries.Add(field);
-                    }
-
-                    map = dict;
-                    DefaultTemplatesByTypeName[type.FullName!] = new FieldMap(templateEntries);
-                }
-            }
-            catch
-            {
-                // AddComponent threw (e.g. type requires siblings or isn't addable standalone) —
-                // fall back to no default-filtering for this type rather than crash the sync.
-                map = null;
-            }
-            finally
-            {
-                if (temp is not null)
-                {
-                    UnityEngine.Object.DestroyImmediate(temp);
-                }
-            }
-
-            DefaultFieldCache[type] = map;
-            return map;
-        }
 
         private static ValueNode ReadProperty(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {

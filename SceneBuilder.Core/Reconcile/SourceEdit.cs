@@ -45,8 +45,8 @@ namespace SceneBuilder.Core.Reconcile
     public sealed record AppendStatement : SourceEdit
     {
         // Predicted synthesized/handle LogicalId for the created object.
-        // Equals the AddedEntry.LogicalId the Reconciler emits (b1-t2 / b2-t1),
-        // and equals what BuilderParser assigns after the Applier rewrites source (b4).
+        // Equals the AddedEntry.LogicalId the Reconciler emits,
+        // and equals what BuilderParser assigns after the Applier rewrites source.
         public string NewLogicalId { get; init; } = "";
 
         // Parent LogicalId to insert under; null => root append (receiver = scene param).
@@ -62,7 +62,7 @@ namespace SceneBuilder.Core.Reconcile
         // Non-default GameObject data. null => omit from emitted source (keep it clean).
         public TransformData? Transform { get; init; }
 
-        // b3-t4/§13: driven-masked UI layout to render as a chained `.RectTransform(...)`.
+        // §13: driven-masked UI layout to render as a chained `.RectTransform(...)`.
         // null => emit no call (non-UI node, or every rect axis driven). Its PRESENCE is what
         // carries Kind=="RectTransform" into re-parsed source, so a UI node whose five values all
         // equal the RectTransformFields defaults still renders a BARE `.RectTransform()`.
@@ -74,7 +74,7 @@ namespace SceneBuilder.Core.Reconcile
         public bool? IsStatic { get; init; }
 
         // Variable name THIS statement declares (`var <Handle> = ...`) when it heads a
-        // subtree whose descendants reference it (b2-t3). null => no declaration.
+        // subtree whose descendants reference it. null => no declaration.
         // When set, Handle == NewLogicalId.
         public string? Handle { get; init; }
 
@@ -83,16 +83,16 @@ namespace SceneBuilder.Core.Reconcile
         public string? ParentHandle { get; init; }
 
         // true => the (currently handle-less) parent statement must be rewritten to declare
-        // ParentHandle before the child is appended (b2-t2 reconcile / b3-t3 apply).
+        // ParentHandle before the child is appended.
         public bool IntroduceParentHandle { get; init; }
 
-        // m6-b4-t1: non-null => this append is a prefab-instance root; render as
+        // Non-null => this append is a prefab-instance root; render as
         // `<receiver>.Instance(SourcePrefabPath)` instead of `<receiver>.Add(Name)`, suppressing
         // Tag/Layer/Active/IsStatic (InstanceHandle exposes no such calls). Path re-derived from
         // SourcePrefabGuid via identityMap.Assets at emit time (Reconciler), not rendered here.
         public string? SourcePrefabPath { get; init; }
 
-        // b4-t4 (stub — not yet consumed by StatementText): non-null => the FacadeCatalog
+        // Non-null => the FacadeCatalog
         // Guid->PropertyName reverse lookup (Reconciler, via facadeCatalog) resolved this
         // instance's SourcePrefabGuid to a façade entry. When set, rendering MUST prefer
         // `<receiver>.Instance(Prefabs.<SourcePropertyName>)` over the SourcePrefabPath string
@@ -145,7 +145,7 @@ namespace SceneBuilder.Core.Reconcile
         // (appendAnnotations.ContainsKey(Anchor)) when the owner is itself appended this batch (§13).
 
         // Synthesized component LogicalId `{ownerLogicalId}/{Type.FullName}#{ordinal}`. MUST equal the
-        // Component-kind AddedEntry.LogicalId (b2-t1/b4-t1) and what BuilderParser assigns after apply,
+        // Component-kind AddedEntry.LogicalId and what BuilderParser assigns after apply,
         // so a 2nd Sync is a no-op.
         public string ComponentLogicalId { get; init; } = "";
 
@@ -159,11 +159,11 @@ namespace SceneBuilder.Core.Reconcile
 
         // Ordered raw-path field setters to render as `.Set("key", <ValueNodeLiteral>)`.
         // REUSE FieldMap (ordered, insertion-preserving, deep value-equality) — same type as
-        // ComponentData.Fields; do not reinvent a raw List. Applier (b3-t1) renders each value via
-        // SourceExpr.ValueNodeLiteral (b1-t1), matching AppendStatement's "structured-in, render-at-apply".
+        // ComponentData.Fields; do not reinvent a raw List. Applier renders each value via
+        // SourceExpr.ValueNodeLiteral, matching AppendStatement's "structured-in, render-at-apply".
         public FieldMap Fields { get; init; } = FieldMap.Empty;
 
-        // b4-t3: pre-rendered ObjectRef expression overrides, keyed by field-key. null => no
+        // Pre-rendered ObjectRef expression overrides, keyed by field-key. null => no
         // overrides (every field renders via SourceExpr.ValueNodeLiteral, unchanged). Mirrors
         // PatchComponentField.NewExpr's pre-rendered-string pattern: SourceExpr stays a pure,
         // context-free formatter with no ObjectRef arm, so anything context-dependent (a handle
@@ -192,24 +192,39 @@ namespace SceneBuilder.Core.Reconcile
         public string NewExpr { get; init; } = "";
     }
 
+    // A source-authored field whose LIVE value returned to the type's constructed default —
+    // the `.Set(...)` call is REMOVED from source, never patched to the default literal (spec 32 C2).
+    // The inverse of IntroduceComponentField; both key on the same component anchor.
+    public sealed record RemoveComponentField : SourceEdit
+    {
+        // Inherited Anchor = owning component LogicalId (trace + conflict-merge attribution).
+        // Span of the VALUE argument of the `.Set(...)` to delete — the same
+        // ParseResult.FieldArgumentSpans[compId][key] entry PatchComponentField resolves by. The
+        // applier walks up from it to the enclosing `.Set(...)` invocation.
+        public SourceSpan ValueSpan { get; init; }
+        // Serialized field key, carried explicitly so SceneBuilderSync.KeyOfSourceEdit can attribute
+        // this edit directly instead of reverse-looking-up the span.
+        public string FieldKey { get; init; } = "";
+    }
+
     // Newly-detected field on an existing component: insert a raw `.Set("m_Path", value)` into its closure.
     public sealed record IntroduceComponentField : SourceEdit
     {
         // Inherited Anchor = target component LogicalId (applier locates the closure via merged
-        // ComponentAnchors in b3-t2).
+        // ComponentAnchors).
         public string FieldKey { get; init; } = "";
         // Unrendered value; applier renders via SourceExpr.ValueNodeLiteral, mirroring
         // AppendComponentStatement's per-field rendering (both create new `.Set` calls) — used
         // ONLY when NewExpr is null.
         public ValueNode Value { get; init; } = new ValueNode.Unsupported("");
-        // b4-t3: pre-rendered expression override (mirrors PatchComponentField.NewExpr /
+        // Pre-rendered expression override (mirrors PatchComponentField.NewExpr /
         // AppendComponentStatement.FieldExpressions). null => Value renders via
         // SourceExpr.ValueNodeLiteral (the pure, context-free formatter, which has NO ObjectRef
         // arm). Set at EMIT time for an ObjectRef field so the applier never has to render one.
         public string? NewExpr { get; init; }
     }
 
-    // ---- m10-b4-t1: instance-root override authoring (append + revert) ------------------------
+    // ---- Instance-root override authoring (append + revert) ------------------------------------
 
     public enum InstanceCallKind { Override, AddComponent, RemoveComponent, AddChild, RemoveChild }
 
@@ -258,7 +273,7 @@ namespace SceneBuilder.Core.Reconcile
         public string? PropertyPath { get; init; } // Override: match the closure whose .Set targets this path; null => the sole Override.
     }
 
-    // ---- m-nested-props b4-t1: scoped `.On(...)` closure authoring (append + revert) -----------
+    // ---- Scoped `.On(...)` closure authoring (append + revert) ----------------------------------
 
     // One op to place inside a `.On(...)` closure. Reuses the M10 root op payload shapes verbatim.
     public abstract record ScopedOp;
@@ -284,12 +299,12 @@ namespace SceneBuilder.Core.Reconcile
     // instance LogicalId.
     public sealed record AppendScopedOn : SourceEdit
     {
-        // Resolved-child identity (b4-t2 sets = ScopedOverride.ChildPath, e.g. "Turret/Barrel"); the
+        // Resolved-child identity (ScopedOverride.ChildPath, e.g. "Turret/Barrel"); the
         // applier matches an existing `.On` whose selector normalises to this. NOT literal text/span
         // order.
         public string SelectorMatchKey { get; init; } = "";
 
-        // Pre-rendered typed selector lambda for a NEW `.On` (b4-t2 renders via FacadeCatalog reverse
+        // Pre-rendered typed selector lambda for a NEW `.On` (rendered via FacadeCatalog reverse
         // lookup, e.g. "sel => sel.Turret.Barrel"). Only consumed on CREATE.
         public string SelectorExpr { get; init; } = "";
 
@@ -305,7 +320,7 @@ namespace SceneBuilder.Core.Reconcile
         public string? PropertyPath { get; init; } // Override: match the closure whose .Set targets this path; null => sole Override.
     }
 
-    // ---- m-nested-props b4-t2: child GameObject add/remove authoring -------------------------
+    // ---- Child GameObject add/remove authoring ---------------------------------------------------
     // Emitted by ReconcilerInstances.Nested.cs from an AddedGameObjects/RemovedGameObjects diff;
     // rendered/reverted by SourcePatchApplier.Instances.cs.
 
@@ -318,9 +333,9 @@ namespace SceneBuilder.Core.Reconcile
         public string ParentPath { get; init; } = ""; // AddedGameObject.Parent.ChildPath ("" == instance root).
         public string ParentSelectorExpr { get; init; } = ""; // Rendered parent arg: `sel => sel.A.B` or a quoted string.
         public string Name { get; init; } = ""; // AddedGameObject.Node.Name.
-        public GameObjectNode Node { get; init; } = new(); // Payload; components rendered into cfg closure (b4-t3).
+        public GameObjectNode Node { get; init; } = new(); // Payload; components rendered into cfg closure.
 
-        // m-ui-recttransform b3-t1 (iteration 2): driven-masked, X/Y-held UI layout to render as a
+        // Driven-masked, X/Y-held UI layout to render as a
         // chained `cfg.RectTransform(...)` call INSIDE the AddChild closure, mirroring
         // AppendStatement.RectTransform verbatim in shape and doc intent. null => emit no call
         // (non-UI added child, or every rect axis driven).

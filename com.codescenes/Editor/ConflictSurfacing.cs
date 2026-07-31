@@ -6,7 +6,7 @@ using UnityEngine;
 namespace SceneBuilder.Editor
 {
     /// <summary>
-    /// Non-modal surfacing for the b6-t1 both-sides-changed conflict resolution (spec checklist #10,
+    /// Non-modal surfacing for the both-sides-changed conflict resolution (spec checklist #10,
     /// §7 fail-loud): a located <see cref="Debug.LogError"/>, the `// CONFLICT:` marker-line text, and
     /// a best-effort scene-view overlay registry. NEVER opens <c>EditorUtility.DisplayDialog</c> — the
     /// scene-wins tie-break already resolved the value; this only makes the resolution visible.
@@ -53,6 +53,14 @@ namespace SceneBuilder.Editor
         /// </summary>
         public static string BuildMarkerLine(string fieldKey, string priorCodeExpr, string sceneValueExpr) =>
             $"// CONFLICT: {fieldKey} code value was {priorCodeExpr}; scene value {sceneValueExpr} applied (scene wins).";
+
+        /// <summary>The marker's SCENE-side text for a field whose setter was removed (it has no
+        /// literal to render — spec 32 C2's scene->code reset). ASCII only: this string is written
+        /// verbatim into the user's builder .cs via <see cref="BuildMarkerLine"/>.
+        /// The value is declared here as the ONE owner
+        /// of this fixed copy; <c>SceneBuilderSync.Conflicts.cs</c>'s <c>SceneExprOfEdit</c> must
+        /// return it instead of its own private literal.</summary>
+        public const string RemovedFieldMarkerValue = "(removed: reset to type default)";
 
         /// <summary>Registers a key (component/GameObject LogicalId) for the next scene-view overlay draw.</summary>
         public void RegisterOverlay(string key) => _registered.Add(key);

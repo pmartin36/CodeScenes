@@ -9,7 +9,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
-// Gate for the b6-t1 field-level conflict resolution (spec checklist #9, #10): a both-sides-changed
+// Gate for field-level conflict resolution (spec checklist #9, #10): a both-sides-changed
 // cycle auto-applies every NON-overlapping field in its own direction, and resolves a TRUE same-field
 // overlap scene-wins with the prior code value preserved in an inline `// CONFLICT:` marker, a located
 // Console error, and no modal. Follows RoundTripComponentTests' two-phase build pattern (build the bare
@@ -41,7 +41,7 @@ public class AutoConflictScene : ISceneDefinition
     public void SetUp()
     {
         // Unrelated helper dir kept only for Conflict_DualTrigger_RunsOneCombinedCycle_NotTwoSingles'
-        // External.cs (never a governing builder, never routed) — not stale.
+        // External.cs (never a governing builder).
         _dir = Path.Combine(Path.GetTempPath(), "sb_conflict_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
 
@@ -186,7 +186,7 @@ public class AutoConflictScene : ISceneDefinition
     // The b4 pump must route a tick where BOTH a scene deadline and a source deadline are due in the
     // SAME window through ONE combined conflict-aware cycle — never the two single-direction executors
     // independently (which would let one side silently clobber the other via reconcile-against-stale-
-    // baseline, per research.md Refinement 2).
+    // baseline).
     [Test]
     public void Conflict_DualTrigger_RunsOneCombinedCycle_NotTwoSingles()
     {
@@ -227,11 +227,11 @@ public class AutoConflictScene : ISceneDefinition
         }
     }
 
-    // Scope-validator finding (bucket-b6.md, HIGH): the wired production single-direction executors
+    // The wired production single-direction executors
     // (ExecuteSceneToCode/ExecuteCodeToScene) never call CaptureBaseline, so a live session's baseline
     // stays null forever and every dual-trigger cycle degrades to the clobbering fallback — the
-    // conflict-aware merge (this task's whole deliverable) is unreachable outside a test that seeds the
-    // baseline directly. This drives ONLY the production executor (never CaptureBaseline directly) to
+    // conflict-aware merge is unreachable outside a test that seeds the baseline directly. This drives
+    // ONLY the production executor (never CaptureBaseline directly) to
     // prove the real session path establishes it, then proves the practical consequence: a code-only
     // edit made after that converged cycle must survive a later dual-trigger conflict cycle.
     [Test]
@@ -268,6 +268,74 @@ public class AutoConflictScene : ISceneDefinition
         StringAssert.Contains("7f", rewritten,
             "Beta's code-changed mass must survive the conflict-aware cycle when the baseline was " +
             "established through the real production single-direction path, not a direct CaptureBaseline call.\n" + rewritten);
+    }
+
+    // A scene-side reset to
+    // the type default (a RemoveComponentField, not a patch) that conflicts with a SAME-field code
+    // edit must still: (a) remove the `.Set(...)` from source (scene wins), (b) leave a `// CONFLICT:`
+    // marker preserving the prior CODE value, (c) render the plugin's fixed removal placeholder as
+    // pure ASCII (today: a U+2014 em dash), and (d) not silently drop the marker altogether because
+    // the conflicting key is attributed to a COMPONENT anchor, which `Parse.Anchors` alone (the
+    // GameObject-anchor map `InsertConflictMarkers` was fed) cannot resolve.
+    [Test]
+    public void Conflict_SceneResetToTypeDefault_VsCodeEdit_RemovesSetter_PreservesCodeInMarker()
+    {
+        // Two-phase build (per BuildTwoMassObjects): Box earns a mapped GlobalObjectId bare first,
+        // then Rigidbody.m_Mass is authored at a NON-default value (5f; the type default is 1f) so a
+        // later live reset to 1f is a genuine default-reset, not a fixed point.
+        File.WriteAllText(_builderPath, Source("        scene.Add(\"Box\");"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        File.WriteAllText(_builderPath, Source(
+            "        var box = scene.Add(\"Box\");\n" +
+            "        box.Component<UnityEngine.Rigidbody>(c => c.Set(\"m_Mass\", 5f));"));
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        SceneBuilderRouter.ResetForTests();
+
+        scene = EditorSceneManager.GetActiveScene();
+        var box = FindRoot(scene, "Box");
+        Assert.IsNotNull(box, "Box was not created.");
+
+        SceneBuilderAutoSync.CaptureBaseline(scene);
+
+        // Scene-side change: mass returns to the Rigidbody TYPE DEFAULT (1f) — a removal, not a patch.
+        box.GetComponent<Rigidbody>().mass = 1f;
+
+        // Code-side change to the SAME field of the SAME object: an external edit to a different,
+        // non-default value.
+        File.WriteAllText(_builderPath, Source(
+            "        var box = scene.Add(\"Box\");\n" +
+            "        box.Component<UnityEngine.Rigidbody>(c => c.Set(\"m_Mass\", 3f));"));
+
+        LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("Box.*m_Mass|m_Mass.*Box"));
+
+        SceneBuilderAutoSync.ExecuteBothChanged(
+            new[] { box.GetEntityId() },
+            new[] { _builderPath });
+
+        var rewritten = File.ReadAllText(_builderPath);
+        StringAssert.DoesNotContain("\"m_Mass\"", rewritten,
+            "The scene reset to the type default must REMOVE the m_Mass setter, not patch it to a literal.\n" + rewritten);
+        StringAssert.Contains("// CONFLICT:", rewritten,
+            "A removal that conflicts with a same-field code edit must still leave a `// CONFLICT:` marker " +
+            "(the component-anchored key must resolve against the MERGED anchor map, not just GameObject anchors).\n" + rewritten);
+        StringAssert.Contains("3f", rewritten,
+            "The prior CODE value must be preserved (recoverable) in the marker, never silently discarded.\n" + rewritten);
+        StringAssert.Contains(ConflictSurfacing.RemovedFieldMarkerValue, rewritten,
+            "The marker's scene-side text must be the plugin's one fixed removal placeholder.\n" + rewritten);
+
+        var conflictLine = rewritten.Split('\n').FirstOrDefault(l => l.Contains("// CONFLICT:"));
+        Assert.IsNotNull(conflictLine, "Expected a `// CONFLICT:` marker line in the rewritten source.\n" + rewritten);
+        foreach (var ch in conflictLine)
+        {
+            Assert.LessOrEqual((int)ch, 0x7F,
+                $"The plugin's own fixed marker copy must be ASCII-only; found U+{(int)ch:X4} in: {conflictLine}");
+        }
+
+        EmittedCodeCompiles.AssertCompiles(rewritten,
+            $"After {nameof(Conflict_SceneResetToTypeDefault_VsCodeEdit_RemovesSetter_PreservesCodeInMarker)}");
     }
 
     [Test]

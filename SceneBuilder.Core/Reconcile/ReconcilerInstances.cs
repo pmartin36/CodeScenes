@@ -8,7 +8,7 @@ using SceneBuilder.Core.Parsing;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    // m6-b4-t1: scene->code append of a prefab-instance root. Split out of ReconcilerAppends.cs
+    // Scene->code append of a prefab-instance root. Split out of ReconcilerAppends.cs
     // per the project's file-size budget (Reconciler.cs is at 854 lines) — third partial-class
     // file, no visibility change.
     public static partial class Reconciler
@@ -27,7 +27,7 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, GameObjectNode> modelByLogicalId,
             HashSet<string> reserved,
             IReadOnlyDictionary<string, string> prefabPathByGuid,
-            // b4-t4: optional Guid->PropertyName reverse lookup. Present + a catalog hit => emit
+            // Optional Guid->PropertyName reverse lookup. Present + a catalog hit => emit
             // the typed `Instance(Prefabs.X)` form; absent or a miss => string fallback (unchanged).
             FacadeCatalog? facadeCatalog,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
@@ -64,7 +64,7 @@ namespace SceneBuilder.Core.Reconcile
             if (node.SourcePrefabGuid == null || !prefabPathByGuid.TryGetValue(node.SourcePrefabGuid, out var path))
             {
                 // Never emit a statement with no path. Ensuring the source prefab is in
-                // identityMap.Assets before Reconcile runs is the adapter's job (b5-t2/b5-t3).
+                // identityMap.Assets before Reconcile runs is the adapter's job.
                 var provisionalId = LogicalIdResolver.Synthesize(parentHandle, node.Name, index);
                 conflicts.Add(new Conflict
                 {
@@ -97,7 +97,7 @@ namespace SceneBuilder.Core.Reconcile
                 newLogicalId = LogicalIdResolver.Synthesize(parentHandle, node.Name, index);
             }
 
-            // b4-t4: SourcePrefabPath stays populated regardless (identity/fallback source);
+            // SourcePrefabPath stays populated regardless (identity/fallback source);
             // SourcePropertyName is the typed-emission preference layered on top, set only on a
             // catalog hit.
             string? sourcePropertyName = facadeCatalog != null
@@ -105,8 +105,7 @@ namespace SceneBuilder.Core.Reconcile
                     ? propertyName
                     : null;
 
-            // m-ui-recttransform b3-t4 (iteration 2): the THIRD create-payload call site
-            // (scope/bucket-b4.md finding 1) — a prefab-instance root, authored as `.Instance(...)`,
+            // The THIRD create-payload call site — a prefab-instance root, authored as `.Instance(...)`,
             // can never host `.RectTransform(...)` (InstanceHandle has no such member), so
             // `canHostRectTransformCall: false`; SplitCreatedPayload reports the unlocalizable
             // layout as a Conflict instead of silently dropping it or writing the derived
@@ -151,9 +150,9 @@ namespace SceneBuilder.Core.Reconcile
             });
         }
 
-        // m10-b4-t2: scene->code membership diff for a MAPPED PrefabInstance root's override
-        // collections. Reversed-role mirror of InstanceOverrideDiff.Emit (b3-t2, materialize
-        // direction): here the SNAPSHOT is truth. snapshot-only entries append the matching b4-t1
+        // Scene->code membership diff for a MAPPED PrefabInstance root's override
+        // collections. Reversed-role mirror of InstanceOverrideDiff.Emit (materialize
+        // direction): here the SNAPSHOT is truth. snapshot-only entries append the matching
         // SourceEdit; model-only entries (reverted in Unity) DROP the authored call — never a
         // value-edit-to-default. Stale keys (InstanceOverrideDiff.DetectStaleOverrides) are excluded
         // from both.
@@ -162,7 +161,7 @@ namespace SceneBuilder.Core.Reconcile
             SnapshotNode snapshot,
             string instanceLogicalId,
             IReadOnlyDictionary<string, SourceSpan>? anchors,
-            // m-nested-props b4-t2: Guid->FacadeEntry reverse lookup for a below-root override's
+            // Guid->FacadeEntry reverse lookup for a below-root override's
             // typed `.On(sel => sel.A.B, ...)` selector. Threaded here from Reconciler.cs (already
             // in scope at the call) so nested emit prefers the typed form, falling back to the
             // string selector on a miss/absent catalog.
@@ -171,9 +170,13 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<Conflict> conflicts,
             List<AssetEntry> addedAssets,
-            // b4-t1: catalogued AssetRef fields render as their typed `Assets.<...>` member chain —
+            // Catalogued AssetRef fields render as their typed `Assets.<...>` member chain —
             // threaded to BuildOverrideSetSpec/BuildAddInstanceComponent's RenderFieldValue calls.
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // The ONE per-type default-field index, built ONCE by Reconciler.Reconcile —
+            // threaded to ReconcileAddedComponents/BuildAddInstanceComponent for its own
+            // instance-emission site.
+            ComponentDefaultOmission.Index? defaults = null)
         {
             if (anchors != null && !anchors.ContainsKey(instanceLogicalId))
             {
@@ -187,15 +190,15 @@ namespace SceneBuilder.Core.Reconcile
             var prefabGuid = snapshot.SourcePrefabGuid;
 
             ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, assetCatalog);
-            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, assetCatalog);
+            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, assetCatalog, defaults);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
-            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts);
+            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts, defaults);
             ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
         }
 
-        // m-nested-props b4-t2: split each membership diff by Target.ChildPath. Root
+        // Splits each membership diff by Target.ChildPath. Root
         // (ChildPath=="") keeps the unchanged M10 flat chained-call emit; nested (ChildPath!="")
-        // routes through the b4-t1 scoped `.On` machinery (ReconcilerInstances.Nested.cs). The diff
+        // is handled through the scoped `.On` machinery (ReconcilerInstances.Nested.cs). The diff
         // KEY stays (SubKey, ComponentType[, PropertyPath]) either way — never re-keyed by
         // ChildPath — so a sub-object rename (same key, new ChildPath) compares EQUAL and emits
         // neither a drop nor a re-add (spec #2).
@@ -296,7 +299,8 @@ namespace SceneBuilder.Core.Reconcile
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            ComponentDefaultOmission.Index? defaults = null)
         {
             var modelKeys = new HashSet<(OverrideTarget Target, string TypeFullName)>();
             foreach (var modelComponent in model.AddedComponents)
@@ -316,7 +320,7 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, assetCatalog);
+                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, assetCatalog, defaults);
                 var childPath = snapshotComponent.Target.ChildPath;
 
                 if (string.IsNullOrEmpty(childPath))
@@ -440,7 +444,7 @@ namespace SceneBuilder.Core.Reconcile
             };
         }
 
-        // m10-b4-t2 (iteration 2): the added-component twin of BuildOverrideSetSpec — carries the
+        // The added-component twin of BuildOverrideSetSpec — carries the
         // snapshot component's FULL field set into the append, symmetric with materialize's
         // InstanceOverrideDiff.EmitAddedComponents. Scalars/AssetRef stay in Fields (rendered via
         // SourceExpr.ValueNodeLiteral at apply time); each ObjectRef field is pre-rendered into
@@ -453,13 +457,18 @@ namespace SceneBuilder.Core.Reconcile
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // An added-instance-component field set carries
+            // every serialized field the same as EmitComponentAppend's before omission; filter it
+            // the same way so a bare `.AddComponent<T>()` emits with no default-field noise.
+            ComponentDefaultOmission.Index? defaults = null)
         {
             var component = snapshotComponent.Component;
             var typeFullName = component.Type.FullName;
+            var fields = ComponentDefaultOmission.OmitDefaults(typeFullName, component.Fields, defaults);
 
             Dictionary<string, string>? fieldExpressions = null;
-            foreach (var (fieldKey, value) in component.Fields)
+            foreach (var (fieldKey, value) in fields)
             {
                 if (value is ValueNode.ObjectRef || ComponentReconciler.IsCataloguedAssetRef(value, assetCatalog))
                 {
@@ -474,7 +483,7 @@ namespace SceneBuilder.Core.Reconcile
             {
                 Anchor = instanceLogicalId,
                 TypeFullName = typeFullName,
-                Fields = component.Fields,
+                Fields = fields,
                 FieldExpressions = fieldExpressions,
             };
         }

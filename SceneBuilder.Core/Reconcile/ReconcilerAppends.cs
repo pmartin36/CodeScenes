@@ -8,15 +8,15 @@ using SceneBuilder.Core.Parsing;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    // DetectAppends (incl. its recursion), moved verbatim out of Reconciler.cs (b4-t3) so the
-    // `pendingTargets` threading it needed fits the project's file-size budget. Second partial-class
+    // DetectAppends (incl. its recursion), split out of Reconciler.cs so the
+    // `pendingTargets` threading it needs fits the project's file-size budget. Second partial-class
     // file — no visibility change, every callee is private static on the same class.
     public static partial class Reconciler
     {
         // Snapshot-driven create-detection: walks the ACTUAL (scene) tree depth-first looking
         // for GameObjectIds absent from the IdentityMap. Emits an AppendStatement only for a
         // create candidate whose parent is a root or an already-MAPPED parent. A create candidate
-        // with >=1 create-candidate child heads its own handle (b2-t3) so its descendants can be
+        // with >=1 create-candidate child heads its own handle so its descendants can be
         // appended referencing it; a create candidate with no create-candidate children is a leaf
         // (Handle stays null, recursion into its children is a no-op guard).
         private static void DetectAppends(
@@ -29,10 +29,10 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, string> logicalIdToGlobalObjectId,
             IReadOnlyDictionary<string, string?> logicalIdToParentLogicalId,
             HashSet<string> reserved,
-            // b4-t3: threaded through only to reach the EmitComponentAppend call below (§13
+            // Threaded through only to reach the EmitComponentAppend call below (§13
             // one-pass attach) — same set ReconcileComponents' ADD path already receives.
             ISet<string> resolvableTargets,
-            // b4-t3: same-batch create-candidate identities — threaded through only to reach the
+            // Same-batch create-candidate identities — threaded through only to reach the
             // EmitComponentAppend call below, mirroring resolvableTargets.
             ISet<string> pendingTargets,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
@@ -42,17 +42,21 @@ namespace SceneBuilder.Core.Reconcile
             List<string> removedLogicalIds,
             List<Conflict> conflicts,
             List<AssetEntry> addedAssets,
-            // m6-b4-1: source-prefab GUID -> last-known asset path (identityMap.Assets), used to
+            // Source-prefab GUID -> last-known asset path (identityMap.Assets), used to
             // re-derive the `.Instance(path)` argument for a snapshot-only prefab-instance root.
             IReadOnlyDictionary<string, string> prefabPathByGuid,
-            // b4-t4: optional Guid->PropertyName reverse lookup — non-null iff the caller
+            // Optional Guid->PropertyName reverse lookup — non-null iff the caller
             // threaded a manifest-backed FacadeCatalog; used by HandleInstanceNode to prefer the
             // typed `Instance(Prefabs.X)` emission over the string fallback.
             FacadeCatalog? facadeCatalog,
-            // b4-t1: catalogued AssetRef fields on a newly-created object pre-render into their
+            // Catalogued AssetRef fields on a newly-created object pre-render into their
             // typed `Assets.<...>` member chain — threaded through only to reach the
             // EmitComponentAppend call below, mirroring facadeCatalog.
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // The ONE per-type default-field index, built ONCE by Reconciler.Reconcile —
+            // threaded through only to reach the EmitComponentAppend call below, mirroring
+            // assetCatalog.
+            ComponentDefaultOmission.Index? defaults = null)
         {
             // The array position IS the scene sibling index (FlattenSnapshot keys SnapshotEntry off the
             // same index), and it is what a created node's statement must be placed at.
@@ -60,7 +64,7 @@ namespace SceneBuilder.Core.Reconcile
             {
                 var node = nodes[siblingIndex];
 
-                // m6-b4-t1: a prefab-instance root is handled entirely by HandleInstanceNode and
+                // A prefab-instance root is handled entirely by HandleInstanceNode and
                 // NEVER recursed into — its children are the prefab's internal hierarchy, out of
                 // scope until M10 — regardless of whether it is already mapped.
                 if (node.SourcePrefabGuid != null)
@@ -113,7 +117,8 @@ namespace SceneBuilder.Core.Reconcile
                         addedAssets,
                         prefabPathByGuid,
                         facadeCatalog,
-                        assetCatalog);
+                        assetCatalog,
+                        defaults);
 
                     continue;
                 }
@@ -139,16 +144,16 @@ namespace SceneBuilder.Core.Reconcile
                     // string, and for a handle-less one the introduction makes them so.
                     var (parentHandle, introduceParentHandle) = resolveOwnerHandle(parentLogicalId);
 
-                    // b4-t1 §13: representable (non-Transform) components force the owner to head
+                    // §13: representable (non-Transform) components force the owner to head
                     // a handle too, so the same-batch component append (ComponentPatchApplier) has
                     // an `OwnerHandle` to attach onto.
-                    // b4-t1: FitSize-before-SurfaceSnap canonical order, regardless of live
+                    // FitSize-before-SurfaceSnap canonical order, regardless of live
                     // GetComponents order, so a created node's FitSize always attaches before its
                     // SurfaceSnap.
                     var representableComponents = SpatialComponentSource.OrderForEmit(
                         ComponentReconciler.ExcludeTransform(node.Components));
 
-                    // b2-t3: a node with >=1 create-candidate (unmapped, non-empty-goid) child
+                    // A node with >=1 create-candidate (unmapped, non-empty-goid) child
                     // heads its own handle so its descendants can reference it - otherwise they
                     // would be stranded (the old dead-end recursion below).
                     // A create candidate whose Name duplicates another sibling in the same snapshot
@@ -174,7 +179,7 @@ namespace SceneBuilder.Core.Reconcile
                         newLogicalId = LogicalIdResolver.Synthesize(parentHandle, node.Name, index);
                     }
 
-                    // b3-t4/§13, extracted m-ui-recttransform b3-t1 (iteration 2): a created UI
+                    // §13: a created UI
                     // node's payload is driven-masked (D2) and X/Y-held (D1) BEFORE it is split
                     // between Transform (base GameObject data) and RectTransform (the chained
                     // `.RectTransform(...)` call) — the ONE such split (SplitCreatedPayload), also
@@ -246,7 +251,8 @@ namespace SceneBuilder.Core.Reconcile
                                 edits,
                                 addedEntries,
                                 addedAssets,
-                                assetCatalog);
+                                assetCatalog,
+                                defaults);
                         }
                     }
 
@@ -271,7 +277,8 @@ namespace SceneBuilder.Core.Reconcile
                         addedAssets,
                         prefabPathByGuid,
                         facadeCatalog,
-                        assetCatalog);
+                        assetCatalog,
+                        defaults);
 
                     continue;
                 }
@@ -297,7 +304,8 @@ namespace SceneBuilder.Core.Reconcile
                     addedAssets,
                     prefabPathByGuid,
                     facadeCatalog,
-                    assetCatalog);
+                    assetCatalog,
+                    defaults);
             }
         }
     }

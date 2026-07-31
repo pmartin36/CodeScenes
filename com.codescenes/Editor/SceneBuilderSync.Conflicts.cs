@@ -8,10 +8,10 @@ using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Editor
 {
-    // m-ui-recttransform b3-t2 (iteration 2): the conflict-aware 3-way merge's attribution + marker
+    // The conflict-aware 3-way merge's attribution + marker
     // region, split out of SceneBuilderSync.cs per the project's file-size budget (the parent file
     // stays under the 1000-line limit). Move-only for everything except the arms explicitly
-    // documented below as NEW/CHANGED for RectTransform field attribution — see research.md.
+    // documented below as NEW/CHANGED for RectTransform field attribution.
     public static partial class SceneBuilderSync
     {
         /// <summary>
@@ -62,9 +62,9 @@ namespace SceneBuilder.Editor
 
         /// <summary>
         /// Field-level `oldModel -&gt; newModel` diff for two DESIRED models (both parsed source, never
-        /// live-scene) — the code-side half of the b6-t1 merge (see the caller's comment for why this
+        /// live-scene) — the code-side half of the merge (see the caller's comment for why this
         /// is NOT <see cref="Differ.Diff"/> against a snapshot). Structural changes (a LogicalId present
-        /// on only one side) are skipped: this task's merge is field-level only, matching
+        /// on only one side) are skipped: this merge is field-level only, matching
         /// <see cref="KeyOfSourceEdit"/>'s same structural pass-through on the scene side.
         /// </summary>
         private static List<ChangeOp> DiffDesiredFields(SceneModel oldModel, SceneModel newModel)
@@ -107,10 +107,10 @@ namespace SceneBuilder.Editor
                     ops.Add(new SetStatic { LogicalId = logicalId, IsStatic = newNode.IsStatic });
                 }
 
-                // m-ui-recttransform b3-t2 (iteration 2): the base transform (Position/Rotation/Scale)
+                // The base transform (Position/Rotation/Scale)
                 // and the rect fields (anchoredPos/sizeDelta/anchorMin/anchorMax/pivot) are diffed and
-                // attributed SEPARATELY — the prior whole-record TransformData compare made a rect-only
-                // code edit spuriously claim transform.pos/rot/scale (defect (b), research.md).
+                // attributed SEPARATELY — a whole-record TransformData compare makes a rect-only
+                // code edit spuriously claim transform.pos/rot/scale (defect (b)).
                 var oldT = oldNode.Transform;
                 var newT = newNode.Transform;
                 if (oldT.Position != newT.Position || oldT.Rotation != newT.Rotation || oldT.Scale != newT.Scale)
@@ -169,10 +169,10 @@ namespace SceneBuilder.Editor
             {
                 case PatchArgument { ArgName: "name" } pa:
                     return new FieldKey(pa.Anchor, "name");
-                // m-ui-recttransform b3-t2 (iteration 2): rect argument names now resolve too — a
-                // scene-side RectTransform edit used to fall through to `default: return null`
-                // (unattributable), which meant it was ALWAYS kept regardless of whether the code side
-                // touched the same field, silently reverting a concurrent code edit (defect (a)).
+                // Rect argument names resolve too, so a scene-side RectTransform edit is attributed
+                // rather than falling through to `default: return null` (unattributable), which would
+                // mean it is ALWAYS kept regardless of whether the code side touched the same field,
+                // silently reverting a concurrent code edit (defect (a)).
                 case PatchArgument pa when IsTransformArg(pa.ArgName):
                     return new FieldKey(pa.Anchor, TransformFieldPrefix + pa.ArgName);
                 case PatchFlagArgument pf:
@@ -190,6 +190,13 @@ namespace SceneBuilder.Editor
                     }
 
                     return null;
+                // A RemoveComponentField carries its FieldKey explicitly, so
+                // no span reverse-lookup is needed, unlike PatchComponentField above. Attributing it
+                // matters: an unmapped edit is ALWAYS kept (see the caller), so a live-value default
+                // reset the auto-sync merge failed to attribute would silently clobber a concurrent
+                // code edit to the SAME field.
+                case RemoveComponentField rcf:
+                    return new FieldKey(rcf.Anchor, rcf.FieldKey);
                 default:
                     return null;
             }
@@ -220,7 +227,7 @@ namespace SceneBuilder.Editor
                     yield return new FieldKey(tr.LogicalId, "transform.rot");
                     yield return new FieldKey(tr.LogicalId, "transform.scale");
                     break;
-                // m-ui-recttransform b3-t2 (iteration 2): one key PER CHANGED rect field, never all
+                // Yields one key PER CHANGED rect field, never all
                 // five — SetRectTransform carries the precise Changed mask, so over-claiming (like
                 // SetTransform's three-key yield above) is avoidable and deliberately avoided here.
                 case SetRectTransform rt:
@@ -254,6 +261,12 @@ namespace SceneBuilder.Editor
             PatchArgument pa => pa.NewExpr,
             PatchFlagArgument pf => pf.NewExpr,
             PatchComponentField pcf => pcf.NewExpr,
+            // A removal has no scene LITERAL (the setter disappears, it isn't replaced by one) —
+            // the default "" arm would render an empty `scene value  applied` marker, indistinguishable
+            // from a real edit that lost its text. Named explicitly instead. The text itself is owned
+            // by ConflictSurfacing so the plugin's one piece of
+            // fixed copy written verbatim into a user's builder .cs stays ASCII-only in one place.
+            RemoveComponentField => ConflictSurfacing.RemovedFieldMarkerValue,
             _ => "",
         };
 
@@ -272,7 +285,7 @@ namespace SceneBuilder.Editor
                 _ => $"new UnityEngine.Quaternion({tr.Transform.Rotation.X}f, {tr.Transform.Rotation.Y}f, " +
                      $"{tr.Transform.Rotation.Z}f, {tr.Transform.Rotation.W}f)",
             },
-            // m-ui-recttransform b3-t2 (iteration 2): the rect half of the marker — one Vec2 literal
+            // The rect half of the marker: one Vec2 literal
             // per changed field, rendered via the SAME SourceExpr.Vec2Literal the reconcile's own
             // RectTransformEdits uses (Reconciler.RectTransform.cs), so a conflict marker's code value
             // never reads as a false difference from what the argument would have shown.
