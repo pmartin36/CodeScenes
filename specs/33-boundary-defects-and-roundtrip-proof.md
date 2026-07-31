@@ -23,6 +23,36 @@ point afterwards.
 authored `NodeHandle.None` is still in the source. This is data loss on the happy path — it takes
 priority over the rest of this spec.
 
+## C10 — a self-referencing component emits non-compiling source
+
+A component whose reference field points at another component on the SAME GameObject emits a
+statement that uses the node's local variable inside its own declaration:
+
+```csharp
+var button = canvas.Add("Button")
+    .RectTransform(anchoredPos: (0f, -60f), sizeDelta: (160f, 40f))
+    .Component<UnityEngine.UI.Image>()
+    .Component<UnityEngine.UI.Button>(c => c.Set("m_TargetGraphic", button));
+```
+
+`CS0841: Cannot use local variable 'button' before it is declared.`
+
+This is the default shape of every Unity Button — `targetGraphic` is set to the Image on its own
+GameObject at creation — so any scene containing a button emits a builder file that does not compile.
+Sync continues to work (the grammar parses, C# is never compiled by the sync path), so the damage is
+the IDE, IntelliSense and `SceneBuilder.Validate`.
+
+The emitter already splits a follow-up call onto its own statement when it must
+(`button.Component<UnityEngine.CanvasRenderer>();` on the next line), so the mechanism to fix this
+exists; a self-reference is not routed through it.
+
+**Build:** a reference to a component on the node currently being declared emits in a form that
+compiles — a follow-up statement after the declaration, or a self-selector that needs no variable.
+
+**Accept when:** a Canvas/Image/Button/Text scene round-trips to source that compiles, and a second
+sync is a fixed point. Cover the same-GameObject case explicitly; a cross-object reference already
+works and is not the defect.
+
 ## C5 — fail-loud on an ambiguous short name
 
 Short-name resolution across loaded assemblies works, and the unambiguity check works: an ambiguous
