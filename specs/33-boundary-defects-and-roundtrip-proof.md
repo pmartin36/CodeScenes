@@ -83,11 +83,49 @@ auto-sync loop. Measure the dirty flag before deciding whether it needs fixing.
 
 ## The round-trip proof suite
 
-Spec 32's C1-C4 are gate-verified only. This suite is what raises them to proven:
-- Cross-class bidirectional EditMode coverage: for each fixed class, drive the change from BOTH
-  directions against real components and assert convergence (a second sync produces zero edits).
-- A live sweep in a real editor, since every one of spec 32's six defect classes was invisible to a
-  458-test batchmode gate. Gate-green has already proven insufficient here twice.
+Spec 32's C1-C4 WERE live-verified on 2026-07-31, but only as a **smoke test of each class on its
+archetype** — not a matrix. The honest claim from that sweep is "the four fixes work on the case we
+tried." This suite closes the difference. Do NOT restate it as "cross-class coverage" and leave the
+matrix to whoever builds it; the specific holes are enumerated below because they are what the sweep
+did not touch.
+
+**What the 2026-07-31 sweep DID cover:** one typed non-flags enum (`Canvas.renderMode`); three
+reset-to-default cases (Image colour, sprite to null, Canvas enum); the Canvas default plus all three
+render modes; `ColorBlock` at one and three changed members and `FontData` at two, with a compile
+check, convergence, a hand-reorder, and a partial initializer.
+
+**What it did NOT cover, in priority order:**
+
+1. **FLAGS enums — the gap that matters most.** `Rigidbody.constraints` is a bitmask and travels a
+   different path from a simple enum: the reader builds a member list from set bits rather than one
+   index, and the writer must OR them back. C1 claims "native enums round-trip typed" on the evidence
+   of a NON-flags enum only. `constraints` is also a field spec 31 specifically recovered, so it is
+   doubly worth covering. Round-trip it typed, both directions, multi-bit and zero-bit.
+2. **Components beyond Canvas / Image / Button / Text.** Nothing was exercised on `Rigidbody`,
+   `Camera`, `MeshRenderer`, `SpriteRenderer`, or `Light`.
+3. **A struct nested inside a struct.** `ValueWalk` exists precisely for recursion depth, and the
+   sweep only reached `ColorBlock` and its members. Deep nesting is the thing the shared walk was
+   built to make safe and it has no live evidence.
+4. **Prefab-instance context.** UI inside a prefab instance reads through `PrefabInstanceProbe`, a
+   separate path.
+5. **Lists of structs.** `ExcludeUnrepresentable` deliberately does not filter list items (recorded
+   as an explicit `InList` flag rather than an unstated omission); nothing verified that choice live.
+
+Every one of spec 32's six defect classes was invisible to a 458-test batchmode gate, so a live pass
+is mandatory here, not optional. Gate-green has proven insufficient on this codebase twice.
+
+## Starting-state caveat — read before trusting `main`
+
+`795eba2` put b3's partial work on `main` and it is UNVALIDATED: b3-t1 (C5) reached GREEN, b3-t2 (C6)
+ESCALATED for a behavioral deliverable with no captured evidence, and the bucket never ran a scope
+review. That code is live in the built DLLs.
+
+Two consequences:
+- Spec 32's live verification ran on a tree that **already contained** this unvalidated C5/C6 work.
+  Nothing was broken by it (the gate is green at 517 including it), but "32 is live-verified" is
+  strictly a statement about that tree, not about 32's changes in isolation.
+- This spec must **re-validate** `795eba2`, not build on top of it as if settled. Treat b3-t2's
+  Inspector-rule claim in particular as unproven until it has captured evidence.
 
 ## DECOMPOSITION CONSTRAINT (carried forward — this is what spec 32 cost)
 
