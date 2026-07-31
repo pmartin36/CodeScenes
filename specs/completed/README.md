@@ -23,7 +23,12 @@ into an expression-bodied closure, `.Component<Canvas>()` building a World Space
 `Canvas.m_SortingOrder` never syncing scene→code. Per the lesson recorded from this milestone, a milestone
 does not absorb pre-existing bugs found next door; each gets its own spec.
 
-32 is CLOSED NARROWED and is the one entry here that is NOT live-verified. It delivered its two
+31 and 32 are the two entries here that are NOT live-verified. 31 (the reader must surface every
+field Unity hides from the default inspector, not just what NextVisible draws) landed gate-green at
+458 and recovered component enable/disable syncing plus Canvas/Rigidbody/MeshRenderer hidden state,
+but its live confirmation never ran.
+
+32 is CLOSED NARROWED. It delivered its two
 owners — the per-type default template (C2+C3) and the value representation contract (C1+C4), plus
 `ValueWalk.cs` as the single walk every value path uses — at `passed=517 failed=0`, mutation-checked,
 with every prior test surviving unweakened. But it is gate-verified only, and every one of its six
