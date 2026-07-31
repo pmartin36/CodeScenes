@@ -23,12 +23,15 @@ into an expression-bodied closure, `.Component<Canvas>()` building a World Space
 `Canvas.m_SortingOrder` never syncing scene→code. Per the lesson recorded from this milestone, a milestone
 does not absorb pre-existing bugs found next door; each gets its own spec.
 
-31 and 32 are the two entries here that are NOT live-verified. 31 (the reader must surface every
-field Unity hides from the default inspector, not just what NextVisible draws) landed gate-green at
-458 and recovered component enable/disable syncing plus Canvas/Rigidbody/MeshRenderer hidden state,
-but its live confirmation never ran.
+31 is the one entry here NOT live-verified: the reader must surface every field Unity hides from the
+default inspector, not just what `NextVisible` draws. It landed gate-green at 458 and recovered
+component enable/disable syncing plus Canvas/Rigidbody/MeshRenderer hidden state, but its live
+confirmation never ran.
 
-32 is CLOSED NARROWED. It delivered its two
+32 is CLOSED NARROWED and IS live-verified (2026-07-31): the typed native enum applies and survives a
+sync byte-identical, reset-to-default removes the setter 3/3, a code-authored Canvas builds Screen
+Space - Overlay with all three modes reaching code, and ColorBlock/FontData emit compiling
+public-property initializers that converge with zero edits on a second sync. It delivered its two
 owners — the per-type default template (C2+C3) and the value representation contract (C1+C4), plus
 `ValueWalk.cs` as the single walk every value path uses — at `passed=517 failed=0`, mutation-checked,
 with every prior test surviving unweakened. But it is gate-verified only, and every one of its six
@@ -38,5 +41,6 @@ close that gap moved to `specs/33`; partial, explicitly unvalidated work on them
 
 Still pending in `specs/`: 08 (M7 robustness, rescoped), 09 (M8 UnityEvents, reframed to typed
 method-lambda), 10 (M9 SerializeReference), 12 (M11 animation, blocked on Animator research),
-33 (boundary defects C5/C6 + bidirectional round-trip proof).
+33 (boundary defects C5/C6, plus C7 unrepresentable UnityEvent visibility and C8 the no-op-edit
+write op, both found during 32's live verification, plus the bidirectional round-trip proof).
 `00-foundation.md` stays in `specs/` as the living base contract.

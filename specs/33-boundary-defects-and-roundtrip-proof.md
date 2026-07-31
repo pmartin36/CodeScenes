@@ -51,6 +51,36 @@ Known violations:
 There is no Unity API for "can a user edit this" (custom editors are opaque), so enforcement is a
 curated exclusion list — but the list must be justified by the rule, not by taste.
 
+## C7 — UnityEvent fields are unrepresentable and only warn
+
+Found during spec 32's live verification (2026-07-31). Every UI component carrying a UnityEvent emits
+a NOTE and nothing else, verbatim:
+
+```
+[CodeScenes] NOTE on 'btn/UnityEngine.UI.Button#0': Cannot represent field 'm_OnClick' of
+'UnityEngine.UI.Button' ... its serialized members (m_PersistentCalls) have no compiling initializer
+form, so no value for this field can be written to code and a scene edit to it is not synced.
+```
+
+Also fires for `m_OnCullStateChanged` on `Image` and on `Text`. The message is honest and this is not
+a regression, but the user-visible consequence is: **wire a `Button.onClick` in the Inspector and it
+produces no code, with the edit silently not synced.** A console warning is easy to miss.
+
+Representing persistent calls is M8's job (`specs/09`), NOT this spec's. What belongs here is the
+visibility question: should an unrepresentable field surface as a conflict marker in the source, where
+the author is actually looking, rather than only in the console? Decide, do not silently keep warning.
+
+## C8 — a semantically no-op source edit still issues a scene write op
+
+Found in the same sweep. After a pure member REORDER of a struct initializer (no value changed), the
+code→scene watcher logged `Built in place: 3 object(s), 1 plan op(s)` — not zero — even though the
+immediately following Sync reported `Scene already matches code`. Nothing was corrupted and it
+converges.
+
+**Unmeasured and worth measuring first:** whether that op dirties the scene. If it does, every
+keystroke inside a struct initializer marks the scene dirty, which is a real annoyance in the
+auto-sync loop. Measure the dirty flag before deciding whether it needs fixing.
+
 ## The round-trip proof suite
 
 Spec 32's C1-C4 are gate-verified only. This suite is what raises them to proven:

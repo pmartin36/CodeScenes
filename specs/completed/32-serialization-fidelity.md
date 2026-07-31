@@ -157,16 +157,23 @@ entangled through the default template), then C5 and C6.
 
 ## Verification status (read before trusting this spec)
 
-**C1-C4 are GATE-VERIFIED, not live-verified.** The gate stands at `passed=517 failed=0`, every
-bucket-b2 test survived the structural nested-value refactor unweakened, and each fix was
-mutation-checked. That is strong evidence the code does what its tests say.
+**C1-C4 are LIVE-VERIFIED** (2026-07-31, real editor, `260873b`), on top of the gate at
+`passed=517 failed=0` with every bucket-b2 test surviving the structural refactor unweakened and each
+fix mutation-checked. Auto-sync stayed alive throughout; zero `error CS`, no `DOES NOT COMPILE`.
 
-It is NOT evidence the product works, and this spec exists precisely because that distinction has
-bitten twice: all six defect classes here were found in a live editor while the batchmode gate sat
-green at 458 tests, and spec 29's multi-scene work was gate-green with auto-sync completely dead.
+- **C1** — the previously-broken `c.Set(x => x.renderMode, RenderMode.ScreenSpaceCamera)` applies
+  (live `"Screen Space - Camera"`) and survives a sync byte-identical (same sha before/after). No
+  "enum member not found", no rewrite to the non-compiling `, 0)` form.
+- **C2** — reset-to-default REMOVES the setter, 3/3: colour to white, sprite to null, enum to
+  default each collapsed the statement to `.Component<Image>()`.
+- **C3** — a code-authored `.Component<Canvas>()` now builds Screen Space - Overlay, and all three
+  render modes reach code, World Space included.
+- **C4** — public property names, changed members only (1 for 1, 3 for 3), `dotnet build` succeeds,
+  second sync produces zero edits, a hand-reordered initializer is not reordered back, and a partial
+  initializer leaves unmentioned members at their Unity defaults rather than zeroing them.
 
-The live sweep that would close the gap is `specs/33`'s round-trip proof suite. Until it runs, the
-honest claim for C1-C4 is "tests pass," not "works."
+Note `specs/31` (the hidden-field reader contract) remains gate-verified only — its headline claim,
+component enable/disable syncing scene→code, was not exercised by this targeted sweep.
 
 Known and accepted at close:
 - Native enum fields whose backing public member no reflective rule can name (`m_CastShadows`,
