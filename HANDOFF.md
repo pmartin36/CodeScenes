@@ -90,6 +90,34 @@ and the round-trip proof suite.
 
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 
+## Resuming an interrupted pipeline run
+
+Two stops, opposite handling — conflating them wastes a full run:
+
+- **Paused, killed, usage-limited, or died on an API error** — the plan was fine, work was
+  interrupted. Resume by id; completed tasks replay from cache:
+  ```
+  Workflow({ scriptPath: "~/.claude/skills/tdd-pipeline/pipeline.workflow.js",
+             resumeFromRunId: "<RUN_ID>",
+             args: { spec: "<path>", noPush: true } })
+  ```
+  Resume REQUIRES re-passing `args` or it bails with "no input".
+- **Halted on plan validation** — the cached plan IS the problem, so resuming reproduces it. Hand-fix
+  `.agent_handoffs/<feature>/tasks.md` (gitignored) and relaunch FRESH.
+
+Editing feature code under a paused run is safe as long as the full gate passes afterward: a cached
+GREEN verdict only lies if behavior broke, and the gate catches that. Editing the harness
+(`verify.sh`, `pipeline.workflow.js`, `tdd-*.md`) under a running one is not — agents read their
+prompt at spawn, and edits get swept into the next bucket commit by `git add -A`.
+
+## Per milestone, all four steps
+
+1. Build through the tdd-pipeline — one invocation per milestone, `noPush`, on `main`.
+2. Quote the `GATE PASS:` line from `./verify.sh`.
+3. Live-verify with `unity-live-verify`. Close the editor before any batchmode gate run and reopen
+   after; there is one license seat.
+4. Fix what live-verify finds, then move the spec to `specs/completed/` and update its README.
+
 ## Rules that are not optional
 
 - **The gate is `./verify.sh` and the only verdict is its `GATE PASS:` line.** A wrapper's exit code is

@@ -1,5 +1,9 @@
 # CodeScenes — operating contract for all agents
 
+**Asked to resume work without being told what to do? Read `HANDOFF.md`.** It carries the current
+state of `main`, the ordered next steps, and how to resume an interrupted pipeline run. Keep it
+current as work lands — it is the one handoff file, and a stale one is worse than none.
+
 ## The product IS seamless, non-user-driven sync — this is the key value prop
 
 Invisible bidirectional sync: the user edits the scene and the code updates; they edit the code and
