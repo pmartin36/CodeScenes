@@ -1,5 +1,20 @@
 # Spec 32 — Serialization boundary fidelity
 
+> ## SCOPE NARROWED 2026-07-31 — this spec now covers C1-C4 only
+> Delivered and committed: **Owner 1**, the per-type default template (`4611d92`, C2 + C3), and
+> **Owner 2**, the value representation contract (`72c8c78`, C1 + C4), plus a structural
+> nested-value fix landing `SceneBuilder.Core/Model/ValueWalk.cs` as the single walk every value
+> path uses. Gate at `passed=517 failed=0`.
+>
+> **C5 (PPtr short-name resolution) and C6 (the Inspector-visibility rule) moved to `specs/33`**,
+> together with the bidirectional round-trip suite that was going to prove them. Partial work on
+> both sits in `795eba2`, explicitly labelled unvalidated — b3-t1 reached GREEN, b3-t2 escalated
+> for a behavioral deliverable with no captured evidence, and the bucket never passed a scope
+> review.
+>
+> **What that means for confidence:** C1-C4 are gate-verified. Read the "Verification status"
+> section at the bottom before assuming more than that.
+
 > Written from a live-editor sweep of the real UI surface (2026-07-30). Every defect below was
 > MEASURED in a running editor against `6c800e6`, not inferred. The batchmode gate was green at
 > `passed=458` throughout: none of these are visible to it.
@@ -139,6 +154,31 @@ constraint exists to prevent.
 ## Suggested order
 C2 and C4 first (divergent scene, broken builder file), then C1 and C3 (both Canvas-facing and
 entangled through the default template), then C5 and C6.
+
+## Verification status (read before trusting this spec)
+
+**C1-C4 are GATE-VERIFIED, not live-verified.** The gate stands at `passed=517 failed=0`, every
+bucket-b2 test survived the structural nested-value refactor unweakened, and each fix was
+mutation-checked. That is strong evidence the code does what its tests say.
+
+It is NOT evidence the product works, and this spec exists precisely because that distinction has
+bitten twice: all six defect classes here were found in a live editor while the batchmode gate sat
+green at 458 tests, and spec 29's multi-scene work was gate-green with auto-sync completely dead.
+
+The live sweep that would close the gap is `specs/33`'s round-trip proof suite. Until it runs, the
+honest claim for C1-C4 is "tests pass," not "works."
+
+Known and accepted at close:
+- Native enum fields whose backing public member no reflective rule can name (`m_CastShadows`,
+  `m_MotionVectors`, `m_AdditionalShaderChannelsFlag`, `m_SpriteTileMode`, `m_Interpolate`) still
+  round-trip as raw ints. Values converge correctly; only C1's typed spelling is absent.
+- A struct whose representable members return to default while an unrepresentable member still
+  differs reports on every sync. Console noise, not file churn — fail-loud beating silent loss. If it
+  proves annoying it wants once-per-session suppression.
+- `ComponentDefaultOmission.Index` probes via `FieldMap.TryGetValue`, a linear scan, where the
+  blueprint specified an O(1) dictionary built once per reconcile. Correctness is unaffected.
+- A `// CONFLICT:` marker writes a U+2014 em dash into the user's builder `.cs`
+  (`SceneBuilderSync.Conflicts.cs:267`), violating the repo's ASCII-in-plain-text rule.
 
 ## Test plan
 - **Core:** default-reset produces a removal edit; nested-struct emission compiles and is minimal;

@@ -1,0 +1,83 @@
+# Spec 33 — Boundary defects (C5, C6) and bidirectional round-trip proof
+
+> Split out of `specs/32-serialization-fidelity.md` on 2026-07-31. Spec 32 delivered its two owners
+> (the per-type default template, and the value representation contract) and was closed there so the
+> work could land; these two independent defects plus the proof suite carry on here.
+>
+> **Partial work already exists in `795eba2`, and it is NOT validated.** b3-t1 (C5) reached a GREEN
+> validator verdict. b3-t2 (C6) was ESCALATED because its behavioral deliverable went green with no
+> captured evidence. Neither passed a bucket scope review. Treat that commit as a starting point to
+> verify, not as done work to build on.
+
+## C5 — PPtr type resolution misses every namespaced type
+
+`ObjectReferenceResolver.ExpectedRefType` parses a `SerializedProperty.type` of the form `PPtr<$X>`
+down to the bare token `X`, then hands it to `ComponentTypeResolver.Resolve`, which matches on
+`Type.FullName`. `Sprite` never equals `UnityEngine.Sprite`; `Graphic` never equals
+`UnityEngine.UI.Graphic`. Only `GameObject` is special-cased. It happens to work today for M5 user
+MonoBehaviours purely because those have no namespace.
+
+Observed live, verbatim, once each per domain:
+```
+[SceneBuilder] Could not resolve component type 'Graphic'.
+[SceneBuilder] Could not resolve component type 'Selectable'.
+[SceneBuilder] Could not resolve component type 'Sprite'.
+[SceneBuilder] Could not resolve component type 'Material'.
+```
+
+Concrete consequence: `IsSceneObjectField` returns false for `PPtr<$Graphic>` / `PPtr<$Selectable>`,
+so a null `Button.targetGraphic` is classified as an asset reference rather than a scene-object
+reference. Not yet observed producing a wrong *value*, because spec 32's C2 defect was masking it —
+which means this needs re-measuring now that C2 is fixed.
+
+**Contract:** resolve by short name across loaded assemblies, with an explicit unambiguity check.
+Two types sharing a short name must fail loud and located, never silently pick one.
+
+## C6 — Fields with no Inspector control are surfaced as authored data
+
+**Paul's rule (2026-07-30), governing:** *the builder holds only what a user can set in the
+Inspector.* Spec 31 documented the exclusion *mechanism* (name lists); this records the *rule* that
+decides what belongs in them, which is what keeps future additions correct.
+
+Known violations:
+- `SpriteRenderer.m_WasSpriteAssigned` — no Inspector control at all; it flips true as a side effect
+  of assigning a sprite.
+- `SpriteRenderer.m_Size` — derived from the sprite bounds, not authored.
+- Suspected, not yet demonstrated: one Inspector control writing two serialized fields
+  (`m_SortingLayer` + `m_SortingLayerID`). Proving it needs a second sorting layer in
+  `ProjectSettings/TagManager.asset`, which the earlier sweep declined to add to a shared project.
+
+**Contract:** a field a user cannot set is not author intent and must not reach builder source.
+There is no Unity API for "can a user edit this" (custom editors are opaque), so enforcement is a
+curated exclusion list — but the list must be justified by the rule, not by taste.
+
+## The round-trip proof suite
+
+Spec 32's C1-C4 are gate-verified only. This suite is what raises them to proven:
+- Cross-class bidirectional EditMode coverage: for each fixed class, drive the change from BOTH
+  directions against real components and assert convergence (a second sync produces zero edits).
+- A live sweep in a real editor, since every one of spec 32's six defect classes was invisible to a
+  458-test batchmode gate. Gate-green has already proven insufficient here twice.
+
+## DECOMPOSITION CONSTRAINT (carried forward — this is what spec 32 cost)
+
+Spec 32's bucket b2 took **six passes on one task** because "recursion into nested values" was a
+cross-cutting invariant that no single task owned, so non-recursing sites were found one at a time:
+the enum normalizer had no `Nested` arm, `Complete` didn't recurse while `Reduce` did, the
+comparison path re-raised an unconvergeable conflict every sync. Spec 32's constraint named "the
+value representation contract" as the owner, which was right in kind and wrong in specifics.
+
+**Before decomposing this spec, name the cross-cutting invariant precisely and give it ONE owning
+task with ONE shared implementation every other task calls.** For C5 the candidate is type
+resolution itself: one resolver every call site uses, rather than each site parsing and matching its
+own way. Do not restate an invariant as per-task guidance.
+
+`SceneBuilder.Core/Model/ValueWalk.cs` (from spec 32) is the model to follow: a pass declares what it
+does to a node and how it descends, so *forgetting to recurse is not expressible*.
+
+## Test plan
+- **Core:** short-name resolution is unambiguous, and an ambiguous short name fails loud and located.
+- **EditMode (required, adapter changes):** a real `Button.targetGraphic` (null and assigned) resolves
+  as a scene-object reference with no `Could not resolve component type` warning; a `SpriteRenderer`
+  with an assigned sprite produces no `m_WasSpriteAssigned` or `m_Size` in source.
+- **Live:** the sweep above. Not optional.
