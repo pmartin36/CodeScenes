@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
@@ -135,9 +134,10 @@ namespace SceneBuilder.Editor
         internal static IReadOnlyList<string> SuggestQualified(string token)
         {
             var results = new List<string>();
-            foreach (var t in TypeCache.GetTypesDerivedFrom<UnityEngine.Component>())
+            foreach (var t in ComponentTypeResolver.ObjectTypesNamed(token))
             {
-                if (t.Name == token && t.FullName != null && !results.Contains(t.FullName))
+                if (t != typeof(UnityEngine.Component) && typeof(UnityEngine.Component).IsAssignableFrom(t)
+                    && t.FullName != null && !results.Contains(t.FullName))
                 {
                     results.Add(t.FullName);
                 }

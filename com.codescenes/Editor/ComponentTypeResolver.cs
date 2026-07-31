@@ -21,6 +21,9 @@ namespace SceneBuilder.Editor
         private static readonly Dictionary<string, Type?> GuidCache = new();
         private static readonly Dictionary<string, Type?> PrefixCache = new();
 
+        private static Dictionary<string, List<Type>>? ObjectTypeIndex;
+        private static readonly Dictionary<string, (Type? Resolved, IReadOnlyList<Type> Ambiguous)> ShortNameCache = new();
+
         /// <summary>
         /// GUID-anchored resolve: when <paramref name="typeRef"/> carries a MonoScript GUID, resolve
         /// the type via the asset (GUID -&gt; path -&gt; MonoScript -&gt; class) so it survives an
@@ -170,6 +173,81 @@ namespace SceneBuilder.Editor
             }
 
             GuidCache[guid] = resolved;
+            return resolved;
+        }
+
+        /// <summary>
+        /// All loaded <see cref="UnityEngine.Object"/> subtypes (plus <see cref="UnityEngine.Object"/>
+        /// itself) whose <c>Type.Name</c> equals <paramref name="shortName"/>. Backed by a lazily-built,
+        /// per-domain index over <c>TypeCache.GetTypesDerivedFrom&lt;UnityEngine.Object&gt;()</c>; never
+        /// logs, never touches <see cref="Cache"/>/<see cref="PrefixCache"/>/<see cref="GuidCache"/>.
+        /// </summary>
+        internal static IReadOnlyList<Type> ObjectTypesNamed(string shortName)
+        {
+            if (ObjectTypeIndex == null)
+            {
+                var index = new Dictionary<string, List<Type>>(StringComparer.Ordinal);
+                void Add(Type t)
+                {
+                    if (!index.TryGetValue(t.Name, out var list))
+                    {
+                        list = new List<Type>();
+                        index[t.Name] = list;
+                    }
+
+                    list.Add(t);
+                }
+
+                Add(typeof(UnityEngine.Object));
+                foreach (var t in TypeCache.GetTypesDerivedFrom<UnityEngine.Object>())
+                {
+                    Add(t);
+                }
+
+                ObjectTypeIndex = index;
+            }
+
+            return ObjectTypeIndex.TryGetValue(shortName, out var found)
+                ? found
+                : Array.Empty<Type>();
+        }
+
+        /// <summary>
+        /// Resolves a BARE type name to the single loaded <see cref="UnityEngine.Object"/> subtype
+        /// with that <c>Type.Name</c>. Exactly one distinct match resolves; zero matches resolves to
+        /// null; two or more DISTINCT matches resolve to null and are reported via
+        /// <paramref name="ambiguousCandidates"/> — never guessed. Never logs; never reads or writes
+        /// <see cref="Cache"/>/<see cref="PrefixCache"/>/<see cref="GuidCache"/>.
+        /// </summary>
+        internal static Type? ResolveObjectTypeByShortName(string shortName, out IReadOnlyList<Type> ambiguousCandidates)
+        {
+            if (ShortNameCache.TryGetValue(shortName, out var cached))
+            {
+                ambiguousCandidates = cached.Ambiguous;
+                return cached.Resolved;
+            }
+
+            var matches = ObjectTypesNamed(shortName);
+            Type? resolved;
+            IReadOnlyList<Type> ambiguous;
+            if (matches.Count == 1)
+            {
+                resolved = matches[0];
+                ambiguous = Array.Empty<Type>();
+            }
+            else if (matches.Count == 0)
+            {
+                resolved = null;
+                ambiguous = Array.Empty<Type>();
+            }
+            else
+            {
+                resolved = null;
+                ambiguous = matches.ToList();
+            }
+
+            ShortNameCache[shortName] = (resolved, ambiguous);
+            ambiguousCandidates = ambiguous;
             return resolved;
         }
 

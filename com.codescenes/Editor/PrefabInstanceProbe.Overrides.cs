@@ -36,10 +36,12 @@ namespace SceneBuilder.Editor
             Nested,
         }
 
-        // Unity bookkeeping property paths on a sub-object — never surfaced as a structured override
-        // or leaked to opaque either (mirrors, per-sub-object, the implicit root exclusion the
-        // Modelled bucket already gives the instance root's own name/transform).
-        private static readonly HashSet<string> NestedBookkeepingPaths = new() { "m_Name", "m_RootOrder" };
+        // Sibling order on a sub-object is carried structurally by the snapshot's own child ordering,
+        // so it is a MODELLING exclusion, never surfaced as a structured override or leaked to opaque
+        // either — not folded into SerializedFieldExclusions because that owner decides author intent,
+        // not how a value is already modelled elsewhere. m_Name is NOT here: it is covered by
+        // SerializedFieldExclusions' shared Bookkeeping list, applied below via IsExcluded.
+        private static readonly HashSet<string> NestedBookkeepingPaths = new() { "m_RootOrder" };
 
         private readonly struct OverrideReadResult
         {
@@ -82,6 +84,11 @@ namespace SceneBuilder.Editor
             foreach (var mod in mods)
             {
                 if (mod.target == null)
+                {
+                    continue;
+                }
+
+                if (SerializedFieldExclusions.IsExcluded(mod.target.GetType(), mod.propertyPath))
                 {
                     continue;
                 }
