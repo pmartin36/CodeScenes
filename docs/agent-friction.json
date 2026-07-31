@@ -90,7 +90,7 @@
     }
   },
   "seen_logs": {
-    "/home/paul/Source/Unity/SceneBuilderTest/Logs/Editor.log": "e05c80a820739933",
-    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-console-capture.log": "81feff4fc874de00"
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/Editor.log": 419870,
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-console-capture.log": 167575
   }
 }

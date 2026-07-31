@@ -5,9 +5,10 @@ Reads Unity editor logs produced by live-verify sessions, pulls out every error
 an agent hit, classifies it, and folds it into docs/agent-friction.json with
 recurrence counts. Renders docs/agent-friction.md from that JSON.
 
-Runs unattended and is idempotent: a log already folded in is skipped, and a
-message already present increments its count rather than adding a row. Safe to
-run on every agent stop.
+Runs unattended and is incremental: each log is consumed by byte offset, so a
+log that grows mid-session contributes only its new lines rather than being
+re-counted from the top. A message already present increments its count rather
+than adding a row. Safe to run on every agent stop.
 
 Classification comes from the stack trace, not from judgement:
   Unity.Pipeline.BasePipelineServer  -> TOOLING   (Unity's CLI, not this product)
@@ -60,10 +61,19 @@ def normalize(message: str) -> str:
     return " ".join(out.split())[:400]
 
 
-def parse(path: Path):
-    """Yield (normalized, verbatim, classification) for each error in a log."""
+def parse(path: Path, start: int = 0):
+    """Yield (normalized, verbatim, classification) for errors after byte `start`.
+
+    Unity logs are append-only and grow while a session runs, so reading the
+    whole file on every pass would re-count everything already folded in. Only
+    new bytes are parsed. A file shorter than `start` was replaced, so it is
+    read from the beginning.
+    """
     try:
-        lines = path.read_text(errors="replace").splitlines()
+        with path.open(errors="replace") as fh:
+            if start and path.stat().st_size >= start:
+                fh.seek(start)
+            lines = fh.read().splitlines()
     except OSError:
         return
     for i, line in enumerate(lines):
@@ -95,10 +105,16 @@ def main(argv):
     for log in logs:
         if not log.exists():
             continue
-        sig = hashlib.sha256(f"{log.resolve()}:{log.stat().st_size}".encode()).hexdigest()[:16]
-        if state["seen_logs"].get(str(log.resolve())) == sig:
-            continue  # already folded in at this size
-        for norm, verbatim, cls in parse(log):
+        key = str(log.resolve())
+        size = log.stat().st_size
+        consumed = state["seen_logs"].get(key, 0)
+        if not isinstance(consumed, int):
+            consumed = 0  # migrate from the old signature format
+        if consumed > size:
+            consumed = 0  # file was replaced, not appended to
+        if consumed == size:
+            continue  # nothing new since last pass
+        for norm, verbatim, cls in parse(log, consumed):
             e = state["entries"].setdefault(
                 norm,
                 {"count": 0, "class": cls, "verbatim": verbatim,
@@ -107,7 +123,7 @@ def main(argv):
             e["count"] += 1
             e["last_seen"] = today
             e["class"] = cls
-        state["seen_logs"][str(log.resolve())] = sig
+        state["seen_logs"][key] = size
         folded += 1
 
     if not folded:
