@@ -42,6 +42,13 @@ GameObject at creation — so any scene containing a button emits a builder file
 Sync continues to work (the grammar parses, C# is never compiled by the sync path), so the damage is
 the IDE, IntelliSense and `SceneBuilder.Validate`.
 
+Scoped by experiment: the defect is specific to the SELF-reference. Retargeting the same field to a
+`Graphic` on a DIFFERENT object emits correctly (`c.Set("m_TargetGraphic", panel)`) and passes the
+compile check; pointing it back at the object's own Image reproduces CS0841 immediately.
+
+It does not self-heal. The broken line is carried forward on every later sync, so a subsequent
+unrelated edit still re-reports DOES NOT COMPILE and the file stays broken until a human fixes it.
+
 The emitter already splits a follow-up call onto its own statement when it must
 (`button.Component<UnityEngine.CanvasRenderer>();` on the next line), so the mechanism to fix this
 exists; a self-reference is not routed through it.
