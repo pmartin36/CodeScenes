@@ -14,9 +14,9 @@ recur. `TOOLING` is Unity's Pipeline CLI. `ENVIRONMENT` is the editor/host.
 | 3 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'find_assets' failed: At least one of type, name, or label is required. |
 | 2 | ENVIRONMENT | 2026-07-31 | 2026-07-31 | Assertion failed on expression: '!gAlreadyClosing' |
 | 2 | PRODUCT | 2026-07-31 | 2026-07-31 | [SceneBuilder] Sync wrote DemoScene.cs: emitted builder source DOES NOT COMPILE (2 error(s)). \| line 784: CS0542: 'Materials': member names cannot be the same as their enclosing type |
-| 1 | ENVIRONMENT | 2026-07-31 | 2026-07-31 | Assertion failed on expression: 'm_RendererNodes.empty()' |
 | 1 | ENVIRONMENT | 2026-07-31 | 2026-07-31 | Assertion failed on expression: 'm_PodArrays.empty()' |
-| 1 | TOOLING | 2026-07-31 | 2026-07-31 | ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty |
-| 1 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'set_serialized_field' failed: Target '/Canvas/Panel' is a GameObject. Pass --component <TypeName> to pick a component on it, or target a specific component directly (use its instanceId/globalId), to read or set  |
-| 1 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'set_serialized_field' failed: Could not resolve object reference: No sub-asset with fileId 21300000 in 'Assets/SceneBuilder/LiveVerifyFixtures/lv_sprite.png'. |
+| 1 | ENVIRONMENT | 2026-07-31 | 2026-07-31 | Assertion failed on expression: 'm_RendererNodes.empty()' |
 | 1 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'set_serialized_field' failed: Could not resolve object reference: No loaded object with instanceId 568105589213755260. |
+| 1 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'set_serialized_field' failed: Could not resolve object reference: No sub-asset with fileId 21300000 in 'Assets/SceneBuilder/LiveVerifyFixtures/lv_sprite.png'. |
+| 1 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'set_serialized_field' failed: Target '/Canvas/Panel' is a GameObject. Pass --component <TypeName> to pick a component on it, or target a specific component directly (use its instanceId/globalId), to read or set  |
+| 1 | TOOLING | 2026-07-31 | 2026-07-31 | ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty |

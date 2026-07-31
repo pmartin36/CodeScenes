@@ -62,21 +62,44 @@ def normalize(message: str) -> str:
     return " ".join(out.split())[:400]
 
 
-def parse(path: Path, start: int = 0):
-    """Yield (normalized, verbatim, classification) for errors after byte `start`.
+LOOKAHEAD = 12  # lines of stack a classification may need
 
-    Unity logs are append-only and grow while a session runs, so reading the
-    whole file on every pass would re-count everything already folded in. Only
-    new bytes are parsed. A file shorter than `start` was replaced, so it is
-    read from the beginning.
+
+def parse(path: Path, start: int, flush: bool):
+    """Parse errors after byte `start`; return (entries, new_offset).
+
+    Two ways a byte marker goes wrong while a session is still writing, both
+    avoided here:
+
+    A partial trailing line. Consuming to EOF can stop mid-line, so the next
+    pass starts inside a line: the front half is parsed truncated and the back
+    half as a bogus new line. Only whole lines (through the final newline) are
+    ever consumed.
+
+    Truncated context. Classification reads up to LOOKAHEAD following lines for
+    the stack trace. An error near the end may not have its stack written yet,
+    so those trailing lines are held back and re-read next pass WITH their
+    context, rather than being consumed and misclassified. `flush` disables the
+    holdback once the log has stopped growing, so a finished log's tail is not
+    stranded.
     """
     try:
-        with path.open(errors="replace") as fh:
-            if start and path.stat().st_size >= start:
-                fh.seek(start)
-            lines = fh.read().splitlines()
+        raw = path.read_bytes()[start:]
     except OSError:
-        return
+        return [], start
+    text = raw.decode("utf-8", errors="replace")
+    cut = text.rfind("\n")
+    if cut < 0:
+        return [], start  # no complete line yet
+    complete, consumed = text[:cut + 1], start + len(text[:cut + 1].encode("utf-8"))
+    lines = complete.splitlines()
+    if not flush and len(lines) > LOOKAHEAD:
+        held = lines[-LOOKAHEAD:]
+        lines = lines[:-LOOKAHEAD]
+        consumed -= len("\n".join(held).encode("utf-8")) + 1
+    elif not flush:
+        return [], start  # too short to classify safely; wait for more
+    found = []
     for i, line in enumerate(lines):
         if line.startswith("##utp:"):
             continue  # JSON mirror of the line above
@@ -90,8 +113,9 @@ def parse(path: Path, start: int = 0):
                 detail = [l for l in lines[i + 1 : i + 6] if "CS" in l]
                 if detail:
                     verbatim = f"{verbatim} | {detail[0].strip()}"
-            yield normalize(verbatim), verbatim, classify(stack, verbatim)
+            found.append((normalize(verbatim), verbatim, classify(stack, verbatim)))
             break
+    return found, consumed
 
 
 def main(argv):
@@ -120,9 +144,14 @@ def main(argv):
             consumed = 0  # new file, or migrating from an older state format
         if consumed > size:
             consumed = 0  # truncated
-        if consumed == size and isinstance(prev, dict):
-            continue  # nothing new since last pass
-        for norm, verbatim, cls in parse(log, consumed):
+        grew = not isinstance(prev, dict) or prev.get("size") != size
+        if consumed == size and not grew:
+            continue  # nothing new, and the tail is already flushed
+        entries, consumed = parse(log, consumed, flush=not grew)
+        if not entries and consumed == (prev or {}).get("bytes", -1):
+            state["seen_logs"][key] = {"bytes": consumed, "head": head, "size": size}
+            continue
+        for norm, verbatim, cls in entries:
             e = state["entries"].setdefault(
                 norm,
                 {"count": 0, "class": cls, "verbatim": verbatim,
@@ -131,7 +160,7 @@ def main(argv):
             e["count"] += 1
             e["last_seen"] = today
             e["class"] = cls
-        state["seen_logs"][key] = {"bytes": size, "head": head}
+        state["seen_logs"][key] = {"bytes": consumed, "head": head, "size": size}
         folded += 1
 
     if not folded:
