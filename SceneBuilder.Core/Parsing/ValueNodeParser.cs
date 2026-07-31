@@ -63,10 +63,9 @@ namespace SceneBuilder.Core.Parsing
                     return assetNode;
 
                 case MemberAccessExpressionSyntax memberAccess:
-                    return new ValueNode.Enum(
+                    return ValueNode.Enum.Canonical(
                         memberAccess.Expression.ToString(),
-                        new[] { memberAccess.Name.Identifier.Text },
-                        IsFlags: false);
+                        new[] { memberAccess.Name.Identifier.Text });
 
                 case ObjectCreationExpressionSyntax objectCreation:
                     return ParseObjectCreation(objectCreation, expr, assetCatalog, conflicts);
@@ -144,13 +143,11 @@ namespace SceneBuilder.Core.Parsing
                 return Unsupported(whole);
             }
 
-            var members = leaves
-                .Select(leaf => leaf.Name.Identifier.Text)
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(m => m, StringComparer.Ordinal)
-                .ToArray();
+            var members = leaves.Select(leaf => leaf.Name.Identifier.Text);
 
-            return new ValueNode.Enum(typeFullName, members, IsFlags: true);
+            // Canonical derives IsFlags from the resulting DISTINCT member count, so `A | A` — two
+            // operands, one distinct member — correctly collapses to a single-member, non-flags node.
+            return ValueNode.Enum.Canonical(typeFullName, members);
         }
 
         private static bool TryFlattenBitwiseOr(ExpressionSyntax expr, List<MemberAccessExpressionSyntax> leaves)

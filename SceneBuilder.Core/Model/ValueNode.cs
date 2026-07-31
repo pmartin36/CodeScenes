@@ -104,6 +104,27 @@ namespace SceneBuilder.Core.Model
 
                 return hash.ToHashCode();
             }
+
+            // The single owning constructor of a canonical Enum node: ordinal-sorted, ordinal-distinct
+            // members, IsFlags derived from the resulting member count (never passed in) so a caller
+            // cannot produce a one-member node tagged IsFlags:true — the shape that fails round-trip
+            // equality against ValueNodeParser (a single member access always parses as IsFlags:false).
+            public static Enum Canonical(string typeFullName, IEnumerable<string> members)
+            {
+                var distinctSorted = members
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(m => m, StringComparer.Ordinal)
+                    .ToArray();
+
+                if (distinctSorted.Length == 0)
+                {
+                    throw new ArgumentException(
+                        "ValueNode.Enum.Canonical requires at least one member; an empty member set is unrenderable.",
+                        nameof(members));
+                }
+
+                return new Enum(typeFullName, distinctSorted, distinctSorted.Length > 1);
+            }
         }
 
         public sealed record Vec2(global::SceneBuilder.Core.Model.Vec2 Value) : ValueNode;

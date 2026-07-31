@@ -100,7 +100,11 @@ public class HiddenFieldScene : ISceneDefinition
         Assert.IsTrue(data.Fields.TryGetValue("m_Constraints", out var node),
             "Rigidbody.m_Constraints is the same class of bug as Canvas.m_SortingOrder — a real " +
             "authored field hidden from the default inspector. Fixing only Canvas is not a fix.");
-        Assert.AreEqual(ValueNode.Primitive.Int((int)RigidbodyConstraints.FreezePositionY), node);
+        Assert.AreEqual(
+            new ValueNode.Enum("UnityEngine.RigidbodyConstraints", new[] { "FreezePositionY" }, IsFlags: false),
+            node,
+            "m_Constraints is an Integer-typed native property whose value is a [Flags] enum; it must " +
+            "read as a typed member NAME, not a raw int.");
     }
 
     [Test]

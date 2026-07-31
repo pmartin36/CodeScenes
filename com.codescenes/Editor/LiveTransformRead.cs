@@ -160,7 +160,7 @@ namespace SceneBuilder.Editor
         // drivenByObject is public but carries no channel granularity, and ugui deliberately registers a
         // driver with DrivenTransformProperties.None (ContentSizeFitter, both fits Unconstrained), so it
         // cannot substitute. Bound ONCE per domain reload as a delegate — this runs per object per sync.
-        // Reflection precedent: SerializedFieldBridge.GetFieldRecursive (SerializedFieldBridge.cs:507).
+        // Reflection precedent: SerializedMemberMap.GetFieldRecursive (SerializedMemberMap.cs).
         private static readonly Func<RectTransform, DrivenTransformProperties>? DrivenGetter = ResolveDrivenGetter();
         private static bool _fallbackWarned;
 

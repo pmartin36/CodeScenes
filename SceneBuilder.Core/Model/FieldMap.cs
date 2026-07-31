@@ -46,6 +46,13 @@ namespace SceneBuilder.Core.Model
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
+        // Equality is by KEY, not by position. The two sides of every comparison come from
+        // different producers with different orders: ValueNodeParser records the order the AUTHOR
+        // wrote, the live read reports Unity's serialized order. A positional comparison calls two
+        // identical values different, so a settled scene re-applies an op forever and the first
+        // sync rewrites the user's member order to match Unity's. ORDER still decides emission —
+        // this type stays an ordered list and renders in its own order — it just does not decide
+        // identity.
         public override bool Equals(object? obj)
         {
             if (ReferenceEquals(this, obj))
@@ -58,11 +65,16 @@ namespace SceneBuilder.Core.Model
                 return false;
             }
 
-            for (var i = 0; i < _entries.Count; i++)
+            // Both directions, because equal counts alone do not rule out a repeated key on one
+            // side standing in for a key the other side has and this one does not.
+            return AllMatch(_entries, other) && AllMatch(other._entries, this);
+        }
+
+        private static bool AllMatch(List<KeyValuePair<string, ValueNode>> entries, FieldMap against)
+        {
+            foreach (var kv in entries)
             {
-                var mine = _entries[i];
-                var theirs = other._entries[i];
-                if (!string.Equals(mine.Key, theirs.Key, StringComparison.Ordinal) || mine.Value != theirs.Value)
+                if (!against.TryGetValue(kv.Key, out var theirs) || kv.Value != theirs)
                 {
                     return false;
                 }
@@ -71,16 +83,17 @@ namespace SceneBuilder.Core.Model
             return true;
         }
 
+        // Order-insensitive, to stay consistent with Equals: per-entry hashes combined by a
+        // commutative operation, never HashCode.Add in sequence.
         public override int GetHashCode()
         {
-            var hash = new HashCode();
+            var hash = 0;
             foreach (var kv in _entries)
             {
-                hash.Add(kv.Key, StringComparer.Ordinal);
-                hash.Add(kv.Value);
+                hash ^= HashCode.Combine(StringComparer.Ordinal.GetHashCode(kv.Key), kv.Value);
             }
 
-            return hash.ToHashCode();
+            return hash;
         }
     }
 }

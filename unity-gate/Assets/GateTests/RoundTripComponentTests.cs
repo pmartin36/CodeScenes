@@ -421,12 +421,13 @@ public class RoundTripScene : ISceneDefinition
     }
 
     // 11. Native enum field, no managed FieldInfo (scene->code) — a field like
-    //     Rigidbody.m_CollisionDetection has no backing managed enum, so the adapter reads it as a raw
-    //     int. Moving it away from its constructed default must harvest it into source as a
-    //     bare `.Set("m_CollisionDetection", <int>)`, and the value must author back correctly on the
-    //     next code->scene build. A second Sync with no further edit must be a fixed point.
+    //     Rigidbody.m_CollisionDetection resolves to the public property Rigidbody.collisionDetectionMode
+    //     via SerializedMemberMap. Moving it away from its constructed default must harvest it into
+    //     source as the typed dotted spelling `.Set("m_CollisionDetection", UnityEngine.CollisionDetectionMode.X)`,
+    //     and the value must author back correctly on the next code->scene build. A second Sync with no
+    //     further edit must be a fixed point.
     [Test]
-    public void SceneToCode_ChangedNativeEnumField_IntroducesIntSetter_SecondSyncNoOp()
+    public void SceneToCode_ChangedNativeEnumField_IntroducesTypedEnumSetter_SecondSyncNoOp()
     {
         File.WriteAllText(_builderPath, Source(
             "        var box = scene.Add(\"Box\");\n" +
@@ -452,8 +453,8 @@ public class RoundTripScene : ISceneDefinition
         Assert.IsTrue(result.Changed, "Sync reported no change despite a native enum field moved off its constructed default");
 
         var rewritten = File.ReadAllText(_builderPath);
-        StringAssert.Contains(".Set(\"m_CollisionDetection\", 1)", rewritten,
-            "Builder source did not harvest the native enum field as a raw int setter.\n" + rewritten);
+        StringAssert.Contains(".Set(\"m_CollisionDetection\", UnityEngine.CollisionDetectionMode.Continuous)", rewritten,
+            "Builder source did not harvest the native enum field as a typed, compiling dotted spelling.\n" + rewritten);
         StringAssert.Contains(".Set(\"m_Mass\", 5f)", rewritten,
             "Pre-existing authored field did not survive the closure rewrite.\n" + rewritten);
 

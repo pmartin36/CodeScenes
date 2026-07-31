@@ -38,7 +38,7 @@ namespace SceneBuilder.Core.Parsing
                     aspectCount++;
                     fields.Add(new KeyValuePair<string, ValueNode>(
                         SpatialComponents.FitSizeFields.Mode,
-                        new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { member }, false)));
+                        ValueNode.Enum.Canonical(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { member })));
                     fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ParseSpatialScalar(arg.Expression, ctx)));
                     spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Value, span));
                 }
@@ -47,7 +47,7 @@ namespace SceneBuilder.Core.Parsing
                     hasExplicit = true;
                     fields.Add(new KeyValuePair<string, ValueNode>(
                         SpatialComponents.FitSizeFields.Mode,
-                        new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Explicit }, false)));
+                        ValueNode.Enum.Canonical(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Explicit })));
                     fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Size, ParseSpatialVec3(arg.Expression, ctx)));
                     spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.FitSizeFields.Size, span));
                 }
@@ -219,7 +219,7 @@ namespace SceneBuilder.Core.Parsing
         {
             if (expr.IsKind(SyntaxKind.TrueLiteralExpression))
             {
-                fields.Add(new KeyValuePair<string, ValueNode>(fieldKey, new ValueNode.Enum(enumTypeName, new[] { member }, false)));
+                fields.Add(new KeyValuePair<string, ValueNode>(fieldKey, ValueNode.Enum.Canonical(enumTypeName, new[] { member })));
                 // Whole-argument span (`down: true`) — a member flip rewrites the keyword too.
                 spans.Add(new KeyValuePair<string, SourceSpan>(fieldKey, argSpan));
                 return true;

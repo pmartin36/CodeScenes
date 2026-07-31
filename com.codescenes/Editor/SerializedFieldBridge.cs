@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using SceneBuilder.Core.Model;
@@ -22,6 +21,13 @@ namespace SceneBuilder.Editor
     /// unconditionally (spec C2). The decision to OMIT a default-valued field from what gets
     /// AUTHORED is made emit-side, by <see cref="SceneBuilder.Core.Reconcile.ComponentReconciler"/>,
     /// fed by <see cref="ComponentDefaultTemplate"/> via <see cref="SceneSnapshot.ComponentDefaults"/>.
+    /// An <c>Enum</c>-typed or Integer-typed-but-enum-backed field's managed member/type is resolved
+    /// through <see cref="SerializedMemberMap"/>, the one owner of that decision on both read and write.
+    /// A nested struct/class field's members are likewise keyed by their compiling PUBLIC spelling
+    /// (<c>ColorBlock.m_NormalColor</c> -&gt; <c>normalColor</c>) via
+    /// <see cref="SerializedMemberMap.TryPublicMemberName"/> on read and
+    /// <see cref="SerializedMemberMap.TrySerializedName"/> on write, so <c>ReadNested</c> and
+    /// <c>WriteProperty</c>'s <c>Nested</c> arm never disagree on a member's name.
     /// </summary>
     public static class SerializedFieldBridge
     {
@@ -175,14 +181,15 @@ namespace SceneBuilder.Editor
             return fields;
         }
 
-        // A field is unrepresentable in M3 if its value is Unsupported OR it is a List/Nested whose
-        // recursion bottoms out in any Unsupported leaf (an object-reference array/struct). Such a
-        // field must be skipped whole — partially rendering it emits uncompilable value tokens.
+        // A field is unrepresentable in M3 if its value is Unsupported OR it is a List whose
+        // recursion bottoms out in any Unsupported leaf (an object-reference array). Such a field
+        // must be skipped whole — partially rendering it emits uncompilable value tokens. A Nested
+        // value's own unrepresentable MEMBERS are excluded at the member level instead (spec 32 C4,
+        // NestedValueEmission.Project) — the rest of the struct still round-trips.
         private static bool ContainsUnsupported(ValueNode value) => value switch
         {
             ValueNode.Unsupported => true,
             ValueNode.List list => list.Items.Any(ContainsUnsupported),
-            ValueNode.Nested nested => nested.Fields.Any(kv => ContainsUnsupported(kv.Value)),
             _ => false,
         };
 
@@ -193,9 +200,7 @@ namespace SceneBuilder.Editor
                 case SerializedPropertyType.Boolean:
                     return ValueNode.Primitive.Bool(p.boolValue);
                 case SerializedPropertyType.Integer:
-                    return p.type == "long"
-                        ? ValueNode.Primitive.Long(p.longValue)
-                        : ValueNode.Primitive.Int(p.intValue);
+                    return ReadInteger(p);
                 case SerializedPropertyType.Float:
                     return p.type == "double"
                         ? ValueNode.Primitive.Double(p.doubleValue)
@@ -244,38 +249,42 @@ namespace SceneBuilder.Editor
             }
         }
 
+        // An Integer-typed serialized property (SerializedPropertyType.Integer, not Enum) can still
+        // be a native enum's backing storage — e.g. Rigidbody.m_Constraints, a [Flags] enum with no
+        // SerializedPropertyType.Enum at all. Ask the SAME resolver ReadEnum does BEFORE the plain
+        // int/long dispatch, so a native flags field reads as a typed member set, not a raw int.
+        private static ValueNode ReadInteger(SerializedProperty p)
+        {
+            if (p.type == "long")
+            {
+                return ValueNode.Primitive.Long(p.longValue);
+            }
+
+            var targetType = p.serializedObject.targetObject?.GetType();
+            if (targetType != null && SerializedMemberMap.TryEnumNode(targetType, p.propertyPath, p.intValue, out var enumNode))
+            {
+                return enumNode;
+            }
+
+            return ValueNode.Primitive.Int(p.intValue);
+        }
+
+        // Resolves the backing enum Type via SerializedMemberMap (managed field, then the
+        // m_Xxx->xxx property ladder) and emits a canonical Enum node by member NAME — never
+        // p.enumNames (sometimes a display string, e.g. "Screen Space - Camera", sometimes raw
+        // member names) and never p.enumValueIndex (measured -1 for a non-contiguous/combined
+        // flags value). An unresolved backing type keeps the raw value as an Int, the same shape
+        // WritePrimitive writes back through SerializedProperty.intValue and the same shape
+        // `c.Set("m_RenderMode", 0)` authors.
         private static ValueNode ReadEnum(SerializedProperty p)
         {
-            var type = ResolveFieldType(p.serializedObject.targetObject, p.propertyPath);
-            if (type == null || !type.IsEnum)
+            var targetType = p.serializedObject.targetObject?.GetType();
+            if (targetType != null && SerializedMemberMap.TryEnumNode(targetType, p.propertyPath, p.intValue, out var enumNode))
             {
-                // A native serialized enum (no managed FieldInfo backs the path, e.g. Canvas.m_RenderMode):
-                // read the raw value as an Int, the same shape WritePrimitive writes back through
-                // SerializedProperty.intValue and the same shape `c.Set("m_RenderMode", 0)` authors.
-                return ValueNode.Primitive.Int(p.intValue);
+                return enumNode;
             }
 
-            var isFlags = type.IsDefined(typeof(FlagsAttribute), false);
-            if (isFlags)
-            {
-                var mask = (long)p.intValue;
-                var members = new List<string>();
-                foreach (var name in Enum.GetNames(type))
-                {
-                    var bits = Convert.ToInt64(Enum.Parse(type, name));
-                    if (bits != 0 && (mask & bits) == bits)
-                    {
-                        members.Add(name);
-                    }
-                }
-
-                return new ValueNode.Enum(type.FullName ?? type.Name, members, true);
-            }
-
-            var names = p.enumNames;
-            var idx = p.enumValueIndex;
-            var member = idx >= 0 && idx < names.Length ? names[idx] : "";
-            return new ValueNode.Enum(type.FullName ?? type.Name, new[] { member }, false);
+            return ValueNode.Primitive.Int(p.intValue);
         }
 
         private static ValueNode ReadList(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
@@ -291,6 +300,18 @@ namespace SceneBuilder.Editor
 
         private static ValueNode ReadNested(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
         {
+            // The struct/class Type resolves FIRST -- every child key below is mapped through it, so
+            // the map must be in hand before the child walk starts.
+            var rootType = p.serializedObject.targetObject?.GetType();
+            var type = rootType != null ? SerializedMemberMap.ResolveManagedFieldType(rootType, p.propertyPath) : null;
+            if (type == null || type.IsGenericType)
+            {
+                // Cannot resolve to a concrete, non-generic managed type (e.g. a built-in native
+                // field, or an unsupported generic serializable) — preserve verbatim, never emit
+                // a broken Nested (e.g. a backtick-arity type name).
+                return new ValueNode.Unsupported(p.type);
+            }
+
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var it = p.Copy();
             var end = p.GetEndProperty();
@@ -303,19 +324,23 @@ namespace SceneBuilder.Editor
             while (it.Next(enterChildren) && !SerializedProperty.EqualContents(it, end))
             {
                 enterChildren = false;
-                if (it.depth == childDepth)
+                if (it.depth != childDepth)
                 {
-                    fields.Add(new KeyValuePair<string, ValueNode>(it.name, ReadProperty(it.Copy(), resolveSceneRef)));
+                    continue;
                 }
-            }
 
-            var type = ResolveFieldType(p.serializedObject.targetObject, p.propertyPath);
-            if (type == null || type.IsGenericType)
-            {
-                // Cannot resolve to a concrete, non-generic managed type (e.g. a built-in native
-                // field, or an unsupported generic serializable) — preserve verbatim, never emit
-                // a broken Nested (e.g. a backtick-arity type name).
-                return new ValueNode.Unsupported(p.type);
+                // A member with a compiling public spelling (UnityEngine.UI.ColorBlock.m_NormalColor
+                // -> normalColor) is keyed by it, so the emitted initializer compiles (spec 32 C4). A
+                // member with NO public spelling is kept under its serialized name with its value
+                // replaced by a located marker -- Core excludes and reports it per-member
+                // (NestedValueEmission.Project) rather than the whole struct being dropped.
+                var hasPublicName = SerializedMemberMap.TryPublicMemberName(type, it.name, out var publicName);
+                var key = hasPublicName ? publicName : it.name;
+                var value = hasPublicName
+                    ? ReadProperty(it.Copy(), resolveSceneRef)
+                    : new ValueNode.Unsupported($"no public member for '{it.name}'");
+
+                fields.Add(new KeyValuePair<string, ValueNode>(key, value));
             }
 
             var typeName = type.FullName!.Replace('+', '.');
@@ -374,9 +399,22 @@ namespace SceneBuilder.Editor
 
                     break;
                 case ValueNode.Nested nested:
+                {
+                    // Resolve the struct/class Type the SAME way ReadNested does, then map each
+                    // PUBLIC member key back to its serialized child name before
+                    // FindPropertyRelative. A key that does not map through it (the type itself
+                    // doesn't resolve, or this specific key isn't a known public spelling) falls back
+                    // to FindPropertyRelative(key) verbatim -- this is what keeps a legacy
+                    // raw-serialized-name builder writing correctly.
+                    var rootType = p.serializedObject.targetObject?.GetType();
+                    var structType = rootType != null ? SerializedMemberMap.ResolveManagedFieldType(rootType, p.propertyPath) : null;
+
                     foreach (var (key, child) in nested.Fields)
                     {
-                        var childProp = p.FindPropertyRelative(key);
+                        var serializedKey = structType != null && SerializedMemberMap.TrySerializedName(structType, key, out var mapped)
+                            ? mapped
+                            : key;
+                        var childProp = p.FindPropertyRelative(serializedKey);
                         if (childProp != null)
                         {
                             WriteProperty(childProp, child);
@@ -384,6 +422,7 @@ namespace SceneBuilder.Editor
                     }
 
                     break;
+                }
                 case ValueNode.Unsupported:
                     // No-op (flagged upstream); never overwrite an unsupported value.
                     break;
@@ -415,110 +454,46 @@ namespace SceneBuilder.Editor
             }
         }
 
+        // Resolves the backing enum Type via SerializedMemberMap and writes via Enum.Parse OR'd into
+        // p.intValue for every member (correct for a single member or a flags combination alike —
+        // never p.enumValueIndex, measured -1 for a non-contiguous/combined value). Only when the
+        // map returns null (unresolved backing type) does this fall back to a p.enumNames
+        // display-name match on a non-flags node; refuses (warns, writes nothing) rather than guess.
         private static void WriteEnum(SerializedProperty p, ValueNode.Enum e)
         {
-            if (e.IsFlags)
+            var targetType = p.serializedObject.targetObject?.GetType();
+            var type = targetType != null ? SerializedMemberMap.ResolveEnumType(targetType, p.propertyPath) : null;
+
+            if (type != null)
             {
-                var type = ResolveFieldType(p.serializedObject.targetObject, p.propertyPath);
-                if (type == null || !type.IsEnum)
+                if (SerializedMemberMap.TryEnumValue(type, e.Members, out var value))
                 {
-                    Debug.LogWarning($"[SceneBuilder] Could not resolve [Flags] enum type for '{p.propertyPath}'.");
+                    p.intValue = value;
                     return;
                 }
 
-                long mask = 0;
-                foreach (var member in e.Members)
-                {
-                    mask |= Convert.ToInt64(Enum.Parse(type, member));
-                }
-
-                p.intValue = (int)mask;
+                Debug.LogWarning(
+                    $"[SceneBuilder] Enum member(s) '{string.Join("|", e.Members)}' could not be parsed as " +
+                    $"'{type.FullName}' for '{p.propertyPath}'.");
                 return;
             }
 
-            if (e.Members.Count == 0)
+            if (!e.IsFlags && e.Members.Count > 0)
             {
-                return;
-            }
-
-            var names = p.enumNames;
-            var target = e.Members[0];
-            for (var i = 0; i < names.Length; i++)
-            {
-                if (names[i] == target)
+                var names = p.enumNames;
+                var target = e.Members[0];
+                for (var i = 0; i < names.Length; i++)
                 {
-                    p.enumValueIndex = i;
-                    return;
-                }
-            }
-
-            Debug.LogWarning($"[SceneBuilder] Enum member '{target}' not found on '{p.propertyPath}'.");
-        }
-
-        // ---- Reflection: resolve a serialized propertyPath to its managed field type ---------
-
-        /// <summary>
-        /// Walks a Unity serialized <paramref name="path"/> against <paramref name="root"/>'s managed
-        /// type via reflection, returning the leaf field's <see cref="Type"/>, or null when the path
-        /// has no managed C# field (e.g. a built-in native serialized field). Used to recover enum
-        /// types (names/bits) that <see cref="SerializedProperty"/> alone does not expose.
-        /// </summary>
-        public static Type? ResolveFieldType(UnityEngine.Object root, string path)
-        {
-            if (root == null || string.IsNullOrEmpty(path))
-            {
-                return null;
-            }
-
-            var type = root.GetType();
-            var normalized = path.Replace(".Array.data[", "[");
-            foreach (var rawElement in normalized.Split('.'))
-            {
-                var name = rawElement;
-                var isElement = false;
-                var bracket = name.IndexOf('[');
-                if (bracket >= 0)
-                {
-                    name = name.Substring(0, bracket);
-                    isElement = true;
-                }
-
-                var field = GetFieldRecursive(type!, name);
-                if (field == null)
-                {
-                    return null;
-                }
-
-                type = field.FieldType;
-                if (isElement)
-                {
-                    if (type.IsArray)
+                    if (names[i] == target)
                     {
-                        type = type.GetElementType();
-                    }
-                    else if (type.IsGenericType)
-                    {
-                        type = type.GetGenericArguments()[0];
+                        p.enumValueIndex = i;
+                        return;
                     }
                 }
             }
 
-            return type;
-        }
-
-        private static FieldInfo? GetFieldRecursive(Type type, string name)
-        {
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-            for (Type? t = type; t != null; t = t.BaseType)
-            {
-                var field = t.GetField(name, flags);
-                if (field != null)
-                {
-                    return field;
-                }
-            }
-
-            return null;
+            var unresolvedTarget = e.Members.Count > 0 ? e.Members[0] : "";
+            Debug.LogWarning($"[SceneBuilder] Enum member '{unresolvedTarget}' not found on '{p.propertyPath}'.");
         }
     }
 }

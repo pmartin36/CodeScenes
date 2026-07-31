@@ -61,7 +61,7 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
-        public void Nested_FieldMap_DeepKeyOrderSignificantEquality()
+        public void Nested_FieldMap_DeepKeyBasedOrderInsensitiveEquality()
         {
             var x = new ValueNode.Primitive(PrimitiveKind.Int, 1);
             var y = new ValueNode.Primitive(PrimitiveKind.Int, 2);
@@ -92,7 +92,11 @@ namespace SceneBuilder.Core.Tests
             var nestedFewer = new ValueNode.Nested("Foo", mapXOnly);
 
             Assert.Equal(nested, nestedAgain);
-            Assert.NotEqual(nested, nestedReordered);
+
+            // Nested-member equality is by KEY, not by position: the parser records the order the
+            // AUTHOR wrote and the live read reports Unity's serialized order, so the same value
+            // arrives with its members in either order.
+            Assert.Equal(nested, nestedReordered);
             Assert.NotEqual(nested, nestedFewer);
         }
 

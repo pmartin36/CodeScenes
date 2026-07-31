@@ -678,14 +678,19 @@ namespace SceneBuilder.Core.Reconcile
                 }
             }
 
+            // Keyless conflicts are EVENTS of this pass (unchanged meaning); a Conflict carrying a
+            // RecurrenceKey is a STANDING condition of the scene+source that will recur on every
+            // reconcile until the user changes one of them, so it is routed into Notes instead. The
+            // same Conflict never appears in both arrays.
             return new ReconcileResult
             {
                 Patch = new SourcePatch { Edits = edits.ToArray() },
-                Conflicts = conflicts.ToArray(),
+                Conflicts = conflicts.Where(c => c.RecurrenceKey is null).ToArray(),
                 AddedEntries = addedEntries.ToArray(),
                 RemovedLogicalIds = removedLogicalIds.ToArray(),
                 Skipped = skippedFields.ToArray(),
                 AddedAssets = DedupAssetsByGuid(addedAssets),
+                Notes = conflicts.Where(c => c.RecurrenceKey is not null).ToArray(),
             };
         }
 

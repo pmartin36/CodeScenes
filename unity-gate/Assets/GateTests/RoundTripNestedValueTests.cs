@@ -278,4 +278,45 @@ public class RoundTripScene : ISceneDefinition
         StringAssert.DoesNotContain(".Set(\"Pair\"", rewritten,
             "Builder source emitted a .Set(\"Pair\", ...) call for an unresolvable generic field.\n" + rewritten);
     }
+
+    // #7 the fill's inverse: a code->scene rebuild fills an inner struct's OMITTED representable
+    // member from the type default, at the inner level too — not just the outer level — so a stale
+    // live value the source never authored resets, and the rebuild reaches a fixed point.
+    [Test]
+    public void CodeToScene_PartiallyAuthoredInnerStruct_ResetsInnerOmittedMemberToDefault()
+    {
+        // Phase 1: build the object alone so it is mapped in the sidecar.
+        File.WriteAllText(_builderPath, Source("        var enemy = scene.Add(\"Enemy\");"));
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        // Phase 2: author the component, setting only the inner struct's "a" member.
+        File.WriteAllText(_builderPath, Source(
+            "        var enemy = scene.Add(\"Enemy\");\n" +
+            "        enemy.Component<GateFixtures.NestedInNestedFixtureBehaviour>(c => c.Set(\"Deep\", new GateFixtures.DeepOuter { y = 1f, inner = new GateFixtures.DeepInner { a = 2f } }));"));
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+
+        var enemy = FindRoot(EditorSceneManager.GetActiveScene(), "Enemy");
+        Assert.IsNotNull(enemy, "Enemy was not created by SceneBuilderBuild.Run");
+        var behaviour = enemy.GetComponent<GateFixtures.NestedInNestedFixtureBehaviour>();
+        Assert.IsNotNull(behaviour, "Authored NestedInNestedFixtureBehaviour was not materialized on Enemy");
+        Assert.AreEqual(2f, behaviour.Deep.inner.a, "Authored inner.a=2 did not materialize");
+        Assert.AreEqual(1f, behaviour.Deep.y, "Authored y=1 did not materialize");
+
+        // The live inner struct member the source never authored drifts away from the type default.
+        behaviour.Deep.inner.b = 5f;
+
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var rebuilt = enemy.GetComponent<GateFixtures.NestedInNestedFixtureBehaviour>();
+        Assert.AreEqual(0f, rebuilt.Deep.inner.b, "Rebuild did not reset the omitted inner member to its type default");
+        Assert.AreEqual(2f, rebuilt.Deep.inner.a, "Rebuild lost the authored inner.a=2");
+        Assert.AreEqual(1f, rebuilt.Deep.y, "Rebuild lost the authored y=1");
+
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        var settled = enemy.GetComponent<GateFixtures.NestedInNestedFixtureBehaviour>();
+        Assert.AreEqual(0f, settled.Deep.inner.b, "NOT CONVERGED: a second rebuild changed the reset inner member");
+        Assert.AreEqual(2f, settled.Deep.inner.a, "NOT CONVERGED: a second rebuild changed inner.a");
+        Assert.AreEqual(1f, settled.Deep.y, "NOT CONVERGED: a second rebuild changed y");
+    }
 }

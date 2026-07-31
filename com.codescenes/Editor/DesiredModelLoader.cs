@@ -103,6 +103,13 @@ namespace SceneBuilder.Editor
             // remapping the field-argument spans in lockstep so span-local field patches still match.
             var (resolved, spans) = AuthoredPathResolver.Resolve(parse.Model, parse.FieldArgumentSpans, parse.Usings);
 
+            // Normalize every enum-backed field (raw int OR an already-typed Enum node) to the SAME
+            // canonical shape SerializedFieldBridge's read produces, via the SAME SerializedMemberMap
+            // resolver — must run AFTER path resolution (it needs serialized paths, e.g. 'm_RenderMode',
+            // not 'member:renderMode') and BEFORE lowering/diffing, so both directions inherit it and a
+            // raw `.Set("m_RenderMode", 0)` never churns against a typed scene-side read.
+            resolved = SerializedEnumNormalizer.Normalize(resolved);
+
             // A LOCATED pre-pass, over the desired-but-unlowered model (serialized paths already
             // resolved above, so the thrown message names 'm_Mesh', not 'member:mesh'): throws on the
             // first unresolvable Builtin(...) or authored built-in-container path, naming the object,

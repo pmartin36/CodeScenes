@@ -65,7 +65,7 @@ namespace SceneBuilder.Core.Tests
             var index = ComponentDefaultOmission.Index.Build(RigidbodyTemplate(ValueNode.Primitive.Float(1f)));
             var fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(1f)) });
 
-            var result = ComponentDefaultOmission.OmitDefaults("UnityEngine.Rigidbody", fields, index);
+            var result = ComponentDefaultOmission.OmitDefaults("UnityEngine.Rigidbody", fields, index, "comp-1", new List<Conflict>());
 
             Assert.Empty(result);
         }
@@ -81,7 +81,7 @@ namespace SceneBuilder.Core.Tests
                 new KeyValuePair<string, ValueNode>("m_UseGravity", ValueNode.Primitive.Bool(true)),
             });
 
-            var result = ComponentDefaultOmission.OmitDefaults("UnityEngine.Rigidbody", fields, index);
+            var result = ComponentDefaultOmission.OmitDefaults("UnityEngine.Rigidbody", fields, index, "comp-1", new List<Conflict>());
 
             var kept = Assert.Single(result);
             Assert.Equal("m_Mass", kept.Key);
@@ -105,7 +105,7 @@ namespace SceneBuilder.Core.Tests
         {
             var fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>("m_Mass", ValueNode.Primitive.Float(1f)) });
 
-            var result = ComponentDefaultOmission.OmitDefaults("UnityEngine.Rigidbody", fields, null);
+            var result = ComponentDefaultOmission.OmitDefaults("UnityEngine.Rigidbody", fields, null, "comp-1", new List<Conflict>());
 
             Assert.Equal(fields, result);
         }

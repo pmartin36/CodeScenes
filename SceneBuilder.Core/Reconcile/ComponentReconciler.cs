@@ -239,10 +239,25 @@ namespace SceneBuilder.Core.Reconcile
                         continue;
                     }
 
+                    // The type's constructed default for this field, when known — the ONE basis both
+                    // the comparison below and the emitted value's reduction share, per spec 32 C4.
+                    var fieldDefault = defaults?.TryGetDefault(sourceComp.Type.FullName, fieldKey);
+
                     if (sourceComp.Fields.TryGetValue(fieldKey, out var srcVal))
                     {
-                        if (Equals(srcVal, snapVal) && AuthoredTextIsCurrent(srcVal, snapVal))
+                        if (Equals(NestedValueEmission.Emittable(srcVal, fieldDefault), NestedValueEmission.Emittable(snapVal, fieldDefault))
+                            && AuthoredTextIsCurrent(srcVal, snapVal))
                         {
+                            // Nothing to patch, but a Nested field whose projection excludes every
+                            // member still owes its standing note here -- an Unsupported member's
+                            // marker can never prove the live value UNCHANGED, so this branch would
+                            // otherwise be the one place that decision is never reached at all.
+                            if (snapVal is ValueNode.Nested)
+                            {
+                                NestedValueEmission.Project(snapVal, fieldDefault)
+                                    .IsEmptyNested(sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, conflicts);
+                            }
+
                             continue;
                         }
 
@@ -293,14 +308,21 @@ namespace SceneBuilder.Core.Reconcile
                             && fieldArgumentSpans.TryGetValue(sourceComp.LogicalId, out var compSpans)
                             && compSpans.TryGetValue(fieldKey, out var valueSpan))
                         {
+                            // Render only the members that differ from the type's constructed default
+                            // (spec 32 C4) — never the live value's full member set. The located
+                            // conflict for an excluded member is raised only now that this pass has
+                            // committed to emitting the rest of the value, never during projection.
+                            var projection = NestedValueEmission.Project(snapVal, fieldDefault);
+                            var emittedVal = projection.Value;
+
                             // A spatial enum-axis flip (SurfaceSnap vertical/horizontal/depth: Down->Up)
                             // patches the WHOLE-argument span (see BuilderParser.Spatial) with the
                             // authoring keyword form `up: true` via RenderKeyValue — the keyword itself
                             // carries the member, so the value-only ValueNodeLiteral would splice an
                             // invalid `SurfaceSnap+Vertical.Up` FQN into the `down:` slot.
-                            var patchExpr = SpatialComponentSource.IsSpatial(sourceComp.Type.FullName) && snapVal is ValueNode.Enum
-                                ? SpatialComponentSource.RenderKeyValue(fieldKey, snapVal, string.Empty)
-                                : RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, assetCatalog);
+                            var patchExpr = SpatialComponentSource.IsSpatial(sourceComp.Type.FullName) && emittedVal is ValueNode.Enum
+                                ? SpatialComponentSource.RenderKeyValue(fieldKey, emittedVal, string.Empty)
+                                : RenderFieldValue(emittedVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, assetCatalog);
                             edits.Add(new PatchComponentField
                             {
                                 Anchor = sourceComp.LogicalId,
@@ -308,7 +330,8 @@ namespace SceneBuilder.Core.Reconcile
                                 NewExpr = patchExpr,
                             });
 
-                            CollectAssetEntries(snapVal, addedAssets);
+                            projection.ReportExclusions(sourceComp.LogicalId, fieldKey, conflicts);
+                            CollectAssetEntries(emittedVal, addedAssets);
                         }
                         else if (fieldArgumentSpans != null)
                         {
@@ -319,6 +342,36 @@ namespace SceneBuilder.Core.Reconcile
                         }
 
                         // fieldArgumentSpans == null: legacy no-op, no conflict.
+                    }
+                    else if (snapVal is ValueNode.Nested)
+                    {
+                        // Newly-detected NESTED field: present in snapshot, absent from source. Its
+                        // default-ness is decided per-MEMBER (spec 32 C4) via Project rather than
+                        // whole-node equality -- an Unsupported member carries no observable value
+                        // (its marker text never encodes the live value), so whole-node equality can
+                        // never prove it unchanged. A field that projects to nothing is never
+                        // introduced; IsEmptyNested still reports a standing note when it excluded a
+                        // member, so a struct with no representable member is never dropped in silence.
+                        var introducedProjection = NestedValueEmission.Project(snapVal, fieldDefault);
+                        if (introducedProjection.IsEmptyNested(
+                            sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, conflicts))
+                        {
+                            continue;
+                        }
+
+                        var introducedVal = introducedProjection.Value;
+
+                        edits.Add(new IntroduceComponentField
+                        {
+                            Anchor = sourceComp.LogicalId,
+                            FieldKey = fieldKey,
+                            Value = introducedVal,
+                            NewExpr = null,
+                        });
+
+                        introducedProjection.ReportExclusions(sourceComp.LogicalId, fieldKey, conflicts);
+
+                        CollectAssetEntries(introducedVal, addedAssets);
                     }
                     else
                     {
@@ -518,7 +571,7 @@ namespace SceneBuilder.Core.Reconcile
         {
             var componentLogicalId = $"{ownerEffectiveId}/{typeFullName}#{ordinal}";
 
-            fields = ComponentDefaultOmission.OmitDefaults(typeFullName, fields, defaults);
+            fields = ComponentDefaultOmission.OmitDefaults(typeFullName, fields, defaults, componentLogicalId, conflicts);
 
             // Pre-render every ObjectRef field's expression at EMIT time (mirroring
             // RenderFieldValue's field-diff use below) instead of leaving it in Fields for

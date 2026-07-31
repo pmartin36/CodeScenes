@@ -139,7 +139,7 @@ namespace SceneBuilder.Core.Reconcile
                     ParentPath = snapshotAdded.Parent.ChildPath,
                     ParentSelectorExpr = parentSelectorExpr,
                     Name = snapshotAdded.Node.Name,
-                    Node = OmitDefaultsFromNode(snapshotAdded.Node, defaults),
+                    Node = OmitDefaultsFromNode(snapshotAdded.Node, defaults, instanceLogicalId, conflicts),
                     RectTransform = rectTransformPayload,
                 });
             }
@@ -165,7 +165,8 @@ namespace SceneBuilder.Core.Reconcile
         // to a snapshot-only added child's own components before it is carried into an
         // AppendInstanceAddChild edit (one of the four
         // emission sites, not covered by ComponentReconciler.EmitComponentAppend).
-        private static GameObjectNode OmitDefaultsFromNode(GameObjectNode node, ComponentDefaultOmission.Index? defaults)
+        private static GameObjectNode OmitDefaultsFromNode(
+            GameObjectNode node, ComponentDefaultOmission.Index? defaults, string instanceLogicalId, List<Conflict> conflicts)
         {
             if (node.Components.Length == 0)
             {
@@ -176,9 +177,10 @@ namespace SceneBuilder.Core.Reconcile
             for (var i = 0; i < node.Components.Length; i++)
             {
                 var component = node.Components[i];
+                var componentLogicalId = $"{instanceLogicalId}/{component.Type.FullName}#{i}";
                 filtered[i] = component with
                 {
-                    Fields = ComponentDefaultOmission.OmitDefaults(component.Type.FullName, component.Fields, defaults),
+                    Fields = ComponentDefaultOmission.OmitDefaults(component.Type.FullName, component.Fields, defaults, componentLogicalId, conflicts),
                 };
             }
 

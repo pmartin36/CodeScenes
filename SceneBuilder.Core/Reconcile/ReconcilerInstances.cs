@@ -190,7 +190,7 @@ namespace SceneBuilder.Core.Reconcile
             var prefabGuid = snapshot.SourcePrefabGuid;
 
             ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, assetCatalog);
-            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, assetCatalog, defaults);
+            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, conflicts, assetCatalog, defaults);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
             ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts, defaults);
             ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
@@ -299,6 +299,7 @@ namespace SceneBuilder.Core.Reconcile
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
+            List<Conflict> conflicts,
             AssetCatalog? assetCatalog = null,
             ComponentDefaultOmission.Index? defaults = null)
         {
@@ -320,7 +321,7 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, assetCatalog, defaults);
+                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, conflicts, assetCatalog, defaults);
                 var childPath = snapshotComponent.Target.ChildPath;
 
                 if (string.IsNullOrEmpty(childPath))
@@ -457,6 +458,7 @@ namespace SceneBuilder.Core.Reconcile
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
+            List<Conflict> conflicts,
             AssetCatalog? assetCatalog = null,
             // An added-instance-component field set carries
             // every serialized field the same as EmitComponentAppend's before omission; filter it
@@ -465,7 +467,8 @@ namespace SceneBuilder.Core.Reconcile
         {
             var component = snapshotComponent.Component;
             var typeFullName = component.Type.FullName;
-            var fields = ComponentDefaultOmission.OmitDefaults(typeFullName, component.Fields, defaults);
+            var componentLogicalId = $"{instanceLogicalId}/{typeFullName}";
+            var fields = ComponentDefaultOmission.OmitDefaults(typeFullName, component.Fields, defaults, componentLogicalId, conflicts);
 
             Dictionary<string, string>? fieldExpressions = null;
             foreach (var (fieldKey, value) in fields)

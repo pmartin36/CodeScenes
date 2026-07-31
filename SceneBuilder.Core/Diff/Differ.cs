@@ -300,14 +300,25 @@ namespace SceneBuilder.Core.Diff
                         var known = actualComponent.Fields.TryGetValue(field.Key, out var actualValue)
                             || (typeDefaults.TryGetValue(actualComponent.Type.FullName, out var defaults)
                                 && defaults.TryGetValue(field.Key, out actualValue));
-                        if (!known || actualValue != field.Value)
+
+                        // The field's constructed default, when the type has a template for it — the
+                        // ONE basis both the comparison below and the emitted value's completion
+                        // share (spec 32 C4), so a partial authored nested value compares equal to an
+                        // already-matching live value and, when it differs, carries every REPRESENTABLE
+                        // omitted member reset to its default rather than wiping them silently.
+                        var fieldDefault = typeDefaults.TryGetValue(actualComponent.Type.FullName, out var defaultsForReduce)
+                            && defaultsForReduce.TryGetValue(field.Key, out var defaultValue)
+                                ? defaultValue
+                                : null;
+
+                        if (!known || NestedValueEmission.Emittable(actualValue, fieldDefault) != NestedValueEmission.Emittable(field.Value, fieldDefault))
                         {
                             setFieldOps.Add(new SetField
                             {
                                 LogicalId = ownerLogicalId,
                                 ComponentLogicalId = desiredComponent.LogicalId,
                                 Path = field.Key,
-                                Value = field.Value,
+                                Value = NestedValueEmission.Complete(field.Value, fieldDefault),
                             });
                         }
                     }

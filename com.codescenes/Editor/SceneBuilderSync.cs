@@ -68,6 +68,15 @@ namespace SceneBuilder.Editor
             /// the prior code value lives in the source's `// CONFLICT:` marker, not here.
             /// </summary>
             public string[] ConflictFields { get; set; } = System.Array.Empty<string>();
+
+            /// <summary>
+            /// Standing conditions this sync actually surfaced (post session-dedupe) -- a fact of the
+            /// scene+source that recurs on every reconcile until the user changes one of them, never
+            /// an event of this pass. Distinct from <see cref="Conflicts"/>, which never carries a
+            /// recurring report twice: the same underlying condition appears here at most once per
+            /// editor session, even across many syncs.
+            /// </summary>
+            public Conflict[] Notes { get; set; } = System.Array.Empty<Conflict>();
         }
 
         /// <summary>
@@ -228,6 +237,10 @@ namespace SceneBuilder.Editor
                 Debug.LogWarning($"[SceneBuilder] Unsupported field on '{s.LogicalId}' path '{s.Path}' — left untouched.");
             }
 
+            // Standing conditions (Conflict.RecurrenceKey set) surface at most once per editor
+            // session — a struct with no representable member must not log on every single sync.
+            var surfacedNotes = ConflictSurfacing.SurfaceNotes(result.Notes, builderPath);
+
             var hasSourceEdits = result.Patch.Edits.Length > 0;
             var hasMapDelta = result.AddedEntries.Length > 0 || result.RemovedLogicalIds.Length > 0;
 
@@ -248,6 +261,7 @@ namespace SceneBuilder.Editor
                     Conflicts = conflicts,
                     Changed = false,
                     PatchEdits = result.Patch.Edits.Length,
+                    Notes = surfacedNotes.ToArray(),
                 };
             }
 
@@ -315,6 +329,7 @@ namespace SceneBuilder.Editor
                 // writes below route through WriteIfChanged, so this is now an observation, not a claim.
                 Changed = editsApplied > 0 || sidecarWritten,
                 CompileErrors = compileErrors,
+                Notes = surfacedNotes.ToArray(),
             };
         }
 
@@ -496,6 +511,11 @@ namespace SceneBuilder.Editor
                 Debug.LogWarning($"[SceneBuilder] Conflict ({c.Kind}) on '{c.LogicalId}': {c.Reason}");
             }
 
+            // Only `applicable`'s notes (new source vs live) are surfaced — `sceneReconcile` exists
+            // purely to compute which fields the SCENE changed and would double-report the same
+            // standing condition `applicable` already reports.
+            var surfacedNotes = ConflictSurfacing.SurfaceNotes(applicable.Notes, builderPath);
+
             var assetMerge = AssetCacheMerge.Merge(map.Assets, applicable.AddedAssets);
             var hasMapDelta = applicable.AddedEntries.Length > 0 || applicable.RemovedLogicalIds.Length > 0;
             var hasAssetDelta = assetMerge.ChangedCount > 0;
@@ -505,6 +525,7 @@ namespace SceneBuilder.Editor
                 PatchEdits = applicable.Patch.Edits.Length,
                 Conflicts = syncConflicts,
                 ConflictFields = conflicts.Select(c => $"{c.Key.Group}.{c.Key.Field}").ToArray(),
+                Notes = surfacedNotes.ToArray(),
             };
 
             if (keptEdits.Count == 0 && !hasMapDelta && !hasAssetDelta)

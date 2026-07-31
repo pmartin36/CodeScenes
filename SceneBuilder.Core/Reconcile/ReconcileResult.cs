@@ -21,5 +21,12 @@ namespace SceneBuilder.Core.Reconcile
         // flagged in BOTH previews). REUSES Plan.SkippedField (same shape). Populated by
         // Reconciler.Reconcile from ComponentReconciler's Unsupported-skip pass.
         public SkippedField[] Skipped { get; init; } = System.Array.Empty<SkippedField>();
+
+        // A STANDING condition (Conflict.RecurrenceKey set) rather than an EVENT of this pass:
+        // a fact of the scene+source that recurs on every reconcile until the user changes one of
+        // them. Disjoint from Conflicts, which carries only keyless (per-pass event) reports;
+        // the same Conflict never appears in both arrays. Distinct from Skipped, which names a
+        // field the emit side left untouched with no located reason attached.
+        public Conflict[] Notes { get; init; } = System.Array.Empty<Conflict>();
     }
 }

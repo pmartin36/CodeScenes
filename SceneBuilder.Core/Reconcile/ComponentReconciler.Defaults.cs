@@ -44,15 +44,81 @@ namespace SceneBuilder.Core.Reconcile
                 _byTypeFullName.TryGetValue(typeFullName, out var template)
                 && template.TryGetValue(fieldKey, out var defaultValue)
                 && Equals(defaultValue, value);
+
+            // The field's constructed-default value, when a template for the type carries one —
+            // `null` means "no basis to reduce/complete this field", the same "no template" and
+            // "field absent from an otherwise-present template" cases IsDefault above treats as
+            // "not default" rather than guessing.
+            internal ValueNode? TryGetDefault(string typeFullName, string fieldKey) =>
+                _byTypeFullName.TryGetValue(typeFullName, out var template)
+                && template.TryGetValue(fieldKey, out var defaultValue)
+                    ? defaultValue
+                    : null;
+        }
+
+        // "Is this live field value at its default" for the C2 removal rule. A non-Nested value uses
+        // the plain whole-value equality gate. A Nested value is at its default when its
+        // REPRESENTABLE projection is empty -- a residual member with no compiling emission form
+        // (whose marker can never prove equality either way) must never block a removal, and never
+        // route the field into the patch branch where it would render a senseless empty initializer.
+        // Never claims default without a basis: a type with no template projects to itself unreduced,
+        // never empty, so a template-less type is never claimed to be at its default.
+        private static bool IsAtDefault(
+            Index index,
+            string typeFullName,
+            string componentLogicalId,
+            string fieldKey,
+            ValueNode snapshotValue,
+            List<Conflict> conflicts)
+        {
+            if (snapshotValue is not ValueNode.Nested)
+            {
+                return index.IsDefault(typeFullName, fieldKey, snapshotValue);
+            }
+
+            var fieldDefault = index.TryGetDefault(typeFullName, fieldKey);
+            return fieldDefault != null
+                && NestedValueEmission.Project(snapshotValue, fieldDefault)
+                    .IsEmptyNested(componentLogicalId, typeFullName, fieldKey, conflicts);
         }
 
         // `defaults` null (Index.Empty semantics) keeps every field — never drop user data for a
-        // type with no template.
-        internal static FieldMap OmitDefaults(string typeFullName, FieldMap fields, Index? defaults)
+        // type with no template. A NESTED field's default-ness is decided per-MEMBER (spec 32 C4) via
+        // NestedValueEmission.Project rather than whole-node equality: an Unsupported member carries
+        // no observable value (its marker text never encodes the live value), so whole-node equality
+        // can never prove it unchanged, and the member must never be silently dropped as "at default"
+        // on that basis alone. A non-Nested field keeps the plain whole-value equality gate, unchanged.
+        internal static FieldMap OmitDefaults(
+            string typeFullName, FieldMap fields, Index? defaults, string componentLogicalId, List<Conflict> conflicts)
         {
             defaults ??= Index.Empty;
 
-            return new FieldMap(fields.Where(field => !defaults.IsDefault(typeFullName, field.Key, field.Value)));
+            var kept = new List<KeyValuePair<string, ValueNode>>();
+            foreach (var field in fields)
+            {
+                if (field.Value is not ValueNode.Nested)
+                {
+                    if (defaults.IsDefault(typeFullName, field.Key, field.Value))
+                    {
+                        continue;
+                    }
+
+                    kept.Add(field);
+                    continue;
+                }
+
+                var fieldDefault = defaults.TryGetDefault(typeFullName, field.Key);
+                var projection = NestedValueEmission.Project(field.Value, fieldDefault);
+                if (projection.IsEmptyNested(componentLogicalId, typeFullName, field.Key, conflicts))
+                {
+                    continue;
+                }
+
+                kept.Add(new KeyValuePair<string, ValueNode>(field.Key, projection.Value));
+                projection.ReportExclusions(componentLogicalId, field.Key, conflicts);
+            }
+
+            return new FieldMap(kept);
         }
 
         // The ONE scene->code default-reset decision — the mirror of OmitDefaults above, for a
@@ -70,7 +136,14 @@ namespace SceneBuilder.Core.Reconcile
             List<Conflict> conflicts)
         {
             var index = defaults ?? Index.Empty;
-            if (!index.IsDefault(sourceComp.Type.FullName, fieldKey, snapshotValue))
+
+            // Buffered, then merged only on a branch that HANDLES the field. The decision reports
+            // as it is made (a nested value with nothing representable left to say is otherwise
+            // discarded in silence), but the last branch below declines the field entirely, and a
+            // report for a field this pass did not handle would be raised again by whichever pass
+            // does.
+            var decisionConflicts = new List<Conflict>();
+            if (!IsAtDefault(index, sourceComp.Type.FullName, sourceComp.LogicalId, fieldKey, snapshotValue, decisionConflicts))
             {
                 return false;
             }
@@ -80,6 +153,7 @@ namespace SceneBuilder.Core.Reconcile
             // silent drop, and never a "vertical: " empty-argument splice.
             if (SpatialComponentSource.IsSpatial(sourceComp.Type.FullName))
             {
+                conflicts.AddRange(decisionConflicts);
                 conflicts.Add(ConflictDetector.UnremovableClosedGrammarField(
                     sourceComp.LogicalId, fieldKey,
                     ComponentReconciler.DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
@@ -90,6 +164,7 @@ namespace SceneBuilder.Core.Reconcile
                 && fieldArgumentSpans.TryGetValue(sourceComp.LogicalId, out var compSpans)
                 && compSpans.TryGetValue(fieldKey, out var valueSpan))
             {
+                conflicts.AddRange(decisionConflicts);
                 edits.Add(new RemoveComponentField
                 {
                     Anchor = sourceComp.LogicalId,
@@ -104,6 +179,7 @@ namespace SceneBuilder.Core.Reconcile
                 // Span data was supplied but this field has none: not localizable to a single source
                 // construct — the SAME conflict the ordinary patch path raises for a span-less field,
                 // never a silent drop of the pending removal.
+                conflicts.AddRange(decisionConflicts);
                 conflicts.Add(ConflictDetector.UnanchorableComponentEdit(sourceComp.LogicalId, $"remove field '{fieldKey}'"));
                 return true;
             }

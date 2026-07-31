@@ -68,8 +68,8 @@ namespace SceneBuilder.Editor
         /// <summary>
         /// Parses <see cref="SerializedProperty.type"/> (<c>"PPtr&lt;$X&gt;"</c>) into the field's
         /// wanted reference <see cref="Type"/>. This is the UNIVERSAL source — unlike
-        /// <see cref="SerializedFieldBridge.ResolveFieldType"/> it works for NATIVE serialized fields
-        /// too (e.g. <c>HingeJoint.connectedBody</c>, which has no managed C# <c>FieldInfo</c>). Also
+        /// <see cref="SerializedMemberMap.ResolveManagedFieldType"/> it works for NATIVE serialized
+        /// fields too (e.g. <c>HingeJoint.connectedBody</c>, which has no managed C# <c>FieldInfo</c>). Also
         /// reused (M5, read side) by <see cref="IsSceneObjectField"/> to classify a null field without
         /// re-parsing PPtr.
         /// </summary>

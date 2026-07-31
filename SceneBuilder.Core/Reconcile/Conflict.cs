@@ -31,7 +31,14 @@ namespace SceneBuilder.Core.Reconcile
         // InstanceHandle has no such member, see InstanceHandle.cs). Emitting the edit would produce
         // source that does not compile, so it is surfaced as a located Conflict instead and NO edit
         // is emitted.
-        UnlocalizableRectTransform
+        UnlocalizableRectTransform,
+
+        // A member of a nested struct/class field has no compiling emission form (an asset or
+        // scene-object reference held inside the struct, or a serialized member with no public
+        // spelling) and is at a NON-default value. Emitting it would produce source that does not
+        // compile, so the member is excluded from the initializer and reported here instead. Never
+        // raised for a member AT its type default (nothing was excluded that a user would notice).
+        UnrepresentableValue,
     }
 
     public sealed record Conflict
@@ -41,5 +48,12 @@ namespace SceneBuilder.Core.Reconcile
         public ConflictKind Kind { get; init; }
         public string Reason { get; init; } = "";
         public SourceSpan? Location { get; init; }
+
+        // Identity of the STANDING condition this report describes -- a fact of the scene+source
+        // that recurs on every reconcile until the user changes one of them, not an event of this
+        // pass. Two reports with the same key are the same report: Reconciler routes them to
+        // ReconcileResult.Notes and a surfacing channel shows one of them, once per editor session.
+        // Null = an event, surfaced every time it happens.
+        public string? RecurrenceKey { get; init; }
     }
 }
