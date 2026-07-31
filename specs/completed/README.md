@@ -23,15 +23,20 @@ into an expression-bodied closure, `.Component<Canvas>()` building a World Space
 `Canvas.m_SortingOrder` never syncing scene→code. Per the lesson recorded from this milestone, a milestone
 does not absorb pre-existing bugs found next door; each gets its own spec.
 
-31 is the one entry here NOT live-verified: the reader must surface every field Unity hides from the
-default inspector, not just what `NextVisible` draws. It landed gate-green at 458 and recovered
-component enable/disable syncing plus Canvas/Rigidbody/MeshRenderer hidden state, but its live
-confirmation never ran.
+31 is the one entry here without a dedicated live pass: the reader must surface every field Unity
+hides from the default inspector, not just what `NextVisible` draws. It landed gate-green at 458 and
+recovered component enable/disable syncing plus Canvas/Rigidbody/MeshRenderer hidden state. Partial
+live evidence arrived incidentally on 2026-07-31 — `Rigidbody.constraints`, one of the fields 31
+recovered, round-trips correctly in a real editor — but 31's headline claim, component
+enable/disable syncing scene->code, still has no live confirmation.
 
-32 is CLOSED NARROWED and IS live-verified (2026-07-31): the typed native enum applies and survives a
-sync byte-identical, reset-to-default removes the setter 3/3, a code-authored Canvas builds Screen
-Space - Overlay with all three modes reaching code, and ColorBlock/FontData emit compiling
-public-property initializers that converge with zero edits on a second sync. It delivered its two
+32 is CLOSED NARROWED and IS live-verified (2026-07-31): typed native enums apply and survive a sync
+byte-identical across BOTH shapes — simple (`Canvas.renderMode`) and flags (`Rigidbody.constraints`,
+including out-of-order authoring, the composite `FreezeAll` member, and zero-bit removal, with the
+authored member order preserved rather than re-emitted canonically); reset-to-default removes the
+setter 3/3; a code-authored Canvas builds Screen Space - Overlay with all three modes reaching code;
+and ColorBlock/FontData emit compiling public-property initializers that converge with zero edits on
+a second sync. It delivered its two
 owners — the per-type default template (C2+C3) and the value representation contract (C1+C4), plus
 `ValueWalk.cs` as the single walk every value path uses — at `passed=517 failed=0`, mutation-checked,
 with every prior test surviving unweakened. But it is gate-verified only, and every one of its six

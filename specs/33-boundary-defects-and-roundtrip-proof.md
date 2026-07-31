@@ -89,30 +89,26 @@ tried." This suite closes the difference. Do NOT restate it as "cross-class cove
 matrix to whoever builds it; the specific holes are enumerated below because they are what the sweep
 did not touch.
 
-**What the 2026-07-31 sweep DID cover:** one typed non-flags enum (`Canvas.renderMode`); three
-reset-to-default cases (Image colour, sprite to null, Canvas enum); the Canvas default plus all three
-render modes; `ColorBlock` at one and three changed members and `FontData` at two, with a compile
-check, convergence, a hand-reorder, and a partial initializer.
+**Already measured live, so NOT in scope here:** simple typed enums (`Canvas.renderMode`), FLAGS
+enums (`Rigidbody.constraints` — multi-bit, out-of-order authoring, the composite `FreezeAll` member,
+and zero-bit removal, all round-tripping typed with authored order preserved and no churn), three
+reset-to-default cases, the Canvas default plus all three render modes, and `ColorBlock`/`FontData`
+emission with a compile check, convergence, hand-reorder and partial initializer.
 
-**What it did NOT cover, in priority order:**
+**Required coverage of the suite this spec BUILDS:**
 
-1. **FLAGS enums — the gap that matters most.** `Rigidbody.constraints` is a bitmask and travels a
-   different path from a simple enum: the reader builds a member list from set bits rather than one
-   index, and the writer must OR them back. C1 claims "native enums round-trip typed" on the evidence
-   of a NON-flags enum only. `constraints` is also a field spec 31 specifically recovered, so it is
-   doubly worth covering. Round-trip it typed, both directions, multi-bit and zero-bit.
-2. **Components beyond Canvas / Image / Button / Text.** Nothing was exercised on `Rigidbody`,
-   `Camera`, `MeshRenderer`, `SpriteRenderer`, or `Light`.
-3. **A struct nested inside a struct.** `ValueWalk` exists precisely for recursion depth, and the
-   sweep only reached `ColorBlock` and its members. Deep nesting is the thing the shared walk was
-   built to make safe and it has no live evidence.
-4. **Prefab-instance context.** UI inside a prefab instance reads through `PrefabInstanceProbe`, a
-   separate path.
-5. **Lists of structs.** `ExcludeUnrepresentable` deliberately does not filter list items (recorded
-   as an explicit `InList` flag rather than an unstated omission); nothing verified that choice live.
+1. **Components beyond Canvas / Image / Button / Text / Rigidbody** — at minimum `Camera`,
+   `MeshRenderer`, `SpriteRenderer`, `Light`.
+2. **A struct nested inside a struct.** `ValueWalk` exists precisely for recursion depth and nothing
+   deeper than `ColorBlock` and its members has live evidence. This is the shared walk's whole reason
+   to exist, so the suite must reach at least two levels.
+3. **Prefab-instance context.** UI inside a prefab instance reads through `PrefabInstanceProbe`, a
+   separate path from the plain reader.
+4. **Lists of structs.** `ExcludeUnrepresentable` deliberately does not filter list items (carried as
+   an explicit `InList` flag rather than an unstated omission); the suite must pin that choice.
 
-Every one of spec 32's six defect classes was invisible to a 458-test batchmode gate, so a live pass
-is mandatory here, not optional. Gate-green has proven insufficient on this codebase twice.
+Every one of spec 32's six defect classes was invisible to a 458-test batchmode gate, so this suite's
+live pass is mandatory, not optional. Gate-green has proven insufficient on this codebase twice.
 
 ## Starting-state caveat — read before trusting `main`
 

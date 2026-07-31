@@ -161,9 +161,18 @@ entangled through the default template), then C5 and C6.
 `passed=517 failed=0` with every bucket-b2 test surviving the structural refactor unweakened and each
 fix mutation-checked. Auto-sync stayed alive throughout; zero `error CS`, no `DOES NOT COMPILE`.
 
-- **C1** — the previously-broken `c.Set(x => x.renderMode, RenderMode.ScreenSpaceCamera)` applies
-  (live `"Screen Space - Camera"`) and survives a sync byte-identical (same sha before/after). No
-  "enum member not found", no rewrite to the non-compiling `, 0)` form.
+- **C1, simple enums** — the previously-broken `c.Set(x => x.renderMode, RenderMode.ScreenSpaceCamera)`
+  applies (live `"Screen Space - Camera"`) and survives a sync byte-identical (same sha before/after).
+  No "enum member not found", no rewrite to the non-compiling `, 0)` form.
+- **C1, FLAGS enums** — `Rigidbody.constraints` round-trips typed on both axes. Scene→code emits
+  `RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezeRotationX` for live mask 20;
+  code→scene ORs correctly from members written out of bit order and unqualified (mask 42); the
+  composite member `FreezeAll` round-trips AS `FreezeAll` rather than expanding into six; a forced
+  rewrite preserves the AUTHORED member order instead of re-emitting canonically, which is the
+  specific churn risk for a bitmask; and zero-bit removes the setter entirely, so C2's rule holds
+  here too. Note this field is `SerializedPropertyType.Integer`, not `Enum`, and is hidden from the
+  visible iterator — so it also exercises spec 31's hidden-field path on one of the fields 31
+  recovered.
 - **C2** — reset-to-default REMOVES the setter, 3/3: colour to white, sprite to null, enum to
   default each collapsed the statement to `.Component<Image>()`.
 - **C3** — a code-authored `.Component<Canvas>()` now builds Screen Space - Overlay, and all three
