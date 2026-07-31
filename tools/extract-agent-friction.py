@@ -7,7 +7,8 @@ recurrence counts. Renders docs/agent-friction.md from that JSON.
 
 Runs unattended and is incremental: each log is consumed by byte offset, so a
 log that grows mid-session contributes only its new lines rather than being
-re-counted from the top. A message already present increments its count rather
+re-counted from the top. A head fingerprint catches a log path REUSED by a
+later session, which offset alone would misread as growth. A message already present increments its count rather
 than adding a row. Safe to run on every agent stop.
 
 Classification comes from the stack trace, not from judgement:
@@ -107,12 +108,19 @@ def main(argv):
             continue
         key = str(log.resolve())
         size = log.stat().st_size
-        consumed = state["seen_logs"].get(key, 0)
-        if not isinstance(consumed, int):
-            consumed = 0  # migrate from the old signature format
+        # A log path can be REUSED by a later session, which truncates and starts
+        # over. Offset alone cannot tell that from growth, and guessing "it grew"
+        # would silently skip the new session's opening lines. Fingerprint the
+        # head: if it changed, this is a different log wearing the same name.
+        with log.open("rb") as fh:
+            head = hashlib.sha256(fh.read(512)).hexdigest()[:16]
+        prev = state["seen_logs"].get(key)
+        consumed = prev.get("bytes", 0) if isinstance(prev, dict) else 0
+        if not isinstance(prev, dict) or prev.get("head") != head:
+            consumed = 0  # new file, or migrating from an older state format
         if consumed > size:
-            consumed = 0  # file was replaced, not appended to
-        if consumed == size:
+            consumed = 0  # truncated
+        if consumed == size and isinstance(prev, dict):
             continue  # nothing new since last pass
         for norm, verbatim, cls in parse(log, consumed):
             e = state["entries"].setdefault(
@@ -123,7 +131,7 @@ def main(argv):
             e["count"] += 1
             e["last_seen"] = today
             e["class"] = cls
-        state["seen_logs"][key] = size
+        state["seen_logs"][key] = {"bytes": size, "head": head}
         folded += 1
 
     if not folded:
@@ -132,7 +140,11 @@ def main(argv):
     STATE.parent.mkdir(parents=True, exist_ok=True)
     STATE.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
 
-    rows = sorted(state["entries"].values(), key=lambda e: (-e["count"], e["class"]))
+    everything = list(state["entries"].values())
+    rows = sorted([e for e in everything if e.get("status", "open") == "open"],
+                  key=lambda e: (-e["count"], e["class"]))
+    done = sorted([e for e in everything if e.get("status", "open") != "open"],
+                  key=lambda e: -e["count"])
     out = [
         "# Agent friction log",
         "",
@@ -149,6 +161,14 @@ def main(argv):
     for e in rows:
         msg = e["verbatim"].replace("|", "\\|")[:220]
         out.append(f"| {e['count']} | {e['class']} | {e['first_seen']} | {e['last_seen']} | {msg} |")
+    if done:
+        out += ["", "## Promoted or resolved", "",
+                "Kept so a recurrence is visible as a regression rather than looking new.",
+                "Set `status` to `promoted` or `wontfix` in `agent-friction.json` to move a row here.",
+                "", "| Count | Class | Status | Message |", "|---|---|---|---|"]
+        for e in done:
+            msg = e["verbatim"].replace("|", "\\|")[:180]
+            out.append(f"| {e['count']} | {e['class']} | {e.get('status')} | {msg} |")
     out.append("")
     RENDER.write_text("\n".join(out))
     print(f"agent-friction: folded {folded} log(s), {len(rows)} distinct entries")
