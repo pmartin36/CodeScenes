@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /home/paul/Source/CodeScenesUnity && python3 tools/extract-agent-friction.py >/dev/null 2>&1 || true",
+            "async": true,
+            "timeout": 30,
+            "statusMessage": "Folding agent friction log"
+          }
+        ]
+      }
+    ]
+  }
+}

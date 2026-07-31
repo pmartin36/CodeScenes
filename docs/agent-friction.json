@@ -1,0 +1,96 @@
+{
+  "entries": {
+    "Assertion failed on expression: '!gAlreadyClosing'": {
+      "class": "ENVIRONMENT",
+      "count": 2,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "Assertion failed on expression: '!gAlreadyClosing'"
+    },
+    "Assertion failed on expression: 'm_PodArrays.empty()'": {
+      "class": "ENVIRONMENT",
+      "count": 1,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
+      "verbatim": "Assertion failed on expression: 'm_PodArrays.empty()'"
+    },
+    "Assertion failed on expression: 'm_RendererNodes.empty()'": {
+      "class": "ENVIRONMENT",
+      "count": 1,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
+      "verbatim": "Assertion failed on expression: 'm_RendererNodes.empty()'"
+    },
+    "Command 'find_assets' failed: At least one of type, name, or label is required.": {
+      "class": "TOOLING",
+      "count": 3,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "Command 'find_assets' failed: At least one of type, name, or label is required."
+    },
+    "Command 'get_component_properties' failed: 'type' is required when 'target' is a GameObject.": {
+      "class": "TOOLING",
+      "count": 4,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "Command 'get_component_properties' failed: 'type' is required when 'target' is a GameObject."
+    },
+    "Command 'set_serialized_field' failed: Could not resolve object reference: No loaded object with instanceId <id>.": {
+      "class": "TOOLING",
+      "count": 1,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "Command 'set_serialized_field' failed: Could not resolve object reference: No loaded object with instanceId 568105589213755260."
+    },
+    "Command 'set_serialized_field' failed: Could not resolve object reference: No sub-asset with fileId <id> in 'Asset<path>'.": {
+      "class": "TOOLING",
+      "count": 1,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "Command 'set_serialized_field' failed: Could not resolve object reference: No sub-asset with fileId 21300000 in 'Assets/SceneBuilder/LiveVerifyFixtures/lv_sprite.png'."
+    },
+    "Command 'set_serialized_field' failed: Target '<path>' is a GameObject. Pass --component <TypeName> to pick a component on it, or target a specific component directly (use its instanceI<path>), to read or set serialized fields.": {
+      "class": "TOOLING",
+      "count": 1,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "Command 'set_serialized_field' failed: Target '/Canvas/Panel' is a GameObject. Pass --component <TypeName> to pick a component on it, or target a specific component directly (use its instanceId/globalId), to read or set serialized fields."
+    },
+    "ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty": {
+      "class": "TOOLING",
+      "count": 1,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty"
+    },
+    "[SceneBuilder] Sync wrote DemoScene.cs: emitted builder source DOES NOT COMPILE (<n> error(s)). | line 784: CS0542: 'Materials': member names cannot be the same as their enclosing type": {
+      "class": "PRODUCT",
+      "count": 2,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
+      "verbatim": "[SceneBuilder] Sync wrote DemoScene.cs: emitted builder source DOES NOT COMPILE (2 error(s)). | line 784: CS0542: 'Materials': member names cannot be the same as their enclosing type"
+    },
+    "[SceneBuilder] Sync wrote LiveVerifyConsole.cs: emitted builder source DOES NOT COMPILE (<n> error(s)). | line 23: CS0841: Cannot use local variable 'button' before it is declared": {
+      "class": "PRODUCT",
+      "count": 3,
+      "first_seen": "2026-07-31",
+      "last_seen": "2026-07-31",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
+      "verbatim": "[SceneBuilder] Sync wrote LiveVerifyConsole.cs: emitted builder source DOES NOT COMPILE (1 error(s)). | line 23: CS0841: Cannot use local variable 'button' before it is declared"
+    }
+  },
+  "seen_logs": {
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/Editor.log": "e05c80a820739933",
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-console-capture.log": "81feff4fc874de00"
+  }
+}
