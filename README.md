@@ -122,9 +122,25 @@ dotnet test SceneBuilder.sln
 Everything — architecture and every milestone — is written up in [`specs/`](specs/). Start with
 `specs/00-foundation.md`.
 
+## Distribution
+
+Two channels, the same complete product on both:
+
+- **Unity Asset Store** — covered by Unity's own per-seat EULA. No key, no activation, no trial.
+- **Direct (Gumroad)** — license key with 3 machine seats and a 14-day trial, activated in the editor
+  under `Code Scenes > License`. Specced in [`specs/34-licensing-activation.md`](specs/34-licensing-activation.md).
+
+Nothing enhanced is sold off-store, which is what keeps this clear of Asset Store Provider Agreement
+§4.9.1.2. Background: `CodeScenesSite/research/04-asset-store-distribution.md`.
+
 ## License
 
-TBD.
+TBD — and it needs deciding before launch, because this repository is **public**. With no LICENSE
+file, default copyright applies (all rights reserved), but a public repo of a paid product means the
+source, including any activation check, is readable by anyone. If direct customers are meant to
+install from git, that install path is open to everyone; delivering a package artifact through
+Gumroad instead is the alternative. See the open question in
+`CodeScenesSite/research/04-asset-store-distribution.md`.
 
 <sub>Product and package are named CodeScenes (`com.codescenes`). The scene-building engine assemblies
 keep the `SceneBuilder.*` names.</sub>

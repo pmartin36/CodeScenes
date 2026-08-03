@@ -88,6 +88,13 @@ and the round-trip proof suite.
   `UnityEngine.Animation` component, which Paul rejected. Needs the parked AnimatorController work
   promoted out of `needs_research` and a spec rewrite BEFORE any pipeline run.
 
+- **`specs/34` M-Licensing.** Activation, seats and the 14-day trial, for the Gumroad build only.
+  Not sequenced against the above — it gates shipping, not any other milestone. Two open items block
+  a pipeline run: whether `ECDsa` P-256 verification works on the target editor across all three
+  desktop platforms, and which machine identifier is actually stable. Both are spikes, not guesses.
+  The backend half lives in the site repo (`CodeScenesSite/specs/01-licensing-backend.md`) and is
+  already partly stood up.
+
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 
 ## Resuming an interrupted pipeline run
