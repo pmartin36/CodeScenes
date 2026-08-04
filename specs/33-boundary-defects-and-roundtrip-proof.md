@@ -1,5 +1,16 @@
 # Spec 33 — Boundary defects and round-trip proof
 
+## Build order
+
+C9, then C10 — both are active defects on `main` and C9 is data loss on the happy path. Then C5, C6,
+C7, C8, then the round-trip proof suite. Nothing here depends on a later item.
+
+Commit `795eba2` already carries UNVALIDATED partial work for C5 and C6:
+`com.codescenes/Editor/ComponentTypeResolver.cs` (short-name resolution across loaded assemblies,
+which reached a GREEN task verdict) and `SerializedFieldExclusions.cs` (the inspector-visibility
+rule, whose behavioral claim was escalated as unproven). Neither passed a seam review. Re-validate
+and finish that code; do not rebuild it from scratch, and do not assume it works.
+
 ## C9 — clearing a scene reference from code is silently discarded
 
 Authoring `c.Set("m_TargetGraphic", NodeHandle.None)` against a scene where that reference is
@@ -95,13 +106,21 @@ A `UnityEvent` field cannot be represented in builder source: its serialized mem
 console NOTE and nothing else, so wiring a `Button.onClick` in the Inspector produces no code and the
 scene edit is not synced. A console warning is easy to miss.
 
-**Build:** decide and implement where an unrepresentable field surfaces — a conflict marker in the
-source, where the author is reading, or console-only. Do not leave it emitting a warning by default.
+**Build:** console-only, promoted from a NOTE to a located warning that names the scene object path,
+the component type and the field, and states that the value stays in the scene and is not synced.
+
+**Sync NEVER writes an advisory comment into builder source.** The builder file holds what the author
+wrote and what their scene edits patched into it, nothing else. A marker for an unrepresentable field
+is not author intent, and `specs/09` makes the motivating case (`UnityEvent` persistent calls)
+representable for real, so a marker would be dead within a milestone.
+
+The path is general, not UnityEvent-specific: it fires for any field the value model cannot
+represent. After `specs/09` lands it stops firing for `onClick` and keeps covering the rest.
 
 Representing persistent calls is `specs/09`, not this spec.
 
-**Accept when:** an author who wires an `onClick` in the Inspector finds out, at the place they are
-working, that it did not reach their code.
+**Accept when:** wiring an `onClick` in the Inspector produces a console warning naming that object,
+component and field; the builder source is byte-unchanged by the warning path.
 
 ## C8 — a no-op source edit issues a write op
 
