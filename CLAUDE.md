@@ -42,10 +42,33 @@ It has two layers:
 1. **Core (always):** `dotnet build SceneBuilder.sln && dotnet test SceneBuilder.sln` — the fast
    headless suite (seconds). This is the inner loop for pure-Core work.
 2. **Unity EditMode (conditional):** the real editor suite in `unity-gate/` (minutes), run whenever
-   the change touches `com.codescenes/` or `unity-gate/` (or `GATE_FORCE_UNITY=1`). It gates on
-   BOTH the process exit code AND the results XML — a missing/failed `results.xml` is a FAILURE,
+   the WORKING change set (tracked diff vs HEAD + untracked, minus the staged build DLLs) touches
+   `com.codescenes/` or `unity-gate/`, or when there is no source change in flight at all. It gates
+   on BOTH the process exit code AND the results XML — a missing/failed `results.xml` is a FAILURE,
    never "probably fine". A pure-Core change skips layer 2 and says so; a skip never counts as a
    Unity pass.
+
+Three env switches, checked in this order — force always wins:
+- `GATE_FORCE_UNITY=1` — run layer 2 whatever the change set says.
+- `GATE_SKIP_UNITY=1` — Core only. This is the pipeline's per-task fast gate; its verdict line names
+  the flag and is not a Unity pass.
+- `GATE_TRIGGER_ONLY=1` — print the layer-2 decision and exit. Not a gate run, prints no verdict.
+
+### Per-task gate scoping — pass this on every pipeline invocation
+
+Without it, one adapter task early in a run leaves the trigger hot for every later task, so Core-only
+tasks each pay the multi-minute editor suite:
+
+```
+Workflow({ scriptPath: "~/.claude/skills/tdd-pipeline/pipeline.workflow.js",
+           args: { spec: "specs/<n>.md", noPush: true,
+                   fastGateCommand: "GATE_SKIP_UNITY=1 ./verify.sh",
+                   slowPathGlobs: ["com.codescenes/**", "unity-gate/**"] } })
+```
+
+A task is fast-gated only when its declared `TOUCHES` miss both slow globs; no touches, or a touch
+too broad to reason about, takes the full gate. Bucket boundaries and the final pass always run the
+full gate, so a task that mis-declares its scope is caught before anything commits.
 
 ### Reading the gate's verdict — the ONLY reliable check is the `GATE PASS` line
 

@@ -103,7 +103,9 @@ lives on a RectTransform under a Canvas.
   `.RectTransform(anchoredPos:(10,20), sizeDelta:(100,30), anchorMin:(0,1), anchorMax:(0,1), pivot:(0,1))`
   yields `TransformData.Kind=="RectTransform"` with the five `Vec2` fields set to those values; a bare
   `.RectTransform()` sets `Kind=="RectTransform"` and leaves the five fields at RectTransform defaults
-  (anchoredPos `(0,0)`, sizeDelta `(0,0)`, anchorMin/anchorMax `(0,0)`… authored-omitted == default).
+  (anchoredPos `(0,0)`, sizeDelta `(100,100)`, anchorMin/anchorMax `(0.5,0.5)`, pivot `(0.5,0.5)` —
+  authored-omitted == default). `SceneBuilder.Core/Model/RectTransformFields.cs` holds these values,
+  live-verified against Unity 6000.5.3f1; it is the table every path keys off.
 - **Kind stays Transform without the call.** A node with only `.Transform(…)` (or nothing) has
   `Kind=="Transform"` and no UI fields — RectTransform authoring is opt-in.
 - **Canonical serialization.** A `RectTransform` `TransformData` serializes deterministically and

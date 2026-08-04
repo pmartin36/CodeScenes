@@ -20,35 +20,9 @@ On `main` but NOT validated: `795eba2` carries partial C5/C6 work. Spec 33 owns 
 
 ### 1. Harness first — it pays for itself across everything after
 
-**1a. Make the Unity gate per-task.** Largest speedup available, and it compounds over every milestone
-below. `verify.sh` decides whether to run the ~470-test EditMode layer by asking whether the *tree*
-contains changes under `com.codescenes/` or `unity-gate/`. Once a run's first adapter task lands that
-stays true, so every later task pays the full suite — including Core-only tasks where `dotnet test`
-would take seconds.
-
-Two changes, smaller first:
-- Drop the `git diff --name-only HEAD~1 HEAD` term from the change set (`verify.sh`, ~line 42). Its
-  stated purpose — a change of only-new files leaving the trigger cold — is already covered by the
-  untracked-files term. It keeps the trigger hot for a whole extra bucket after adapter work commits.
-- Pass each task's `TOUCHES` to the gate and run the Unity layer only when THAT task touches the
-  adapter. The pipeline already carries a `gates:{full, fast}` structure with `fast` unpopulated.
-
-**Non-negotiable invariant:** bucket boundaries and the final pass ALWAYS run the full gate. A fast
-gate must never be the evidence for a commit, so a task that mis-declares its scope is caught before
-anything lands.
-
 **1b. Sweep existing pipeline prose from the codebase.** `verify.sh` now lints comments for task ids,
 `research.md` citations, iteration numbers and pending-state prose — but only on lines the working
 diff ADDS. Everything already in the tree is invisible to it. One sweep closes that.
-
-**1c. Correct two specs whose text is wrong.** Both are ledger entries at count 2, and both are booby
-traps: a future task that "corrects" working code to match the spec reintroduces a bug.
-- `specs/completed/13-recttransform.md` states RectTransform defaults as `(0,0)`. Live Unity reports
-  `sizeDelta (100,100)` and anchors/pivot `(0.5,0.5)`. `RectTransformFields.cs` already ships the
-  correct values — fix the prose, never the table.
-- `specs/completed/07-m6-prefab-instances.md` transposes the GlobalObjectId pair-key semantics. Two
-  instances of one prefab share `targetObjectId` and differ in `targetPrefabId`; the spec says the
-  reverse.
 
 **1d. Run `/tdd-learnings`.** Eight recurring entries remain active (13 were applied and archived to
 `ledger-archive.md`). Most are evidence-discipline: RED confirmed for the wrong reason, stale-test
@@ -106,9 +80,12 @@ Two stops, opposite handling — conflating them wastes a full run:
   ```
   Workflow({ scriptPath: "~/.claude/skills/tdd-pipeline/pipeline.workflow.js",
              resumeFromRunId: "<RUN_ID>",
-             args: { spec: "<path>", noPush: true } })
+             args: { spec: "<path>", noPush: true,
+                     fastGateCommand: "GATE_SKIP_UNITY=1 ./verify.sh",
+                     slowPathGlobs: ["com.codescenes/**", "unity-gate/**"] } })
   ```
-  Resume REQUIRES re-passing `args` or it bails with "no input".
+  Resume REQUIRES re-passing `args` or it bails with "no input" — including the gate-scoping pair
+  (see CLAUDE.md), which is not recorded in the run and is silently off if omitted.
 - **Halted on plan validation** — the cached plan IS the problem, so resuming reproduces it. Hand-fix
   `.agent_handoffs/<feature>/tasks.md` (gitignored) and relaunch FRESH.
 

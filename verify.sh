@@ -3,8 +3,9 @@
 #
 #   Layer 1 (always): the fast headless Core suite — dotnet build + test. Seconds.
 #   Layer 2 (conditional): the Unity EditMode suite — real editor behavior. Minutes.
-#     Runs ONLY when the change touches Unity-facing code (com.codescenes/ or unity-gate/),
-#     or when forced (GATE_FORCE_UNITY=1 — used by the pipeline's final cross-bucket pass).
+#     Runs when the working change set touches Unity-facing code (com.codescenes/ or
+#     unity-gate/), when the tree is clean (nothing in flight to prove otherwise), or when
+#     forced (GATE_FORCE_UNITY=1). GATE_SKIP_UNITY=1 runs Core only and says so.
 #
 # A Unity-touching change CANNOT pass without a green Unity result: a missing/failed
 # results.xml is a FAILURE, never "probably fine". A pure-Core change skips Layer 2 and
@@ -32,19 +33,50 @@ BUILD_ARTIFACTS_RE='^com\.codescenes/(Plugins/(SceneBuilder\.Core|SceneBuilder\.
 # Core change then drags in the multi-minute editor suite.
 #
 # The staged DLLs are also excluded from the trigger outright. The exclusion is what holds when the
-# ordering alone is not enough — a DLL left dirty by an earlier build, or a "refresh staged DLLs"
-# commit landing in the HEAD~1..HEAD diff. Both guards are required.
+# ordering alone is not enough — a DLL left dirty by an earlier build. Both guards are required.
 #
-# UNTRACKED files are part of the change set. `git diff --name-only` never lists them, so a task
-# consisting only of NEW Unity files (a new MonoBehaviour + its EditMode test) used to leave the
-# trigger cold and silently skip the suite that is the task's whole point.
-# Adding a NEW plugin still triggers Layer 2 via its .meta, which is not excluded.
-changed="$(git diff --name-only HEAD; git diff --name-only HEAD~1 HEAD 2>/dev/null; git ls-files --others --exclude-standard)"
+# The change set is the WORKING TREE against HEAD, plus untracked files. Untracked files count
+# because `git diff --name-only` never lists them, so a change consisting only of NEW Unity files
+# (a new MonoBehaviour + its EditMode test) would otherwise leave the trigger cold and skip the
+# suite that is the change's whole point. Adding a NEW plugin still triggers Layer 2 via its .meta,
+# which is not excluded. Committed history is deliberately NOT consulted: once a run's first adapter
+# change committed, a HEAD~1..HEAD term kept the trigger hot for every later Core-only change.
+#
+# A change set that is EMPTY after exclusions runs Layer 2. Nothing is in flight to prove the run is
+# Core-only, so the run is a full verification of committed state — this is what the pipeline's
+# post-commit final pass runs.
+#
+# Env overrides, force wins over skip:
+#   GATE_FORCE_UNITY=1  run Layer 2 whatever the change set says.
+#   GATE_SKIP_UNITY=1   Core only; the verdict line says so and is not a Unity pass. This is the
+#                       pipeline's per-task fast gate for tasks whose TOUCHES miss the adapter.
+changed="$(git diff --name-only HEAD; git ls-files --others --exclude-standard)"
+relevant="$(echo "$changed" | grep -vE "$BUILD_ARTIFACTS_RE" | grep -vE '^\s*$')"
 need_unity=0
-[[ "${GATE_FORCE_UNITY:-0}" == "1" ]] && need_unity=1
-echo "$changed" \
-  | grep -vE "$BUILD_ARTIFACTS_RE" \
-  | grep -qE '^(com\.codescenes|unity-gate)/' && need_unity=1
+unity_reason=""
+if [[ -z "$relevant" ]]; then
+  need_unity=1
+  unity_reason="no source changes in flight; verifying committed state in full"
+else
+  echo "$relevant" | grep -qE '^(com\.codescenes|unity-gate)/' && {
+    need_unity=1
+    unity_reason="change set touches com.codescenes/ or unity-gate/"
+  }
+fi
+if [[ "${GATE_SKIP_UNITY:-0}" == "1" ]]; then
+  need_unity=0
+  skip_reason="GATE_SKIP_UNITY=1 requested it; this is NOT a Unity pass"
+else
+  skip_reason="no com.codescenes/ or unity-gate/ changes"
+fi
+[[ "${GATE_FORCE_UNITY:-0}" == "1" ]] && { need_unity=1; unity_reason="forced by GATE_FORCE_UNITY=1"; }
+
+# GATE_TRIGGER_ONLY=1 prints the Layer 2 decision and exits without running either layer. It is how
+# the trigger itself is checked; it is NOT a gate run and never prints a verdict line.
+if [[ "${GATE_TRIGGER_ONLY:-0}" == "1" ]]; then
+  echo "TRIGGER: unity=$need_unity reason=$([[ "$need_unity" -eq 1 ]] && echo "$unity_reason" || echo "$skip_reason")"
+  exit 0
+fi
 
 # ---- Lint: pipeline-artifact prose in ADDED source lines ----
 # A shipped code comment may describe the file's own CURRENT contract, in present tense. It may
@@ -132,12 +164,12 @@ if ! dotnet test  SceneBuilder.sln; then echo "GATE FAIL: dotnet test";  exit 1;
 
 if [[ "$need_unity" -eq 0 ]]; then
   if ! check_clean_after_run; then echo "GATE FAIL: the gate run left the tree dirty"; exit 1; fi
-  echo "GATE PASS: Core green (Unity EditMode gate skipped — no com.codescenes/ or unity-gate/ changes)"
+  echo "GATE PASS: Core green (Unity EditMode gate skipped: $skip_reason)"
   exit 0
 fi
 
 # ---- Layer 2: Unity EditMode (real editor behavior) ----
-echo "== Unity EditMode gate: real editor behavior =="
+echo "== Unity EditMode gate: real editor behavior ($unity_reason) =="
 UNITY="${UNITY_EDITOR:-$HOME/Unity/Hub/Editor/6000.5.3f1/Editor/Unity}"
 GATE="$REPO/unity-gate"
 RESULTS="$GATE/results.xml"

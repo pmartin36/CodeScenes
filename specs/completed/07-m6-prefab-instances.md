@@ -18,9 +18,12 @@ This milestone introduces types not present in foundation §3. Each is flagged h
   IdentityMap can persist both halves:
   ```
   PrefabInstanceKey
-    TargetPrefabId  : ulong    // GlobalObjectId.targetPrefabId  (the source prefab asset)
-    TargetObjectId  : ulong    // GlobalObjectId.targetObjectId  (the object within the instance)
+    TargetPrefabId  : ulong    // GlobalObjectId.targetPrefabId  (which INSTANCE in the scene)
+    TargetObjectId  : ulong    // GlobalObjectId.targetObjectId  (the object's fileID INSIDE the
+                               //                                 source prefab asset)
   ```
+  Two instances of the same prefab SHARE `TargetObjectId` per corresponding object and DIFFER in
+  `TargetPrefabId`. The pair is what separates sibling instances; neither half alone does.
   For a plain (non-prefab) object `TargetPrefabId == 0`; a nonzero value is what marks a snapshot
   object as belonging to a prefab instance.
 
