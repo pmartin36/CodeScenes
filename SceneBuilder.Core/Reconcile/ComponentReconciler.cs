@@ -322,7 +322,7 @@ namespace SceneBuilder.Core.Reconcile
                             // invalid `SurfaceSnap+Vertical.Up` FQN into the `down:` slot.
                             var patchExpr = SpatialComponentSource.IsSpatial(sourceComp.Type.FullName) && emittedVal is ValueNode.Enum
                                 ? SpatialComponentSource.RenderKeyValue(fieldKey, emittedVal, string.Empty)
-                                : RenderFieldValue(emittedVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, assetCatalog);
+                                : RenderFieldValue(emittedVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, ownerLogicalId, assetCatalog);
                             edits.Add(new PatchComponentField
                             {
                                 Anchor = sourceComp.LogicalId,
@@ -409,7 +409,7 @@ namespace SceneBuilder.Core.Reconcile
                             FieldKey = fieldKey,
                             Value = snapVal,
                             NewExpr = introduceResolution == RefResolution.Resolvable
-                                ? RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, assetCatalog)
+                                ? RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, ownerLogicalId, assetCatalog)
                                 : null,
                         });
 
@@ -490,11 +490,17 @@ namespace SceneBuilder.Core.Reconcile
         // BOTH context-dependent (needs the handle table) and side-effecting (may need to introduce
         // a handle on the target) — neither belongs in a pure formatter, so this intercepts
         // ValueNode.ObjectRef before delegating everything else to ValueNodeLiteral unchanged.
+        // `ownerNodeLogicalId` is REQUIRED (no default), placed before the optional `assetCatalog`,
+        // so a new call site fails to compile until it supplies the node the value is being written
+        // onto — see SelfReferenceEmission for why: a self-target must render as the variable-free
+        // `NodeHandle.Self` selector, never the owner's own local, which would be CS0841 inside the
+        // statement that declares it.
         internal static string RenderFieldValue(
             ValueNode value,
             string typeFullName,
             System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
+            string ownerNodeLogicalId,
             AssetCatalog? assetCatalog = null)
         {
             if (value is ValueNode.ObjectRef(var targetLogicalId))
@@ -502,6 +508,14 @@ namespace SceneBuilder.Core.Reconcile
                 if (targetLogicalId == null)
                 {
                     return "NodeHandle.None";
+                }
+
+                // Checked BEFORE resolveOwnerHandle is consulted: resolveOwnerHandle is
+                // side-effecting (it can register a handle introduction), and a self-target needs
+                // no handle at all — consulting it first would introduce one that is never used.
+                if (SelfReferenceEmission.IsSelf(targetLogicalId, ownerNodeLogicalId))
+                {
+                    return SelfReferenceEmission.AuthoredExpression;
                 }
 
                 var (handle, introduce) = resolveOwnerHandle(targetLogicalId);
@@ -615,7 +629,7 @@ namespace SceneBuilder.Core.Reconcile
                 if (value is ValueNode.ObjectRef || IsCataloguedAssetRef(value, assetCatalog))
                 {
                     fieldExpressions ??= new Dictionary<string, string>();
-                    fieldExpressions[fieldKey] = RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, assetCatalog);
+                    fieldExpressions[fieldKey] = RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, ownerAnchor, assetCatalog);
                 }
             }
 

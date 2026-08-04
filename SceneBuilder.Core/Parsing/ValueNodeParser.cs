@@ -50,6 +50,13 @@ namespace SceneBuilder.Core.Parsing
                     when member.Expression.ToString() == "NodeHandle" && member.Name.Identifier.Text == "None":
                     return new ValueNode.ObjectRef(null);
 
+                // Must precede the generic MemberAccess->Enum arm below, or `NodeHandle.Self`
+                // parses as `Enum("NodeHandle", "Self")`. The reserved marker is resolved to the
+                // owning node's LogicalId by ObjectRefLowering, which has the owner in hand.
+                case MemberAccessExpressionSyntax member
+                    when member.Expression.ToString() == "NodeHandle" && member.Name.Identifier.Text == "Self":
+                    return new ValueNode.ObjectRef(SelfReferenceEmission.Marker);
+
                 case IdentifierNameSyntax id:
                     return new ValueNode.ObjectRef(id.Identifier.Text);
 

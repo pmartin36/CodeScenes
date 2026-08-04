@@ -2,13 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Model;
+using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Core.Lowering
 {
     // Rewrites intermediate ValueNode.ObjectRef(name) nodes -> ObjectRef(<resolved LogicalId>)
     // by walking the SceneModel tree and rebuilding it immutably (mirrors AssetRefLowering's
     // tree-walk shape). ObjectRef(null) (authored NodeHandle.None) passes through unchanged;
-    // a resolveHandle MISS yields ValueNode.Unsupported(name) — never a bogus LogicalId.
+    // a resolveHandle MISS yields ValueNode.Unsupported(name) — never a bogus LogicalId. The
+    // reserved SelfReferenceEmission.Marker (authored `NodeHandle.Self`) is resolved to the
+    // OWNING node's LogicalId — threaded down from the GameObjectNode being walked at that
+    // point — BEFORE resolveHandle is consulted, since a marker is never a legal handle name.
     public static class ObjectRefLowering
     {
         public static SceneModel Lower(SceneModel model, Func<string, string?> resolveHandle)
@@ -20,7 +24,7 @@ namespace SceneBuilder.Core.Lowering
         {
             var lowered = go with
             {
-                Components = go.Components.Select(c => LowerComponent(c, resolveHandle)).ToArray(),
+                Components = go.Components.Select(c => LowerComponent(c, go.LogicalId, resolveHandle)).ToArray(),
                 Children = go.Children.Select(c => LowerGameObject(c, resolveHandle)).ToArray(),
             };
 
@@ -28,9 +32,9 @@ namespace SceneBuilder.Core.Lowering
             {
                 return instance with
                 {
-                    Overrides = instance.Overrides.Select(o => LowerPropertyOverride(o, resolveHandle)).ToArray(),
+                    Overrides = instance.Overrides.Select(o => LowerPropertyOverride(o, go.LogicalId, resolveHandle)).ToArray(),
                     AddedComponents = instance.AddedComponents
-                        .Select(a => a with { Component = LowerComponent(a.Component, resolveHandle) })
+                        .Select(a => a with { Component = LowerComponent(a.Component, go.LogicalId, resolveHandle) })
                         .ToArray(),
                 };
             }
@@ -38,49 +42,54 @@ namespace SceneBuilder.Core.Lowering
             return lowered;
         }
 
-        private static PropertyOverride LowerPropertyOverride(PropertyOverride @override, Func<string, string?> resolveHandle)
+        private static PropertyOverride LowerPropertyOverride(PropertyOverride @override, string ownerNodeLogicalId, Func<string, string?> resolveHandle)
         {
             return @override with
             {
-                Value = LowerNode(@override.Value, resolveHandle),
+                Value = LowerNode(@override.Value, ownerNodeLogicalId, resolveHandle),
                 ObjectReference = @override.ObjectReference is null
                     ? null
-                    : LowerNode(@override.ObjectReference, resolveHandle),
+                    : LowerNode(@override.ObjectReference, ownerNodeLogicalId, resolveHandle),
             };
         }
 
-        private static ComponentData LowerComponent(ComponentData component, Func<string, string?> resolveHandle)
+        private static ComponentData LowerComponent(ComponentData component, string ownerNodeLogicalId, Func<string, string?> resolveHandle)
         {
-            return component with { Fields = LowerFieldMap(component.Fields, resolveHandle) };
+            return component with { Fields = LowerFieldMap(component.Fields, ownerNodeLogicalId, resolveHandle) };
         }
 
-        private static FieldMap LowerFieldMap(FieldMap fields, Func<string, string?> resolveHandle)
+        private static FieldMap LowerFieldMap(FieldMap fields, string ownerNodeLogicalId, Func<string, string?> resolveHandle)
         {
             return new FieldMap(fields.Select(kv =>
-                new KeyValuePair<string, ValueNode>(kv.Key, LowerNode(kv.Value, resolveHandle))));
+                new KeyValuePair<string, ValueNode>(kv.Key, LowerNode(kv.Value, ownerNodeLogicalId, resolveHandle))));
         }
 
-        private static ValueNode LowerNode(ValueNode node, Func<string, string?> resolveHandle)
+        private static ValueNode LowerNode(ValueNode node, string ownerNodeLogicalId, Func<string, string?> resolveHandle)
         {
             switch (node)
             {
                 case ValueNode.ObjectRef objectRef:
-                    return LowerObjectRef(objectRef, resolveHandle);
+                    return LowerObjectRef(objectRef, ownerNodeLogicalId, resolveHandle);
                 case ValueNode.List list:
-                    return new ValueNode.List(list.Items.Select(item => LowerNode(item, resolveHandle)).ToList());
+                    return new ValueNode.List(list.Items.Select(item => LowerNode(item, ownerNodeLogicalId, resolveHandle)).ToList());
                 case ValueNode.Nested nested:
-                    return new ValueNode.Nested(nested.TypeName, LowerFieldMap(nested.Fields, resolveHandle));
+                    return new ValueNode.Nested(nested.TypeName, LowerFieldMap(nested.Fields, ownerNodeLogicalId, resolveHandle));
                 default:
                     return node;
             }
         }
 
-        private static ValueNode LowerObjectRef(ValueNode.ObjectRef objectRef, Func<string, string?> resolveHandle)
+        private static ValueNode LowerObjectRef(ValueNode.ObjectRef objectRef, string ownerNodeLogicalId, Func<string, string?> resolveHandle)
         {
             var name = objectRef.TargetLogicalId;
             if (name is null)
             {
                 return objectRef;
+            }
+
+            if (SelfReferenceEmission.IsMarker(name))
+            {
+                return new ValueNode.ObjectRef(ownerNodeLogicalId);
             }
 
             var resolved = resolveHandle(name);

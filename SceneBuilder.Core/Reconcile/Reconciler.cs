@@ -560,6 +560,9 @@ namespace SceneBuilder.Core.Reconcile
             // structural delete-cascade never strips a `var door = scene.Add(...)` declaration (or its
             // own component statements) out from under a surviving `.Set(x => x.target, door)`
             // argument — that produces non-compiling source (CS0103), never a style issue.
+            // A SELF-target is excluded: a node's own field can never be the reason its own
+            // statement survives, or a self-referencing node deleted from the scene would be
+            // silently retained forever instead of removed.
             var referencedByFieldTargets = new HashSet<string>(StringComparer.Ordinal);
             foreach (var node in modelByLogicalId.Values)
             {
@@ -567,7 +570,9 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     foreach (var (_, value) in component.Fields)
                     {
-                        if (value is ValueNode.ObjectRef(var targetLogicalId) && targetLogicalId != null)
+                        if (value is ValueNode.ObjectRef(var targetLogicalId)
+                            && targetLogicalId != null
+                            && targetLogicalId != node.LogicalId)
                         {
                             referencedByFieldTargets.Add(targetLogicalId);
                         }

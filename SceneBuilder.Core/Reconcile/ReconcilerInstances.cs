@@ -235,7 +235,7 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var setSpec = BuildOverrideSetSpec(snapshotOverride, resolveOwnerHandle, edits, addedAssets, assetCatalog);
+                var setSpec = BuildOverrideSetSpec(snapshotOverride, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, assetCatalog);
                 var childPath = snapshotOverride.Target.ChildPath;
 
                 if (string.IsNullOrEmpty(childPath))
@@ -426,6 +426,7 @@ namespace SceneBuilder.Core.Reconcile
 
         private static OverrideSetSpec BuildOverrideSetSpec(
             PropertyOverride snapshotOverride,
+            string instanceLogicalId,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
@@ -441,7 +442,7 @@ namespace SceneBuilder.Core.Reconcile
                 TypeFullName = typeFullName,
                 PropertyPath = snapshotOverride.PropertyPath,
                 Value = snapshotOverride.Value,
-                ValueExpression = ComponentReconciler.RenderFieldValue(renderedValue, typeFullName, resolveOwnerHandle, edits, assetCatalog),
+                ValueExpression = ComponentReconciler.RenderFieldValue(renderedValue, typeFullName, resolveOwnerHandle, edits, instanceLogicalId, assetCatalog),
             };
         }
 
@@ -476,7 +477,7 @@ namespace SceneBuilder.Core.Reconcile
                 if (value is ValueNode.ObjectRef || ComponentReconciler.IsCataloguedAssetRef(value, assetCatalog))
                 {
                     fieldExpressions ??= new Dictionary<string, string>();
-                    fieldExpressions[fieldKey] = ComponentReconciler.RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, assetCatalog);
+                    fieldExpressions[fieldKey] = ComponentReconciler.RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, instanceLogicalId, assetCatalog);
                 }
 
                 ComponentReconciler.CollectAssetEntries(value, addedAssets);

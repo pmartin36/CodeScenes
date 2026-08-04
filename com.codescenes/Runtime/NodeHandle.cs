@@ -14,6 +14,11 @@ namespace SceneBuilder.Authoring
         /// <summary>Assign this to a reference field to clear it, leaving the slot empty in the scene.</summary>
         public static readonly NodeHandle None = new NodeHandle();
 
+        /// <summary>Assign this to a reference field to point it at the GameObject the component is on
+        /// — a Button's target graphic on its own Image, for example. It needs no variable, so it is
+        /// legal inside the statement that declares the node.</summary>
+        public static readonly NodeHandle Self = new NodeHandle();
+
         /// <summary>Add a child GameObject.</summary>
         public NodeHandle Add(string name) => new NodeHandle();
 

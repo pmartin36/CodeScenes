@@ -115,6 +115,86 @@ public class CompileCheckRectTransformScene : ISceneDefinition
             "Expected CS0103 (name does not exist); got: " + string.Join(" | ", errors.Select(e => e.ToString())));
     }
 
+    // C10: a component field targeting a component on the SAME GameObject, chained onto its
+    // own declaration statement -- the exact pre-fix shape a stock Unity Button hits, since Unity
+    // auto-assigns Button.m_TargetGraphic to a co-located Image.
+    private const string SelfReferenceChainedSource = @"
+using SceneBuilder.Authoring;
+public class CompileCheckSelfReferenceScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var canvas = scene.Add(""Canvas"");
+        canvas.Component<UnityEngine.Canvas>();
+        var button = canvas.Add(""Button"").Component<UnityEngine.UI.Image>().Component<UnityEngine.UI.Button>(c => c.Set(""m_TargetGraphic"", button));
+    }
+}";
+
+    private const string SelfSelectorRawPathSource = @"
+using SceneBuilder.Authoring;
+public class CompileCheckSelfSelectorRawScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var canvas = scene.Add(""Canvas"");
+        canvas.Component<UnityEngine.Canvas>();
+        var button = canvas.Add(""Button"");
+        button.Component<UnityEngine.UI.Image>();
+        button.Component<UnityEngine.UI.Button>(c => c.Set(""m_TargetGraphic"", NodeHandle.Self));
+    }
+}";
+
+    private const string SelfSelectorTypedSource = @"
+using UnityEngine.UI;
+using SceneBuilder.Authoring;
+public class CompileCheckSelfSelectorTypedScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var canvas = scene.Add(""Canvas"");
+        canvas.Component<UnityEngine.Canvas>();
+        var button = canvas.Add(""Button"");
+        button.Component<Image>();
+        button.Component<Button>(c => c.Set(x => x.targetGraphic, NodeHandle.Self));
+    }
+}";
+
+    [Test]
+    public void SelfReferenceInOwnDeclaration_IsReportedAsCs0841_WithTheEmissionBugLabel()
+    {
+        var errors = BuilderCompileCheck.Check(SelfReferenceChainedSource);
+
+        Assert.IsTrue(errors.Any(e => e.Id == "CS0841"),
+            "Expected CS0841 (local used before it is declared) for a self-reference chained onto its "
+                + "own declaration; got: " + string.Join(" | ", errors.Select(e => e.ToString())));
+
+        var statementIndex = SelfReferenceChainedSource.IndexOf("var button = canvas.Add");
+        var expectedLine = SelfReferenceChainedSource.Substring(0, statementIndex).Count(c => c == '\n') + 1;
+        Assert.IsTrue(errors.Any(e => e.Id == "CS0841" && e.Line == expectedLine),
+            $"Expected CS0841 reported at line {expectedLine}; got: "
+                + string.Join(" | ", errors.Select(e => e.ToString())));
+
+        var formatted = BuilderCompileCheck.Format(errors, "self-reference regression pin", SelfReferenceChainedSource);
+        StringAssert.Contains("This is a bug in SceneBuilder's emission, not in your scene edit.", formatted,
+            "The emission-bug label must be present verbatim.\n" + formatted);
+        StringAssert.Contains("CS0841", formatted);
+        StringAssert.Contains($"line {expectedLine}", formatted);
+        StringAssert.Contains(SelfReferenceChainedSource, formatted,
+            "Formatted diagnostic must include the full emitted source.");
+    }
+
+    [Test]
+    public void SelfSelectorSource_CompilesInBothAuthoringSpellings()
+    {
+        var rawErrors = BuilderCompileCheck.Check(SelfSelectorRawPathSource);
+        Assert.IsEmpty(rawErrors.Select(e => e.ToString()),
+            "Raw-path self-selector (NodeHandle.Self) must compile with zero errors.");
+
+        var typedErrors = BuilderCompileCheck.Check(SelfSelectorTypedSource);
+        Assert.IsEmpty(typedErrors.Select(e => e.ToString()),
+            "Typed-selector self-selector (NodeHandle.Self) must compile with zero errors.");
+    }
+
     [Test]
     public void ReferenceSet_IsCachedAcrossCalls()
     {
