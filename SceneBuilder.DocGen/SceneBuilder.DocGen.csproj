@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Emits api.json: the machine-readable authoring API reference the marketing site renders.
+       Syntax-only Roslyn over com.codescenes/Runtime — no Unity DLLs, no project load, so it runs
+       anywhere dotnet does. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+  </ItemGroup>
+
+</Project>

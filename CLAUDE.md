@@ -92,6 +92,12 @@ enforces it.
 - `com.codescenes/` — the Unity package (Runtime + Editor adapter + `Plugins/SceneBuilder.Core.dll`,
   auto-staged by a Core post-build target — never hand-copy it).
 - `SceneBuilder.Editor.CompileCheck/` — compiles the adapter against Unity DLLs for the `dotnet` build.
+- `SceneBuilder.DocGen/` — emits `api.json`, the public authoring reference the marketing site
+  renders. Syntax-only Roslyn over `com.codescenes/Runtime` + `CodeScenes.Analyzers/DiagnosticDescriptors.cs`;
+  no Unity DLLs and no project load, so it runs anywhere `dotnet` does. The XML doc comments on
+  `com.codescenes/Runtime` are published API copy — they are read by users, not just by the IDE.
+  Run from the site repo with `npm run api:sync`, or directly:
+  `dotnet run --project SceneBuilder.DocGen -- --out <path>/api.json`.
 - `unity-gate/` — the dedicated Unity project the gate runs. Embeds `com.codescenes` via a relative
   package ref; EditMode tests live in `unity-gate/Assets/GateTests/`. Do NOT open this project in an
   interactive editor while the gate runs (Unity single-instance lock).
