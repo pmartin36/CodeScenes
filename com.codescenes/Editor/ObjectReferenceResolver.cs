@@ -141,20 +141,19 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
-        /// Builds a read-side scene-object identity resolver bound to <paramref name="map"/>'s
-        /// GameObject entries (mirrors <c>Reconciler</c>'s goid&lt;-&gt;LogicalId dictionary
-        /// construction — the same shape, so read identity agrees with reconcile). The returned
-        /// delegate normalizes a Component target to its owning GameObject before the lookup (a
-        /// Component has no IdentityMap entry of its own): HIT → the owning GameObject's LogicalId;
-        /// MISS (not yet mapped, e.g. newly created) → the target's raw <see cref="GlobalObjectId"/>
-        /// string, so a later Sync converges it via the reconciler's pending-target classification;
-        /// not a GameObject/Component (e.g. an in-memory, non-scene object) → null.
+        /// Builds a read-side scene-object identity resolver bound to <paramref name="map"/>'s node
+        /// entries — a plain GameObject or a PrefabInstance root (<see cref="IdentityNodeIndex"/>,
+        /// mirrors <c>Reconciler</c>'s goid&lt;-&gt;LogicalId dictionary construction — the same
+        /// shape, so read identity agrees with reconcile). The returned delegate normalizes a
+        /// Component target to its owning GameObject before the lookup (a Component has no
+        /// IdentityMap entry of its own): HIT → the owning node's LogicalId; MISS (not yet mapped,
+        /// e.g. newly created) → the target's raw <see cref="GlobalObjectId"/> string, so a later
+        /// Sync converges it via the reconciler's pending-target classification; not a
+        /// GameObject/Component (e.g. an in-memory, non-scene object) → null.
         /// </summary>
         public static Func<UnityEngine.Object, string?> BuildSceneRefResolver(IdentityMap map)
         {
-            var goidToLogicalId = map.Entries
-                .Where(e => e.Kind == "GameObject" && !string.IsNullOrEmpty(e.GlobalObjectId))
-                .ToDictionary(e => e.GlobalObjectId, e => e.LogicalId);
+            var goidToLogicalId = IdentityNodeIndex.GlobalObjectIdToLogicalId(map);
 
             return obj =>
             {

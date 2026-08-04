@@ -1,3 +1,7 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -91,7 +95,8 @@ public class AssetReferenceResolverObjectRefReadTests
         SaveActiveScene();
 
         // Only the GameObject entry is mapped (Components carry no IdentityMap entry of their own) —
-        // BuildSceneRefResolver's dictionary is built from Kind=="GameObject" entries only.
+        // BuildSceneRefResolver's dictionary is built from mapped node entries (GameObject and
+        // PrefabInstance).
         var map = new IdentityMap
         {
             Entries = new[]
@@ -203,11 +208,199 @@ public class AssetReferenceResolverObjectRefReadTests
         var prop = new SerializedObject(doorOpener).FindProperty("target");
         Assert.IsNotNull(prop, "DoorOpener.target property not found");
 
-        // No resolver (the build read path, M4-preserved): a populated scene ref must stay Unsupported.
-        var node = AssetReferenceResolver.ReadObjectReference(prop);
+        // No resolver: a populated scene ref must stay Unsupported.
+        var node = AssetReferenceResolver.ReadObjectReference(prop, resolveSceneRef: null);
 
         Assert.IsInstanceOf<ValueNode.Unsupported>(node,
-            "With no resolver supplied, a scene-object reference must stay Unsupported (build path, " +
-            "M4-preserved) — got " + node.GetType().Name);
+            "With no resolver supplied, a scene-object reference must stay Unsupported — got " +
+            node.GetType().Name);
+    }
+
+    // A component field referencing a PREFAB-INSTANCE ROOT must reverse-map through
+    // BuildSceneRefResolver to the instance's LogicalId, the same as a plain GameObject target —
+    // the resolver's node index must accept both mapped node kinds.
+    [Test]
+    public void ReadObjectReference_PrefabInstanceRootTarget_ResolvesToItsLogicalId()
+    {
+        const string fixturesDir = "Assets/GateTests/Fixtures_ObjRefPrefabInstanceRead";
+        const string prefabPath = fixturesDir + "/RefTarget.prefab";
+
+        if (!AssetDatabase.IsValidFolder(fixturesDir))
+        {
+            AssetDatabase.CreateFolder("Assets/GateTests", "Fixtures_ObjRefPrefabInstanceRead");
+        }
+
+        var prefabSource = new GameObject("RefTarget");
+        PrefabUtility.SaveAsPrefabAsset(prefabSource, prefabPath);
+        Object.DestroyImmediate(prefabSource);
+
+        try
+        {
+            var instanceRoot = (GameObject)PrefabUtility.InstantiatePrefab(
+                AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath));
+            var openerGo = new GameObject("Opener");
+            var doorOpener = openerGo.AddComponent<DoorOpener>();
+            doorOpener.target = instanceRoot;
+            SaveActiveScene();
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = "Tank", Kind = "PrefabInstance",
+                        GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(instanceRoot).ToString(),
+                    },
+                },
+            };
+            var resolver = ObjectReferenceResolver.BuildSceneRefResolver(map);
+
+            var prop = new SerializedObject(doorOpener).FindProperty("target");
+            Assert.IsNotNull(prop, "DoorOpener.target property not found");
+
+            var node = AssetReferenceResolver.ReadObjectReference(prop, resolver);
+
+            Assert.IsInstanceOf<ValueNode.ObjectRef>(node,
+                "A live prefab-instance-root reference did not read back as ObjectRef (got " + node.GetType().Name + ")");
+            Assert.AreEqual("Tank", ((ValueNode.ObjectRef)node).TargetLogicalId,
+                "A prefab-instance-root target must resolve to its mapped LogicalId ('Tank'), not its raw " +
+                "GlobalObjectId — got '" + ((ValueNode.ObjectRef)node).TargetLogicalId + "'");
+        }
+        finally
+        {
+            AssetDatabase.DeleteAsset(prefabPath);
+            if (AssetDatabase.IsValidFolder(fixturesDir))
+            {
+                AssetDatabase.DeleteAsset(fixturesDir);
+            }
+        }
+    }
+
+    // Every adapter read that can encounter an in-scene object reference must STATE its
+    // scene-identity answer (a resolver, or an explicit null); it must never OMIT the answer via a
+    // default parameter value or sticky mutable state (a settable property or a non-readonly field).
+    // The scan set is DISCOVERED by reflecting over every type in the production assembly, not listed
+    // by hand, so a type added later inherits the rule without anyone remembering to register it.
+    private sealed class ResolverOmissionScan
+    {
+        public List<string> Parameters = new List<string>();
+        public List<string> Properties = new List<string>();
+        public List<string> Fields = new List<string>();
+    }
+
+    private static ResolverOmissionScan ScanForOmittableResolvers(Assembly assembly)
+    {
+        var resolverType = typeof(System.Func<UnityEngine.Object, string>);
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic |
+            BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+        System.Type[] types;
+        try
+        {
+            types = assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            types = ex.Types.Where(t => t != null).ToArray();
+        }
+
+        var scan = new ResolverOmissionScan();
+
+        foreach (var type in types)
+        {
+            if (type.IsDefined(typeof(CompilerGeneratedAttribute), false))
+            {
+                continue;
+            }
+
+            foreach (var method in type.GetMethods(flags))
+            {
+                foreach (var parameter in method.GetParameters())
+                {
+                    if (parameter.ParameterType == resolverType && parameter.HasDefaultValue)
+                    {
+                        scan.Parameters.Add(type.Name + "." + method.Name + "(" + parameter.Name + ")");
+                    }
+                }
+            }
+
+            foreach (var ctor in type.GetConstructors(flags))
+            {
+                foreach (var parameter in ctor.GetParameters())
+                {
+                    if (parameter.ParameterType == resolverType && parameter.HasDefaultValue)
+                    {
+                        scan.Parameters.Add(type.Name + ".ctor(" + parameter.Name + ")");
+                    }
+                }
+            }
+
+            foreach (var property in type.GetProperties(flags))
+            {
+                if (property.PropertyType == resolverType && property.CanWrite)
+                {
+                    scan.Properties.Add(type.Name + "." + property.Name);
+                }
+            }
+
+            foreach (var field in type.GetFields(flags))
+            {
+                if (field.FieldType == resolverType && !field.IsInitOnly)
+                {
+                    scan.Fields.Add(type.Name + "." + field.Name);
+                }
+            }
+        }
+
+        return scan;
+    }
+
+    // Deliberate offender fixture: never instantiated, referenced only by reflection, so
+    // SceneRefResolverGuard_DetectsEveryOmissionShape can prove the scan actually detects each
+    // omission shape rather than passing on an empty result by construction.
+    private static class ResolverGuardOffenderFixture
+    {
+        public static System.Func<UnityEngine.Object, string> Sticky;
+
+        public static System.Func<UnityEngine.Object, string> Settable { get; set; }
+
+        public static void Read(SerializedProperty p,
+            System.Func<UnityEngine.Object, string> resolveSceneRef = null)
+        {
+        }
+    }
+
+    [Test]
+    public void SceneRefResolverParameters_AreRequired_NotDefaulted()
+    {
+        var scan = ScanForOmittableResolvers(typeof(SerializedFieldBridge).Assembly);
+
+        Assert.IsEmpty(scan.Parameters,
+            "Every scene-ref resolver parameter must be REQUIRED, not defaulted, so a caller cannot " +
+            "silently omit whether an object-reference field resolves to scene identity. Offending: " +
+            string.Join(", ", scan.Parameters));
+        Assert.IsEmpty(scan.Properties,
+            "No type may expose a settable scene-ref resolver property — sticky mutable state is the " +
+            "same omission hazard as a defaulted parameter. Offending: " + string.Join(", ", scan.Properties));
+        Assert.IsEmpty(scan.Fields,
+            "No type may expose a non-readonly scene-ref resolver field — sticky mutable state is the " +
+            "same omission hazard as a defaulted parameter. Offending: " + string.Join(", ", scan.Fields));
+    }
+
+    [Test]
+    public void SceneRefResolverGuard_DetectsEveryOmissionShape()
+    {
+        var scan = ScanForOmittableResolvers(Assembly.GetExecutingAssembly());
+
+        CollectionAssert.Contains(scan.Parameters,
+            "ResolverGuardOffenderFixture.Read(resolveSceneRef)",
+            "The scan must detect a defaulted resolver parameter. Found: " + string.Join(", ", scan.Parameters));
+        CollectionAssert.Contains(scan.Properties,
+            "ResolverGuardOffenderFixture.Settable",
+            "The scan must detect a settable resolver property. Found: " + string.Join(", ", scan.Properties));
+        CollectionAssert.Contains(scan.Fields,
+            "ResolverGuardOffenderFixture.Sticky",
+            "The scan must detect a non-readonly resolver field. Found: " + string.Join(", ", scan.Fields));
     }
 }

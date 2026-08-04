@@ -812,7 +812,7 @@ public class RoundTripSpatialTests
             sizer.mode = FitSize.Mode.Height;
             sizer.value = 2f;
 
-            var snapshot = SceneSnapshotReader.Read(go.scene);
+            var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "FitSizeNode");
 
             Assert.IsNotNull(node, "FitSizeNode not found in snapshot.");
@@ -839,7 +839,7 @@ public class RoundTripSpatialTests
             sizer.value = 2f;
             sizer.enabled = false;
 
-            var snapshot = SceneSnapshotReader.Read(go.scene);
+            var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "DisabledFitSizeNode");
 
             Assert.IsNotNull(node, "DisabledFitSizeNode not found in snapshot.");
@@ -864,7 +864,7 @@ public class RoundTripSpatialTests
             var snapper = go.AddComponent<SurfaceSnap>();
             snapper.vertical = SurfaceSnap.Vertical.Down;
 
-            var snapshot = SceneSnapshotReader.Read(go.scene);
+            var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "SurfaceSnapDownNode");
 
             Assert.IsNotNull(node, "SurfaceSnapDownNode not found in snapshot.");
@@ -890,7 +890,7 @@ public class RoundTripSpatialTests
             snapper.vertical = SurfaceSnap.Vertical.Down;
             snapper.horizontal = SurfaceSnap.Horizontal.Left;
 
-            var snapshot = SceneSnapshotReader.Read(go.scene);
+            var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "SurfaceSnapDownLeftNode");
 
             Assert.IsNotNull(node, "SurfaceSnapDownLeftNode not found in snapshot.");
@@ -912,7 +912,7 @@ public class RoundTripSpatialTests
         var go = new GameObject("PlainNode");
         try
         {
-            var snapshot = SceneSnapshotReader.Read(go.scene);
+            var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "PlainNode");
 
             Assert.IsNotNull(node, "PlainNode not found in snapshot.");

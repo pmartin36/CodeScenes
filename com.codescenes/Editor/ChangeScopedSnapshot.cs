@@ -12,26 +12,20 @@ namespace SceneBuilder.Editor
     /// unchanged GameObjects reuse their previously-built <see cref="SnapshotNode"/> (no component
     /// read, no id resolve); only GameObjects named in the change set are re-read via
     /// <see cref="SceneSnapshotReader"/>. The output must be byte-equivalent (via CanonicalJson) to a
-    /// cold <see cref="SceneSnapshotReader.Read"/> for the same scene state.
+    /// cold <see cref="SceneSnapshotReader.Read"/> for the same scene state. The M5 scene-object
+    /// identity resolver (see <see cref="ObjectReferenceResolver.BuildSceneRefResolver"/>) is a
+    /// required parameter of every assemble call, not sticky instance state — each caller states its
+    /// own answer for that assemble.
     /// </summary>
     public sealed class ChangeScopedSnapshot
     {
         /// <summary>The identity cache backing every id resolve this assembler performs — the counting seam.</summary>
         public GlobalObjectIdCache Ids { get; } = new GlobalObjectIdCache();
 
-        /// <summary>
-        /// The M5 scene-object identity resolver (see
-        /// <see cref="ObjectReferenceResolver.BuildSceneRefResolver"/>) threaded into every
-        /// object-reference field read by this assemble. Null (the default) leaves scene-object refs
-        /// Unsupported — set by <see cref="SceneBuilderAutoSync"/> from the loaded IdentityMap before
-        /// assembling a snapshot feeding a sync-back read.
-        /// </summary>
-        public System.Func<UnityEngine.Object, string?>? SceneRefResolver { get; set; }
-
         private Dictionary<EntityId, SnapshotNode>? _nodeByGoEntityId;
 
         /// <summary>Full re-walk, warming <see cref="Ids"/> via one batch call. Establishes the baseline for future incremental assembles.</summary>
-        public SceneSnapshot AssembleCold(Scene scene)
+        public SceneSnapshot AssembleCold(Scene scene, System.Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             Ids.Clear();
             Ids.WarmBatch(CollectAllGameObjects(scene));
@@ -40,7 +34,7 @@ namespace SceneBuilder.Editor
 
             SnapshotNode BuildNode(GameObject go)
             {
-                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve, SceneRefResolver);
+                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve, resolveSceneRef);
                 CacheDescendants(go, node, nodeByGoEntityId);
                 return node;
             }
@@ -61,11 +55,11 @@ namespace SceneBuilder.Editor
         /// reused unchanged from the prior assemble. Keyed on <see cref="UnityEngine.EntityId"/>, NOT
         /// <c>int</c> — <c>Object.GetInstanceID()</c> is a compile ERROR on 6000.5.3f1.
         /// </summary>
-        public SceneSnapshot AssembleIncremental(Scene scene, IReadOnlyCollection<EntityId> changedEntityIds)
+        public SceneSnapshot AssembleIncremental(Scene scene, IReadOnlyCollection<EntityId> changedEntityIds, System.Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             if (_nodeByGoEntityId == null)
             {
-                return AssembleCold(scene);
+                return AssembleCold(scene, resolveSceneRef);
             }
 
             var changedGo = new HashSet<EntityId>();
@@ -110,7 +104,7 @@ namespace SceneBuilder.Editor
                 SnapshotNode node;
                 if (changedGo.Contains(entityId) || !priorNodes.TryGetValue(entityId, out var cached))
                 {
-                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve, SceneRefResolver);
+                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve, resolveSceneRef);
                 }
                 else
                 {

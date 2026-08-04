@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
+using SceneBuilder.Core.Serialization;
 using SceneBuilder.Editor;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -155,13 +156,21 @@ public class AutoSceneToCodeScene : ISceneDefinition
             "Builder source was not synced with the moved transform.\n" + rewritten);
     }
 
-    // Regression: the new 4-arg Run overload, given the scene's own cold-read snapshot, must be
+    // Regression: the new 4-arg Run overload, given the scene's own cold-read snapshot BUILT WITH THE
+    // SAME scene-identity resolver production uses (ObjectReferenceResolver.BuildSceneRefResolver over
+    // the sidecar's IdentityMap — SceneBuilderAutoSync.cs always sets this before assembling), must be
     // equivalent in effect to the existing 3-arg Run — RoundTrip*/SyncFuzz tests calling the 3-arg
-    // form must stay green untouched.
+    // form must stay green untouched. The fixture carries an object-reference field re-pointed live in
+    // the scene so the equivalence check actually exercises resolver-dependent sync, not just a
+    // transform move.
     [Test]
     public void Run_PreAssembledSnapshotOverload_EquivalentTo_ColdRead()
     {
-        File.WriteAllText(_builderPath, Source("        scene.Add(\"Alpha\");"));
+        File.WriteAllText(_builderPath, Source(
+            "        var alpha = scene.Add(\"Alpha\");\n" +
+            "        var beta = scene.Add(\"Beta\");\n" +
+            "        var opener = scene.Add(\"Opener\");\n" +
+            "        opener.Component<DoorOpener>(c => c.Set(\"target\", alpha));"));
 
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
@@ -169,8 +178,15 @@ public class AutoSceneToCodeScene : ISceneDefinition
         SceneBuilderRouter.ResetForTests();
 
         var alpha = FindRoot(EditorSceneManager.GetActiveScene(), "Alpha");
+        var beta = FindRoot(EditorSceneManager.GetActiveScene(), "Beta");
+        var opener = FindRoot(EditorSceneManager.GetActiveScene(), "Opener");
         Assert.IsNotNull(alpha, "Alpha was not created by SceneBuilderBuild.Run");
+        Assert.IsNotNull(beta, "Beta was not created by SceneBuilderBuild.Run");
+        Assert.IsNotNull(opener, "Opener was not created by SceneBuilderBuild.Run");
         alpha.transform.position = new Vector3(4f, 5f, 6f);
+        // Re-point the live reference away from what the source authored — only a resolver-aware
+        // read can detect this, an omitted/null resolver reads it as Unsupported and prunes it.
+        opener.GetComponent<DoorOpener>().target = beta;
 
         var coldBuilderPath = _builderPath + ".cold.cs";
         var coldSidecarPath = _sidecarPath + ".cold.json";
@@ -180,7 +196,12 @@ public class AutoSceneToCodeScene : ISceneDefinition
         var liveScene = EditorSceneManager.GetActiveScene();
         var coldResult = SceneBuilderSync.Run(coldBuilderPath, coldSidecarPath, liveScene);
 
-        var preAssembled = SceneSnapshotReader.Read(liveScene);
+        Assert.Greater(coldResult.EditsApplied, 0,
+            "Precondition: the cold read must detect at least one edit (the moved transform and/or the " +
+            "re-pointed reference), or the equivalence check below is vacuous.");
+
+        var map = IdentityMapJson.Deserialize(File.ReadAllText(_sidecarPath));
+        var preAssembled = SceneSnapshotReader.Read(liveScene, ObjectReferenceResolver.BuildSceneRefResolver(map));
         var overloadResult = SceneBuilderSync.Run(_builderPath, _sidecarPath, liveScene, preAssembled);
 
         Assert.AreEqual(coldResult.EditsApplied, overloadResult.EditsApplied,
@@ -188,6 +209,9 @@ public class AutoSceneToCodeScene : ISceneDefinition
         Assert.AreEqual(coldResult.Changed, overloadResult.Changed);
         Assert.AreEqual(File.ReadAllText(coldBuilderPath), File.ReadAllText(_builderPath),
             "The pre-assembled-snapshot overload must produce byte-identical source to the cold 3-arg Run given an equivalent snapshot.");
+        StringAssert.Contains(", beta)", File.ReadAllText(_builderPath),
+            "The re-pointed reference (Opener.target -> Beta) must reach the builder source through the " +
+            "pre-assembled-snapshot overload, not only through the cold 3-arg Run.");
 
         // These live under the real SceneBuilders/ dir now (not a temp dir wiped wholesale by
         // TearDown) — clean up the scratch copies explicitly so they don't linger between runs.

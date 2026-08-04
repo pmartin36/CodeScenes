@@ -48,7 +48,7 @@ public class NestedOverrideReadTests
     }
 
     private static SnapshotNode ReadTank(Scene scene) =>
-        SceneSnapshotReader.Read(scene).Roots.First(r => r.Name == "Tank");
+        SceneSnapshotReader.Read(scene, resolveSceneRef: null).Roots.First(r => r.Name == "Tank");
 
     private static PrefabInstanceKey PairKey(GameObject go)
     {

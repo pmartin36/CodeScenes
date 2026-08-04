@@ -79,7 +79,7 @@ public class HiddenFieldScene : ISceneDefinition
         canvas.sortingOrder = 7; // hidden from a default inspector; CanvasEditor draws it by hand
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(canvas);
+        var data = SerializedFieldBridge.ReadComponent(canvas, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.TryGetValue("m_SortingOrder", out var node),
             "Canvas.m_SortingOrder was edited in the scene but the reader did not capture it — the " +
@@ -95,7 +95,7 @@ public class HiddenFieldScene : ISceneDefinition
         rb.constraints = RigidbodyConstraints.FreezePositionY; // hidden; drawn by RigidbodyEditor
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(rb);
+        var data = SerializedFieldBridge.ReadComponent(rb, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.TryGetValue("m_Constraints", out var node),
             "Rigidbody.m_Constraints is the same class of bug as Canvas.m_SortingOrder — a real " +
@@ -115,7 +115,7 @@ public class HiddenFieldScene : ISceneDefinition
         canvas.enabled = false; // m_Enabled is hidden: the inspector draws it in the component header
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(canvas);
+        var data = SerializedFieldBridge.ReadComponent(canvas, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.TryGetValue("m_Enabled", out var node),
             "Disabling a component in the scene must reach the builder source — m_Enabled is hidden " +
@@ -133,7 +133,7 @@ public class HiddenFieldScene : ISceneDefinition
         var scaler = go.AddComponent<CanvasScaler>();
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(scaler);
+        var data = SerializedFieldBridge.ReadComponent(scaler, resolveSceneRef: null);
 
         foreach (var bookkeeping in new[]
                  {
@@ -159,7 +159,7 @@ public class HiddenFieldScene : ISceneDefinition
         so.ApplyModifiedPropertiesWithoutUndo();
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(renderer);
+        var data = SerializedFieldBridge.ReadComponent(renderer, resolveSceneRef: null);
 
         foreach (var derived in new[]
                  {
@@ -183,7 +183,7 @@ public class HiddenFieldScene : ISceneDefinition
         sizer.enabled = false;
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(sizer);
+        var data = SerializedFieldBridge.ReadComponent(sizer, resolveSceneRef: null);
 
         Assert.IsFalse(data.Fields.TryGetValue("m_Enabled", out _),
             "FitSize is authored as `.FitSize(height: 2f)` — a closed keyword grammar with no " +

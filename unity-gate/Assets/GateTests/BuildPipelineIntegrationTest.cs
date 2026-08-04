@@ -33,8 +33,9 @@ public class GateScene : ISceneDefinition
         // test that assembles its own pipeline can silently omit a stage (that is exactly how sync
         // came to skip asset-ref lowering) and would then be proving a pipeline nobody ships.
         var loaded = DesiredModelLoader.Load(Source, null);
-        var snapshot = SceneSnapshotReader.Read(scene);
         var remapped = IdentityRemapper.Remap(loaded.Parse.Model, new IdentityMap());
+        var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(remapped);
+        var snapshot = SceneSnapshotReader.Read(scene, sceneRef);
         var plan = Materializer.Materialize(loaded.Desired, snapshot, remapped);
         PlanExecutor.Execute(plan, remapped, scene);
 

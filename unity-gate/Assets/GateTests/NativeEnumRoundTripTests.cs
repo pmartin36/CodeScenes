@@ -53,7 +53,7 @@ public class NativeEnumRoundTripTests
         canvas.renderMode = RenderMode.WorldSpace;
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(canvas);
+        var data = SerializedFieldBridge.ReadComponent(canvas, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.TryGetValue("m_RenderMode", out var node),
             "A native enum field must still be present in the read.");
@@ -72,7 +72,7 @@ public class NativeEnumRoundTripTests
         rb.constraints = RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezeRotationZ;
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(rb);
+        var data = SerializedFieldBridge.ReadComponent(rb, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.TryGetValue("m_Constraints", out var node),
             "Rigidbody.m_Constraints must still be present in the read.");
@@ -132,7 +132,7 @@ public class NativeEnumRoundTripTests
         var source = new GameObject("Source").AddComponent<Canvas>();
         source.renderMode = RenderMode.WorldSpace;
         SaveActiveScene();
-        var originalNode = SerializedFieldBridge.ReadComponent(source).Fields["m_RenderMode"];
+        var originalNode = SerializedFieldBridge.ReadComponent(source, resolveSceneRef: null).Fields["m_RenderMode"];
         Assert.IsInstanceOf<ValueNode.Enum>(originalNode,
             "PREMISE: the read must already be a typed Enum node for this round trip to prove the " +
             "read, write and model agree on one representation, not merely that a raw int is stable.");
@@ -142,7 +142,7 @@ public class NativeEnumRoundTripTests
         SerializedFieldBridge.WriteField(so, "m_RenderMode", originalNode);
         so.ApplyModifiedPropertiesWithoutUndo();
 
-        var roundTrippedNode = SerializedFieldBridge.ReadComponent(target).Fields["m_RenderMode"];
+        var roundTrippedNode = SerializedFieldBridge.ReadComponent(target, resolveSceneRef: null).Fields["m_RenderMode"];
 
         Assert.AreEqual(originalNode, roundTrippedNode,
             "Reading a native enum, writing it to a different component, then reading it again must " +

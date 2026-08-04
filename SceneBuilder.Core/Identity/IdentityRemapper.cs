@@ -16,7 +16,7 @@ namespace SceneBuilder.Core.Identity
             // b5-t3: a prior PrefabInstance entry is a first-class node kind alongside GameObject —
             // both live in the same match pool so a rebuilt instance inherits its prior
             // GlobalObjectId/PrefabKey/SourcePrefabGuid instead of orphaning the prior entry.
-            var priorGameObjects = prior.Entries.Where(e => e.Kind == "GameObject" || e.Kind == "PrefabInstance").ToList();
+            var priorGameObjects = prior.Entries.Where(IdentityNodeIndex.IsNode).ToList();
             var priorRoots = priorGameObjects.Where(e => e.ParentLogicalId == null).ToList();
 
             var priorChildrenByParent = new Dictionary<string, List<IdentityMapEntry>>();
@@ -39,7 +39,7 @@ namespace SceneBuilder.Core.Identity
             var priorComponentsByOwner = new Dictionary<string, List<IdentityMapEntry>>();
             foreach (var entry in prior.Entries)
             {
-                if (entry.Kind != "Component" || entry.ParentLogicalId == null)
+                if (entry.Kind != IdentityNodeIndex.Component || entry.ParentLogicalId == null)
                 {
                     continue;
                 }

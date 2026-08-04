@@ -100,5 +100,46 @@ namespace SceneBuilder.Core.Model
                     return visited;
             }
         }
+
+        /// <summary>
+        /// True when <paramref name="predicate"/> holds for <paramref name="node"/> itself or for any
+        /// member/item reachable from it at any depth (<see cref="ValueNode.Nested"/> members and
+        /// <see cref="ValueNode.List"/> items; every other kind is a leaf).
+        /// </summary>
+        public static bool Any(ValueNode node, Func<ValueNode, bool> predicate)
+        {
+            if (predicate(node))
+            {
+                return true;
+            }
+
+            switch (node)
+            {
+                case ValueNode.Nested nested:
+                    foreach (var (_, memberValue) in nested.Fields)
+                    {
+                        if (Any(memberValue, predicate))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+
+                case ValueNode.List list:
+                    foreach (var item in list.Items)
+                    {
+                        if (Any(item, predicate))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+
+                default:
+                    return false;
+            }
+        }
     }
 }

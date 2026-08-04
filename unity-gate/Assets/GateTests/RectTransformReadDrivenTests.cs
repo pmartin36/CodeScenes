@@ -60,7 +60,7 @@ public class RectTransformReadDrivenTests
             go.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
             Canvas.ForceUpdateCanvases();
 
-            var snapshot = SceneSnapshotReader.Read(go.scene);
+            var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "HudCanvas");
 
             Assert.IsNotNull(node, "HudCanvas not found in snapshot.");
@@ -99,7 +99,7 @@ public class RectTransformReadDrivenTests
             Canvas.ForceUpdateCanvases();
             LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)groupGo.transform);
 
-            var snapshot = SceneSnapshotReader.Read(canvasGo.scene);
+            var snapshot = SceneSnapshotReader.Read(canvasGo.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "Item");
 
             Assert.IsNotNull(node, "Item not found in snapshot.");
@@ -130,7 +130,7 @@ public class RectTransformReadDrivenTests
             Canvas.ForceUpdateCanvases();
             LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)itemGo.transform);
 
-            var snapshot = SceneSnapshotReader.Read(canvasGo.scene);
+            var snapshot = SceneSnapshotReader.Read(canvasGo.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "Fitted");
 
             Assert.IsNotNull(node, "Fitted not found in snapshot.");
@@ -159,7 +159,7 @@ public class RectTransformReadDrivenTests
             rt.anchoredPosition = new Vector2(24f, -24f);
             rt.sizeDelta = new Vector2(320f, 120f);
 
-            var snapshot = SceneSnapshotReader.Read(canvasGo.scene);
+            var snapshot = SceneSnapshotReader.Read(canvasGo.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "Panel");
 
             Assert.IsNotNull(node, "Panel not found in snapshot.");
@@ -184,7 +184,7 @@ public class RectTransformReadDrivenTests
         var go = new GameObject("Plain");
         try
         {
-            var snapshot = SceneSnapshotReader.Read(go.scene);
+            var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
             var node = FindNode(snapshot.Roots, "Plain");
 
             Assert.IsNotNull(node, "Plain not found in snapshot.");
@@ -211,7 +211,7 @@ public class RectTransformReadDrivenTests
             var panelGo = new GameObject("Panel", typeof(RectTransform), typeof(Image));
             panelGo.transform.SetParent(canvasGo.transform, false);
 
-            var snapshot = SceneSnapshotReader.Read(canvasGo.scene);
+            var snapshot = SceneSnapshotReader.Read(canvasGo.scene, resolveSceneRef: null);
             var panelNode = FindNode(snapshot.Roots, "Panel");
             var plainNode = FindNode(snapshot.Roots, "PlainNode");
 
@@ -254,7 +254,7 @@ public class RectTransformReadDrivenTests
             Assert.IsTrue(addedPremise != null && addedPremise.Any(a => a.instanceGameObject == hud),
                 "Premise failed: Hud did not register as a PrefabUtility AddedGameObjects override.");
 
-            var node = SceneSnapshotReader.Read(scene).Roots.First(r => r.Name == "Tank");
+            var node = SceneSnapshotReader.Read(scene, resolveSceneRef: null).Roots.First(r => r.Name == "Tank");
             var added = node.AddedGameObjects.FirstOrDefault(a => a.Node.Name == "Hud");
 
             Assert.IsNotNull(added, "Hud did not read into Tank's AddedGameObjects[].");
@@ -299,7 +299,7 @@ public class RectTransformReadDrivenTests
             Assert.IsTrue(addedPremise != null && addedPremise.Any(a => a.instanceGameObject == hud),
                 "Premise failed: Hud did not register as a PrefabUtility AddedGameObjects override.");
 
-            var node = SceneSnapshotReader.Read(scene).Roots.First(r => r.Name == "Tank");
+            var node = SceneSnapshotReader.Read(scene, resolveSceneRef: null).Roots.First(r => r.Name == "Tank");
             var added = node.AddedGameObjects.FirstOrDefault(a => a.Node.Name == "Hud");
 
             Assert.IsNotNull(added, "Hud did not read into Tank's AddedGameObjects[].");

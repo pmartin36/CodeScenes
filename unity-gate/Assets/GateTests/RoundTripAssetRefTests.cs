@@ -304,7 +304,7 @@ using SceneBuilder.Authoring;
             var meshProp = so.FindProperty("m_Mesh");
             Assert.IsNotNull(meshProp, "m_Mesh property not found on MeshFilter");
 
-            var node = AssetReferenceResolver.ReadObjectReference(meshProp);
+            var node = AssetReferenceResolver.ReadObjectReference(meshProp, resolveSceneRef: null);
 
             Assert.IsInstanceOf<ValueNode.AssetRef>(node,
                 "Built-in mesh read did not produce an AssetRef node (got " + node.GetType().Name + ")");
@@ -345,7 +345,7 @@ using SceneBuilder.Authoring;
             var spriteProp = so.FindProperty("m_Sprite");
             Assert.IsNotNull(spriteProp, "Image.m_Sprite property not found");
 
-            var node = AssetReferenceResolver.ReadObjectReference(spriteProp);
+            var node = AssetReferenceResolver.ReadObjectReference(spriteProp, resolveSceneRef: null);
 
             Assert.IsInstanceOf<ValueNode.AssetRef>(node,
                 "Ambiguous-name built-in sprite read did not produce an AssetRef node (got " + node.GetType().Name + ")");

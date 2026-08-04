@@ -227,7 +227,7 @@ public class InstanceAddReconcileGateScene : ISceneDefinition
         Assert.IsTrue(PrefabUtility.GetAddedComponents(tank).Any(a => a.instanceComponent is Light),
             "Setup: the live-added Light was not recorded as an AddedComponents override on the Tank instance.");
 
-        var snapshot = SceneSnapshotReader.Read(EditorSceneManager.GetActiveScene());
+        var snapshot = SceneSnapshotReader.Read(EditorSceneManager.GetActiveScene(), resolveSceneRef: null);
         var tankNode = snapshot.Roots.First(n => n.Name == "Tank");
         Assert.IsTrue(tankNode.AddedComponents.Any(a => a.Component.Type.FullName == "UnityEngine.Light"),
             "Setup: the snapshot's Tank node did not carry the added Light on its AddedComponents channel.");

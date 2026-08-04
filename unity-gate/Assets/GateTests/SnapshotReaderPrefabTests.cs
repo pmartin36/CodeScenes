@@ -86,7 +86,7 @@ public class SnapshotReaderPrefabTests
     }
 
     private static SnapshotNode ReadRoot(Scene scene, string name) =>
-        SceneSnapshotReader.Read(scene).Roots.First(r => r.Name == name);
+        SceneSnapshotReader.Read(scene, resolveSceneRef: null).Roots.First(r => r.Name == name);
 
     private static SnapshotNode ReadRoot(Scene scene, string name, Func<UnityEngine.Object, string?> resolveSceneRef) =>
         SceneSnapshotReader.Read(scene, resolveSceneRef).Roots.First(r => r.Name == name);

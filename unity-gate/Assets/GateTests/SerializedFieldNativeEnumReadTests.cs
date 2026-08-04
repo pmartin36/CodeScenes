@@ -51,7 +51,7 @@ public class SerializedFieldNativeEnumReadTests
                                                     // "away from default" value this test needs.
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(canvas);
+        var data = SerializedFieldBridge.ReadComponent(canvas, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.TryGetValue("m_RenderMode", out var node),
             "A native enum authored away from its type default must survive CollectFields, not be " +
@@ -71,7 +71,7 @@ public class SerializedFieldNativeEnumReadTests
         fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize; // default is Unconstrained
         SaveActiveScene();
 
-        var data = SerializedFieldBridge.ReadComponent(fitter);
+        var data = SerializedFieldBridge.ReadComponent(fitter, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.TryGetValue("m_HorizontalFit", out var node),
             "A managed enum field authored away from its default must still be present.");
@@ -91,7 +91,7 @@ public class SerializedFieldNativeEnumReadTests
                                     // NOT this GameObject's own raw AddComponent value (WorldSpace).
         SaveActiveScene();
 
-        var snapshot = SceneSnapshotReader.Read(EditorSceneManager.GetActiveScene());
+        var snapshot = SceneSnapshotReader.Read(EditorSceneManager.GetActiveScene(), resolveSceneRef: null);
 
         var canvasDefaults = System.Array.Find(snapshot.ComponentDefaults,
             d => d.Type.FullName == "UnityEngine.Canvas");

@@ -34,7 +34,7 @@ namespace SceneBuilder.Editor
     {
         // ---- Read (component -> ComponentData) ---------------------------------------------
 
-        public static ComponentData ReadComponent(Component component, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        public static ComponentData ReadComponent(Component component, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             // Registration only — never filters this read. Ensures ComponentDefaultTemplate has a
             // template for every type reachable from a snapshot, so SceneSnapshotReader.FromRoots can
@@ -92,7 +92,7 @@ namespace SceneBuilder.Editor
         // value changed and the sync answered "Scene already matches code". Serialized state, not
         // inspector-visible state, is what round-trips, so the filtering is by explicit name, via
         // SerializedFieldExclusions, rather than by Unity's inspector-drawing flag.
-        internal static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        internal static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
@@ -143,7 +143,7 @@ namespace SceneBuilder.Editor
             _ => false,
         };
 
-        private static ValueNode ReadProperty(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        private static ValueNode ReadProperty(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             switch (p.propertyType)
             {
@@ -237,7 +237,7 @@ namespace SceneBuilder.Editor
             return ValueNode.Primitive.Int(p.intValue);
         }
 
-        private static ValueNode ReadList(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        private static ValueNode ReadList(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var items = new List<ValueNode>(p.arraySize);
             for (var i = 0; i < p.arraySize; i++)
@@ -248,7 +248,7 @@ namespace SceneBuilder.Editor
             return new ValueNode.List(items);
         }
 
-        private static ValueNode ReadNested(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        private static ValueNode ReadNested(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             // The struct/class Type resolves FIRST -- every child key below is mapped through it, so
             // the map must be in hand before the child walk starts.

@@ -112,7 +112,7 @@ public class RoundTripScene : ISceneDefinition
         behaviour.Health = 7;
 
         // The MonoScript-GUID anchor is exposed on the snapshot TypeRef the adapter reads.
-        var snapshot = SceneSnapshotReader.Read(EditorSceneManager.GetActiveScene());
+        var snapshot = SceneSnapshotReader.Read(EditorSceneManager.GetActiveScene(), resolveSceneRef: null);
         var typeName = typeof(GateSampleBehaviour).FullName;
         var component = FindComponent(snapshot.Roots.First(n => n.Name == "Hero"), typeName);
         Assert.IsNotNull(component, "GateSampleBehaviour was not read into the scene snapshot");

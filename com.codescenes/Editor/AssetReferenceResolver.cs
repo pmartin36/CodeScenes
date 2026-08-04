@@ -444,10 +444,10 @@ namespace SceneBuilder.Editor
         /// populated <c>ValueNode.AssetRef</c> (GUID/FileId/TypeHint + re-derived DisplayPath, and
         /// SubAsset set to the referenced object's name when it is a sub-object, "" for the main
         /// asset); a scene-object reference → <c>ValueNode.ObjectRef</c> resolved via
-        /// <paramref name="resolveSceneRef"/> (M5) when supplied, else <c>Unsupported</c> (build path,
-        /// M4-preserved — build never reads scene refs, only writes them via <c>SetReference</c>).
+        /// <paramref name="resolveSceneRef"/> (M5) when supplied, else <c>Unsupported</c> (no
+        /// resolver was passed, so a scene-object reference cannot be represented).
         /// </summary>
-        public static ValueNode ReadObjectReference(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        public static ValueNode ReadObjectReference(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var obj = p.objectReferenceValue;
             if (obj == null)
@@ -473,8 +473,8 @@ namespace SceneBuilder.Editor
         internal static ValueNode ReadObjectReferenceValue(UnityEngine.Object obj, Func<UnityEngine.Object, string?>? resolveSceneRef, SerializedProperty? p = null)
         {
             // A reference to a scene GameObject/Component (not a project asset) resolves via the
-            // injected identity resolver (M5) when one was supplied; otherwise (the build read path,
-            // which never consumes scene refs) it stays Unsupported exactly as pre-M5.
+            // injected identity resolver (M5) when one was supplied; otherwise it stays Unsupported
+            // exactly as pre-M5.
             if (!AssetDatabase.Contains(obj))
             {
                 if (resolveSceneRef == null)

@@ -45,8 +45,7 @@ namespace SceneBuilder.Editor
             // Pre-resolve EXISTING mapped GameObjects by LogicalId so update/parent ops target them.
             foreach (var entry in map.Entries)
             {
-                if ((entry.Kind == "GameObject" || entry.Kind == "PrefabInstance")
-                    && !string.IsNullOrEmpty(entry.GlobalObjectId)
+                if (IdentityNodeIndex.IsMappedNode(entry)
                     && goidToGameObject.TryGetValue(entry.GlobalObjectId, out var go))
                 {
                     result.GameObjectsByLogicalId[entry.LogicalId] = go;

@@ -72,13 +72,13 @@ public class ComponentDefaultTemplateScene : ISceneDefinition
     {
         var canvasGo = new GameObject("Canvas");
         var canvas = canvasGo.AddComponent<Canvas>();
-        var canvasData = SerializedFieldBridge.ReadComponent(canvas);
+        var canvasData = SerializedFieldBridge.ReadComponent(canvas, resolveSceneRef: null);
         Assert.IsTrue(canvasData.Fields.ContainsKey("m_RenderMode"),
             "A Canvas at its default render mode must still report m_RenderMode.");
 
         var imageGo = new GameObject("Image");
         var image = imageGo.AddComponent<Image>();
-        var imageData = SerializedFieldBridge.ReadComponent(image);
+        var imageData = SerializedFieldBridge.ReadComponent(image, resolveSceneRef: null);
         Assert.IsTrue(imageData.Fields.ContainsKey("m_Sprite"),
             "An Image with a null (default) m_Sprite must still report m_Sprite.");
         Assert.IsTrue(imageData.Fields.ContainsKey("m_Color"),

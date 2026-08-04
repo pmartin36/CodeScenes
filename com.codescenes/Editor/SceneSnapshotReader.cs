@@ -20,14 +20,13 @@ namespace SceneBuilder.Editor
         private static readonly Func<GameObject, string> DefaultResolver =
             go => GlobalObjectId.GetGlobalObjectIdSlow(go).ToString();
 
-        public static SceneSnapshot Read(Scene scene) => Read(scene, DefaultResolver, resolveSceneRef: null);
-
         /// <summary>
         /// Cold read with a scene-object identity resolver (M5, see
         /// <see cref="ObjectReferenceResolver.BuildSceneRefResolver"/>) threaded to every
-        /// object-reference field — the sync-cold read path. <paramref name="resolveSceneRef"/> null
-        /// (the default, build-path <see cref="Read(Scene)"/> overload) leaves scene-object refs
-        /// Unsupported, M4-preserved.
+        /// object-reference field. Every caller must explicitly decide whether an object-reference
+        /// field resolves to scene identity: pass a resolver (the sync-cold read path) to have an
+        /// assigned in-scene reference resolve to a <see cref="ValueNode.ObjectRef"/>, or pass
+        /// <paramref name="resolveSceneRef"/> null to leave scene-object refs Unsupported and pruned.
         /// </summary>
         public static SceneSnapshot Read(Scene scene, Func<UnityEngine.Object, string?>? resolveSceneRef) =>
             Read(scene, DefaultResolver, resolveSceneRef);
@@ -147,7 +146,9 @@ namespace SceneBuilder.Editor
         /// <see cref="ChangeScopedSnapshot"/>'s incremental rebuild of dirty nodes.
         /// <paramref name="resolveSceneRef"/> is REQUIRED (not defaulted) so every caller — including
         /// <see cref="ChangeScopedSnapshot"/> — must explicitly decide whether object-reference fields
-        /// resolve to scene identity (M5) or stay Unsupported (build path: pass null).
+        /// resolve to scene identity (M5, pass a resolver) or stay Unsupported (pass null — correct
+        /// only for a caller with no scene-identity resolver to offer, e.g. a fresh-component template
+        /// read).
         /// </summary>
         internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {

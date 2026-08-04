@@ -41,8 +41,8 @@ public class AutoIdentityTests
         var scene = EditorSceneManager.GetActiveScene();
         var css = new ChangeScopedSnapshot();
 
-        var cold = css.AssembleCold(scene);
-        var expected = SceneSnapshotReader.Read(scene);
+        var cold = css.AssembleCold(scene, resolveSceneRef: null);
+        var expected = SceneSnapshotReader.Read(scene, resolveSceneRef: null);
 
         Assert.AreEqual(
             CanonicalJson.Serialize(expected),
@@ -64,7 +64,7 @@ public class AutoIdentityTests
         var scene = EditorSceneManager.GetActiveScene();
         var css = new ChangeScopedSnapshot();
 
-        css.AssembleCold(scene);
+        css.AssembleCold(scene, resolveSceneRef: null);
 
         Assert.AreEqual(count, css.Ids.ResolutionCount,
             "Cold assemble of a scene with no prior state must resolve every GameObject exactly once.");
@@ -90,13 +90,13 @@ public class AutoIdentityTests
 
         var scene = EditorSceneManager.GetActiveScene();
         var css = new ChangeScopedSnapshot();
-        css.AssembleCold(scene);
+        css.AssembleCold(scene, resolveSceneRef: null);
         css.Ids.ResetCount();
 
         target.tag = "Player";
         SaveActiveScene();
 
-        css.AssembleIncremental(scene, new[] { target.GetEntityId() });
+        css.AssembleIncremental(scene, new[] { target.GetEntityId() }, resolveSceneRef: null);
 
         Assert.AreEqual(1, css.Ids.ResolutionCount,
             "A single-object change must resolve exactly 1 GlobalObjectId (the owning GameObject), " +
@@ -121,13 +121,13 @@ public class AutoIdentityTests
 
         var scene = EditorSceneManager.GetActiveScene();
         var css = new ChangeScopedSnapshot();
-        css.AssembleCold(scene);
+        css.AssembleCold(scene, resolveSceneRef: null);
 
         target.tag = "Player";
         SaveActiveScene();
 
-        var incremental = css.AssembleIncremental(scene, new[] { target.GetEntityId() });
-        var freshCold = SceneSnapshotReader.Read(scene);
+        var incremental = css.AssembleIncremental(scene, new[] { target.GetEntityId() }, resolveSceneRef: null);
+        var freshCold = SceneSnapshotReader.Read(scene, resolveSceneRef: null);
 
         Assert.AreEqual(
             CanonicalJson.Serialize(freshCold),

@@ -15,13 +15,9 @@ namespace SceneBuilder.Core.Diff
 
         public static ChangeSet Diff(SceneModel desired, SceneSnapshot actual, IdentityMap identityMap)
         {
-            var logicalIdToGlobalObjectId = identityMap.Entries
-                .Where(e => (e.Kind == "GameObject" || e.Kind == "PrefabInstance") && !string.IsNullOrEmpty(e.GlobalObjectId))
-                .ToDictionary(e => e.LogicalId, e => e.GlobalObjectId);
+            var logicalIdToGlobalObjectId = IdentityNodeIndex.LogicalIdToGlobalObjectId(identityMap);
 
-            var globalObjectIdToLogicalId = logicalIdToGlobalObjectId
-                .GroupBy(kv => kv.Value)
-                .ToDictionary(g => g.Key, g => g.First().Key);
+            var globalObjectIdToLogicalId = IdentityNodeIndex.GlobalObjectIdToLogicalId(identityMap);
 
             var snapshotByGoid = new Dictionary<string, SnapshotEntry>();
             FlattenSnapshot(actual.Roots, null, snapshotByGoid);
@@ -290,15 +286,21 @@ namespace SceneBuilder.Core.Diff
                     var actualComponent = actualComps[actualIndex];
                     foreach (var field in desiredComponent.Fields)
                     {
-                        // A field absent from the live component's Fields is not
-                        // automatically "changed". The live adapter read no longer prunes, so
-                        // this backstop now fires only for a snapshot from some OTHER producer whose
-                        // Fields is genuinely partial — it resolves the absent field against the
-                        // per-type default template (populated on ComponentDefaults) before falling
-                        // back to "unknown, emit anyway". A live Fields entry, when present, always
-                        // wins over the template regardless of its value.
+                        // A field absent from the live component's Fields is not automatically
+                        // "changed": it resolves against the per-type default template (populated on
+                        // ComponentDefaults) before falling back to "unknown, emit anyway". A live
+                        // Fields entry, when present, always wins over the template regardless of its
+                        // value. That backstop does not hold for a desired value carrying a scene
+                        // reference: absence of a reference field is not evidence the live value is
+                        // at default, because the live reader prunes exactly the reference values it
+                        // could not represent (spec 33 C9) — its absence means "unreadable", not
+                        // "unchanged". Skip the template lookup for those fields so the comparison
+                        // below falls through to "unknown, emit anyway".
+                        var defaultIsUsableBasis = !ValueWalk.Any(field.Value, n => n is ValueNode.ObjectRef);
+
                         var known = actualComponent.Fields.TryGetValue(field.Key, out var actualValue)
-                            || (typeDefaults.TryGetValue(actualComponent.Type.FullName, out var defaults)
+                            || (defaultIsUsableBasis
+                                && typeDefaults.TryGetValue(actualComponent.Type.FullName, out var defaults)
                                 && defaults.TryGetValue(field.Key, out actualValue));
 
                         // The field's constructed default, when the type has a template for it — the

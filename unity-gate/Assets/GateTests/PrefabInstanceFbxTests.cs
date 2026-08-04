@@ -145,7 +145,7 @@ Connections:  {
         var scene = EditorSceneManager.GetActiveScene();
         EditorSceneManager.SaveScene(scene, ScenePath);
 
-        var node = SceneSnapshotReader.Read(scene).Roots.First(r => r.Name == "Model1");
+        var node = SceneSnapshotReader.Read(scene, resolveSceneRef: null).Roots.First(r => r.Name == "Model1");
 
         Assert.AreEqual(_guid, node.SourcePrefabGuid,
             "Snapshot reader did not stamp the FBX's asset GUID as SourcePrefabGuid");

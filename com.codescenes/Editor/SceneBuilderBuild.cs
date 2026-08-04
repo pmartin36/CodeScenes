@@ -223,8 +223,13 @@ namespace SceneBuilder.Editor
             var priorSidecar = existingMap ?? new IdentityMap();
             var remapped = IdentityRemapper.Remap(parse.Model, priorSidecar);
 
-            // Read the PASSED scene as `actual` — never NewScene / wipe.
-            var snapshot = SceneSnapshotReader.Read(scene);
+            // Read the PASSED scene as `actual` — never NewScene / wipe. Threaded with the same
+            // scene-object identity resolver Sync uses (SceneBuilderSync.cs:206-207) so an assigned
+            // in-scene reference resolves to a LogicalId instead of reading Unsupported and being
+            // pruned — a rebuild from a converged source sees the live reference and emits no
+            // redundant SetReference for it.
+            var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(remapped);
+            var snapshot = SceneSnapshotReader.Read(scene, sceneRef);
 
             var plan = Materializer.Materialize(desired, snapshot, remapped);
 
@@ -256,7 +261,7 @@ namespace SceneBuilder.Editor
             // LogicalId — threaded so WithGlobalObjectIds can correlate them to their LIVE counterparts
             // (RootAddedComponents) and persist a stable GlobalObjectId per added component.
             var desiredInstancesByLogicalId = CollectPrefabInstanceNodes(desired.Roots);
-            var map = WithGlobalObjectIds(currentStructure, execution, desiredInstancesByLogicalId);
+            var map = WithGlobalObjectIds(currentStructure, execution, desiredInstancesByLogicalId, sceneRef);
 
             // Write-if-changed: a rebuild that produces an identical sidecar must not bump its mtime —
             // the file watcher driving code->scene would fire on it for nothing.
@@ -284,7 +289,8 @@ namespace SceneBuilder.Editor
         private static IdentityMap WithGlobalObjectIds(
             IdentityMap map,
             PlanExecutor.ExecutionResult execution,
-            IReadOnlyDictionary<string, PrefabInstanceNode> desiredInstancesByLogicalId)
+            IReadOnlyDictionary<string, PrefabInstanceNode> desiredInstancesByLogicalId,
+            Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var entries = new List<IdentityMapEntry>(map.Entries.Length);
 
@@ -304,14 +310,15 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                // b5-t3: stamp the instance root's GlobalObjectId + the (TargetPrefabId, TargetObjectId)
-                // pair-key + SourcePrefabGuid via the SAME probe the read side (b5-t2) uses, so build-side
-                // and read-side identity are byte-identical (the Differ's pair-key match depends on it).
-                // Runs AFTER SaveScene, so the GlobalObjectId pair is real.
+                // Stamp the instance root's GlobalObjectId + the (TargetPrefabId, TargetObjectId)
+                // pair-key + SourcePrefabGuid via the SAME probe the read side uses, with the SAME
+                // scene-identity resolver, so build-side and read-side identity are byte-identical
+                // (the Differ's pair-key match depends on it). Runs AFTER SaveScene, so the
+                // GlobalObjectId pair is real.
                 if (e.Kind == "PrefabInstance"
                     && execution.GameObjectsByLogicalId.TryGetValue(e.LogicalId, out var instanceGo) && instanceGo != null)
                 {
-                    var instanceRead = PrefabInstanceProbe.ReadInstanceRoot(instanceGo);
+                    var instanceRead = PrefabInstanceProbe.ReadInstanceRoot(instanceGo, resolveSceneRef);
                     desiredInstancesByLogicalId.TryGetValue(e.LogicalId, out var instanceNode);
 
                     // M10/b1-t2 + m-nested-props b7-t1: EVERY read-side override/added/removed

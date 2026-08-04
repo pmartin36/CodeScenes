@@ -71,9 +71,11 @@ namespace SceneBuilder.Editor
         /// Reads the instance-root identity + overrides. Callers MUST only invoke this when
         /// <see cref="IsInstanceRoot"/> is true. <paramref name="resolveSceneRef"/> (M5, see
         /// <see cref="ObjectReferenceResolver.BuildSceneRefResolver"/>) lowers an in-scene
-        /// objectReference override's target; null leaves it <c>Unsupported</c> (build path).
+        /// objectReference override's target to a <see cref="ValueNode.ObjectRef"/>; passing null
+        /// leaves it <c>Unsupported</c> — a valid answer only for a caller with no scene-identity
+        /// resolver to offer.
         /// </summary>
-        internal static InstanceReadResult ReadInstanceRoot(GameObject go, Func<UnityEngine.Object, string?>? resolveSceneRef = null)
+        internal static InstanceReadResult ReadInstanceRoot(GameObject go, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             string? guid = null;
             var source = PrefabUtility.GetCorrespondingObjectFromSource(go) as GameObject;

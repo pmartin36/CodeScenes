@@ -84,7 +84,7 @@ public class InspectorVisibilityRuleScene : ISceneDefinition
         sr.sprite = _sprite;
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene(), ScenePath);
 
-        var data = SerializedFieldBridge.ReadComponent(sr);
+        var data = SerializedFieldBridge.ReadComponent(sr, resolveSceneRef: null);
 
         Assert.IsFalse(data.Fields.TryGetValue("m_WasSpriteAssigned", out _),
             "m_WasSpriteAssigned has no Inspector control - Unity sets it itself on sprite " +
@@ -102,7 +102,7 @@ public class InspectorVisibilityRuleScene : ISceneDefinition
         sr.sprite = _sprite;
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene(), ScenePath);
 
-        var data = SerializedFieldBridge.ReadComponent(sr);
+        var data = SerializedFieldBridge.ReadComponent(sr, resolveSceneRef: null);
 
         Assert.IsTrue(data.Fields.ContainsKey("m_Sprite"), "m_Sprite must still be reported.");
         Assert.IsTrue(data.Fields.ContainsKey("m_Color"), "m_Color must still be reported.");
@@ -176,12 +176,12 @@ public class InspectorVisibilityRuleScene : ISceneDefinition
         var scrollbar = new GameObject("Scrollbar").AddComponent<UnityEngine.UI.Scrollbar>();
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene(), ScenePath);
 
-        Assert.IsTrue(SerializedFieldBridge.ReadComponent(box).Fields.ContainsKey("m_Size"),
+        Assert.IsTrue(SerializedFieldBridge.ReadComponent(box, resolveSceneRef: null).Fields.ContainsKey("m_Size"),
             "BoxCollider.m_Size is a first-class Inspector control (the collider's size) and must " +
             "still be captured. A bare-name exclusion would silently stop it round-tripping.");
-        Assert.IsTrue(SerializedFieldBridge.ReadComponent(box2D).Fields.ContainsKey("m_Size"),
+        Assert.IsTrue(SerializedFieldBridge.ReadComponent(box2D, resolveSceneRef: null).Fields.ContainsKey("m_Size"),
             "BoxCollider2D.m_Size is a first-class Inspector control and must still be captured.");
-        Assert.IsTrue(SerializedFieldBridge.ReadComponent(scrollbar).Fields.ContainsKey("m_Size"),
+        Assert.IsTrue(SerializedFieldBridge.ReadComponent(scrollbar, resolveSceneRef: null).Fields.ContainsKey("m_Size"),
             "Scrollbar.m_Size is a first-class Inspector control and must still be captured.");
     }
 
@@ -196,13 +196,13 @@ public class InspectorVisibilityRuleScene : ISceneDefinition
         var canvas = canvasGo.AddComponent<Canvas>();
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene(), ScenePath);
 
-        var spriteData = SerializedFieldBridge.ReadComponent(sr);
+        var spriteData = SerializedFieldBridge.ReadComponent(sr, resolveSceneRef: null);
         Assert.IsTrue(spriteData.Fields.ContainsKey("m_SortingLayer"),
             "SpriteRenderer serializes m_SortingLayer (the short name) alongside m_SortingLayerID; both must round-trip.");
         Assert.IsTrue(spriteData.Fields.ContainsKey("m_SortingLayerID"),
             "SpriteRenderer's m_SortingLayerID must round-trip.");
 
-        var canvasData = SerializedFieldBridge.ReadComponent(canvas);
+        var canvasData = SerializedFieldBridge.ReadComponent(canvas, resolveSceneRef: null);
         Assert.IsTrue(canvasData.Fields.ContainsKey("m_SortingLayerID"),
             "Canvas's m_SortingLayerID must round-trip.");
         Assert.IsFalse(canvasData.Fields.ContainsKey("m_SortingLayer"),
@@ -235,7 +235,7 @@ public class InspectorVisibilityRuleScene : ISceneDefinition
         var scene = EditorSceneManager.GetActiveScene();
         EditorSceneManager.SaveScene(scene, ScenePath);
 
-        var node = SceneSnapshotReader.Read(scene).Roots.First(r => r.Name == "Instance");
+        var node = SceneSnapshotReader.Read(scene, resolveSceneRef: null).Roots.First(r => r.Name == "Instance");
 
         var leaked = node.Overrides
             .Select(o => o.PropertyPath.Split('.')[0])

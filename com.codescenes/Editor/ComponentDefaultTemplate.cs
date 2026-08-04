@@ -89,8 +89,9 @@ namespace SceneBuilder.Editor
                 if (component != null)
                 {
                     // Read back through the SAME field walk the live read uses, so template and
-                    // creation cannot diverge.
-                    var fields = SerializedFieldBridge.CollectFields(new SerializedObject(component));
+                    // creation cannot diverge. A freshly-created component's reference fields are all
+                    // null, so a null resolver is the correct, explicit answer here.
+                    var fields = SerializedFieldBridge.CollectFields(new SerializedObject(component), resolveSceneRef: null);
                     TemplatesByTypeName[fullName] = new FieldMap(fields);
                 }
             }

@@ -49,13 +49,9 @@ namespace SceneBuilder.Core.Reconcile
             // omit from a newly-authored field set.
             var defaultsIndex = ComponentDefaultOmission.Index.Build(actual.ComponentDefaults);
 
-            var logicalIdToGlobalObjectId = identityMap.Entries
-                .Where(e => (e.Kind == "GameObject" || e.Kind == "PrefabInstance") && !string.IsNullOrEmpty(e.GlobalObjectId))
-                .ToDictionary(e => e.LogicalId, e => e.GlobalObjectId);
+            var logicalIdToGlobalObjectId = IdentityNodeIndex.LogicalIdToGlobalObjectId(identityMap);
 
-            var globalObjectIdToLogicalId = logicalIdToGlobalObjectId
-                .GroupBy(kv => kv.Value)
-                .ToDictionary(g => g.Key, g => g.First().Key);
+            var globalObjectIdToLogicalId = IdentityNodeIndex.GlobalObjectIdToLogicalId(identityMap);
 
             // Source-prefab GUID -> last-known asset path, re-deriving the
             // `.Instance(path)` argument for a snapshot-only prefab-instance root. First-wins on a
@@ -70,7 +66,7 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             var logicalIdToParentLogicalId = identityMap.Entries
-                .Where(e => e.Kind == "GameObject" || e.Kind == "PrefabInstance")
+                .Where(IdentityNodeIndex.IsNode)
                 .ToDictionary(e => e.LogicalId, e => e.ParentLogicalId);
 
             var snapshotByGoid = new Dictionary<string, SnapshotEntry>();
@@ -186,7 +182,7 @@ namespace SceneBuilder.Core.Reconcile
 
                 removedLogicalIds.Add(oldId);
                 var source = identityMap.Entries.FirstOrDefault(e => e.LogicalId == oldId
-                    && (e.Kind == "GameObject" || e.Kind == "PrefabInstance"));
+                    && IdentityNodeIndex.IsNode(e));
                 addedEntries.Add((source ?? new IdentityMapEntry { LogicalId = oldId, Kind = "GameObject" })
                     with
                     {
@@ -197,7 +193,7 @@ namespace SceneBuilder.Core.Reconcile
 
                 foreach (var component in identityMap.Entries)
                 {
-                    if (component.Kind != "Component"
+                    if (component.Kind != IdentityNodeIndex.Component
                         || component.ParentLogicalId != oldId
                         || !component.LogicalId.StartsWith(oldId + "/", StringComparison.Ordinal))
                     {
@@ -442,8 +438,7 @@ namespace SceneBuilder.Core.Reconcile
             //     hasn't mapped yet (but is genuinely authored) is not mistaken for dangling.
             var sceneLiveTargets = new HashSet<string>(
                 identityMap.Entries
-                    .Where(e => e.Kind == "GameObject"
-                        && !string.IsNullOrEmpty(e.GlobalObjectId)
+                    .Where(e => IdentityNodeIndex.IsMappedNode(e)
                         && snapshotByGoid.ContainsKey(e.GlobalObjectId))
                     .Select(e => e.LogicalId),
                 StringComparer.Ordinal);
@@ -645,7 +640,7 @@ namespace SceneBuilder.Core.Reconcile
 
             AppendStatement? FindAppend(string globalObjectId)
             {
-                var entry = addedEntries.LastOrDefault(e => e.Kind == "GameObject" && e.GlobalObjectId == globalObjectId);
+                var entry = addedEntries.LastOrDefault(e => IdentityNodeIndex.IsNode(e) && e.GlobalObjectId == globalObjectId);
                 return entry == null
                     ? null
                     : edits.OfType<AppendStatement>().FirstOrDefault(a => a.NewLogicalId == entry.LogicalId);
@@ -748,13 +743,13 @@ namespace SceneBuilder.Core.Reconcile
             List<Conflict> conflicts)
         {
             var dependentsByOwner = identityMap.Entries
-                .Where(e => (e.Kind == "GameObject" || e.Kind == "Component" || e.Kind == "PrefabInstance") && e.ParentLogicalId != null)
+                .Where(e => (IdentityNodeIndex.IsNode(e) || e.Kind == IdentityNodeIndex.Component) && e.ParentLogicalId != null)
                 .GroupBy(e => e.ParentLogicalId!)
                 .ToDictionary(g => g.Key, g => g.ToArray());
 
             foreach (var entry in identityMap.Entries)
             {
-                if ((entry.Kind != "GameObject" && entry.Kind != "PrefabInstance") || string.IsNullOrEmpty(entry.GlobalObjectId))
+                if (!IdentityNodeIndex.IsMappedNode(entry))
                 {
                     continue;
                 }
@@ -771,8 +766,7 @@ namespace SceneBuilder.Core.Reconcile
                 // Only a GameObject or PrefabInstance dependent can survive its owner (components
                 // are never snapshot nodes).
                 var hasSurvivingChild = dependents.Any(d =>
-                    (d.Kind == "GameObject" || d.Kind == "PrefabInstance")
-                    && !string.IsNullOrEmpty(d.GlobalObjectId)
+                    IdentityNodeIndex.IsMappedNode(d)
                     && snapshotByGoid.ContainsKey(d.GlobalObjectId));
 
                 // A field elsewhere in the source still names this handle. The owner is gone
