@@ -224,8 +224,26 @@ namespace SceneBuilder.DocGen
             overload.Returns.AddRange(docs.Returns);
         }
 
+        /// <summary>
+        /// True for a member that is public for mechanism rather than for callers: one the plugin's
+        /// own assemblies invoke across an asmdef boundary, marked
+        /// <c>[EditorBrowsable(EditorBrowsableState.Never)]</c>. Hidden from IntelliSense, and hidden
+        /// from the published reference for the same reason.
+        /// </summary>
+        private static bool IsHidden(MemberDeclarationSyntax member) =>
+            member.AttributeLists
+                .SelectMany(list => list.Attributes)
+                .Any(attribute =>
+                {
+                    var name = attribute.Name.ToString();
+                    if (!name.EndsWith("EditorBrowsable", StringComparison.Ordinal)) return false;
+                    return attribute.ArgumentList?.Arguments
+                        .Any(a => a.Expression.ToString().EndsWith("Never", StringComparison.Ordinal)) == true;
+                });
+
         private static bool IsPublic(MemberDeclarationSyntax member, bool insideInterface)
         {
+            if (IsHidden(member)) return false;
             if (member.Modifiers.Any(SyntaxKind.PublicKeyword)) return true;
             if (!insideInterface) return false;
 

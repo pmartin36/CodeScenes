@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using UnityEngine;
 
 namespace SceneBuilder.Authoring
@@ -9,19 +10,23 @@ namespace SceneBuilder.Authoring
     /// native dimensions, rotation, or a scaled parent.
     /// </summary>
     /// <remarks>
-    /// Serialized field names are the real write contract — they MUST equal
-    /// <c>SceneBuilder.Core.Model.SpatialComponents.FitSizeFields.*</c> so Materialize's by-name write
-    /// hits the right field.
+    /// Add it from a builder with <see cref="NodeHandle.FitSize(float?, float?, float?)"/> or in the
+    /// inspector. It runs in edit mode only. Resize the object by hand and it reads the new world size
+    /// back into <see cref="value"/> / <see cref="size"/>, so the size you drag to is the size your
+    /// builder file ends up saying.
     /// </remarks>
+    // Serialized field names are the write contract: they must equal
+    // SceneBuilder.Core.Model.SpatialComponents.FitSizeFields.* so Materialize's by-name write hits
+    // the right field.
     [ExecuteAlways]
     [DefaultExecutionOrder(-100)]
     public sealed class FitSize : MonoBehaviour
     {
         private const float Epsilon = 1e-4f;
 
-        /// <summary>The mode-enum discriminator for which dimension(s) drive <c>localScale</c>. None
-        /// MUST be index 0 (default == inert; <see cref="Evaluate"/> early-returns and a freshly-added
-        /// FitSize drives nothing).</summary>
+        /// <summary>Which dimension drives the size. <c>None</c> is the default and drives nothing, so
+        /// a freshly added FitSize leaves the object alone until you pick a mode.</summary>
+        // None must stay index 0: default-value pruning on read relies on it.
         public enum Mode { None, Width, Height, Depth, Explicit }
 
         public Mode mode = Mode.None;
@@ -46,13 +51,14 @@ namespace SceneBuilder.Authoring
 
         private void OnEnable() => ResetBaseline();
 
-        /// <summary>Forgets the last-self-write baseline (NaN sentinel) so the NEXT <see cref="Evaluate"/>
-        /// re-derives <c>localScale</c> from the intent instead of mistaking a fresh write for a manual
-        /// rescale. Called on enable, and by <c>PlanExecutor</c> (code-&gt;scene) right after it writes
-        /// <c>m_LocalScale</c> directly on this object's <see cref="Transform"/> (materialize always
-        /// writes the full authored transform per spec 23 — that write is the plugin's own, not a user
-        /// drag, so it must not be back-solved into source as a wrong <see cref="value"/>/<see cref="size"/>;
-        /// mirrors <c>SurfaceSnap.ResetBaseline</c> for the m_LocalPosition case).</summary>
+        // Plugin-internal coordination hook, public only because the editor assembly calls it across
+        // the asmdef boundary. Forgets the last-self-write baseline so the next Evaluate re-derives
+        // localScale from the intent instead of mistaking a fresh write for a manual rescale. Called
+        // on enable, and by PlanExecutor right after it writes m_LocalScale directly on this object's
+        // Transform (materialize always writes the full authored transform per spec 23 — that write is
+        // the plugin's own, not a user drag, so it must not be back-solved into source as a wrong
+        // value/size). Mirrors SurfaceSnap.ResetBaseline for the m_LocalPosition case.
+        [EditorBrowsable(EditorBrowsableState.Never)]
         public void ResetBaseline() => _lastWritten = new Vector3(float.NaN, float.NaN, float.NaN);
 
         private void OnValidate()

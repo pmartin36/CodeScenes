@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using UnityEngine;
 
 namespace SceneBuilder.Authoring
@@ -9,10 +10,14 @@ namespace SceneBuilder.Authoring
     /// override), independent of the object's own pivot.
     /// </summary>
     /// <remarks>
-    /// Serialized field names are the real write contract — they MUST equal
-    /// <c>SceneBuilder.Core.Model.SpatialComponents.SurfaceSnapFields.*</c> so Materialize's by-name write
-    /// hits the right field.
+    /// Add it from a builder with <see cref="NodeHandle.SurfaceSnap"/> or in the inspector. It runs in
+    /// edit mode only, and re-snaps when the surface underneath moves. Drag the object further than
+    /// <see cref="captureThreshold"/> to detach it deliberately. Axes you leave unset are never touched,
+    /// so an object can snap down to the floor while staying free to move horizontally.
     /// </remarks>
+    // Serialized field names are the write contract: they must equal
+    // SceneBuilder.Core.Model.SpatialComponents.SurfaceSnapFields.* so Materialize's by-name write
+    // hits the right field.
     [ExecuteAlways]
     [DefaultExecutionOrder(-90)] // after FitSize(-100): snaps the post-resize size
     public sealed class SurfaceSnap : MonoBehaviour
@@ -64,13 +69,14 @@ namespace SceneBuilder.Authoring
 
         private void OnEnable() => ResetBaseline();
 
-        /// <summary>Forgets the last-self-write baseline (NaN sentinel) and forces a fresh snap on the
-        /// next <see cref="Evaluate"/>. Called on enable, and by <c>PlanExecutor</c> (code-&gt;scene)
-        /// right after it writes <c>m_LocalPosition</c> directly on this object's <see cref="Transform"/>
-        /// (materialize always writes the full authored transform per spec 23, including a frozen
-        /// driven-channel placeholder — that write is the plugin's own, not a user drag, so it must not
-        /// count toward <see cref="captureThreshold"/>; the very next Evaluate() re-derives from this
-        /// fresh baseline instead of sticky-detaching off a stale in-memory baseline).</summary>
+        // Plugin-internal coordination hook, public only because the editor assembly calls it across
+        // the asmdef boundary. Forgets the last-self-write baseline and forces a fresh snap on the next
+        // Evaluate. Called on enable, and by PlanExecutor right after it writes m_LocalPosition
+        // directly on this object's Transform (materialize always writes the full authored transform
+        // per spec 23, including a frozen driven-channel placeholder — that write is the plugin's own,
+        // not a user drag, so it must not count toward captureThreshold; the very next Evaluate
+        // re-derives from this fresh baseline instead of sticky-detaching off a stale one).
+        [EditorBrowsable(EditorBrowsableState.Never)]
         public void ResetBaseline()
         {
             _lastWritten = new Vector3(float.NaN, float.NaN, float.NaN);

@@ -12,10 +12,10 @@ namespace SceneBuilder.Authoring
     /// these methods return handles for chaining but perform no work at runtime.
     /// </remarks>
     /// <remarks>
-    /// A prefab instance is handled as one whole unit for its hierarchy (M6): child GameObjects are
-    /// not authored under an instance. Root-level property overrides and added/removed components are
-    /// authored via <see cref="Override"/>, <see cref="AddComponent{T}()"/> and
-    /// <see cref="RemoveComponent{T}"/> (M10).
+    /// A prefab instance is authored as one whole unit: you do not author child GameObjects inside its
+    /// hierarchy. Change what the instance carries with <see cref="Override"/>,
+    /// <see cref="AddComponent{T}()"/> and <see cref="RemoveComponent{T}"/>, and reach a nested target
+    /// with <see cref="On(string, Action{ScopedHandle})"/>.
     /// </remarks>
     public class InstanceHandle
     {
