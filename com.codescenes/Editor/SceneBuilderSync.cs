@@ -220,17 +220,19 @@ namespace SceneBuilder.Editor
                 assetCatalog: assetCatalog,
                 chainedComponents: parse.ChainedComponents);
 
+            // Built AFTER the reconcile so a report anchored on a LogicalId this sync itself
+            // introduced (a handle for a handle-less owner, a brand-new scene node) still resolves:
+            // Core anchors those reports on the POST-batch id, which only result.AddedEntries carries.
+            var scenePath = new SceneHierarchyPath(map, result.AddedEntries);
+
             // A NestedOverrideBootstrap Conflict (below-root target with no live
             // sub-object) is folded in here — the SAME located-conflict channel the reconcile itself
             // surfaces, never a silent drop.
-            var conflicts = loaded.BootstrapConflicts.Count > 0
-                ? loaded.BootstrapConflicts.Concat(result.Conflicts).ToArray()
-                : result.Conflicts;
-
-            foreach (var c in conflicts)
-            {
-                Debug.LogWarning($"[SceneBuilder] Conflict ({c.Kind}) on '{c.LogicalId}': {c.Reason}");
-            }
+            var conflicts = ConflictSurfacing.SurfaceConflicts(
+                loaded.BootstrapConflicts.Count > 0
+                    ? loaded.BootstrapConflicts.Concat(result.Conflicts).ToArray()
+                    : result.Conflicts,
+                scenePath);
 
             foreach (var s in result.Skipped)
             {
@@ -239,7 +241,7 @@ namespace SceneBuilder.Editor
 
             // Standing conditions (Conflict.RecurrenceKey set) surface at most once per editor
             // session — a struct with no representable member must not log on every single sync.
-            var surfacedNotes = ConflictSurfacing.SurfaceNotes(result.Notes, builderPath);
+            var surfacedNotes = ConflictSurfacing.SurfaceNotes(result.Notes, builderPath, scenePath);
 
             var hasSourceEdits = result.Patch.Edits.Length > 0;
             var hasMapDelta = result.AddedEntries.Length > 0 || result.RemovedLogicalIds.Length > 0;
@@ -459,6 +461,11 @@ namespace SceneBuilder.Editor
                 assetCatalog: assetCatalog,
                 chainedComponents: newLoaded.Parse.ChainedComponents);
 
+            // Built AFTER `applicable` (the reconcile whose reports are actually surfaced below) so a
+            // report anchored on a LogicalId this sync itself introduced still resolves — see Run's
+            // identical comment.
+            var scenePath = new SceneHierarchyPath(map, applicable.AddedEntries);
+
             // Resolves the AUTHORED GameObject name (e.g. "Box") for the located-error message — the
             // LogicalId itself is the resolved HANDLE when the statement declares one (e.g. `var box =
             // scene.Add("Box")` resolves to "box"), which is NOT the same string a reader (or a test
@@ -502,19 +509,16 @@ namespace SceneBuilder.Editor
             // Folds newLoaded's NestedOverrideBootstrap conflicts in — `applicable`
             // reconciles `newLoaded.Desired`, so its below-root targets are the ones that may have
             // failed to resolve against the live instance.
-            var syncConflicts = newLoaded.BootstrapConflicts.Count > 0
-                ? newLoaded.BootstrapConflicts.Concat(applicable.Conflicts).ToArray()
-                : applicable.Conflicts;
-
-            foreach (var c in syncConflicts)
-            {
-                Debug.LogWarning($"[SceneBuilder] Conflict ({c.Kind}) on '{c.LogicalId}': {c.Reason}");
-            }
+            var syncConflicts = ConflictSurfacing.SurfaceConflicts(
+                newLoaded.BootstrapConflicts.Count > 0
+                    ? newLoaded.BootstrapConflicts.Concat(applicable.Conflicts).ToArray()
+                    : applicable.Conflicts,
+                scenePath);
 
             // Only `applicable`'s notes (new source vs live) are surfaced — `sceneReconcile` exists
             // purely to compute which fields the SCENE changed and would double-report the same
             // standing condition `applicable` already reports.
-            var surfacedNotes = ConflictSurfacing.SurfaceNotes(applicable.Notes, builderPath);
+            var surfacedNotes = ConflictSurfacing.SurfaceNotes(applicable.Notes, builderPath, scenePath);
 
             var assetMerge = AssetCacheMerge.Merge(map.Assets, applicable.AddedAssets);
             var hasMapDelta = applicable.AddedEntries.Length > 0 || applicable.RemovedLogicalIds.Length > 0;

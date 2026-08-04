@@ -346,7 +346,7 @@ namespace SceneBuilder.Editor
         // ComponentTypeNormalizer rewrites Op.Type.FullName to the resolved/qualified CLR name
         // (e.g. "Rigidbody" -> "UnityEngine.Rigidbody") while the component's LogicalId keeps the
         // ORIGINAL authored token — a literal marker match would silently miss and no-op the add.
-        private static string? OwnerOf(string componentLogicalId)
+        internal static string? OwnerOf(string componentLogicalId)
         {
             var idx = componentLogicalId.LastIndexOf('/');
             return idx < 0 ? null : componentLogicalId.Substring(0, idx);
@@ -452,13 +452,13 @@ namespace SceneBuilder.Editor
             ComponentDefaultTemplate.Create(go, typeof(RectTransform)); // in-place promotion; may return null (prefab instance)
             if (go.transform is RectTransform promoted)
             {
-                ConflictSurfacing.LogNote(logicalId,
+                ConflictSurfacing.LogNote(go, logicalId,
                     $"'{go.name}' had a plain Transform and was promoted in place to a RectTransform (same object, " +
                     "no wipe); its UI layout is now authored by .RectTransform(...).");
                 return promoted;
             }
 
-            ConflictSurfacing.LogLocatedError(logicalId,
+            ConflictSurfacing.LogLocatedError(go, logicalId,
                 $"'{go.name}' must become a RectTransform for its authored .RectTransform(...) layout, but Unity " +
                 "refused the in-place promotion (a prefab-instance root cannot swap its Transform). The layout was " +
                 "NOT applied; the object is unchanged.");

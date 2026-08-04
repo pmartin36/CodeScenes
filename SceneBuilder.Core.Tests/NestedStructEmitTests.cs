@@ -74,7 +74,7 @@ namespace SceneBuilder.Core.Tests
             var conflicts = new List<Conflict>();
 
             var projection = NestedValueEmission.Project(value, @default);
-            projection.ReportExclusions("comp-1", "m_Nav", conflicts);
+            projection.ReportExclusions("comp-1", "Nav", "m_Nav", conflicts);
 
             Assert.Equal(Node("Nav", ("a", F(1))), projection.Value);
             var conflict = Assert.Single(conflicts);
@@ -92,7 +92,7 @@ namespace SceneBuilder.Core.Tests
             var conflicts = new List<Conflict>();
 
             var projection = NestedValueEmission.Project(value, @default);
-            projection.ReportExclusions("comp-1", "m_Nav", conflicts);
+            projection.ReportExclusions("comp-1", "Nav", "m_Nav", conflicts);
 
             Assert.Equal(Node("Nav", ("a", F(1))), projection.Value);
             Assert.Empty(conflicts);

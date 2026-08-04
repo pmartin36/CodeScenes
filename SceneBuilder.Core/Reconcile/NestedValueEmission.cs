@@ -43,11 +43,13 @@ namespace SceneBuilder.Core.Reconcile
             // Raises one located UnrepresentableValue conflict per excluded member. Called only by
             // a caller that has already committed to emitting `Value` -- a pass that emits nothing
             // for this field must never call this, or a settled scene reports forever.
-            internal void ReportExclusions(string componentLogicalId, string fieldKey, List<Conflict> conflicts)
+            internal void ReportExclusions(
+                string componentLogicalId, string componentTypeFullName, string fieldKey, List<Conflict> conflicts)
             {
                 foreach (var memberPath in ExcludedMembers)
                 {
-                    conflicts.Add(ConflictDetector.UnrepresentableNestedMember(componentLogicalId, fieldKey, memberPath, null));
+                    conflicts.Add(ConflictDetector.UnrepresentableNestedMember(
+                        componentLogicalId, componentTypeFullName, fieldKey, memberPath, null));
                 }
             }
 
@@ -80,7 +82,7 @@ namespace SceneBuilder.Core.Reconcile
                 if (_discardedMembers.Count > 0)
                 {
                     conflicts.Add(ConflictDetector.UnrepresentableNestedField(
-                        componentLogicalId, fieldKey, _discardedMembers, null));
+                        componentLogicalId, componentTypeFullName, fieldKey, _discardedMembers, null));
                 }
                 else if (ExcludedMembers.Count > 0)
                 {

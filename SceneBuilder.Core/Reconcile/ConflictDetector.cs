@@ -276,17 +276,14 @@ namespace SceneBuilder.Core.Reconcile
         // rest of the struct still round-trips. Never raised for a member at its type default, and
         // never raised for a pass that ends up emitting nothing for the field.
         public static Conflict UnrepresentableNestedMember(
-            string componentLogicalId, string fieldKey, string memberKey, SourceSpan? location) =>
-            new()
-            {
-                Kind = ConflictKind.UnrepresentableValue,
-                LogicalId = componentLogicalId,
-                GlobalObjectId = null,
-                Reason = $"Cannot represent member '{memberKey}' of field '{fieldKey}' on component " +
-                    $"'{componentLogicalId}' in builder source: no compiling initializer form exists for it. " +
-                    "It was left out of the emitted initializer; the rest of the value's members still round-trip.",
-                Location = location,
-            };
+            string componentLogicalId, string componentTypeFullName, string fieldKey, string memberPath,
+            SourceSpan? location) =>
+            Conflict.FromReport(
+                ConflictKind.UnrepresentableValue,
+                new LocatedReport(componentLogicalId, componentTypeFullName, $"{fieldKey}.{memberPath}",
+                    "No compiling initializer form exists for this member, so it was left out of the " +
+                    "emitted initializer; the rest of the value's members still round-trip."),
+                recurrenceKey: null, location);
 
         // EVERY member of a nested field that differs from the type default has no compiling
         // emission form, so the field projects to nothing: no site emits an edit for it, and
@@ -296,20 +293,16 @@ namespace SceneBuilder.Core.Reconcile
         // provably non-default (an AssetRef/ObjectRef), which is a fact of this component, not of the
         // type, so a second component of the same type with its own drift gets its own report.
         public static Conflict UnrepresentableNestedField(
-            string componentLogicalId, string fieldKey, IEnumerable<string> memberPaths, SourceSpan? location) =>
-            new()
-            {
-                Kind = ConflictKind.UnrepresentableValue,
-                LogicalId = componentLogicalId,
-                GlobalObjectId = null,
-                Reason = $"Cannot represent field '{fieldKey}' on component '{componentLogicalId}' in builder " +
-                    $"source: every member that differs from the type default ({string.Join(", ", memberPaths)}) " +
-                    "has no compiling initializer form, so there is nothing to write. The live value was NOT " +
-                    "written to source and was NOT silently accepted (§7) — author it in the scene's prefab, or " +
-                    "move the value to a field the builder can express.",
-                Location = location,
-                RecurrenceKey = $"unrepresentable-field:{componentLogicalId}:{fieldKey}",
-            };
+            string componentLogicalId, string componentTypeFullName, string fieldKey,
+            IEnumerable<string> memberPaths, SourceSpan? location) =>
+            Conflict.FromReport(
+                ConflictKind.UnrepresentableValue,
+                new LocatedReport(componentLogicalId, componentTypeFullName, fieldKey,
+                    $"Every member that differs from the type default ({string.Join(", ", memberPaths)}) has no " +
+                    "compiling initializer form, so there is nothing to write. The live value was NOT written to " +
+                    "source and was NOT silently accepted (§7) — author it in the scene's prefab, or move the " +
+                    "value to a field the builder can express."),
+                recurrenceKey: $"unrepresentable-field:{componentLogicalId}:{fieldKey}", location);
 
         // A nested field's ONLY excluded members are Unsupported placeholders (no public spelling,
         // e.g. Button.m_OnClick) -- a placeholder's marker text names the member but never its value,
@@ -319,18 +312,12 @@ namespace SceneBuilder.Core.Reconcile
         public static Conflict UnrepresentableNestedFieldMembers(
             string componentLogicalId, string componentTypeFullName, string fieldKey,
             IEnumerable<string> memberPaths, SourceSpan? location) =>
-            new()
-            {
-                Kind = ConflictKind.UnrepresentableValue,
-                LogicalId = componentLogicalId,
-                GlobalObjectId = null,
-                Reason = $"Cannot represent field '{fieldKey}' of '{componentTypeFullName}' on component " +
-                    $"'{componentLogicalId}' in builder source: its serialized members " +
-                    $"({string.Join(", ", memberPaths)}) have no compiling initializer form, so no value for " +
-                    "this field can be written to code and a scene edit to it is not synced.",
-                Location = location,
-                RecurrenceKey = $"unrepresentable-type-field:{componentTypeFullName}:{fieldKey}",
-            };
+            Conflict.FromReport(
+                ConflictKind.UnrepresentableValue,
+                new LocatedReport(componentLogicalId, componentTypeFullName, fieldKey,
+                    $"Its serialized members ({string.Join(", ", memberPaths)}) have no compiling initializer " +
+                    "form, so no value for this field can be written to code and a scene edit to it is not synced."),
+                recurrenceKey: $"unrepresentable-type-field:{componentTypeFullName}:{fieldKey}", location);
 
         // A closed-grammar component (FitSize/SurfaceSnap) has a live field that returned to
         // its type default, but its dedicated fluent call throws on an empty argument list -- there

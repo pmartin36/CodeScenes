@@ -43,10 +43,38 @@ namespace SceneBuilder.Core.Reconcile
 
     public sealed record Conflict
     {
+        private readonly ConflictKind _kind;
+        private readonly string _reason = "";
+
+        // Records lose the implicit parameterless constructor once any constructor is declared --
+        // kept explicitly so a plain object initializer (a non-guarded kind) still compiles, e.g.
+        // com.codescenes/Editor/NestedOverrideBootstrap.cs's adapter-side construction.
+        public Conflict() { }
+
+        // The ONE door that can set a guarded kind, used only by FromReport. Bypasses the Kind
+        // init guard by writing the backing field directly.
+        private Conflict(ConflictKind kind) { _kind = kind; }
+
         public string? LogicalId { get; init; }
         public string? GlobalObjectId { get; init; }
-        public ConflictKind Kind { get; init; }
-        public string Reason { get; init; } = "";
+
+        public ConflictKind Kind
+        {
+            get => _kind;
+            init => _kind = value != ConflictKind.UnrepresentableValue
+                ? value
+                : throw new System.ArgumentException(
+                    "An UnrepresentableValue report is constructed through Conflict.FromReport(...), " +
+                    "which requires the object anchor, the component type full name and the " +
+                    "field/member key. Set Located, not Kind.");
+        }
+
+        public string Reason
+        {
+            get => Located?.Compose() ?? _reason;
+            init => _reason = value;
+        }
+
         public SourceSpan? Location { get; init; }
 
         // Identity of the STANDING condition this report describes -- a fact of the scene+source
@@ -55,5 +83,20 @@ namespace SceneBuilder.Core.Reconcile
         // ReconcileResult.Notes and a surfacing channel shows one of them, once per editor session.
         // Null = an event, surfaced every time it happens.
         public string? RecurrenceKey { get; init; }
+
+        // The located-report data (anchor, component type full name, field/member key) an
+        // UnrepresentableValue conflict must carry. FromReport is the one construction door for a
+        // conflict of that kind; every other kind leaves this null.
+        public LocatedReport? Located { get; init; }
+
+        public static Conflict FromReport(
+            ConflictKind kind, LocatedReport report, string? recurrenceKey, SourceSpan? location) =>
+            new Conflict(kind)
+            {
+                LogicalId = report.LogicalId,
+                Located = report,
+                RecurrenceKey = recurrenceKey,
+                Location = location,
+            };
     }
 }

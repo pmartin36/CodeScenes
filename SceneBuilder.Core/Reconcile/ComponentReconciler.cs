@@ -330,7 +330,7 @@ namespace SceneBuilder.Core.Reconcile
                                 NewExpr = patchExpr,
                             });
 
-                            projection.ReportExclusions(sourceComp.LogicalId, fieldKey, conflicts);
+                            projection.ReportExclusions(sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, conflicts);
                             CollectAssetEntries(emittedVal, addedAssets);
                         }
                         else if (fieldArgumentSpans != null)
@@ -369,7 +369,7 @@ namespace SceneBuilder.Core.Reconcile
                             NewExpr = null,
                         });
 
-                        introducedProjection.ReportExclusions(sourceComp.LogicalId, fieldKey, conflicts);
+                        introducedProjection.ReportExclusions(sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, conflicts);
 
                         CollectAssetEntries(introducedVal, addedAssets);
                     }

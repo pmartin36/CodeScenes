@@ -90,4 +90,15 @@ namespace GateFixtures
     {
         public DeepOuter Deep;
     }
+
+    // Isolated on its own behaviour (never NestedUnrepresentableFixtureBehaviour, whose fields share
+    // a session-scoped recurrence key with other suites) so a located-report test can drive a
+    // standing note (Anchored) and a per-pass conflict (Mixed) on an object placed under a parent,
+    // where the LogicalId, the live scene hierarchy path and the object's own name are three
+    // distinct strings.
+    public class LocatedReportFixtureBehaviour : MonoBehaviour
+    {
+        public PrivateBacked Anchored;
+        public MixedPrivateBacked Mixed;
+    }
 }

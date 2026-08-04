@@ -115,7 +115,7 @@ namespace SceneBuilder.Core.Reconcile
                 }
 
                 kept.Add(new KeyValuePair<string, ValueNode>(field.Key, projection.Value));
-                projection.ReportExclusions(componentLogicalId, field.Key, conflicts);
+                projection.ReportExclusions(componentLogicalId, typeFullName, field.Key, conflicts);
             }
 
             return new FieldMap(kept);
