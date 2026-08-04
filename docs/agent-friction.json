@@ -91,9 +91,9 @@
   },
   "seen_logs": {
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/Editor.log": {
-      "bytes": 419870,
-      "head": "c885685f76e4b7bf",
-      "size": 419870
+      "bytes": 58661,
+      "head": "46f26a89b5620a84",
+      "size": 58661
     },
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-console-capture.log": {
       "bytes": 167575,
