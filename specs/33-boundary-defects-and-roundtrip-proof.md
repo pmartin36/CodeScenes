@@ -78,7 +78,13 @@ works and is not the defect.
 
 **Fix forward only.** A builder file that ALREADY carries a broken self-reference line is out of
 scope: nothing detects and rewrites it. No such file exists today (no builder in the test project
-contains the pattern) and nothing has shipped, so the fix leaves no one holding a broken file.
+contains the pattern) and nothing is installed anywhere, so the fix leaves no one holding one.
+
+**Keep the emission-bug report intact.** `BuilderCompileCheck.Format` already labels a non-compiling
+emission `This is a bug in SceneBuilder's emission, not in your scene edit.`, alongside the CS error,
+its line and the emitted source. That label is what stops an agent reading broken output as a broken
+scene edit and reverting the author's work. C10 must not weaken it, and the fix is not a reason to
+relax the check.
 
 ## C5 — fail-loud on an ambiguous short name
 
