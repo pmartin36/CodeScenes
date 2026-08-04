@@ -3,7 +3,12 @@
 ## Build order
 
 C9, then C10 — both are active defects on `main` and C9 is data loss on the happy path. Then C5, C6,
-C7, C8, then the round-trip proof suite. Nothing here depends on a later item.
+C7, C8, then the round-trip proof suite.
+
+This is EXECUTION order, not a dependency claim: no item here needs another item's code. Encode it
+as serial ordering, and where an ordering-only edge is used, say so on the edge. Do not invent a
+data dependency to express a preference, and do not encode the order for some pairs and drop it for
+others.
 
 Commit `795eba2` already carries UNVALIDATED partial work for C5 and C6:
 `com.codescenes/Editor/ComponentTypeResolver.cs` (short-name resolution across loaded assemblies,
@@ -71,6 +76,10 @@ compiles — a follow-up statement after the declaration, or a self-selector tha
 sync is a fixed point. Cover the same-GameObject case explicitly; a cross-object reference already
 works and is not the defect.
 
+**Fix forward only.** A builder file that ALREADY carries a broken self-reference line is out of
+scope: nothing detects and rewrites it. No such file exists today (no builder in the test project
+contains the pattern) and nothing has shipped, so the fix leaves no one holding a broken file.
+
 ## C5 — fail-loud on an ambiguous short name
 
 Short-name resolution across loaded assemblies works, and the unambiguity check works: an ambiguous
@@ -83,6 +92,17 @@ out-parameter no caller surfaces, so "fail loud and located" is half-honoured �
 
 **Accept when:** authoring against a type whose short name collides produces a located message
 naming both candidates, rather than a silent null.
+
+**Split across the two suites**, because resolution needs Unity's loaded assemblies but the report
+does not:
+- **Core** — the candidate list and its message form are Unity-free and unit-tested headlessly: two
+  colliding candidates in, one message naming both out. This is the spec's Core test-plan line; it
+  is met, not waived.
+- **EditMode** — a real short name colliding across loaded assemblies reaches that message through
+  `com.codescenes/Editor/ComponentTypeResolver.cs`, whose only non-test caller is
+  `ObjectReferenceResolver.cs`.
+
+The message is built by the located report channel below, not by a second formatter.
 
 ## C6 — the sorting-layer field pair
 
@@ -106,8 +126,9 @@ A `UnityEvent` field cannot be represented in builder source: its serialized mem
 console NOTE and nothing else, so wiring a `Button.onClick` in the Inspector produces no code and the
 scene edit is not synced. A console warning is easy to miss.
 
-**Build:** console-only, promoted from a NOTE to a located warning that names the scene object path,
-the component type and the field, and states that the value stays in the scene and is not synced.
+**Build:** console-only, promoted from a NOTE to a located warning that names the object (its
+`LogicalId`, plus the live scene hierarchy path where the adapter has it), the component type and
+the field, and states that the value stays in the scene and is not synced.
 
 **Sync NEVER writes an advisory comment into builder source.** The builder file holds what the author
 wrote and what their scene edits patched into it, nothing else. A marker for an unrepresentable field
@@ -119,8 +140,13 @@ represent. After `specs/09` lands it stops firing for `onClick` and keeps coveri
 
 Representing persistent calls is `specs/09`, not this spec.
 
-**Accept when:** wiring an `onClick` in the Inspector produces a console warning naming that object,
-component and field; the builder source is byte-unchanged by the warning path.
+**Accept when:** wiring an `onClick` in the Inspector produces a console warning that names the
+object, the component type and the field AND states that the value stays in the scene and is not
+synced; the builder source is byte-unchanged by the warning path. All four parts are asserted — a
+test that checks only the located triple leaves the author without the one sentence that tells them
+what happened to their edit.
+
+The warning goes through the located report channel below. It is not a second surfacing path.
 
 ## C8 — a no-op source edit issues a write op
 
@@ -128,9 +154,15 @@ A pure member reorder of a struct initializer, changing no value, produces
 `Built in place: 1 plan op(s)` rather than zero. The following sync reports `Scene already matches
 code`, so it converges and corrupts nothing.
 
-**Build:** measure whether that op sets the scene dirty flag. If it does, suppress the op for an edit
-that changes no value — otherwise every keystroke inside a struct initializer marks the scene dirty.
-If it does not, close this with the measurement recorded and build nothing.
+**Build:** measure whether that op sets the scene dirty flag, in an EditMode test that records the
+answer either way. The measurement is the deliverable; what follows it depends on the result.
+
+Both branches carry their own assertion, so neither closes on prose:
+- **It dirties the scene** — suppress the op. The test asserts a value-preserving reorder yields
+  **zero** plan ops and leaves the dirty flag unset. Otherwise every keystroke inside a struct
+  initializer marks the scene dirty.
+- **It does not dirty the scene** — build nothing further. The test stands as the recorded
+  measurement: the reorder yields its op and the dirty flag stays unset.
 
 ## The round-trip proof suite
 
@@ -144,26 +176,62 @@ directions against real components and assert convergence (a second sync produce
 4. Lists of structs. `ExcludeUnrepresentable` does not filter list items, carried as an explicit
    `InList` flag; pin that behavior.
 
+**The shared harness lives in its own file**, `unity-gate/Assets/GateTests/RoundTripProofHarness.cs`,
+and every test file that drives it declares that path. A harness that lives inside the first test
+file it was written for means every later test edits a file it never declared.
+
 **Accept when:** the suite is green in the batchmode gate AND a live-editor pass confirms it. A
-batchmode gate alone does not close this spec.
+batchmode gate alone does not close this spec. The live pass writes its console log to
+`unity-gate/Logs/live-verify-roundtrip.log` and its observation-to-evidence report to
+`.agent_handoffs/<feature>/live-verify-roundtrip.md`, each observation citing a line in that log. An
+evidence artifact with no path is a narrated pass.
 
-## Decomposition constraint
+## The cross-cutting invariant: one located report channel
 
-Name this spec's cross-cutting invariant precisely and give it ONE owning task with ONE shared
-implementation that every other task calls. Do not restate an invariant as per-task guidance.
+C5 and C7 both end in the same act — telling an author something about their scene did not reach
+their code. That report is this spec's invariant, it gets ONE owning task and ONE implementation
+every other site calls, and the enforcement must be structural.
 
-For C5 the candidate is type resolution itself: one resolver every call site uses, rather than each
-site parsing and matching its own way.
+**Every report of this kind carries, as REQUIRED construction data:** the object anchor (the
+`LogicalId`, plus the live scene hierarchy path wherever the adapter has it), the component type
+full name, and the field or member key. Required means non-optional parameters, so a site that omits
+them does not compile.
+
+**Where it binds.** All three `ConflictKind.UnrepresentableValue` factories in
+`SceneBuilder.Core/Reconcile/ConflictDetector.cs` take that data today only in part —
+`UnrepresentableNestedFieldMembers` carries `componentTypeFullName`, `UnrepresentableNestedMember`
+and `UnrepresentableNestedField` do not. All three must, and a fourth added later must not be able
+to skip it.
+
+**The bypass to close.** `ConflictSurfacing.LogNote(string logicalId, string message)` is public and
+takes no location, and `SurfaceNotes` routes every standing note through it. A site that reaches the
+console that way emits an unlocated report and no adapter-side check can see it, because the message
+text is built in Core and arrives as runtime data. An `UnrepresentableValue` note must not be
+loggable through an untyped two-argument call.
+
+**Enforcement lives in Core, not in an adapter source scan.** The check is a Core test asserting
+that every `UnrepresentableValue` conflict the detector produces carries the required data. A grep
+over `com.codescenes/**/*.cs` for message-copy constants cannot work: the copy lives in Core, so the
+scan's scope excludes the layer that owns the strings, and a bypassing site is invisible to it.
 
 `SceneBuilder.Core/Model/ValueWalk.cs` is the model to follow — a pass declares what it does to a
-node and how it descends, so failing to recurse is not expressible.
+node and how it descends, so failing to recurse is not expressible. Apply the same standard here:
+make the omission fail to compile, rather than checking for it after the fact.
+
+**Message copy ownership.** The report text is built in
+`SceneBuilder.Core/Reconcile/ConflictDetector.cs` and asserted by
+`SceneBuilder.Core.Tests/UnrepresentableNoteTests.cs` and
+`SceneBuilder.Core.Tests/NestedStructEmitCompileTests.cs`. Whichever task changes the copy declares
+all three, plus `SceneBuilder.Core/Reconcile/NestedValueEmission.cs` if the emission path moves.
 
 ## Test plan
 
 - **Core:** a `NodeHandle.None` on an assigned reference lowers to a clearing op, for both a native
-  PPtr and a MonoBehaviour `GameObject` field (C9); an ambiguous short name surfaces its candidates
-  rather than returning a bare null (C5).
+  PPtr and a MonoBehaviour `GameObject` field (C9); two colliding candidates produce one message
+  naming both (C5); every `UnrepresentableValue` conflict the detector produces carries the required
+  located data (the invariant).
 - **EditMode** (required — adapter changes): a code-authored `NodeHandle.None` clears the live
-  reference and the source is a fixed point afterwards (C9); the round-trip suite above.
-- **Live:** a real-editor pass over C9 in both reference kinds, and over whichever surface C7 lands
-  on. C8 is a measurement before it is a build item.
+  reference and the source is a fixed point afterwards (C9); a real colliding short name reaches the
+  C5 message; a wired `onClick` produces the C7 warning and leaves the source byte-unchanged; the
+  C8 dirty-flag measurement; the round-trip suite above.
+- **Live:** a real-editor pass over C9 in both reference kinds, and over the C7 console warning.
