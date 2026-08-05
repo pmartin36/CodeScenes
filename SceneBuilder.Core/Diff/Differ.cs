@@ -38,8 +38,9 @@ namespace SceneBuilder.Core.Diff
             var ops = new List<ChangeOp>();
             var diagnostics = new List<Diagnostic>();
             var conflicts = new List<Conflict>();
+            var fieldGate = new ExcludedFieldGate(actual.FieldExclusions, conflicts);
 
-            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, ops, diagnostics, conflicts);
+            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, fieldGate, ops, diagnostics, conflicts);
 
             foreach (var kv in snapshotByGoid)
             {
@@ -82,6 +83,7 @@ namespace SceneBuilder.Core.Diff
             HashSet<string> visitedGoids,
             IdentityMap identityMap,
             Dictionary<string, FieldMap> typeDefaults,
+            ExcludedFieldGate fieldGate,
             List<ChangeOp> ops,
             List<Diagnostic> diagnostics,
             List<Conflict> conflicts)
@@ -100,7 +102,7 @@ namespace SceneBuilder.Core.Diff
                     && snapshotByGoid.TryGetValue(goid, out var entry))
                 {
                     visitedGoids.Add(goid);
-                    EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, typeDefaults, ops);
+                    EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, typeDefaults, fieldGate, ops);
 
                     // Matched PrefabInstanceNode ⇒ diff its structured override collections
                     // (Overrides/AddedComponents/RemovedComponents) against the matched snapshot's.
@@ -132,10 +134,10 @@ namespace SceneBuilder.Core.Diff
                 }
                 else
                 {
-                    EmitCreate(node, parentLogicalId, identityMap, ops);
+                    EmitCreate(node, parentLogicalId, identityMap, fieldGate, ops);
                 }
 
-                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, ops, diagnostics, conflicts);
+                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, fieldGate, ops, diagnostics, conflicts);
             }
         }
 
@@ -147,6 +149,7 @@ namespace SceneBuilder.Core.Diff
             SnapshotEntry entry,
             IdentityMap identityMap,
             Dictionary<string, FieldMap> typeDefaults,
+            ExcludedFieldGate fieldGate,
             List<ChangeOp> ops)
         {
             var snapshot = entry.Node;
@@ -192,7 +195,7 @@ namespace SceneBuilder.Core.Diff
                 ops.Add(new Reorder { LogicalId = node.LogicalId, SiblingIndex = siblingIndex });
             }
 
-            EmitComponentEdits(node, snapshot, identityMap, typeDefaults, ops);
+            EmitComponentEdits(node, snapshot, identityMap, typeDefaults, fieldGate, ops);
         }
 
         // Unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
@@ -245,10 +248,10 @@ namespace SceneBuilder.Core.Diff
         // component's own LogicalId. Transform is excluded from the actual side (never authored,
         // never removed/reordered). Removed-component identity is resolved from the IdentityMap's
         // Component entries (managed gate), never synthesized.
-        private static void EmitComponentEdits(GameObjectNode node, SnapshotNode snapshot, IdentityMap identityMap, Dictionary<string, FieldMap> typeDefaults, List<ChangeOp> ops)
+        private static void EmitComponentEdits(GameObjectNode node, SnapshotNode snapshot, IdentityMap identityMap, Dictionary<string, FieldMap> typeDefaults, ExcludedFieldGate fieldGate, List<ChangeOp> ops)
         {
             var ownerLogicalId = node.LogicalId;
-            var desiredComps = node.Components;
+            var desiredComps = fieldGate.Admit(node.Components);
             var actualComps = snapshot.Components
                 .Where(c => c.Type.FullName != "UnityEngine.Transform")
                 .ToArray();
@@ -405,7 +408,7 @@ namespace SceneBuilder.Core.Diff
             RectTransformDiff.EmitCreate(node.LogicalId, node.Transform, ops);
         }
 
-        private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, List<ChangeOp> ops)
+        private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, ExcludedFieldGate fieldGate, List<ChangeOp> ops)
         {
             ops.Add(new AddNode { LogicalId = node.LogicalId, Name = node.Name, ParentLogicalId = parentLogicalId });
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
@@ -436,7 +439,7 @@ namespace SceneBuilder.Core.Diff
             // matching the mapped path's emission. Children are handled by WalkDesired's recursion.
             // No matched component exists on an empty snapshot, so the type-defaults map is never
             // consulted here — an empty map keeps that explicit.
-            EmitComponentEdits(node, new SnapshotNode(), identityMap, EmptyTypeDefaults, ops);
+            EmitComponentEdits(node, new SnapshotNode(), identityMap, EmptyTypeDefaults, fieldGate, ops);
         }
     }
 }

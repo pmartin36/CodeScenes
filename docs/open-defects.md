@@ -240,3 +240,22 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   op suppression does not touch it. Not measured for user-visible impact — whether the written bytes
   actually differ, and what it costs in editor I/O and version-control noise, is unknown and worth
   measuring before designing a fix. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
+
+- SEVERITY med: an authored prefab-INSTANCE override on an adapter-excluded serialized path never
+  converges. It is the same permanent non-convergence trap spec 35 D2 closes for ordinary component
+  fields, on a different authoring surface, and D2's fix does not reach it.
+  `com.codescenes/Editor/PrefabInstanceProbe.Overrides.cs:91` drops a `PropertyModification` whose
+  path `SerializedFieldExclusions.IsExcluded` rejects, so the snapshot's `Overrides` never carries
+  it, while `SceneBuilder.Core/Diff/InstanceOverrideDiff.cs:88-100` emits a `SetInstanceOverride`
+  for any desired override with no snapshot counterpart. So `.Override(...).Set("m_Size", ...)` on a
+  `SpriteRenderer` inside an instance (or `"m_SortingLayer"` on a renderer) emits an op on every
+  build, forever, with no report. The sibling sites `InstanceOverrideDiff.cs:138`
+  (`AddInstanceComponent`) and `:208` (`AddInstanceChild`) carry whole `ComponentData` payloads and
+  have the same exposure. `SceneBuilder.Core/Diff/ExcludedFieldGate.cs` (spec 35 D2) is threaded
+  only through `Differ.EmitComponentEdits`; `InstanceOverrideDiff.Emit` is called separately from
+  `Differ.WalkDesired:112` and receives no gate. `ExcludedFieldAudit` already scans
+  `AddInstanceComponent`/`AddInstanceChild`, so the backstop would flag these ops, but it cannot
+  attribute a `SetInstanceOverride` (its `Target` names a nested prefab member, not a model
+  component). Not reproduced in a live editor; derived by reading both call sites. Spec 35:98-103
+  scopes D2 to the matched field loop and the `AddComponent` branch, so this does NOT relax
+  b1-t1's DELIVERABLE. OWNER: unassigned. FOUND-BY: excluded-field-one-way-report.

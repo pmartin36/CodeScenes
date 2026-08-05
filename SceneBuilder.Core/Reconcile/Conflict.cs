@@ -48,6 +48,12 @@ namespace SceneBuilder.Core.Reconcile
         // resolved to none -- never guessed. Constructed only through Conflict.AmbiguousTypeName,
         // which requires the object anchor, the component type full name and the field/member key.
         AmbiguousTypeName,
+
+        // A component field the adapter never treats as author intent was AUTHORED in source. The
+        // build emits no op for it and reports it instead. Constructed only through
+        // Conflict.UnauthorableField, which requires the object anchor, the component type full
+        // name and the field key.
+        UnauthorableField,
     }
 
     public sealed record Conflict
@@ -67,12 +73,14 @@ namespace SceneBuilder.Core.Reconcile
         public string? LogicalId { get; init; }
         public string? GlobalObjectId { get; init; }
 
-        // The kinds whose located data is REQUIRED: constructible only through Unrepresentable or
-        // AmbiguousTypeName, which cannot be called without a LocatedReport. Adding a kind here
-        // makes every other construction of it throw -- deterministically, on first execution, not
-        // data-dependently.
+        // The kinds whose located data is REQUIRED: constructible only through Unrepresentable,
+        // AmbiguousTypeName or UnauthorableField, none of which can be called without a
+        // LocatedReport. Adding a kind here makes every other construction of it throw --
+        // deterministically, on first execution, not data-dependently.
         private static bool RequiresLocatedReport(ConflictKind kind) =>
-            kind == ConflictKind.UnrepresentableValue || kind == ConflictKind.AmbiguousTypeName;
+            kind == ConflictKind.UnrepresentableValue
+            || kind == ConflictKind.AmbiguousTypeName
+            || kind == ConflictKind.UnauthorableField;
 
         public ConflictKind Kind
         {
@@ -80,10 +88,11 @@ namespace SceneBuilder.Core.Reconcile
             init => _kind = !RequiresLocatedReport(value)
                 ? value
                 : throw new System.ArgumentException(
-                    "An UnrepresentableValue report is constructed through Conflict.Unrepresentable(...) " +
-                    "and an AmbiguousTypeName report through Conflict.AmbiguousTypeName(...), both of " +
-                    "which require the object anchor, the component type full name and the field/member " +
-                    "key. Set Located, not Kind.");
+                    "An UnrepresentableValue report is constructed through Conflict.Unrepresentable(...), " +
+                    "an AmbiguousTypeName report through Conflict.AmbiguousTypeName(...) and an " +
+                    "UnauthorableField report through Conflict.UnauthorableField(...), all of which " +
+                    "require the object anchor, the component type full name and the field/member key. " +
+                    "Set Located, not Kind.");
         }
 
         public string Reason
@@ -154,5 +163,20 @@ namespace SceneBuilder.Core.Reconcile
                 recurrenceKey: $"ambiguous-type-name:{ambiguousName}",
                 location: null);
         }
+
+        // THE one sentence stating that an authored line has no effect (excluded-field report).
+        public const string LineHasNoEffect =
+            "This line has NO effect: the field is derived state Unity owns, not author intent, so the " +
+            "build emits nothing for it and it is never read back into code. Remove the line.";
+
+        // THE construction of an unauthorable-field report: the object anchor, the component type
+        // full name and the field key are required positionally.
+        public static Conflict UnauthorableField(
+            string componentLogicalId, string componentTypeFullName, string fieldKey) =>
+            FromReport(
+                ConflictKind.UnauthorableField,
+                new LocatedReport(componentLogicalId, componentTypeFullName, fieldKey, LineHasNoEffect),
+                recurrenceKey: $"unauthorable-field:{componentLogicalId}:{fieldKey}",
+                location: null);
     }
 }
