@@ -10,9 +10,11 @@ future reader can check it without an editor.
 
 ## Build order
 
-D1, D2, D3, D4. Execution order only; no item needs another's code.
+D1, D3 and D4 are SHIPPED (see each section). **D2 is the only item left to build.**
 
 ## D1 — a populated list of scene references writes null slots
+
+**SHIPPED at `7640919 (plus 2c3dc36, the mixed-handle array-type fix its own emission exposed)`.** Do not re-plan D1; it is on `main` and gate-verified.
 
 **Data loss on the happy path.** Authoring a `List<GameObject>` (waypoints, spawn points, targets)
 with in-scene targets resizes the live array to N and leaves every element null. Silent: no
@@ -43,8 +45,12 @@ exactly that element and leaves the other assigned.
 
 ## D2 — an authored sorting layer never converges
 
-**BLOCKED: do not build this item.** It needs the (a)/(b) approach decision below, which is the
-repo owner's to make. A run over this spec builds D1, D3 and D4 only.
+**DECIDED (repo owner, approach (a)): excluded fields are ONE-WAY, made loud.** Keep the exclusion
+and report a source-authored excluded field through spec 33's located report channel, so the author
+is told the line does nothing. Approach (b) — pruning the line from their source — was rejected:
+silently deleting code someone typed is its own surprise, and it is the more invasive change.
+
+This item is the only one left to build in this spec.
 
 **A regression introduced by spec 33's C6.** `SerializedFieldExclusions` excludes `m_SortingLayer`
 on `UnityEngine.Renderer` and `SortingGroup`. Correct for its own purpose — one Inspector control
@@ -73,16 +79,16 @@ point. Here every debounced keystroke costs a plan op and an unconditional scene
 No builder authors the field today, in this repo or the live test project, so nothing is broken
 right now. The defect is that hand-authoring it becomes a silent, permanent non-convergence trap.
 
-**Decide, then build.** This is an approach decision, not a localized edit:
-- **(a) Excluded fields are one-way, made loud.** Keep the exclusion; detect a source-authored
-  excluded field and report it as an unrepresentable-field warning through spec 33's located report
-  channel, so the author is told the line does nothing instead of silently churning.
-- **(b) Excluded fields are prunable.** Carry the adapter's excluded-path set into Core so the
-  reconciler can emit a removal for a source-only excluded field, and the line disappears on the
-  next sync.
+**Build (approach (a)).** A source-authored field that the adapter excludes is detected and
+reported through spec 33's located report channel — the same channel C5 and C7 use, not a second
+one — naming the object, the component type and the field, and saying the line has no effect. The
+build must also stop emitting a plan op for it, or the console goes quiet while the scene keeps
+re-saving on every keystroke, which is the actual defect.
 
-(a) is smaller and reuses a channel that now exists. (b) is what a user would probably expect.
-Whoever builds this states the choice in the spec before writing code.
+The set of excluded fields lives adapter-side (`SerializedFieldExclusions`) and the differ that
+emits the op lives in Core, so the two halves have to meet somewhere. That crossing is this item's
+one design decision; it does NOT mean adopting approach (b), which additionally deletes the
+author's line. Nothing here removes anything from the author's source.
 
 **Accept when:** a builder authoring `m_SortingLayer` reaches a fixed point — either the line is
 removed (b), or it survives with a located warning and the build stops emitting a plan op for it (a).
@@ -90,6 +96,8 @@ A gate test authors the field in builder source; today none does, which is why 5
 over it.
 
 ## D3 — the incremental snapshot cache is never invalidated when the IdentityMap changes
+
+**SHIPPED at `2a634a8`.** Do not re-plan D3; it is on `main` and gate-verified.
 
 `com.codescenes/Editor/ChangeScopedSnapshot.cs` declares that an incremental assemble must be
 byte-equivalent to a cold read of the same scene state. Its node cache is only ever replaced
@@ -125,6 +133,8 @@ varies the resolver between two assembles today, and the byte-equality test uses
 reference fields at all.
 
 ## D4 — value-patching preserves a typed selector that cannot take an instance handle
+
+**SHIPPED at `225400d (plus 6018199, widening the authoring-surface scan)`.** Do not re-plan D4; it is on `main` and gate-verified.
 
 `com.codescenes/Runtime/NodeHandle.cs` declares `public sealed class NodeHandle`;
 `InstanceHandle` has no base, no interface and no conversion operator, and there are no implicit
