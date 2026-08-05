@@ -166,8 +166,8 @@ namespace SceneBuilder.Core.Reconcile
 
         // THE one sentence stating that an authored line has no effect (excluded-field report).
         public const string LineHasNoEffect =
-            "This line has NO effect: the field is derived state Unity owns, not author intent, so the " +
-            "build emits nothing for it and it is never read back into code. Remove the line.";
+            "This line has NO effect: this field cannot be authored from code, so the build emits " +
+            "nothing for it and it is never read back into code. Remove the line.";
 
         // THE construction of an unauthorable-field report: the object anchor, the component type
         // full name and the field key are required positionally.

@@ -41,7 +41,10 @@ namespace SceneBuilder.Editor
         /// </summary>
         public string? Of(string? logicalId)
         {
-            if (string.IsNullOrEmpty(logicalId))
+            // Pattern-matched rather than string.IsNullOrEmpty: the reference assemblies Unity
+            // compiles against carry no [NotNullWhen(false)] on it, so the guard does not narrow
+            // and the TryGetValue below warns CS8604.
+            if (logicalId is not { Length: > 0 })
             {
                 return null;
             }
