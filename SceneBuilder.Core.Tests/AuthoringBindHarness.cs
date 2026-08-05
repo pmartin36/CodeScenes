@@ -31,14 +31,21 @@ namespace SceneBuilder.Core.Tests
             return dir;
         }
 
+        // Full paths of every com.codescenes/Runtime/*.cs source -- the one Runtime directory walk,
+        // shared by every reader of the authoring surface.
+        internal static string[] RuntimeSourceFiles()
+        {
+            var runtimeDir = Path.Combine(RepoRoot(), "com.codescenes", "Runtime");
+            return Directory.EnumerateFiles(runtimeDir, "*.cs").ToArray();
+        }
+
         // Every com.codescenes/Runtime/*.cs source EXCEPT the runtime MonoBehaviours, which need the
         // UnityEngine assembly this harness does not reference. Excluded by CONTENT ("using
         // UnityEngine"), never a hardcoded filename pair, so a new authoring file is included
         // automatically and a new MonoBehaviour is excluded automatically.
         internal static string[] AuthoringSources()
         {
-            var runtimeDir = Path.Combine(RepoRoot(), "com.codescenes", "Runtime");
-            return Directory.EnumerateFiles(runtimeDir, "*.cs")
+            return RuntimeSourceFiles()
                 .Select(File.ReadAllText)
                 .Where(text => !text.Contains("using UnityEngine"))
                 .ToArray();

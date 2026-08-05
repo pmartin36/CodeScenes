@@ -219,3 +219,15 @@ STATUS: READY
   differs. Consequence: `EmittedCodeCompiles.cs:20-22`'s "a future test cannot silently skip it by
   forgetting to opt in" is false for these three, and the compile class of bug CLAUDE.md calls a bug
   outright can land there unseen. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
+
+- SEVERITY low - two archived spec listings document a signature the tree no longer has after this
+  feature's D4 widening. `specs/completed/19-spatial-authoring-components.md:300` prints
+  `NodeHandle target = null);` for `SurfaceSnap`, and
+  `specs/completed/06-m5-cross-object-references.md:129` prints
+  ``**`ComponentHandle<T>.Set<TValue>(Func<T,TValue> selector, NodeHandle target)`**``. Both
+  parameters are `SceneObjectHandle` on the current tree (`com.codescenes/Runtime/NodeHandle.cs:67`,
+  `com.codescenes/Runtime/ComponentHandle.cs:34`). Re-measured by tdd-validator during b3-t1
+  iteration 2 (`sed -n '298,302p'` / `sed -n '127,131p'`): both lines still print `NodeHandle`.
+  Dead prose in an archive; nothing observable changes. Raised as a b3-t1 finding by
+  `scope/bucket-b3.md` and NOT fixed by the routed iteration, which addressed the guard-completeness
+  finding only; `specs/completed/` is in no task's TOUCHES in this plan. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.

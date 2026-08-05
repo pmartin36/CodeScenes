@@ -1,10 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Lowering;
 using SceneBuilder.Core.Model;
@@ -387,49 +383,70 @@ public class AppendScene : ISceneDefinition
 
         // ---- fixture 7: the structural surface scan ----
 
-        private static string RepoRoot([CallerFilePath] string here = "")
-        {
-            var dir = Path.GetDirectoryName(here);
-            while (dir != null && !File.Exists(Path.Combine(dir, "SceneBuilder.sln")))
-            {
-                dir = Path.GetDirectoryName(dir);
-            }
-
-            if (dir == null)
-            {
-                throw new InvalidOperationException(
-                    $"InstanceTargetBindTests.RepoRoot: no SceneBuilder.sln found walking up from '{here}'");
-            }
-
-            return dir;
-        }
-
-        // #7: no parameter in the published authoring surface is typed exactly `NodeHandle` -- the
-        // structural invariant that makes a bypassing emit site fail to COMPILE rather than rely on
-        // a convention. An `Action<NodeHandle>` closure parameter is a GenericNameSyntax, not an
-        // IdentifierNameSyntax, so it is untouched by this identifier match and needs no allowlist.
+        // No parameter in the published authoring surface is typed as a concrete handle. Widening
+        // every reference-accepting parameter to SceneObjectHandle is what lets any emitted handle
+        // token bind; this scan is what keeps a later member from narrowing back to one kind, in
+        // either direction. The banned set is derived from the sources' base lists, so a new
+        // SceneObjectHandle subtype is covered without editing this test. An Action<NodeHandle>
+        // closure parameter names Action at the top level and is not an offender.
         [Fact]
-        public void AuthoringSurface_NoParameterAcceptsOnlyANodeHandle()
+        public void AuthoringSurface_NoParameterIsTypedAConcreteHandle()
         {
-            var runtimeDir = Path.Combine(RepoRoot(), "com.codescenes", "Runtime");
-            var files = Directory.EnumerateFiles(runtimeDir, "*.cs").ToList();
-            Assert.True(files.Count > 0, "scan found zero com.codescenes/Runtime/*.cs files -- repo root resolution is broken");
+            var files = AuthoringBindHarness.RuntimeSourceFiles();
+            Assert.True(files.Length > 0, "scan found zero com.codescenes/Runtime/*.cs files -- repo root resolution is broken");
 
-            var offenders = new List<string>();
-            foreach (var file in files)
-            {
-                var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(file), path: file);
-                foreach (var parameter in tree.GetRoot().DescendantNodes().OfType<ParameterSyntax>())
-                {
-                    if (parameter.Type is IdentifierNameSyntax { Identifier.Text: "NodeHandle" })
-                    {
-                        var line = parameter.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-                        offenders.Add($"{Path.GetFileName(file)}:{line} {parameter}");
-                    }
-                }
-            }
+            var (_, offenders) = AuthoringSurfaceScan.Scan(
+                files.Select(file => (file, System.IO.File.ReadAllText(file))));
 
             Assert.True(offenders.Count == 0, string.Join("\n", offenders));
+        }
+
+        // The derived handle-type set must actually contain both concrete subtypes -- a scan that
+        // finds no handle types at all would report zero offenders for the wrong reason.
+        [Fact]
+        public void AuthoringSurfaceScan_SeesBothConcreteHandleTypes()
+        {
+            var files = AuthoringBindHarness.RuntimeSourceFiles();
+            var (handleTypes, _) = AuthoringSurfaceScan.Scan(
+                files.Select(file => (file, System.IO.File.ReadAllText(file))));
+
+            Assert.Contains("NodeHandle", handleTypes);
+            Assert.Contains("InstanceHandle", handleTypes);
+        }
+
+        // A deliberate-violation proof: every concrete handle type -- including a generic one --
+        // is flagged as a parameter type, and a parameter widened to the base, a closure parameter,
+        // a return type and a field of the same name are not.
+        [Fact]
+        public void AuthoringSurfaceScan_FlagsEveryNarrowHandleParameter()
+        {
+            const string sample = @"
+public abstract class SceneObjectHandle { }
+public sealed class NodeHandle : SceneObjectHandle { }
+public class InstanceHandle : SceneObjectHandle { }
+public sealed class InstanceHandle<TRef> : InstanceHandle { }
+
+public class Surface
+{
+    public static readonly NodeHandle None = null;          // not a parameter
+    public NodeHandle Produce() => null;                    // return type, not a parameter
+    public Surface Widened(SceneObjectHandle target) => this;
+    public Surface Closure(Action<NodeHandle> configure) => this;
+    public Surface NarrowNode(NodeHandle target) => this;               // offender
+    public Surface NarrowInstance(InstanceHandle target) => this;       // offender
+    public Surface NarrowTyped(InstanceHandle<TRef> target) => this;    // offender
+}
+";
+            var (_, offenders) = AuthoringSurfaceScan.Scan(new[] { ("Sample.cs", sample) });
+
+            Assert.Equal(3, offenders.Count);
+            Assert.Contains(offenders, o => o.Contains("NarrowNode"));
+            Assert.Contains(offenders, o => o.Contains("NarrowInstance"));
+            Assert.Contains(offenders, o => o.Contains("NarrowTyped"));
+            Assert.DoesNotContain(offenders, o => o.Contains("Widened"));
+            Assert.DoesNotContain(offenders, o => o.Contains("Closure"));
+            Assert.DoesNotContain(offenders, o => o.Contains("Produce"));
+            Assert.DoesNotContain(offenders, o => o.Contains("None"));
         }
     }
 }
