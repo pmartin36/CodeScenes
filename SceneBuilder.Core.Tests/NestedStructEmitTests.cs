@@ -98,6 +98,52 @@ namespace SceneBuilder.Core.Tests
             Assert.Empty(conflicts);
         }
 
+        // A list item is exempt from the representability filter: a list element is not a
+        // member-initializer slot, so an item with no compiling struct-member form (an asset
+        // reference here) still renders. The same value as a struct MEMBER has no compiling
+        // initializer form and is excluded. The exemption stops at the item -- a struct member
+        // reached through a list item is filtered again.
+        [Fact]
+        public void Project_KeepsUnrepresentableListItems_ExcludesTheSameValueAsAStructMember()
+        {
+            var assetA = new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/a.mat" });
+            var assetB = new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/b.mat" });
+            var @default = Node("Bag", ("mat", new ValueNode.AssetRef(null)), ("mats", new ValueNode.List(new ValueNode[] { })));
+            var value = Node("Bag", ("mat", assetA), ("mats", new ValueNode.List(new ValueNode[] { assetA, assetB })));
+            var conflicts = new List<Conflict>();
+
+            var projection = NestedValueEmission.Project(value, @default);
+            projection.ReportExclusions("comp-1", "Bag", "m_Bag", conflicts);
+
+            Assert.Equal(Node("Bag", ("mats", new ValueNode.List(new ValueNode[] { assetA, assetB }))), projection.Value);
+            Assert.Equal(new[] { "mat" }, projection.ExcludedMembers);
+            var conflict = Assert.Single(conflicts);
+            Assert.Equal(ConflictKind.UnrepresentableValue, conflict.Kind);
+            Assert.Contains("m_Bag", conflict.Reason);
+            Assert.Contains("mat", conflict.Reason);
+            Assert.Equal(
+                "new Bag { mats = new[] { Asset(\"Assets/a.mat\"), Asset(\"Assets/b.mat\") } }",
+                SourceExpr.ValueNodeLiteral(projection.Value));
+        }
+
+        [Fact]
+        public void Project_ResumesExclusionInsideANestedListItem()
+        {
+            var itemAsset = new ValueNode.AssetRef(new AssetRef { DisplayPath = "Assets/a.mat" });
+            var @default = Node("Bag", ("items", new ValueNode.List(new ValueNode[] { })));
+            var value = Node("Bag", ("items", new ValueNode.List(new ValueNode[]
+            {
+                Node("It", ("n", F(2)), ("mat", itemAsset)),
+            })));
+
+            var projection = NestedValueEmission.Project(value, @default);
+
+            Assert.Equal(
+                Node("Bag", ("items", new ValueNode.List(new ValueNode[] { Node("It", ("n", F(2))) }))),
+                projection.Value);
+            Assert.Equal(new[] { "items.mat" }, projection.ExcludedMembers);
+        }
+
         // ---- NestedValueEmission.Complete -----------------------------------------------------
 
         [Fact]
