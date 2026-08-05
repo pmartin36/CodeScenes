@@ -164,7 +164,7 @@ namespace SceneBuilder.Editor
                     foreach (var (key, value) in c.Fields)
                     {
                         var path = ResolveProperty(so, key);
-                        WriteFieldValue(so, path, value, comp, result, map, scene);
+                        WriteFieldValue(so, path, value, comp, c.LogicalId, result, map, scene);
                     }
 
                     so.ApplyModifiedProperties();

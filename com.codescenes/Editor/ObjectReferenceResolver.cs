@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Core.Identity;
+using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Editor
 {
@@ -32,7 +33,7 @@ namespace SceneBuilder.Editor
         /// <c>SerializedObject.ApplyModifiedProperties</c>.
         /// </summary>
         public static void WriteReference(
-            SerializedObject so, string path, string? targetLogicalId, Component owner,
+            SerializedObject so, string path, string? targetLogicalId, Component owner, string ownerLogicalId,
             IReadOnlyDictionary<string, GameObject> gameObjectsByLogicalId,
             IReadOnlyDictionary<string, Component> componentsByLogicalId,
             IdentityMap map, Scene scene)
@@ -51,7 +52,7 @@ namespace SceneBuilder.Editor
                 return;
             }
 
-            var wanted = ExpectedRefType(prop);
+            var wanted = ExpectedRefType(prop, out var ambiguousCandidates);
             var obj = ResolveTarget(targetLogicalId!, wanted, gameObjectsByLogicalId, componentsByLogicalId, map, scene);
             if (obj == null)
             {
@@ -63,6 +64,22 @@ namespace SceneBuilder.Editor
             }
 
             prop.objectReferenceValue = obj;
+
+            // Unity's own setter rejects an object that is not the field's declared type, leaving the slot
+            // null. That can only survive Coerce above when the declared type could NOT be determined, which
+            // is what an ambiguous short name produces: the type was not guessed, so nothing coerced the
+            // target and the authored reference is dropped. Report it located rather than in silence.
+            if (prop.objectReferenceValue == null && ambiguousCandidates.Count >= 2 && owner != null)
+            {
+                ConflictSurfacing.SurfaceLocatedError(
+                    Conflict.AmbiguousTypeName(
+                        ownerLogicalId,
+                        owner.GetType().FullName,
+                        FieldNameOf(path),
+                        ambiguousCandidates[0].Name,
+                        ambiguousCandidates.Select(t => t.FullName ?? t.Name).ToList()),
+                    owner.gameObject);
+            }
         }
 
         /// <summary>
@@ -79,8 +96,10 @@ namespace SceneBuilder.Editor
         /// reused (M5, read side) by <see cref="IsSceneObjectField"/> to classify a null field without
         /// re-parsing PPtr.
         /// </summary>
-        internal static Type? ExpectedRefType(SerializedProperty prop)
+        internal static Type? ExpectedRefType(SerializedProperty prop, out IReadOnlyList<Type> ambiguousCandidates)
         {
+            ambiguousCandidates = Array.Empty<Type>();
+
             var name = PPtrTypeName(prop.type);
             if (name == null)
             {
@@ -102,7 +121,7 @@ namespace SceneBuilder.Editor
                 return typeof(GameObject);
             }
 
-            return ComponentTypeResolver.ResolveObjectTypeByShortName(name, out _);
+            return ComponentTypeResolver.ResolveObjectTypeByShortName(name, out ambiguousCandidates);
         }
 
         /// <summary>
@@ -136,7 +155,7 @@ namespace SceneBuilder.Editor
         /// </summary>
         internal static bool IsSceneObjectField(SerializedProperty p)
         {
-            var t = ExpectedRefType(p);
+            var t = ExpectedRefType(p, out _);
             return t != null && (t == typeof(GameObject) || typeof(Component).IsAssignableFrom(t));
         }
 

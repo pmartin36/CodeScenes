@@ -115,7 +115,7 @@ public class LocatedReportChannelScene : ISceneDefinition
         Assert.AreEqual("Panel/Fixture", note.Located.ScenePath,
             "The report must carry the live scene hierarchy path as data.");
 
-        var expected = $"[CodeScenes] NOTE on '{note.Located.LogicalId}' (Panel/Fixture) > " +
+        var expected = $"[CodeScenes] WARNING on '{note.Located.LogicalId}' (Panel/Fixture) > " +
             $"'{ComponentTypeFullName}' > 'Anchored': {note.Located.Detail}";
         Assert.AreEqual(expected, logs.Single(m => m.Contains("'Anchored'")),
             "The composed console NOTE line does not match segment for segment.\nLogs:\n" + string.Join("\n", logs));
@@ -193,8 +193,9 @@ public class LocatedReportChannelScene : ISceneDefinition
     {
         var map = new IdentityMap { Entries = Array.Empty<IdentityMapEntry>() };
         var scenePath = new SceneHierarchyPath(map, Array.Empty<IdentityMapEntry>());
-        var report = new LocatedReport("ghost", ComponentTypeFullName, "Anchored", "value could not be represented");
-        var note = Conflict.FromReport(ConflictKind.UnrepresentableValue, report, "unrepresentable-type-field:ghost:Anchored", null);
+        var note = Conflict.Unrepresentable(
+            "ghost", ComponentTypeFullName, "Anchored", "value could not be represented",
+            "unrepresentable-type-field:ghost:Anchored", null);
 
         IReadOnlyList<Conflict> surfaced = null;
         var logs = CaptureLogs(() => surfaced = ConflictSurfacing.SurfaceNotes(new[] { note }, "builder.cs", scenePath));

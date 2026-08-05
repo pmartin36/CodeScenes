@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace SceneBuilder.Core.Reconcile
 {
     public enum ConflictKind
@@ -39,6 +43,11 @@ namespace SceneBuilder.Core.Reconcile
         // compile, so the member is excluded from the initializer and reported here instead. Never
         // raised for a member AT its type default (nothing was excluded that a user would notice).
         UnrepresentableValue,
+
+        // A component field's declared reference type name matched two or more loaded types, so it
+        // resolved to none -- never guessed. Constructed only through Conflict.AmbiguousTypeName,
+        // which requires the object anchor, the component type full name and the field/member key.
+        AmbiguousTypeName,
     }
 
     public sealed record Conflict
@@ -58,15 +67,23 @@ namespace SceneBuilder.Core.Reconcile
         public string? LogicalId { get; init; }
         public string? GlobalObjectId { get; init; }
 
+        // The kinds whose located data is REQUIRED: constructible only through Unrepresentable or
+        // AmbiguousTypeName, which cannot be called without a LocatedReport. Adding a kind here
+        // makes every other construction of it throw -- deterministically, on first execution, not
+        // data-dependently.
+        private static bool RequiresLocatedReport(ConflictKind kind) =>
+            kind == ConflictKind.UnrepresentableValue || kind == ConflictKind.AmbiguousTypeName;
+
         public ConflictKind Kind
         {
             get => _kind;
-            init => _kind = value != ConflictKind.UnrepresentableValue
+            init => _kind = !RequiresLocatedReport(value)
                 ? value
                 : throw new System.ArgumentException(
-                    "An UnrepresentableValue report is constructed through Conflict.FromReport(...), " +
-                    "which requires the object anchor, the component type full name and the " +
-                    "field/member key. Set Located, not Kind.");
+                    "An UnrepresentableValue report is constructed through Conflict.Unrepresentable(...) " +
+                    "and an AmbiguousTypeName report through Conflict.AmbiguousTypeName(...), both of " +
+                    "which require the object anchor, the component type full name and the field/member " +
+                    "key. Set Located, not Kind.");
         }
 
         public string Reason
@@ -85,11 +102,11 @@ namespace SceneBuilder.Core.Reconcile
         public string? RecurrenceKey { get; init; }
 
         // The located-report data (anchor, component type full name, field/member key) an
-        // UnrepresentableValue conflict must carry. FromReport is the one construction door for a
-        // conflict of that kind; every other kind leaves this null.
+        // UnrepresentableValue or AmbiguousTypeName conflict must carry; every other kind leaves
+        // this null.
         public LocatedReport? Located { get; init; }
 
-        public static Conflict FromReport(
+        private static Conflict FromReport(
             ConflictKind kind, LocatedReport report, string? recurrenceKey, SourceSpan? location) =>
             new Conflict(kind)
             {
@@ -98,5 +115,44 @@ namespace SceneBuilder.Core.Reconcile
                 RecurrenceKey = recurrenceKey,
                 Location = location,
             };
+
+        // The ONE sentence stating what happened to a value the model cannot represent. Every
+        // UnrepresentableValue report carries it, because Unrepresentable is the only construction
+        // of the kind and appends it here.
+        public const string ValueStaysInScene =
+            "The live value stays in the scene and is NOT synced to code.";
+
+        // THE construction of an unrepresentable-value report: the object anchor, the component
+        // type full name and the field/member key are required positionally, and the fixed sentence
+        // stating what happened to the value is appended to detail so no caller spells it.
+        public static Conflict Unrepresentable(
+            string logicalId, string componentTypeFullName, string memberKey, string detail,
+            string? recurrenceKey, SourceSpan? location) =>
+            FromReport(
+                ConflictKind.UnrepresentableValue,
+                new LocatedReport(logicalId, componentTypeFullName, memberKey, $"{detail} {ValueStaysInScene}"),
+                recurrenceKey, location);
+
+        // THE construction of an ambiguous-type-name report: candidate order, quoting and copy
+        // live here so no caller spells any of them. Callers report only when 2+ candidates
+        // matched; the recurrence key is NAME-scoped, so two reports sharing the ambiguous name
+        // surface once per session regardless of which object/field triggered them.
+        public static Conflict AmbiguousTypeName(
+            string logicalId, string componentTypeFullName, string memberKey,
+            string ambiguousName, IReadOnlyList<string> candidateFullNames)
+        {
+            var quoted = string.Join(
+                ", ",
+                candidateFullNames.OrderBy(n => n, StringComparer.Ordinal).Select(n => $"'{n}'"));
+
+            return FromReport(
+                ConflictKind.AmbiguousTypeName,
+                new LocatedReport(logicalId, componentTypeFullName, memberKey,
+                    $"Its declared type name '{ambiguousName}' is AMBIGUOUS — it matches {quoted}. The type " +
+                    "was NOT guessed (§7), so this field's reference could not be resolved. Rename one of the " +
+                    "colliding types so the name is unique among the editor's loaded types."),
+                recurrenceKey: $"ambiguous-type-name:{ambiguousName}",
+                location: null);
+        }
     }
 }

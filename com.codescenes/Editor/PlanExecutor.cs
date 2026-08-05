@@ -301,7 +301,7 @@ namespace SceneBuilder.Editor
                 }
 
                 ObjectReferenceResolver.WriteReference(
-                    refSo, sr.Path, sr.TargetLogicalId, refComp,
+                    refSo, sr.Path, sr.TargetLogicalId, refComp, sr.LogicalId,
                     result.GameObjectsByLogicalId, result.ComponentsByLogicalId, map, scene);
             }
 

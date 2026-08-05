@@ -141,7 +141,17 @@ namespace SceneBuilder.Core.Tests
                 Assert.False(string.IsNullOrEmpty(report.Located.ComponentTypeFullName));
                 Assert.False(string.IsNullOrEmpty(report.Located.MemberKey));
                 Assert.Equal(report.Located.Compose(), report.Reason);
+                Assert.EndsWith("The live value stays in the scene and is NOT synced to code.", report.Reason);
             }
+        }
+
+        // Conflict.Unrepresentable is the only public door for an UnrepresentableValue report;
+        // FromReport is the private mechanism it (and AmbiguousTypeName) shares internally, so a
+        // fourth site cannot build the kind another way -- it fails to compile.
+        [Fact]
+        public void Conflict_HasNoPublicGenericDoorForAGuardedKind()
+        {
+            Assert.Null(typeof(Conflict).GetMethod("FromReport", BindingFlags.Public | BindingFlags.Static));
         }
 
         // Reflection sweep over every ConflictDetector factory that can produce a Conflict, so a
@@ -193,9 +203,8 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void LocatedReport_WithScenePath_RecomposesTheReasonAndKeepsTheKind()
         {
-            var report = new LocatedReport("comp-1", CompType, FieldKey, "detail text");
-            var conflict = Conflict.FromReport(
-                ConflictKind.UnrepresentableValue, report, recurrenceKey: null, location: null);
+            var conflict = Conflict.Unrepresentable(
+                "comp-1", CompType, FieldKey, "detail text", recurrenceKey: null, location: null);
 
             var moved = conflict with { Located = conflict.Located! with { ScenePath = "Canvas/Text" } };
 

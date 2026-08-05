@@ -58,6 +58,33 @@ namespace SceneBuilder.Editor
         public static void LogLocatedError(GameObject subject, string logicalId, string message)
             => Debug.LogError($"[CodeScenes] ERROR on '{logicalId}' ({SceneHierarchyPath.Of(subject)}): {message}");
 
+        /// <summary>Surfaces a LOCATED report the adapter raises while holding the LIVE object and no
+        /// builder file: attaches <paramref name="subject"/>'s live hierarchy path to the report's
+        /// <see cref="Conflict.Located"/> and logs the composed line as an error (§7 fail-loud), at most
+        /// once per editor session per <see cref="Conflict.RecurrenceKey"/>. Returns true when it logged.
+        /// A report about the editor's LOADED TYPES is a fact of the domain, not of one builder file, so
+        /// its dedupe scope is <see cref="DomainScope"/>, never a builder path.</summary>
+        public static bool SurfaceLocatedError(Conflict report, GameObject subject)
+        {
+            if (report.RecurrenceKey is { } key && !ClaimOnce(DomainScope, key))
+            {
+                return false;
+            }
+
+            Debug.LogError($"[CodeScenes] ERROR on {On(Locate(report, subject))}");
+            return true;
+        }
+
+        // A path can never equal this, so a domain-scoped key can never collide with a builder-scoped one.
+        private const string DomainScope = "<domain>";
+
+        // THE one claim of a session-scoped recurrence key; SurfaceNotes claims with `builderPath`.
+        private static bool ClaimOnce(string scope, string recurrenceKey) =>
+            _surfacedNoteKeys.Add(scope + '\0' + recurrenceKey);
+
+        private static Conflict Locate(Conflict c, GameObject subject) =>
+            c.Located is { } r ? c with { Located = r with { ScenePath = SceneHierarchyPath.Of(subject) } } : c;
+
         /// <summary>
         /// Surfaces the keyless per-pass <paramref name="conflicts"/> (RecurrenceKey null) to the
         /// console, attaching <paramref name="scenePath"/>'s resolved live hierarchy path to each
@@ -136,18 +163,24 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                if (!_surfacedNoteKeys.Add(builderPath + '\0' + note.RecurrenceKey))
+                if (!ClaimOnce(builderPath, note.RecurrenceKey))
                 {
                     continue;
                 }
 
                 var located = Locate(note, scenePath);
-                Debug.LogWarning($"[CodeScenes] NOTE on {On(located)}");
+                Debug.LogWarning($"[CodeScenes] {StandingLabel(located)} on {On(located)}");
                 surfaced.Add(located);
             }
 
             return surfaced;
         }
+
+        /// <summary>The console severity label of a surfaced standing report. An
+        /// <see cref="ConflictKind.UnrepresentableValue"/> report is a WARNING: a scene edit the user
+        /// made is not reaching their code. Any other standing condition reads as a NOTE.</summary>
+        private static string StandingLabel(Conflict c) =>
+            c.Kind == ConflictKind.UnrepresentableValue ? "WARNING" : "NOTE";
 
         // Best-effort draw only; the registry (the test-observable seam) is populated regardless of
         // whether this ever paints anything (e.g. headless batchmode has no SceneView).

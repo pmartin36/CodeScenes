@@ -8,6 +8,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
 using SceneBuilder.Editor;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
@@ -46,6 +47,19 @@ public class PPtrShortNameResolutionScene : ISceneDefinition
         _builderPath = Path.Combine(_dir, "PPtrShortNameResolutionScene.cs");
         _sidecarPath = Path.Combine(_dir, "PPtrShortNameResolutionScene.sbmap.json");
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        ConflictSurfacing.ResetNotes();
+    }
+
+    private static GameObject FindRoot(Scene scene, string name)
+    {
+        foreach (var go in scene.GetRootGameObjects())
+        {
+            if (go.name == name)
+            {
+                return go;
+            }
+        }
+        return null;
     }
 
     [TearDown]
@@ -97,13 +111,13 @@ public class PPtrShortNameResolutionScene : ISceneDefinition
         Assert.IsNotNull(targetGraphicProp, "Button.m_TargetGraphic property not found");
         Assert.IsNotNull(selectOnUpProp, "Button.m_Navigation.m_SelectOnUp property not found");
 
-        Assert.AreEqual(typeof(Sprite), ObjectReferenceResolver.ExpectedRefType(spriteProp),
+        Assert.AreEqual(typeof(Sprite), ObjectReferenceResolver.ExpectedRefType(spriteProp, out _),
             "Image.m_Sprite did not resolve to UnityEngine.Sprite");
-        Assert.AreEqual(typeof(Material), ObjectReferenceResolver.ExpectedRefType(materialProp),
+        Assert.AreEqual(typeof(Material), ObjectReferenceResolver.ExpectedRefType(materialProp, out _),
             "Image.m_Material did not resolve to UnityEngine.Material");
-        Assert.AreEqual(typeof(Graphic), ObjectReferenceResolver.ExpectedRefType(targetGraphicProp),
+        Assert.AreEqual(typeof(Graphic), ObjectReferenceResolver.ExpectedRefType(targetGraphicProp, out _),
             "Button.m_TargetGraphic did not resolve to UnityEngine.UI.Graphic");
-        Assert.AreEqual(typeof(Selectable), ObjectReferenceResolver.ExpectedRefType(selectOnUpProp),
+        Assert.AreEqual(typeof(Selectable), ObjectReferenceResolver.ExpectedRefType(selectOnUpProp, out _),
             "Button.m_Navigation.m_SelectOnUp did not resolve to UnityEngine.UI.Selectable");
     }
 
@@ -115,13 +129,13 @@ public class PPtrShortNameResolutionScene : ISceneDefinition
         var canvas = new GameObject("Canvas").AddComponent<Canvas>();
         var cameraProp = new SerializedObject(canvas).FindProperty("m_Camera");
         Assert.IsNotNull(cameraProp, "Canvas.m_Camera property not found");
-        Assert.AreEqual(typeof(Camera), ObjectReferenceResolver.ExpectedRefType(cameraProp),
+        Assert.AreEqual(typeof(Camera), ObjectReferenceResolver.ExpectedRefType(cameraProp, out _),
             "Canvas.m_Camera (native PPtr<Camera>) did not resolve by short name");
 
         var spriteRenderer = new GameObject("SpriteRenderer").AddComponent<SpriteRenderer>();
         var probeAnchorProp = new SerializedObject(spriteRenderer).FindProperty("m_ProbeAnchor");
         Assert.IsNotNull(probeAnchorProp, "SpriteRenderer.m_ProbeAnchor property not found");
-        Assert.AreEqual(typeof(Transform), ObjectReferenceResolver.ExpectedRefType(probeAnchorProp),
+        Assert.AreEqual(typeof(Transform), ObjectReferenceResolver.ExpectedRefType(probeAnchorProp, out _),
             "SpriteRenderer.m_ProbeAnchor (native PPtr<Transform>) did not resolve by short name");
     }
 
@@ -199,7 +213,7 @@ public class PPtrShortNameResolutionScene : ISceneDefinition
         var prop = new SerializedObject(joint).FindProperty("m_ConnectedBody");
         Assert.IsNotNull(prop, "HingeJoint.m_ConnectedBody property not found");
 
-        var resolved = ObjectReferenceResolver.ExpectedRefType(prop);
+        var resolved = ObjectReferenceResolver.ExpectedRefType(prop, out _);
 
         Assert.IsNull(resolved, "An ambiguous native PPtr token must resolve to null");
         Assert.AreNotEqual(typeof(MyGame.Physics.Rigidbody), resolved,
@@ -216,7 +230,7 @@ public class PPtrShortNameResolutionScene : ISceneDefinition
         var prop = new SerializedObject(doorOpener).FindProperty("target");
         Assert.IsNotNull(prop, "DoorOpener.target property not found");
 
-        Assert.AreEqual(typeof(GameObject), ObjectReferenceResolver.ExpectedRefType(prop),
+        Assert.AreEqual(typeof(GameObject), ObjectReferenceResolver.ExpectedRefType(prop, out _),
             "DoorOpener.target (managed GameObject-typed field) did not resolve to typeof(GameObject)");
     }
 
@@ -274,5 +288,153 @@ public class PPtrShortNameResolutionScene : ISceneDefinition
             "A null native asset-typed field (m_Mesh) must NOT be reclassified as a scene reference "
             + "by short-name resolution (got " + node.GetType().Name + ")");
         Assert.IsNull(((ValueNode.AssetRef)node).Ref, "A cleared mesh field must read as AssetRef(null)");
+    }
+
+    // 11. Building an authored reference on a field whose declared type name collides across loaded
+    // assemblies, targeting an object that lacks the component, logs exactly one located console
+    // error naming the object anchor, the component type, the field, the ambiguous short name and
+    // every distinct colliding candidate full name -- and the live property stays unassigned: the
+    // drop is reported, not repaired.
+    [Test]
+    public void Build_AmbiguousFieldWhoseTargetLacksTheComponent_LogsTheLocatedCandidateMessage()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var plain = scene.Add(\"Plain\");\n" +
+            "        var joint = scene.Add(\"Joint\");\n" +
+            "        joint.Component<UnityEngine.HingeJoint>(c => c.Set(\"m_ConnectedBody\", plain));"));
+
+        var scene = EditorSceneManager.GetActiveScene();
+
+        LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("AMBIGUOUS"));
+
+        SceneBuilderBuild.BuildResult buildResult = null;
+        var logs = CaptureLogs(() =>
+        {
+            buildResult = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        });
+
+        Assert.IsEmpty(buildResult.Diagnostics,
+            "Build reported diagnostics: " + string.Join("; ", buildResult.Diagnostics.Select(d => d.Message)));
+
+        var ambiguousMessages = logs.Where(m => m.Contains("AMBIGUOUS")).ToList();
+        Assert.AreEqual(1, ambiguousMessages.Count,
+            "Expected exactly one located AMBIGUOUS error.\nLogs:\n" + string.Join("\n", logs));
+
+        var message = ambiguousMessages[0];
+        StringAssert.Contains("Joint", message, "Message does not name the object anchor.\n" + message);
+        StringAssert.Contains("UnityEngine.HingeJoint", message, "Message does not name the component type.\n" + message);
+        StringAssert.Contains("m_ConnectedBody", message, "Message does not name the field.\n" + message);
+        StringAssert.Contains("'Rigidbody'", message, "Message does not name the ambiguous short name.\n" + message);
+        StringAssert.Contains("'MyGame.Physics.Rigidbody'", message, "Message does not list the MyGame.Physics.Rigidbody candidate.\n" + message);
+        StringAssert.Contains("'UnityEngine.Rigidbody'", message, "Message does not list the UnityEngine.Rigidbody candidate.\n" + message);
+
+        var joint = FindRoot(scene, "Joint");
+        Assert.IsNotNull(joint, "Joint was not created.");
+        var hinge = joint.GetComponent<HingeJoint>();
+        Assert.IsNotNull(hinge, "HingeJoint was not added.");
+        Assert.IsNull(hinge.connectedBody,
+            "The dropped reference must stay null -- reporting the drop does not repair it.");
+    }
+
+    // 12. The same ambiguous field on a target that DOES carry the component is silent and assigns
+    // correctly -- the report fires only on a write Unity's own setter measurably drops, never on
+    // every ambiguous resolution.
+    [Test]
+    public void Build_AmbiguousFieldWhoseTargetCarriesTheComponent_IsSilentAndAssigns()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var body = scene.Add(\"Body\");\n" +
+            "        body.Component<UnityEngine.Rigidbody>();\n" +
+            "        var joint = scene.Add(\"Joint\");\n" +
+            "        joint.Component<UnityEngine.HingeJoint>(c => c.Set(\"m_ConnectedBody\", body));"));
+
+        var scene = EditorSceneManager.GetActiveScene();
+
+        SceneBuilderBuild.BuildResult buildResult = null;
+        var logs = CaptureLogs(() =>
+        {
+            buildResult = SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+        });
+
+        Assert.IsEmpty(buildResult.Diagnostics,
+            "Build reported diagnostics: " + string.Join("; ", buildResult.Diagnostics.Select(d => d.Message)));
+        Assert.IsFalse(logs.Any(m => m.Contains("AMBIGUOUS")),
+            "An unambiguous WRITE must not log the ambiguity report.\nLogs:\n" + string.Join("\n", logs));
+
+        var joint = FindRoot(scene, "Joint");
+        var body = FindRoot(scene, "Body");
+        Assert.IsNotNull(joint, "Joint was not created.");
+        Assert.IsNotNull(body, "Body was not created.");
+        var hinge = joint.GetComponent<HingeJoint>();
+        Assert.AreEqual(body.GetComponent<UnityEngine.Rigidbody>(), hinge.connectedBody,
+            "The reference must resolve when the target genuinely carries the declared component.");
+    }
+
+    // 13. A second build in the same session reports the same ambiguous name nothing further -- the
+    // session-scoped recurrence key claims it once, not once per build.
+    [Test]
+    public void Build_TheSameAmbiguousName_IsReportedOncePerSession()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var plain = scene.Add(\"Plain\");\n" +
+            "        var joint = scene.Add(\"Joint\");\n" +
+            "        joint.Component<UnityEngine.HingeJoint>(c => c.Set(\"m_ConnectedBody\", plain));"));
+
+        var scene = EditorSceneManager.GetActiveScene();
+
+        LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("AMBIGUOUS"));
+        var firstLogs = CaptureLogs(() => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene));
+        Assert.AreEqual(1, firstLogs.Count(m => m.Contains("AMBIGUOUS")),
+            "First build did not log the located AMBIGUOUS error exactly once.\nLogs:\n" + string.Join("\n", firstLogs));
+
+        var secondLogs = CaptureLogs(() => SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene));
+        Assert.IsFalse(secondLogs.Any(m => m.Contains("AMBIGUOUS")),
+            "A second build in the same session must not repeat the ambiguity report.\nLogs:\n" + string.Join("\n", secondLogs));
+    }
+
+    // 14. An unknown short name resolves to null with no candidates -- there is nothing ambiguous
+    // about a name matching zero loaded types.
+    [Test]
+    public void ResolveObjectTypeByShortName_UnknownName_IsNullWithNoCandidates()
+    {
+        var resolved = ComponentTypeResolver.ResolveObjectTypeByShortName(
+            "ThisShortNameMatchesNoLoadedTypeAnywhereInTheDomain", out var candidates);
+
+        Assert.IsNull(resolved, "An unknown short name must resolve to null");
+        Assert.IsEmpty(candidates, "An unknown short name must report no candidates");
+    }
+
+    // 15. A repeated resolve of the same ambiguous name returns the SAME candidate set from the
+    // cache, not a freshly recomputed one.
+    [Test]
+    public void ResolveObjectTypeByShortName_RepeatedCall_ReturnsTheSameCandidatesFromCache()
+    {
+        var first = ComponentTypeResolver.ResolveObjectTypeByShortName("Rigidbody", out var firstCandidates);
+        var second = ComponentTypeResolver.ResolveObjectTypeByShortName("Rigidbody", out var secondCandidates);
+
+        Assert.IsNull(first);
+        Assert.IsNull(second);
+        CollectionAssert.AreEquivalent(firstCandidates.ToList(), secondCandidates.ToList(),
+            "A repeated resolve of the same ambiguous name must return the same candidate set");
+    }
+
+    // 16. The candidate list for an ambiguous name holds no duplicate type entries.
+    [Test]
+    public void ResolveObjectTypeByShortName_Candidates_AreDistinctTypes()
+    {
+        ComponentTypeResolver.ResolveObjectTypeByShortName("Rigidbody", out var candidates);
+
+        CollectionAssert.AllItemsAreUnique(candidates.ToList(),
+            "The candidate list for an ambiguous name must hold distinct types");
+    }
+
+    // 17. Resolving a short name, ambiguous or not, never logs to the console -- callers own
+    // whether and how a resulting ambiguity is reported.
+    [Test]
+    public void ResolveObjectTypeByShortName_NeverLogs()
+    {
+        var logs = CaptureLogs(() => ComponentTypeResolver.ResolveObjectTypeByShortName("Rigidbody", out _));
+
+        Assert.IsEmpty(logs, "ResolveObjectTypeByShortName must never log.\nLogs:\n" + string.Join("\n", logs));
     }
 }

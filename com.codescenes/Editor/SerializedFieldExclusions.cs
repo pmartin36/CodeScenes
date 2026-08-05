@@ -28,13 +28,16 @@ namespace SceneBuilder.Editor
     /// <c>OcclusionArea</c>, <c>OcclusionPortal</c>, <c>Tilemap</c>, <c>UnityEngine.UI.Scrollbar</c>) — a
     /// bare-name exclusion would silently stop every one of them round-tripping.
     ///
-    /// Known, unproven case: <c>SpriteRenderer</c> serializes BOTH <c>m_SortingLayer</c> (the short
-    /// layer name) and <c>m_SortingLayerID</c> (the int id), while <c>Canvas</c> serializes only the
-    /// ID — one Inspector "Sorting Layer" control writing two fields on the type that has both. Both
-    /// fields stay CAPTURED here (neither is in <see cref="NotInspectorAuthorable"/>); proving the
-    /// dual-field emission round-trips correctly needs a second sorting layer defined in
-    /// <c>TagManager.asset</c>, which spec 32's "Out of scope" excludes, so this stays a documented,
-    /// unproven case rather than an addressed one.
+    /// <c>UnityEngine.Renderer</c> (and separately <c>UnityEngine.Rendering.SortingGroup</c>) serializes
+    /// BOTH <c>m_SortingLayer</c> and <c>m_SortingLayerID</c>, while <c>Canvas</c> serializes only the
+    /// ID — one Inspector "Sorting Layer" control writing two fields on the types that have both.
+    /// <c>m_SortingLayer</c> is a <c>short</c>-typed INDEX into the project's sorting-layer order,
+    /// derived by Unity from <c>m_SortingLayerID</c>; writing it alone through
+    /// <see cref="UnityEditor.SerializedProperty"/> and <c>ApplyModifiedProperties</c> is discarded and
+    /// both fields read back as their default. It is excluded here, keyed on the DECLARING type
+    /// (<c>UnityEngine.Renderer</c>, <c>UnityEngine.Rendering.SortingGroup</c>) so every current and
+    /// future renderer inherits the rule; <c>m_SortingLayerID</c>, the field the control actually
+    /// writes, keeps round-tripping.
     /// </summary>
     internal static class SerializedFieldExclusions
     {
@@ -90,6 +93,8 @@ namespace SceneBuilder.Editor
         private static readonly Dictionary<string, HashSet<string>> NotInspectorAuthorable = new()
         {
             ["UnityEngine.SpriteRenderer"] = new() { "m_WasSpriteAssigned", "m_Size" },
+            ["UnityEngine.Renderer"] = new() { "m_SortingLayer" },
+            ["UnityEngine.Rendering.SortingGroup"] = new() { "m_SortingLayer" },
         };
 
         // Per-domain memo of the base-chain union for a given concrete type, so a repeated read (every

@@ -38,7 +38,7 @@ namespace SceneBuilder.Editor
 
             var so = new SerializedObject(comp);
             var path = ResolveProperty(so, op.PropertyPath);
-            WriteFieldValue(so, path, op.ObjectReference ?? op.Value, comp, result, map, scene);
+            WriteFieldValue(so, path, op.ObjectReference ?? op.Value, comp, op.LogicalId, result, map, scene);
             so.ApplyModifiedProperties();
         }
 
@@ -64,7 +64,7 @@ namespace SceneBuilder.Editor
                 foreach (var (key, value) in op.Component.Fields)
                 {
                     var path = ResolveProperty(so, key);
-                    WriteFieldValue(so, path, value, comp, result, map, scene);
+                    WriteFieldValue(so, path, value, comp, op.Component.LogicalId, result, map, scene);
                 }
 
                 so.ApplyModifiedProperties();
@@ -247,7 +247,7 @@ namespace SceneBuilder.Editor
         // REFINED: SetPropertyModifications replaces the WHOLE override list and would clobber every
         // override not in the passed array).
         private static void WriteFieldValue(
-            SerializedObject so, string path, ValueNode value, Component owner,
+            SerializedObject so, string path, ValueNode value, Component owner, string ownerLogicalId,
             PlanExecutor.ExecutionResult result, IdentityMap map, Scene scene)
         {
             switch (value)
@@ -257,7 +257,7 @@ namespace SceneBuilder.Editor
                     break;
                 case ValueNode.ObjectRef objectRef:
                     ObjectReferenceResolver.WriteReference(
-                        so, path, objectRef.TargetLogicalId, owner,
+                        so, path, objectRef.TargetLogicalId, owner, ownerLogicalId,
                         result.GameObjectsByLogicalId, result.ComponentsByLogicalId, map, scene);
                     break;
                 default:
