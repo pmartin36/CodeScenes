@@ -225,10 +225,20 @@ public class AutoIdentityTests
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         const int count = 50;
         GameObject target = null;
+        GameObject nodeA = null;
+        GameObject nodeB = null;
         for (var i = 0; i < count; i++)
         {
             var go = new GameObject($"GO_{i}");
-            if (i == 25)
+            if (i == 0)
+            {
+                nodeA = go;
+            }
+            else if (i == 10)
+            {
+                nodeB = go;
+            }
+            else if (i == 25)
             {
                 target = go;
             }
@@ -238,8 +248,26 @@ public class AutoIdentityTests
         var scene = EditorSceneManager.GetActiveScene();
         var css = new ChangeScopedSnapshot();
 
-        var mapA = new IdentityMap();
-        var mapB = new IdentityMap();
+        // Same mapped-node content (NodeA, NodeB) built as two SEPARATE arrays/instances, so the
+        // generation is computed from real entries rather than an empty (degenerate) map.
+        var goidA = GlobalObjectId.GetGlobalObjectIdSlow(nodeA).ToString();
+        var goidB = GlobalObjectId.GetGlobalObjectIdSlow(nodeB).ToString();
+        var mapA = new IdentityMap
+        {
+            Entries = new[]
+            {
+                new IdentityMapEntry { LogicalId = "NodeA", Kind = "GameObject", GlobalObjectId = goidA },
+                new IdentityMapEntry { LogicalId = "NodeB", Kind = "GameObject", GlobalObjectId = goidB },
+            },
+        };
+        var mapB = new IdentityMap
+        {
+            Entries = new[]
+            {
+                new IdentityMapEntry { LogicalId = "NodeA", Kind = "GameObject", GlobalObjectId = goidA },
+                new IdentityMapEntry { LogicalId = "NodeB", Kind = "GameObject", GlobalObjectId = goidB },
+            },
+        };
 
         css.AssembleCold(scene, SceneRefResolver.ForMap(mapA));
         css.Ids.ResetCount();
@@ -250,7 +278,7 @@ public class AutoIdentityTests
         css.AssembleIncremental(scene, new[] { target.GetEntityId() }, SceneRefResolver.ForMap(mapB));
 
         Assert.AreEqual(1, css.Ids.ResolutionCount,
-            "Two IdentityMap instances with equal (empty) mapped-node content must produce the same " +
+            "Two IdentityMap instances with equal, non-empty mapped-node content must produce the same " +
             "generation, so a single-object change still resolves exactly 1 GlobalObjectId, not the whole " +
             $"{count}-object scene.");
     }

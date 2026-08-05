@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
@@ -375,7 +376,8 @@ public class S : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(ownerScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
             SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
-            Assert.Contains("new Game.Slot { items = new[] { door, other } }", patched);
+            Assert.Contains(
+                "new Game.Slot { items = new SceneBuilder.Authoring.SceneObjectHandle[] { door, other } }", patched);
 
             var reparsed = BuilderParser.Parse(patched, map);
             var recon2 = Reconciler.Reconcile(
@@ -399,7 +401,7 @@ public class S : ISceneDefinition
         }
 
         [Fact]
-        public void ArrayPrefix_AllHandleTokens_StaysImplicitlyTyped()
+        public void ArrayPrefix_AllHandleTokensOfTheSameKind_IsExplicitlySceneObjectHandleTyped()
         {
             var list = new ValueNode.List(new ValueNode[]
             {
@@ -407,7 +409,22 @@ public class S : ISceneDefinition
                 new ValueNode.Unsupported("NodeHandle.None"),
             });
 
-            Assert.Equal("new[] { ", ListValueEmission.ArrayPrefix(list));
+            Assert.Equal("new SceneBuilder.Authoring.SceneObjectHandle[] { ", ListValueEmission.ArrayPrefix(list));
+        }
+
+        // Two handle tokens naming DIFFERENT concrete handle types (a plain scene object and a
+        // prefab-instance root) have no common element type an implicitly-typed array can infer, so
+        // this must render the explicit form too.
+        [Fact]
+        public void ArrayPrefix_HandleTokensOfDifferentKinds_IsExplicitlySceneObjectHandleTyped()
+        {
+            var list = new ValueNode.List(new ValueNode[]
+            {
+                new ValueNode.Unsupported("door"),
+                new ValueNode.Unsupported("tank"),
+            });
+
+            Assert.Equal("new SceneBuilder.Authoring.SceneObjectHandle[] { ", ListValueEmission.ArrayPrefix(list));
         }
 
         [Fact]
@@ -467,10 +484,16 @@ public class S : ISceneDefinition
             Assert.True(ListValueEmission.HasUnemittableItem(value));
         }
 
+        // Any quoted array-creation prefix ("new" + optional element type + "[] {"), not just the two
+        // spellings this file emits, so a hand-rolled fourth spelling (e.g. the explicit
+        // SceneObjectHandle[] form) is caught outside this file exactly as the first two are.
+        private static readonly Regex ArrayCreationPrefixLiteral = new Regex("\"new[^\"]*\\[\\] \\{");
+
         // Scans production source (SceneBuilder.Core/**, com.codescenes/**, excluding tests and
-        // build output) for a string literal spelling an array-literal prefix (`"new[] { "` /
-        // `"new object[] { "`) — asserts ListValueEmission.cs is the only file that spells one, so a
-        // new emit site cannot hand-roll its own element-type decision.
+        // build output) for a string literal spelling an array-literal prefix (`"new[] { "`,
+        // `"new object[] { "`, `"new SceneBuilder.Authoring.SceneObjectHandle[] { "`, ...) — asserts
+        // ListValueEmission.cs is the only file that spells one, so a new emit site cannot hand-roll
+        // its own element-type decision.
         [Fact]
         public void ArrayLiteralPrefix_HasOneProductionSite()
         {
@@ -494,7 +517,7 @@ public class S : ISceneDefinition
                     }
 
                     var text = File.ReadAllText(file);
-                    if (text.Contains("\"new[] { ") || text.Contains("\"new object[] {"))
+                    if (ArrayCreationPrefixLiteral.IsMatch(text))
                     {
                         offenders.Add(relative);
                     }

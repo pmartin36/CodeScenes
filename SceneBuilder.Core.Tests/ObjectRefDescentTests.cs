@@ -476,7 +476,7 @@ public class OwnerAndDoorScene : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(OwnerAndDoorScene, result.Patch, parsed.Anchors);
 
-            Assert.Contains(".Set(\"targets\", new[] { door, NodeHandle.None })", patched);
+            Assert.Contains(".Set(\"targets\", new SceneBuilder.Authoring.SceneObjectHandle[] { door, NodeHandle.None })", patched);
         }
 
         // ---- Gate 4: a list element whose target vanished from the scene must report a located

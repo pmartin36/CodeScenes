@@ -233,6 +233,57 @@ public class RoundTripObjectRefPrefabInstanceScene : ISceneDefinition
         }
     }
 
+    // A reference-list field holding one plain scene object and one prefab-instance root has no
+    // common C# element type for an implicitly-typed array; the emitted list literal must still
+    // compile, whatever kinds its live elements happen to be.
+    [Test]
+    public void SceneToCode_ReferenceListMixingNodeAndInstanceRoot_CompilesAndIsAFixedPoint()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sb_rtorpi_list_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var builderPath = Path.Combine(dir, "RoundTripObjectRefPrefabInstanceScene.cs");
+            var sidecarPath = Path.Combine(dir, "RoundTripObjectRefPrefabInstanceScene.sbmap.json");
+            const string body =
+                "        var tank = scene.Instance(\"" + PrefabPath + "\");\n" +
+                "        var door = scene.Add(\"Door\");\n" +
+                "        var path = scene.Add(\"Path\");\n" +
+                "        path.Component<WaypointPath>(c => c.Set(\"waypoints\", new[] { door }));";
+            File.WriteAllText(builderPath, Source(body));
+
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            var scene = EditorSceneManager.GetActiveScene();
+            SceneBuilderBuild.Run(builderPath, ScenePath, sidecarPath, scene);
+
+            var doorGo = FindRoot(EditorSceneManager.GetActiveScene(), "Door");
+            var instanceRoot = FindRoot(EditorSceneManager.GetActiveScene(), InstanceName);
+            var pathGo = FindRoot(EditorSceneManager.GetActiveScene(), "Path");
+            Assert.IsNotNull(doorGo, "Door was not created by SceneBuilderBuild.Run");
+            Assert.IsNotNull(instanceRoot, InstanceName + " instance root was not created by SceneBuilderBuild.Run");
+            Assert.IsNotNull(pathGo, "Path was not created by SceneBuilderBuild.Run");
+
+            var waypointPath = pathGo.GetComponent<WaypointPath>();
+            waypointPath.waypoints = new[] { doorGo, instanceRoot };
+            EditorUtility.SetDirty(waypointPath);
+
+            var result = EmittedCodeCompiles.SyncAndAssertCompiles(builderPath, sidecarPath, EditorSceneManager.GetActiveScene());
+
+            Assert.AreEqual(0, result.CompileErrors.Length,
+                "A reference list mixing a plain scene object and a prefab-instance root wrote source that does not compile.");
+            Assert.AreEqual(0, result.Conflicts.Count(c => c.Kind == ConflictKind.DanglingReference),
+                "A live, mapped list of references must never report DanglingReference.");
+
+            var second = EmittedCodeCompiles.SyncAndAssertCompiles(builderPath, sidecarPath, EditorSceneManager.GetActiveScene());
+            Assert.AreEqual(0, second.PatchEdits, "A settled mixed-kind reference list must sync as a no-op.");
+            Assert.IsFalse(second.Changed, "A no-op re-sync must not report Changed=true.");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
     [Test]
     public void RoundTrip_TypedSelectorOnInstanceRoot_RebuildMaterializesTheInstanceRootAndReSyncIsANoOp()
     {

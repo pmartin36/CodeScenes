@@ -8,10 +8,11 @@ using Xunit;
 
 namespace SceneBuilder.Core.Tests
 {
-    // A snapshot field whose value is a List of ObjectRefs emits a `new[] { ... }` array of
-    // scene-reference selectors, at every emission site (introduce, patch, append) and for every
-    // element outcome (resolvable, cleared, self-targeting, unresolvable), and a second
-    // reconcile against the same snapshot is a fixed point (zero conflicts, zero edits).
+    // A snapshot field whose value is a List of ObjectRefs emits an explicitly-typed
+    // `new SceneBuilder.Authoring.SceneObjectHandle[] { ... }` array of scene-reference selectors, at
+    // every emission site (introduce, patch, append) and for every element outcome (resolvable,
+    // cleared, self-targeting, unresolvable), and a second reconcile against the same snapshot is a
+    // fixed point (zero conflicts, zero edits).
     public class ObjectRefListEmitTests
     {
         private const string DoorOpenerType = "Game.DoorOpener";
@@ -142,7 +143,7 @@ public class S : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(EmptyOpenerScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
             SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
-            Assert.Contains(".Set(\"targets\", new[] { door, other })", patched);
+            Assert.Contains(".Set(\"targets\", new SceneBuilder.Authoring.SceneObjectHandle[] { door, other })", patched);
 
             var reparsed = BuilderParser.Parse(patched, map);
             var recon2 = Reconciler.Reconcile(
@@ -182,7 +183,7 @@ public class S : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(HandleLessDoorScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
             SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
-            Assert.Contains("new[] {", patched);
+            Assert.Contains("new SceneBuilder.Authoring.SceneObjectHandle[] {", patched);
         }
 
         [Fact]
@@ -204,11 +205,11 @@ public class S : ISceneDefinition
             Assert.Empty(result.Conflicts);
             var onlyEdit = Assert.Single(result.Patch.Edits);
             var patch = Assert.IsType<PatchComponentField>(onlyEdit);
-            Assert.Equal("new[] { door, third }", patch.NewExpr);
+            Assert.Equal("new SceneBuilder.Authoring.SceneObjectHandle[] { door, third }", patch.NewExpr);
 
             var patched = SourcePatchApplier.Apply(AuthoredListScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
             SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
-            Assert.Contains(".Set(\"targets\", new[] { door, third })", patched);
+            Assert.Contains(".Set(\"targets\", new SceneBuilder.Authoring.SceneObjectHandle[] { door, third })", patched);
 
             var reparsed = BuilderParser.Parse(patched, map);
             var recon2 = Reconciler.Reconcile(
@@ -236,7 +237,7 @@ public class S : ISceneDefinition
             Assert.Empty(result.Conflicts);
             var onlyEdit = Assert.Single(result.Patch.Edits);
             var patch = Assert.IsType<PatchComponentField>(onlyEdit);
-            Assert.Equal("new[] { door, NodeHandle.None }", patch.NewExpr);
+            Assert.Equal("new SceneBuilder.Authoring.SceneObjectHandle[] { door, NodeHandle.None }", patch.NewExpr);
 
             var patched = SourcePatchApplier.Apply(AuthoredListScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
             SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
@@ -277,7 +278,7 @@ public class S : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(DoorsOnlyScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
             SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
-            Assert.Contains(".Set(\"targets\", new[] { door, other })", patched);
+            Assert.Contains(".Set(\"targets\", new SceneBuilder.Authoring.SceneObjectHandle[] { door, other })", patched);
 
             var map2 = new IdentityMap { Entries = map.Entries.Concat(result.AddedEntries).ToArray() };
             var reparsed = BuilderParser.Parse(patched, map2);
@@ -327,7 +328,7 @@ public class S : ISceneDefinition
             Assert.Empty(result.Conflicts);
             var patched = SourcePatchApplier.Apply(EmptyOpenerScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
             SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
-            Assert.Contains(".Set(\"targets\", new[] { door, NodeHandle.Self })", patched);
+            Assert.Contains(".Set(\"targets\", new SceneBuilder.Authoring.SceneObjectHandle[] { door, NodeHandle.Self })", patched);
 
             var reparsed = BuilderParser.Parse(patched, map);
             var recon2 = Reconciler.Reconcile(

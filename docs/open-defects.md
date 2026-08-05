@@ -115,8 +115,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   invalidation for a moved/reparented target, which no planned task's DELIVERABLE holds.
   OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
 
-STATUS: READY
-
 - SEVERITY low — `SceneBuilder.Core.Tests/SpatialComponentTests.cs` is 1083 lines, over the
   1000-line file-size budget this plan states (measured: `wc -l`; it is the only file in the tree
   over the limit, next highest is `unity-gate/Assets/GateTests/RoundTripSpatialTests.cs` at 979 and

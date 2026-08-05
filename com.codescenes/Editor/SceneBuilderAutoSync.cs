@@ -615,9 +615,10 @@ namespace SceneBuilder.Editor
 
             // M5: resolve live scene-object reference fields the same way the reconcile-feeding reads
             // do, so a baseline ObjectRef agrees with the field-diff (ExecuteBothChanged) that compares
-            // against it. No sidecar yet -> explicit null (an ObjectRef read as Unsupported is harmless
-            // here: the baseline is only used for desired-vs-desired code diffs and scene-vs-baseline
-            // field attribution, never written back).
+            // against it. Default to SceneRefResolver.None (scene refs read Unsupported) unless a
+            // sidecar is found below: the baseline is only used for desired-vs-desired code diffs and
+            // scene-vs-baseline field attribution, never written back, so an Unsupported read is
+            // harmless here.
             var sceneRef = SceneRefResolver.None;
             if (File.Exists(route.SidecarPath))
             {

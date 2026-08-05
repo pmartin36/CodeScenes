@@ -27,6 +27,9 @@ round-trip proof suite), plus M-UI RectTransform sync (spec 13) and spec 32's C1
 Shipped, gate-verified only: spec 31, the hidden-serialized-field reader contract. Its headline claim
 - component enable/disable syncing scene->code - still has no live confirmation.
 
+Unowned defects measured during builds, each with no task claiming its fix, are tracked in
+`docs/open-defects.md`.
+
 ## Order
 
 ### 1. Harness first — it pays for itself across everything after

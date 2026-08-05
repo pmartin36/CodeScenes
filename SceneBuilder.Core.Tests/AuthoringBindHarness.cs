@@ -61,6 +61,7 @@ namespace Game
     public class DoorOpener
     {
         public UnityEngine.GameObject target;
+        public UnityEngine.GameObject[] targets;
         public float speed;
         public UnityEngine.Material mat;
     }

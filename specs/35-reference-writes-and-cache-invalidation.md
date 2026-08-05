@@ -149,12 +149,23 @@ is hardcoded to the string spelling. Do not change it.
 **Chosen: (a), one mechanism.** `SceneObjectHandle` is the base of both `NodeHandle` and
 `InstanceHandle`, and every authoring parameter that accepts a scene-object reference is typed
 `SceneObjectHandle`: `ComponentHandle<T>.Set(selector, …)`, `OverrideHandle.Set(selector, …)`
-and `NodeHandle.SurfaceSnap(target:)`. The rule lives in the authoring type, so no emit site
-decides it and none can bypass it. `SurfaceSnap(target:)` is a third site of the same defect,
-found by that enumeration: it renders a pre-rendered handle the same way, and an instance
-target there produced `CS1503`. An `InstanceHandle` overload was not usable — `target` is one
-optional parameter among seven, so an overload differing only in its type is unresolvable
-whenever the parameter is omitted.
+and `NodeHandle.SurfaceSnap(target:)`. The rule lives in the authoring type for every SCALAR
+spelling, so no emit site decides it and none can bypass it. `SurfaceSnap(target:)` is a third
+site of the same defect, found by that enumeration: it renders a pre-rendered handle the same
+way, and an instance target there produced `CS1503`. An `InstanceHandle` overload was not
+usable — `target` is one optional parameter among seven, so an overload differing only in its
+type is unresolvable whenever the parameter is omitted.
+
+A list of references is the one shape the authoring type cannot cover: C# infers an
+implicitly-typed array's element type from its elements, never their common base, so `new[] {
+door, tank }` (a plain node beside a prefab-instance root) does not compile even though both
+are `SceneObjectHandle`. The same failure reaches an ordinary Inspector state with no second
+kind involved at all — one instance-root target beside a cleared slot, `new[] { tank,
+NodeHandle.None }` — because the cleared slot renders as a `NodeHandle` beside an
+`InstanceHandle`. A list of scene-object-handle expressions is therefore an emit-site decision,
+made at the single site `ListValueEmission.ArrayPrefix`: it renders an explicit `new
+SceneBuilder.Authoring.SceneObjectHandle[] { … }` whenever every item is a handle expression,
+whatever concrete kinds its elements are.
 
 **Accept when:** a field authored in the typed spelling and then rewired onto a prefab-instance root
 round-trips to source that compiles, and a second sync is a fixed point. `BuilderCompileCheck` stays

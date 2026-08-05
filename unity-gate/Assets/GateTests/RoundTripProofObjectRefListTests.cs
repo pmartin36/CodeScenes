@@ -116,7 +116,7 @@ public class RoundTripProofObjectRefListTests
             assertSource: ctx =>
             {
                 StringAssert.Contains(
-                    "c.Set(\"waypoints\", new[] { alpha, gamma })", ctx.Source,
+                    "c.Set(\"waypoints\", new SceneBuilder.Authoring.SceneObjectHandle[] { alpha, gamma })", ctx.Source,
                     "Rewiring waypoints[1] to Gamma did not patch the source to the rewired element.\n" + ctx.Source);
                 StringAssert.DoesNotContain(
                     "new[] { alpha, beta }", ctx.Source,
@@ -143,7 +143,7 @@ public class RoundTripProofObjectRefListTests
             assertSource: ctx =>
             {
                 StringAssert.Contains(
-                    "c.Set(\"waypoints\", new[] { alpha, beta })", ctx.Source,
+                    "c.Set(\"waypoints\", new SceneBuilder.Authoring.SceneObjectHandle[] { alpha, beta })", ctx.Source,
                     "Introducing a scene-assigned list absent from source did not emit the string-path setter.\n" + ctx.Source);
                 StringAssert.DoesNotContain(
                     "x => x.waypoints", ctx.Source,

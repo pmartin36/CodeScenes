@@ -45,6 +45,21 @@ namespace SceneBuilder.Core.Tests
             return (result, applied);
         }
 
+        // Counts non-overlapping occurrences of a literal substring, so a caller can pin that a
+        // component is authored exactly once in the applied source, not duplicated by the ADD pass.
+        private static int CountOccurrences(string text, string substring)
+        {
+            var count = 0;
+            var index = 0;
+            while ((index = text.IndexOf(substring, index, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += substring.Length;
+            }
+
+            return count;
+        }
+
         // The transient "member:<name>" field key a typed-selector parse produces, rewritten to the
         // plain key before Reconcile sees it -- mirrors the adapter's own rewrite ahead of the diff.
         private static GameObjectNode RewriteNode(GameObjectNode node) => node with
@@ -308,6 +323,9 @@ public class FullMatrixScene : ISceneDefinition
             c.Set(""target"", tank);
             c.Set(x => x.speed, 5f);
             c.Set(x => x.mat, Asset(""Assets/M.mat""));
+            c.Set(""targets"", new SceneBuilder.Authoring.SceneObjectHandle[] { door, tank });
+            c.Set(""targets"", new SceneBuilder.Authoring.SceneObjectHandle[] { tank, NodeHandle.None });
+            c.Set(""targets"", new[] { door, door });
         });
         opener.SurfaceSnap(up: true, target: door);
         opener.SurfaceSnap(up: true, target: tank);
@@ -319,6 +337,128 @@ public class FullMatrixScene : ISceneDefinition
 ";
             var errors = AuthoringBindHarness.BindErrors(source, AuthoringBindHarness.DoorOpenerStubs);
             Assert.Empty(errors);
+        }
+
+        // ---- fixture 5b: a reference LIST field whose targets are of DIFFERENT authoring kinds ----
+
+        private const string ListIntroduceSource = @"using SceneBuilder.Authoring;
+
+public class ListIntroduceScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var door = scene.Add(""Door"");
+        var tank = scene.Instance(""Assets/Prefabs/Tank.prefab"");
+        var opener = scene.Add(""Opener"");
+        opener.Component<Game.DoorOpener>(c => { });
+    }
+}
+";
+
+        private static (IdentityMap Map, SceneSnapshot Snapshot) ReferenceListFixture(ValueNode.List targetsValue)
+        {
+            var componentLogicalId = "opener/" + ComponentTypeFullName + "#0";
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = "door", GlobalObjectId = "goid-door", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = "tank", GlobalObjectId = "goid-tank", Kind = "PrefabInstance" },
+                    new IdentityMapEntry { LogicalId = "opener", GlobalObjectId = "goid-opener", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = componentLogicalId, GlobalObjectId = "goid-comp", Kind = "Component",
+                        ComponentType = ComponentTypeFullName, ParentLogicalId = "opener",
+                    },
+                },
+            };
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode { GlobalObjectId = "goid-door", Name = "Door" },
+                    new SnapshotNode { GlobalObjectId = "goid-tank", Name = "Tank" },
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-opener",
+                        Name = "Opener",
+                        Components = new[]
+                        {
+                            new ComponentData
+                            {
+                                LogicalId = "unused",
+                                Type = new TypeRef(ComponentTypeFullName),
+                                Fields = new FieldMap(new[]
+                                {
+                                    new KeyValuePair<string, ValueNode>("targets", targetsValue),
+                                }),
+                            },
+                        },
+                    },
+                },
+            };
+
+            return (map, snapshot);
+        }
+
+        // #5b.1: a list mixing a plain scene object and a prefab-instance root has no common C#
+        // element type for an implicitly-typed array; the emitted source must still bind.
+        [Fact]
+        public void ReferenceListMixingNodeAndInstanceTargets_AppliedSourceBinds()
+        {
+            var (map, snapshot) = ReferenceListFixture(new ValueNode.List(new ValueNode[]
+            {
+                new ValueNode.ObjectRef("door"),
+                new ValueNode.ObjectRef("tank"),
+            }));
+
+            var (_, applied) = ReconcileAndApply(ListIntroduceSource, map, snapshot);
+
+            var errors = AuthoringBindHarness.BindErrors(applied, AuthoringBindHarness.DoorOpenerStubs);
+            Assert.Empty(errors);
+            Assert.Contains("new SceneBuilder.Authoring.SceneObjectHandle[] { door, tank }", applied);
+            Assert.Equal(1, CountOccurrences(applied, "Component<Game.DoorOpener>"));
+        }
+
+        // #5b.2: an ordinary Inspector state -- one instance-root target and one cleared slot -- must
+        // also bind; the cleared slot renders as a NodeHandle beside an InstanceHandle.
+        [Fact]
+        public void ReferenceListWithAnInstanceTargetAndAClearedSlot_AppliedSourceBinds()
+        {
+            var (map, snapshot) = ReferenceListFixture(new ValueNode.List(new ValueNode[]
+            {
+                new ValueNode.ObjectRef("tank"),
+                new ValueNode.ObjectRef(null),
+            }));
+
+            var (_, applied) = ReconcileAndApply(ListIntroduceSource, map, snapshot);
+
+            var errors = AuthoringBindHarness.BindErrors(applied, AuthoringBindHarness.DoorOpenerStubs);
+            Assert.Empty(errors);
+            Assert.Contains("new SceneBuilder.Authoring.SceneObjectHandle[] { tank, NodeHandle.None }", applied);
+            Assert.Equal(1, CountOccurrences(applied, "Component<Game.DoorOpener>"));
+        }
+
+        // #5b.3: re-running the pipeline over the applied source, against the same snapshot,
+        // converges -- no further edits, conflicts, or notes.
+        [Fact]
+        public void ReferenceListMixingNodeAndInstanceTargets_SecondReconcileIsAFixedPoint()
+        {
+            var (map, snapshot) = ReferenceListFixture(new ValueNode.List(new ValueNode[]
+            {
+                new ValueNode.ObjectRef("door"),
+                new ValueNode.ObjectRef("tank"),
+            }));
+
+            var (_, applied) = ReconcileAndApply(ListIntroduceSource, map, snapshot);
+            var (second, _) = ReconcileAndApply(applied, map, snapshot);
+
+            Assert.Empty(second.Patch.Edits);
+            Assert.Empty(second.Conflicts);
+            Assert.Empty(second.Notes);
         }
 
         // ---- fixture 6: the APPEND path (component absent from source, present in the snapshot) ----
