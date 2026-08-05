@@ -178,9 +178,13 @@ namespace SceneBuilder.Editor
 
         /// <summary>The console severity label of a surfaced standing report. An
         /// <see cref="ConflictKind.UnrepresentableValue"/> report is a WARNING: a scene edit the user
-        /// made is not reaching their code. Any other standing condition reads as a NOTE.</summary>
+        /// made is not reaching their code. An <see cref="ConflictKind.UnauthorableField"/> report is a
+        /// WARNING for the mirror reason: a line the user wrote is not reaching their scene. Any other
+        /// standing condition reads as a NOTE.</summary>
         private static string StandingLabel(Conflict c) =>
-            c.Kind == ConflictKind.UnrepresentableValue ? "WARNING" : "NOTE";
+            c.Kind is ConflictKind.UnrepresentableValue or ConflictKind.UnauthorableField
+                ? "WARNING"
+                : "NOTE";
 
         // Best-effort draw only; the registry (the test-observable seam) is populated regardless of
         // whether this ever paints anything (e.g. headless batchmode has no SceneView).

@@ -61,7 +61,9 @@ namespace SceneBuilder.Editor
         /// so a cold read (which calls <see cref="SerializedFieldBridge.ReadComponent"/>, which calls
         /// <see cref="ComponentDefaultTemplate.Register"/>, for every component in the tree, including
         /// the ones reachable only through instance override channels) always precedes a
-        /// <see cref="FromRoots"/> call in the same domain.
+        /// <see cref="FromRoots"/> call in the same domain. Also the one place the adapter's
+        /// field-exclusion decision (<see cref="SerializedFieldExclusions.Policy"/>) is attached to
+        /// the snapshot, for the same reason <see cref="SceneSnapshot.ComponentDefaults"/> is.
         /// </summary>
         internal static SceneSnapshot FromRoots(SnapshotNode[] roots)
         {
@@ -77,7 +79,13 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            return new SceneSnapshot { SchemaVersion = 1, Roots = roots, ComponentDefaults = defaults.ToArray() };
+            return new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = roots,
+                ComponentDefaults = defaults.ToArray(),
+                FieldExclusions = SerializedFieldExclusions.Policy.Instance,
+            };
         }
 
         private static void CollectComponentTypeNames(SnapshotNode[] nodes, SortedSet<string> typeNames)

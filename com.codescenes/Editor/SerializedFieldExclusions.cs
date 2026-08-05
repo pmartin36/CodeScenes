@@ -160,5 +160,28 @@ namespace SceneBuilder.Editor
             EffectiveByType[ownerType] = effective;
             return effective;
         }
+
+        /// <summary>
+        /// The adapter side of the Core crossing (spec 35 D2): the SAME predicate the live read uses
+        /// (<see cref="SerializedFieldBridge.CollectFields"/>), asked with a Core
+        /// <see cref="TypeRef"/> instead of a <see cref="Type"/>. Stateless singleton - the code->scene
+        /// diff must answer for component types that are not in the live scene at all (the create
+        /// path), which neither the resolve nor the rule needs. Populated onto every snapshot at the
+        /// one construction factory, <see cref="SceneSnapshotReader.FromRoots"/>; no producer opts in.
+        /// An unresolvable type name degrades to the type-independent rules only (Bookkeeping /
+        /// DerivedBuildState) - the conservative answer, and unreachable on both live paths because
+        /// ComponentTypeNormalizer throws on an unresolved type before any diff.
+        /// </summary>
+        internal sealed class Policy : IFieldExclusionPolicy
+        {
+            internal static readonly Policy Instance = new();
+
+            private Policy()
+            {
+            }
+
+            public bool IsExcluded(TypeRef componentType, string fieldRoot) =>
+                SerializedFieldExclusions.IsExcluded(ComponentTypeResolver.Resolve(componentType), fieldRoot);
+        }
     }
 }

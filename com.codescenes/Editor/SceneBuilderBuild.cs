@@ -64,6 +64,15 @@ namespace SceneBuilder.Editor
             /// </summary>
             public System.Collections.Generic.IReadOnlyList<SceneBuilder.Core.Validation.Diagnostic> Flags
                 { get; set; } = System.Array.Empty<SceneBuilder.Core.Validation.Diagnostic>();
+
+            /// <summary>
+            /// The standing located reports this build NEWLY surfaced to the console through spec 33's
+            /// channel (e.g. an authored field the adapter never treats as author intent, spec 35 D2).
+            /// A report already surfaced this session for the same (builder, recurrence key) is absent —
+            /// the channel dedupes — so an auto-build running on every debounced change announces each
+            /// standing condition once. Empty on a refused build.
+            /// </summary>
+            public Conflict[] Notes { get; set; } = System.Array.Empty<Conflict>();
         }
 
         /// <summary>
@@ -271,6 +280,14 @@ namespace SceneBuilder.Editor
             // scene was already registered with the AssetDatabase by EditorSceneManager.SaveScene above.
             // A Refresh here would cost a domain reload for no gain.
 
+            // spec 35 D2: a located report the plan carries (an authored field the adapter never treats as
+            // author intent) reaches the author through spec 33's channel — the SAME one C5/C7 use — at
+            // most once per session per recurrence key. Surfaced AFTER the save + id stamp so the anchor of
+            // a component THIS build created still resolves to a live scene path; a keyless per-pass
+            // conflict (StaleOverride) is dropped by the channel, same as any other keyless entry.
+            var surfacedNotes = ConflictSurfacing.SurfaceNotes(
+                plan.Conflicts, builderPath, new SceneHierarchyPath(map, Array.Empty<IdentityMapEntry>()));
+
             Debug.Log($"[SceneBuilder] Built in place: {execution.GameObjectsByLogicalId.Count} object(s), " +
                       $"{plan.Ops.Length} plan op(s) into {scenePath}. Sidecar: {sidecarPath}");
 
@@ -283,6 +300,7 @@ namespace SceneBuilder.Editor
                 ObjectCount = execution.GameObjectsByLogicalId.Count,
                 PlanOpCount = plan.Ops.Length,
                 Flags = plan.Diagnostics,
+                Notes = surfacedNotes.ToArray(),
             };
         }
 

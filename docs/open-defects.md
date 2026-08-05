@@ -259,3 +259,23 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   component). Not reproduced in a live editor; derived by reading both call sites. Spec 35:98-103
   scopes D2 to the matched field loop and the `AddComponent` branch, so this does NOT relax
   b1-t1's DELIVERABLE. OWNER: unassigned. FOUND-BY: excluded-field-one-way-report.
+
+- SEVERITY med: a stale prefab-instance override detected on the code->scene BUILD is suppressed
+  with no report, while the same detection on the scene->code sync is surfaced. Derived by reading
+  the chain, not reproduced in a live editor: `SceneBuilder.Core/Diff/Differ.cs:112` calls
+  `InstanceOverrideDiff.Emit`, which calls `DetectStaleOverrides`
+  (`SceneBuilder.Core/Diff/InstanceOverrideDiff.cs:20,35-63`); the stale key is excluded from the
+  Set/Revert emission AND a `ConflictDetector.StaleOverride` conflict
+  (`SceneBuilder.Core/Reconcile/ConflictDetector.cs:229-241`, plain object-initializer construction,
+  so its `RecurrenceKey` is null) is appended to `ChangeSet.Conflicts` and copied into
+  `Plan.Conflicts` (`SceneBuilder.Core/Materialize/Materializer.cs:235`; proven by
+  `SceneBuilder.Core.Tests/PrefabInstanceConflictTests.cs:203`). `SceneBuilderBuild.Run` dropped
+  `plan.Conflicts` entirely before spec 35 D2, and D2 routes it to
+  `ConflictSurfacing.SurfaceNotes`, which skips a null `RecurrenceKey`
+  (`com.codescenes/Editor/ConflictSurfacing.cs:161-164`) — so the build still tells the author
+  nothing while silently declining to apply their override. The sync direction does surface it
+  (`SceneBuilder.Core/Reconcile/ReconcilerInstances.cs:194` -> `ReconcileResult.Conflicts` ->
+  `ConflictSurfacing.SurfaceConflicts`, `com.codescenes/Editor/SceneBuilderSync.cs:231`). A fix has
+  to decide the recurrence key first: auto-sync builds on every debounced change, so surfacing a
+  keyless per-pass conflict on the build path would log on every keystroke. OWNER: unassigned.
+  FOUND-BY: excluded-field-one-way-report.
