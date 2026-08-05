@@ -95,8 +95,8 @@ namespace SceneBuilder.Core.Reconcile
             ValueNode.Color(var v) =>
                 $"new UnityEngine.Color({FloatLiteral(v.R)}, {FloatLiteral(v.G)}, {FloatLiteral(v.B)}, {FloatLiteral(v.A)})",
 
-            ValueNode.List { Items.Count: 0 } => "new object[] { }",
-            ValueNode.List list => "new[] { " + string.Join(", ", list.Items.Select(item => ValueNodeLiteral(item, assetCatalog))) + " }",
+            ValueNode.List { Items.Count: 0 } => ListValueEmission.EmptyArrayLiteral,
+            ValueNode.List list => ListValueEmission.ArrayPrefix(list) + string.Join(", ", list.Items.Select(item => ValueNodeLiteral(item, assetCatalog))) + " }",
 
             ValueNode.Nested nested => "new " + nested.TypeName + " { " +
                 string.Join(", ", nested.Fields.Select(kv => kv.Key + " = " + ValueNodeLiteral(kv.Value, assetCatalog))) +

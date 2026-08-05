@@ -293,24 +293,12 @@ namespace SceneBuilder.Core.Materialize
                     TargetLogicalId = objectRef.TargetLogicalId,
                 });
             }
-            else if (value is ValueNode.List list && list.Items.Count > 0 && list.Items.All(item => item is ValueNode.AssetRef))
+            else if (value is ValueNode.List list && IsReferenceList(list))
             {
+                passB.Add(new SetArraySize { LogicalId = logicalId, Path = path, Size = list.Items.Count });
                 for (var i = 0; i < list.Items.Count; i++)
                 {
-                    var element = (ValueNode.AssetRef)list.Items[i];
-                    if (IsUnresolved(element.Ref))
-                    {
-                        skipped.Add(new SkippedField { LogicalId = logicalId, Path = $"{path}[{i}]", Reason = "Unresolved" });
-                        continue;
-                    }
-
-                    passB.Add(new SetAssetRef
-                    {
-                        LogicalId = logicalId,
-                        Path = $"{path}[{i}]",
-                        Guid = element.Ref?.Guid,
-                        FileId = element.Ref?.FileId ?? 0,
-                    });
+                    EmitFieldOp(logicalId, $"{path}[{i}]", list.Items[i], passB, skipped);
                 }
             }
             else if (value is ValueNode.Unsupported)
@@ -322,6 +310,14 @@ namespace SceneBuilder.Core.Materialize
                 passB.Add(new SetField { LogicalId = logicalId, Path = path, Value = value });
             }
         }
+
+        // A list of items where every item is a reference kind (ObjectRef/AssetRef/Unsupported) and
+        // at least one is a real reference. Both reference kinds and the unresolved placeholder share
+        // one lowering rule: SetArraySize carrying the authored count, then one op per index.
+        private static bool IsReferenceList(ValueNode.List list) =>
+            list.Items.Count > 0
+            && list.Items.All(item => item is ValueNode.AssetRef or ValueNode.ObjectRef or ValueNode.Unsupported)
+            && list.Items.Any(item => item is ValueNode.AssetRef or ValueNode.ObjectRef);
 
         // A ref that EXISTS but carries no resolved GUID named something the resolver could not find.
         // Emitting it as SetAssetRef(guid: "") makes the adapter CLEAR the live field

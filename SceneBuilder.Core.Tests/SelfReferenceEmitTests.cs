@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SceneBuilder.Core.Identity;
@@ -69,12 +68,6 @@ public class ButtonScene : ISceneDefinition
             }
         }
 
-        private static void AssertNoSyntaxErrors(string source)
-        {
-            var diagnostics = CSharpSyntaxTree.ParseText(source).GetDiagnostics();
-            Assert.DoesNotContain(diagnostics, d => d.Severity == DiagnosticSeverity.Error);
-        }
-
         private static SceneSnapshot SelfTargetingButtonSnapshot(string buttonLogicalId) => new SceneSnapshot
         {
             SchemaVersion = 1,
@@ -132,7 +125,7 @@ public class ButtonScene : ISceneDefinition
 
             Assert.Contains("NodeHandle.Self", patched);
             AssertNoLocalUsedInOwnDeclaration(patched);
-            AssertNoSyntaxErrors(patched);
+            SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
         }
 
         [Fact]
@@ -155,7 +148,7 @@ public class ButtonScene : ISceneDefinition
             var patched = SourcePatchApplier.Apply(ButtonStatementAnchoredScene, result.Patch, SourcePatchTestHelpers.MergeAnchors(parsed));
 
             Assert.Contains(".Set(\"m_TargetGraphic\", NodeHandle.Self)", patched);
-            AssertNoSyntaxErrors(patched);
+            SourcePatchTestHelpers.AssertNoSyntaxErrors(patched);
         }
 
         // An existing chained `.Set("target", b)` retargeted in the scene to the owner itself

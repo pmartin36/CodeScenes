@@ -308,6 +308,20 @@ namespace SceneBuilder.Core.Tests
         }
 
         [Fact]
+        public void SetArraySize_RoundTripsWithDiscriminatorPathAndSize()
+        {
+            var op = new SetArraySize { LogicalId = "path-1", Path = "waypoints", Size = 2 };
+
+            var json = PlanJson.Serialize(PlanWith(op));
+            var back = PlanJson.Deserialize(json);
+
+            Assert.Contains("\"op\":\"SetArraySize\"", json.Replace(" ", ""));
+            Assert.Contains("\"path\":\"waypoints\"", json.Replace(" ", ""));
+            Assert.Contains("\"size\":2", json.Replace(" ", ""));
+            Assert.Equal(op, Assert.IsType<SetArraySize>(Assert.Single(back.Ops)));
+        }
+
+        [Fact]
         public void Plan_MixingInstanceOps_DeserializesEachToRightConcreteType()
         {
             var plan = new Plan.Plan

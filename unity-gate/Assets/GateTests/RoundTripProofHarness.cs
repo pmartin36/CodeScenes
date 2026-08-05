@@ -187,6 +187,54 @@ public class RoundTripProofScene : ISceneDefinition
         }
     }
 
+    // Proves a code->scene edit made to an ALREADY-CONVERGED source: seed, converge, hand the
+    // converged text to `reauthor`, rebuild from the edited text, let the caller assert the live
+    // scene, then converge again. This is the shape a bare "assign, build, assert" proof cannot
+    // express -- the rebuild must apply a nonzero plan op count, so a `reauthor` callback that
+    // matched nothing (and therefore proved nothing) fails loud instead of passing as a no-op.
+    public static ProofResult ProveReauthoredCodeToScene(
+        string usings, string body, Func<string, string> reauthor, Action<ProofContext> assertScene)
+    {
+        var fixture = NewFixture();
+        try
+        {
+            SeedScene(fixture, usings, body);
+            ConvergeToFixedPoint(fixture, "re-authored code->scene baseline (before the edit)");
+
+            var converged = File.ReadAllText(fixture.BuilderPath);
+            var edited = reauthor(converged);
+            Assert.AreNotEqual(
+                converged, edited,
+                "The reauthor callback did not change the converged source -- it matched nothing, so the "
+                    + "case proves nothing.");
+            File.WriteAllText(fixture.BuilderPath, edited);
+
+            var rebuild = SceneBuilderBuild.Run(
+                fixture.BuilderPath, fixture.ScenePath, fixture.SidecarPath, EditorSceneManager.GetActiveScene());
+            Assert.IsEmpty(
+                rebuild.Diagnostics,
+                "The re-authored build was refused.\n" + string.Join("\n", rebuild.Diagnostics.Select(d => d.Message)));
+            Assert.Greater(
+                rebuild.PlanOpCount, 0,
+                "The re-authored build applied zero plan ops -- the edit reached nothing.");
+
+            assertScene(new ProofContext(fixture.BuilderPath, fixture.SidecarPath, fixture.ScenePath, rebuild, null));
+
+            var convergenceSync = ConvergeToFixedPoint(fixture, "re-authored code->scene convergence");
+
+            return new ProofResult(
+                rebuild,
+                driveSync: null,
+                convergenceSync: convergenceSync,
+                convergedSource: File.ReadAllText(fixture.BuilderPath),
+                convergedSidecar: File.ReadAllText(fixture.SidecarPath));
+        }
+        finally
+        {
+            Cleanup(fixture);
+        }
+    }
+
     public static ProofResult ProveSceneToCode(
         string usings, string body, Action<ProofContext> mutateScene, Action<ProofContext> assertSource)
     {

@@ -141,5 +141,44 @@ namespace SceneBuilder.Core.Model
                     return false;
             }
         }
+
+        /// <summary>
+        /// Yields <paramref name="node"/> itself at path <c>""</c>, then every descendant in
+        /// pre-order: a <see cref="ValueNode.List"/> item at <c>parent + "[" + i + "]"</c>, a
+        /// <see cref="ValueNode.Nested"/> member at <c>parent + "." + memberKey</c>. Every other
+        /// kind is a leaf. Callers concatenate the yielded path onto their own field key/path.
+        /// </summary>
+        public static IEnumerable<(string Path, ValueNode Node)> Enumerate(ValueNode node) =>
+            EnumerateAt(node, "");
+
+        private static IEnumerable<(string Path, ValueNode Node)> EnumerateAt(ValueNode node, string path)
+        {
+            yield return (path, node);
+
+            switch (node)
+            {
+                case ValueNode.Nested nested:
+                    foreach (var (memberKey, memberValue) in nested.Fields)
+                    {
+                        foreach (var entry in EnumerateAt(memberValue, path + "." + memberKey))
+                        {
+                            yield return entry;
+                        }
+                    }
+
+                    break;
+
+                case ValueNode.List list:
+                    for (var i = 0; i < list.Items.Count; i++)
+                    {
+                        foreach (var entry in EnumerateAt(list.Items[i], path + "[" + i + "]"))
+                        {
+                            yield return entry;
+                        }
+                    }
+
+                    break;
+            }
+        }
     }
 }

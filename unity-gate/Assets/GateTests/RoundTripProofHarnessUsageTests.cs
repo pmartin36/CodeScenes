@@ -18,7 +18,8 @@ public class RoundTripProofHarnessUsageTests
         "SceneBuilderBuild", "SceneBuilderSync", "SceneBuilderAutoSync", "EmittedCodeCompiles", "EditorSceneManager"
     };
 
-    private static readonly string[] HarnessEntryPoints = { "ProveCodeToScene", "ProveSceneToCode" };
+    private static readonly string[] HarnessEntryPoints =
+        { "ProveCodeToScene", "ProveSceneToCode", "ProveReauthoredCodeToScene" };
 
     private static readonly string[] TestAttributeNames = { "Test", "TestCase", "TestCaseSource", "UnityTest" };
 

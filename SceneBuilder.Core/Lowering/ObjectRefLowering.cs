@@ -64,20 +64,8 @@ namespace SceneBuilder.Core.Lowering
                 new KeyValuePair<string, ValueNode>(kv.Key, LowerNode(kv.Value, ownerNodeLogicalId, resolveHandle))));
         }
 
-        private static ValueNode LowerNode(ValueNode node, string ownerNodeLogicalId, Func<string, string?> resolveHandle)
-        {
-            switch (node)
-            {
-                case ValueNode.ObjectRef objectRef:
-                    return LowerObjectRef(objectRef, ownerNodeLogicalId, resolveHandle);
-                case ValueNode.List list:
-                    return new ValueNode.List(list.Items.Select(item => LowerNode(item, ownerNodeLogicalId, resolveHandle)).ToList());
-                case ValueNode.Nested nested:
-                    return new ValueNode.Nested(nested.TypeName, LowerFieldMap(nested.Fields, ownerNodeLogicalId, resolveHandle));
-                default:
-                    return node;
-            }
-        }
+        private static ValueNode LowerNode(ValueNode node, string ownerNodeLogicalId, Func<string, string?> resolveHandle) =>
+            ObjectRefValues.Substitute(node, objectRef => LowerObjectRef(objectRef, ownerNodeLogicalId, resolveHandle));
 
         private static ValueNode LowerObjectRef(ValueNode.ObjectRef objectRef, string ownerNodeLogicalId, Func<string, string?> resolveHandle)
         {

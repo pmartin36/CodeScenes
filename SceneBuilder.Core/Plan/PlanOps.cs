@@ -100,6 +100,17 @@ namespace SceneBuilder.Core.Plan
         public string? TargetLogicalId { get; init; }
     }
 
+    // Carries the AUTHORED length of a reference list (ObjectRef/AssetRef elements), so the live
+    // array can shrink -- per-index SetReference/SetAssetRef ops alone can only grow it.
+    public sealed record SetArraySize : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public string Path { get; init; } = "";
+
+        [JsonPropertyOrder(2)]
+        public int Size { get; init; }
+    }
+
     public sealed record InstantiatePrefab : PlanOp
     {
         [JsonPropertyOrder(1)]

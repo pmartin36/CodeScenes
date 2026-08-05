@@ -477,14 +477,50 @@ public class InstanceMoveScene : ISceneDefinition
         [Fact]
         public void Reconcile_SnapshotOnlyAddedComponent_ObjectRefField_PreRendersFieldExpression_AndIntroducesHandle()
         {
+            const string doorLid = "Door/0";
             var target = OverrideTargetFor("Game.DoorOpener");
-            // "Door/0" is a synthesized-shape LogicalId (parent-less, sibling index 0) so
-            // ResolveOwnerHandle treats it as not-yet-authored and introduces a handle for it —
-            // exercising the same side-effecting IntroduceHandle path override/component-field
-            // reconcile already use (ComponentReconciler.RenderFieldValue).
+            // "Door/0" is a synthesized-shape LogicalId (parent-less, sibling index 0) authored in
+            // the model — a genuinely resolvable target — so ResolveOwnerHandle treats it as not
+            // yet having a `var` name and introduces a handle for it, exercising the same
+            // side-effecting IntroduceHandle path override/component-field reconcile already use
+            // (ComponentReconciler.RenderFieldValue).
             var fields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef("Door/0")),
+                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef(doorLid)),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var door = new GameObjectNode { LogicalId = doorLid, Name = "Door" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { door, instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.Equal(new ValueNode.ObjectRef(doorLid), append.Fields["target"]);
+            Assert.NotNull(append.FieldExpressions);
+            Assert.True(append.FieldExpressions!.TryGetValue("target", out var renderedHandle));
+
+            var introduced = Assert.Single(result.Patch.Edits.OfType<IntroduceHandle>());
+            Assert.Equal(doorLid, introduced.Anchor);
+            Assert.Equal(introduced.Handle, renderedHandle);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_ListFieldWithDanglingTarget_OmitsFieldAndReportsDanglingReference()
+        {
+            var target = OverrideTargetFor("Game.DoorOpener");
+            // "ghost-1" is neither a live scene object, nor in the parsed source model, nor a
+            // known handle, nor a same-batch create candidate -- unresolvable by construction, the
+            // same shape ObjectReferenceResolver.BuildSceneRefResolver yields for a scene reference
+            // to an object the identity map has never mapped.
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("targets", new ValueNode.List(new ValueNode[] { new ValueNode.ObjectRef("ghost-1") })),
             });
             var added = new AddedComponent
             {
@@ -498,13 +534,193 @@ public class InstanceMoveScene : ISceneDefinition
             var result = Reconciler.Reconcile(model, snapshot, map);
 
             var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
-            Assert.Equal(new ValueNode.ObjectRef("Door/0"), append.Fields["target"]);
-            Assert.NotNull(append.FieldExpressions);
-            Assert.True(append.FieldExpressions!.TryGetValue("target", out var renderedHandle));
+            Assert.False(append.Fields.ContainsKey("targets"));
+            Assert.False(append.FieldExpressions != null && append.FieldExpressions.ContainsKey("targets"));
+            var conflict = Assert.Single(result.Conflicts.Where(c => c.Kind == ConflictKind.DanglingReference));
+            Assert.Contains("ghost-1", conflict.Reason);
+        }
 
-            var introduced = Assert.Single(result.Patch.Edits.OfType<IntroduceHandle>());
-            Assert.Equal("Door/0", introduced.Anchor);
-            Assert.Equal(introduced.Handle, renderedHandle);
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_BareObjectRefWithDanglingTarget_OmitsFieldAndReportsDanglingReference()
+        {
+            var target = OverrideTargetFor("Game.DoorOpener");
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef("ghost-1")),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.False(append.Fields.ContainsKey("target"));
+            Assert.False(append.FieldExpressions != null && append.FieldExpressions.ContainsKey("target"));
+            var conflict = Assert.Single(result.Conflicts.Where(c => c.Kind == ConflictKind.DanglingReference));
+            Assert.Contains("ghost-1", conflict.Reason);
+            Assert.Empty(result.Patch.Edits.OfType<IntroduceHandle>());
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_ListFieldWithPendingTarget_OmitsFieldSilently()
+        {
+            const string pendingGoid = "goid-newtarget";
+            var target = OverrideTargetFor("Game.DoorOpener");
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("targets", new ValueNode.List(new ValueNode[] { new ValueNode.ObjectRef(pendingGoid) })),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            // pendingGoid is a genuinely-new, same-batch object: present in the snapshot with no
+            // IdentityMap entry yet -- resolves on the guaranteed second Sync, not dangling.
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[] { snapshotInstance, new SnapshotNode { GlobalObjectId = pendingGoid, Name = "NewTarget" } },
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.False(append.Fields.ContainsKey("targets"));
+            Assert.False(append.FieldExpressions != null && append.FieldExpressions.ContainsKey("targets"));
+            Assert.Empty(result.Conflicts.Where(c => c.Kind == ConflictKind.DanglingReference));
+            Assert.Empty(result.Notes.Where(c => c.Kind == ConflictKind.UnrepresentableValue));
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_MixedResolvableAndDanglingList_OmitsWholeFieldAndReportsOnce()
+        {
+            const string doorLid = "Door/0";
+            var target = OverrideTargetFor("Game.DoorOpener");
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    "targets",
+                    new ValueNode.List(new ValueNode[] { new ValueNode.ObjectRef(doorLid), new ValueNode.ObjectRef("ghost-1") })),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var door = new GameObjectNode { LogicalId = doorLid, Name = "Door" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { door, instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.False(append.Fields.ContainsKey("targets"));
+            Assert.False(append.FieldExpressions != null && append.FieldExpressions.ContainsKey("targets"));
+            var conflict = Assert.Single(result.Conflicts.Where(c => c.Kind == ConflictKind.DanglingReference));
+            Assert.Contains("ghost-1", conflict.Reason);
+            // The resolvable element must not have side-effected a handle introduction for an
+            // omitted field.
+            Assert.Empty(result.Patch.Edits.OfType<IntroduceHandle>());
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_DanglingField_LeavesSiblingFieldsEmitted()
+        {
+            var target = OverrideTargetFor("Game.DoorOpener");
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("before", ValueNode.Primitive.Float(1f)),
+                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef("ghost-1")),
+                new KeyValuePair<string, ValueNode>("after", ValueNode.Primitive.Float(2f)),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.False(append.Fields.ContainsKey("target"));
+            Assert.Equal(ValueNode.Primitive.Float(1f), append.Fields["before"]);
+            Assert.Equal(ValueNode.Primitive.Float(2f), append.Fields["after"]);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_ChildPathTarget_DanglingField_OmitsOnScopedOp()
+        {
+            var target = new OverrideTarget { ComponentType = "Game.DoorOpener", ChildPath = "Body/Door" };
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef("ghost-1")),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var scopedOn = Assert.Single(result.Patch.Edits.OfType<AppendScopedOn>());
+            var scopedAdd = Assert.IsType<ScopedAddComponentOp>(Assert.Single(scopedOn.Ops));
+            Assert.False(scopedAdd.Fields.ContainsKey("target"));
+            Assert.False(scopedAdd.FieldExpressions != null && scopedAdd.FieldExpressions.ContainsKey("target"));
+            var conflict = Assert.Single(result.Conflicts.Where(c => c.Kind == ConflictKind.DanglingReference));
+            Assert.Contains("ghost-1", conflict.Reason);
+        }
+
+        [Fact]
+        public void Reconcile_SnapshotOnlyAddedComponent_ListFieldWithUnemittableItem_OmitsFieldAndReportsUnrepresentableValue()
+        {
+            const string doorLid = "door-1";
+            var target = OverrideTargetFor("Game.DoorOpener");
+            var fields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(
+                    "targets",
+                    new ValueNode.List(new ValueNode[] { new ValueNode.ObjectRef(doorLid), new ValueNode.Unsupported("ObjectReference") })),
+            });
+            var added = new AddedComponent
+            {
+                Target = target,
+                Component = new ComponentData { LogicalId = "opener-1", Type = new TypeRef("Game.DoorOpener"), Fields = fields },
+            };
+            var (instance, snapshotInstance, map) = BuildMatchedInstance(snapshotAddedComponents: new[] { added });
+            var door = new GameObjectNode { LogicalId = doorLid, Name = "Door" };
+            var model = new SceneModel { SchemaVersion = 1, Roots = new GameObjectNode[] { door, instance } };
+            var snapshot = new SceneSnapshot { SchemaVersion = 1, Roots = new[] { snapshotInstance } };
+            map = map with
+            {
+                Entries = map.Entries
+                    .Append(new IdentityMapEntry { LogicalId = doorLid, GlobalObjectId = "goid-door", Kind = "GameObject" })
+                    .ToArray(),
+            };
+
+            var result = Reconciler.Reconcile(model, snapshot, map);
+
+            var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddComponent>());
+            Assert.False(append.Fields.ContainsKey("targets"));
+            Assert.False(append.FieldExpressions != null && append.FieldExpressions.ContainsKey("targets"));
+            var note = Assert.Single(result.Notes);
+            Assert.Equal(ConflictKind.UnrepresentableValue, note.Kind);
         }
 
         [Fact]

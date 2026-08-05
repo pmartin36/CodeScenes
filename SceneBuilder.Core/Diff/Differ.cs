@@ -296,7 +296,7 @@ namespace SceneBuilder.Core.Diff
                         // could not represent (spec 33 C9) — its absence means "unreadable", not
                         // "unchanged". Skip the template lookup for those fields so the comparison
                         // below falls through to "unknown, emit anyway".
-                        var defaultIsUsableBasis = !ValueWalk.Any(field.Value, n => n is ValueNode.ObjectRef);
+                        var defaultIsUsableBasis = !ObjectRefValues.Contains(field.Value);
 
                         var known = actualComponent.Fields.TryGetValue(field.Key, out var actualValue)
                             || (defaultIsUsableBasis

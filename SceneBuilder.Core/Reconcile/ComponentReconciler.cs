@@ -261,16 +261,20 @@ namespace SceneBuilder.Core.Reconcile
                             continue;
                         }
 
-                        // Detection 1: the source handle's target vanished from the scene (Unity
-                        // nulls the field when its referenced GameObject is deleted) -> a located
-                        // DanglingReference conflict, NEVER a silent NodeHandle.None patch. A target
-                        // that IS still live falls through to the ordinary None-patch below (legit clear).
-                        if (srcVal is ValueNode.ObjectRef(var srcTarget) && srcTarget != null
-                            && snapVal is ValueNode.ObjectRef(null)
-                            && !sceneLiveTargets.Contains(srcTarget))
+                        // Detection 1: a target named at ANY depth (bare, list item, nested member)
+                        // by the source vanished from the scene (Unity nulls the field slot when its
+                        // referenced GameObject is deleted) -> one located DanglingReference conflict
+                        // per vanished target, NEVER a silent NodeHandle.None patch. A target that IS
+                        // still live falls through to the ordinary None-patch below (legit clear).
+                        var vanishedTargets = ObjectRefValues.VanishedTargets(srcVal, snapVal, sceneLiveTargets).ToList();
+                        if (vanishedTargets.Count > 0)
                         {
-                            conflicts.Add(ConflictDetector.DanglingReference(
-                                sourceComp.LogicalId, fieldKey, srcTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            foreach (var vanishedTarget in vanishedTargets)
+                            {
+                                conflicts.Add(ConflictDetector.DanglingReference(
+                                    sourceComp.LogicalId, fieldKey, vanishedTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            }
+
                             continue;
                         }
 
@@ -280,17 +284,24 @@ namespace SceneBuilder.Core.Reconcile
                         // a phantom-handle render. A same-batch create-candidate (not yet mapped,
                         // about to be appended THIS pass) is PENDING, not dangling — suppress both the
                         // patch and the conflict and converge quietly on the guaranteed second Sync.
-                        var fieldValueDiffResolution = ClassifySnapshotRef(snapVal, resolvableTargets, pendingTargets);
-                        if (fieldValueDiffResolution == RefResolution.Pending)
+                        var fieldValueDiffClassification = ClassifySnapshotRef(
+                            NestedValueEmission.Emittable(snapVal, fieldDefault), resolvableTargets, pendingTargets);
+                        if (fieldValueDiffClassification.Resolution == RefResolution.Unemittable)
+                        {
+                            conflicts.Add(ConflictDetector.UnrepresentableListItem(
+                                sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
+                        if (fieldValueDiffClassification.Resolution == RefResolution.Pending)
                         {
                             continue;
                         }
 
-                        if (fieldValueDiffResolution == RefResolution.Dangling)
+                        if (fieldValueDiffClassification.Resolution == RefResolution.Dangling)
                         {
-                            var danglingTarget = ((ValueNode.ObjectRef)snapVal).TargetLogicalId;
                             conflicts.Add(ConflictDetector.DanglingReference(
-                                sourceComp.LogicalId, fieldKey, danglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                                sourceComp.LogicalId, fieldKey, fieldValueDiffClassification.DanglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
                             continue;
                         }
 
@@ -361,12 +372,39 @@ namespace SceneBuilder.Core.Reconcile
 
                         var introducedVal = introducedProjection.Value;
 
+                        // A Nested field whose own member carries a reference (bare, list item)
+                        // classifies the same as every other introduced value below — resolvable
+                        // pre-renders a handle-aware NewExpr (ValueNodeLiteral has no ObjectRef arm
+                        // and would throw), pending defers silently, dangling/unemittable report a
+                        // located conflict and emit nothing.
+                        var nestedIntroduceClassification = ClassifySnapshotRef(introducedVal, resolvableTargets, pendingTargets);
+                        if (nestedIntroduceClassification.Resolution == RefResolution.Pending)
+                        {
+                            continue;
+                        }
+
+                        if (nestedIntroduceClassification.Resolution == RefResolution.Dangling)
+                        {
+                            conflicts.Add(ConflictDetector.DanglingReference(
+                                sourceComp.LogicalId, fieldKey, nestedIntroduceClassification.DanglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
+                        if (nestedIntroduceClassification.Resolution == RefResolution.Unemittable)
+                        {
+                            conflicts.Add(ConflictDetector.UnrepresentableListItem(
+                                sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
                         edits.Add(new IntroduceComponentField
                         {
                             Anchor = sourceComp.LogicalId,
                             FieldKey = fieldKey,
                             Value = introducedVal,
-                            NewExpr = null,
+                            NewExpr = nestedIntroduceClassification.Resolution == RefResolution.Resolvable
+                                ? RenderFieldValue(introducedVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, ownerLogicalId, assetCatalog)
+                                : null,
                         });
 
                         introducedProjection.ReportExclusions(sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, conflicts);
@@ -385,21 +423,28 @@ namespace SceneBuilder.Core.Reconcile
                         }
 
                         // Newly-detected field: present in snapshot, absent from source. An ObjectRef
-                        // here must classify the same as Detection 2 above —
+                        // reached at any depth here must classify the same as Detection 2 above —
                         // resolvable/null pre-renders a handle-aware NewExpr (the applier's
                         // ValueNodeLiteral has no ObjectRef arm and would throw), pending defers
                         // silently, dangling reports a located conflict and emits nothing.
-                        var introduceResolution = ClassifySnapshotRef(snapVal, resolvableTargets, pendingTargets);
-                        if (introduceResolution == RefResolution.Pending)
+                        var introduceClassification = ClassifySnapshotRef(
+                            NestedValueEmission.Emittable(snapVal, fieldDefault), resolvableTargets, pendingTargets);
+                        if (introduceClassification.Resolution == RefResolution.Unemittable)
+                        {
+                            conflicts.Add(ConflictDetector.UnrepresentableListItem(
+                                sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                            continue;
+                        }
+
+                        if (introduceClassification.Resolution == RefResolution.Pending)
                         {
                             continue;
                         }
 
-                        if (introduceResolution == RefResolution.Dangling)
+                        if (introduceClassification.Resolution == RefResolution.Dangling)
                         {
-                            var danglingTarget = ((ValueNode.ObjectRef)snapVal).TargetLogicalId;
                             conflicts.Add(ConflictDetector.DanglingReference(
-                                sourceComp.LogicalId, fieldKey, danglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
+                                sourceComp.LogicalId, fieldKey, introduceClassification.DanglingTarget, DanglingFieldSpan(sourceComp.LogicalId, fieldKey, fieldArgumentSpans)));
                             continue;
                         }
 
@@ -408,7 +453,7 @@ namespace SceneBuilder.Core.Reconcile
                             Anchor = sourceComp.LogicalId,
                             FieldKey = fieldKey,
                             Value = snapVal,
-                            NewExpr = introduceResolution == RefResolution.Resolvable
+                            NewExpr = introduceClassification.Resolution == RefResolution.Resolvable
                                 ? RenderFieldValue(snapVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, ownerLogicalId, assetCatalog)
                                 : null,
                         });
@@ -440,26 +485,52 @@ namespace SceneBuilder.Core.Reconcile
             return false;
         }
 
-        // The ONE place the liveness/pending/dangling decision for a snapshot ObjectRef is
-        // made — present-field Detection 2, the introduce-field branch, and the append loop all
-        // route through this instead of re-inlining `!resolvableTargets.Contains(...) /
-        // pendingTargets.Contains(...)` a fourth time.
-        private enum RefResolution { NotObjectRef, Resolvable, Pending, Dangling }
+        // The ONE place the liveness/pending/dangling/unemittable decision for a snapshot field
+        // value is made — present-field Detection 2, both introduce branches, and every append-emit
+        // site (SnapshotFieldEmission.EmitFieldSet) route through this instead of re-inlining
+        // `!resolvableTargets.Contains(...) / pendingTargets.Contains(...)` a fourth time. Internal
+        // (not private): SnapshotFieldEmission is its other caller.
+        internal enum RefResolution { NotObjectRef, Resolvable, Pending, Dangling, Unemittable }
 
-        private static RefResolution ClassifySnapshotRef(
+        // Verdict precedence over EVERY ref reached in `snapVal`, at any depth: a List reaching an
+        // item with no compiling emission form => Unemittable, checked FIRST and independent of
+        // whether the value carries an ObjectRef at all (a list of only unmappable items has none);
+        // else no ref at all => NotObjectRef; any unresolvable-and-not-pending target => Dangling
+        // (with the FIRST such target named, pre-order); else any pending target => Pending; else
+        // Resolvable. Dangling outranks Pending because dangling is a permanent condition owing a
+        // loud report, pending is transient and self-heals on the guaranteed second sync.
+        internal static (RefResolution Resolution, string? DanglingTarget) ClassifySnapshotRef(
             ValueNode snapVal, ISet<string> resolvableTargets, ISet<string> pendingTargets)
         {
-            if (snapVal is not ValueNode.ObjectRef(var target))
+            if (ListValueEmission.HasUnemittableItem(snapVal))
             {
-                return RefResolution.NotObjectRef;
+                return (RefResolution.Unemittable, null);
             }
 
-            if (target == null || resolvableTargets.Contains(target))
+            if (!ObjectRefValues.Contains(snapVal))
             {
-                return RefResolution.Resolvable;
+                return (RefResolution.NotObjectRef, null);
             }
 
-            return pendingTargets.Contains(target) ? RefResolution.Pending : RefResolution.Dangling;
+            var anyPending = false;
+            foreach (var (_, r) in ObjectRefValues.Enumerate(snapVal))
+            {
+                var target = r.TargetLogicalId;
+                if (target == null || resolvableTargets.Contains(target))
+                {
+                    continue;
+                }
+
+                if (pendingTargets.Contains(target))
+                {
+                    anyPending = true;
+                    continue;
+                }
+
+                return (RefResolution.Dangling, target);
+            }
+
+            return anyPending ? (RefResolution.Pending, null) : (RefResolution.Resolvable, null);
         }
 
         // Gate for the EmitComponentAppend pre-render branch above — a project AssetRef whose
@@ -469,6 +540,13 @@ namespace SceneBuilder.Core.Reconcile
             value is ValueNode.AssetRef(var r)
             && r is { IsBuiltin: false }
             && assetCatalog?.TryGetMember(r.Guid, SourceExpr.CatalogLookupFileId(r), out _, out _, out _) == true;
+
+        // THE ONE gate for "this field must be pre-rendered into FieldExpressions instead of being
+        // left in Fields for SourceExpr.ValueNodeLiteral to format at apply time" — an ObjectRef
+        // reached at any depth needs a handle table, and a catalogued AssetRef needs the catalog;
+        // neither belongs in ValueNodeLiteral's pure, context-free formatting.
+        internal static bool NeedsPreRender(ValueNode value, AssetCatalog? assetCatalog) =>
+            ObjectRefValues.Contains(value) || IsCataloguedAssetRef(value, assetCatalog);
 
         // The identical span lookup used by the span-based patch emission below, reused for a
         // DanglingReference conflict's Location. Emitted even when the span is absent (returns null) —
@@ -488,8 +566,9 @@ namespace SceneBuilder.Core.Reconcile
         // Renders a changed field's replacement expression. SourceExpr.ValueNodeLiteral has
         // no ObjectRef arm (it is a pure, context-free formatter) because rendering an ObjectRef is
         // BOTH context-dependent (needs the handle table) and side-effecting (may need to introduce
-        // a handle on the target) — neither belongs in a pure formatter, so this intercepts
-        // ValueNode.ObjectRef before delegating everything else to ValueNodeLiteral unchanged.
+        // a handle on the target) — neither belongs in a pure formatter, so this intercepts every
+        // ObjectRef reached anywhere in `value` (bare, list item, nested member) before delegating
+        // the rest to ValueNodeLiteral unchanged.
         // `ownerNodeLogicalId` is REQUIRED (no default), placed before the optional `assetCatalog`,
         // so a new call site fails to compile until it supplies the node the value is being written
         // onto — see SelfReferenceEmission for why: a self-target must render as the variable-free
@@ -503,28 +582,41 @@ namespace SceneBuilder.Core.Reconcile
             string ownerNodeLogicalId,
             AssetCatalog? assetCatalog = null)
         {
-            if (value is ValueNode.ObjectRef(var targetLogicalId))
+            if (ObjectRefValues.Contains(value))
             {
-                if (targetLogicalId == null)
+                // The per-ref render function: replaces every ObjectRef reached in `value` at any
+                // depth (bare, list item, nested member) with its rendered token, wrapped in
+                // ValueNode.Unsupported so SourceExpr.ValueNodeLiteral's existing raw-token
+                // passthrough renders the whole substituted tree with no new formatter and no
+                // ObjectRef arm — a substituted list renders as `new[] { door, other }`, a
+                // substituted bare ref renders as `door`.
+                var substituted = ObjectRefValues.Substitute(value, (ValueNode.ObjectRef objectRef) =>
                 {
-                    return "NodeHandle.None";
-                }
+                    var targetLogicalId = objectRef.TargetLogicalId;
+                    if (targetLogicalId == null)
+                    {
+                        return new ValueNode.Unsupported("NodeHandle.None");
+                    }
 
-                // Checked BEFORE resolveOwnerHandle is consulted: resolveOwnerHandle is
-                // side-effecting (it can register a handle introduction), and a self-target needs
-                // no handle at all — consulting it first would introduce one that is never used.
-                if (SelfReferenceEmission.IsSelf(targetLogicalId, ownerNodeLogicalId))
-                {
-                    return SelfReferenceEmission.AuthoredExpression;
-                }
+                    // Checked BEFORE resolveOwnerHandle is consulted: resolveOwnerHandle is
+                    // side-effecting (it can register a handle introduction), and a self-target
+                    // needs no handle at all — consulting it first would introduce one that is
+                    // never used.
+                    if (SelfReferenceEmission.IsSelf(targetLogicalId, ownerNodeLogicalId))
+                    {
+                        return new ValueNode.Unsupported(SelfReferenceEmission.AuthoredExpression);
+                    }
 
-                var (handle, introduce) = resolveOwnerHandle(targetLogicalId);
-                if (introduce && handle != null)
-                {
-                    edits.Add(new IntroduceHandle { Anchor = targetLogicalId, Handle = handle });
-                }
+                    var (handle, introduce) = resolveOwnerHandle(targetLogicalId);
+                    if (introduce && handle != null)
+                    {
+                        edits.Add(new IntroduceHandle { Anchor = targetLogicalId, Handle = handle });
+                    }
 
-                return handle ?? targetLogicalId;
+                    return new ValueNode.Unsupported(handle ?? targetLogicalId);
+                });
+
+                return SourceExpr.ValueNodeLiteral(substituted, assetCatalog);
             }
 
             // A FitSize/SurfaceSnap field patch/introduce must render through the dedicated
@@ -587,53 +679,12 @@ namespace SceneBuilder.Core.Reconcile
 
             fields = ComponentDefaultOmission.OmitDefaults(typeFullName, fields, defaults, componentLogicalId, conflicts);
 
-            // Pre-render every ObjectRef field's expression at EMIT time (mirroring
-            // RenderFieldValue's field-diff use below) instead of leaving it in Fields for
-            // SourceExpr.ValueNodeLiteral to throw on at apply time. `filteredFields` stays null
-            // (reuse `fields` unchanged) unless a field is actually dropped.
-            List<KeyValuePair<string, ValueNode>>? filteredFields = null;
-            Dictionary<string, string>? fieldExpressions = null;
-
-            for (var i = 0; i < fields.Count; i++)
-            {
-                var (fieldKey, value) = fields[i];
-                var resolution = ClassifySnapshotRef(value, resolvableTargets, pendingTargets);
-
-                if (resolution == RefResolution.Dangling)
-                {
-                    // Genuinely unknown THIS pass — never a bogus handle, never {fileID:0}, never a
-                    // thrown NotSupportedException. Omit the field; report it (never a permanent
-                    // silent null) unless the FIELD-VALUE DIFF pass already owns this component's
-                    // dangling report.
-                    filteredFields ??= new List<KeyValuePair<string, ValueNode>>(fields.Take(i));
-                    if (reportUnresolvable)
-                    {
-                        var targetId = ((ValueNode.ObjectRef)value).TargetLogicalId;
-                        conflicts.Add(ConflictDetector.DanglingReference(componentLogicalId, fieldKey, targetId, null));
-                    }
-
-                    continue;
-                }
-
-                if (resolution == RefResolution.Pending)
-                {
-                    // A same-batch create-candidate not yet mapped — omit and converge on the
-                    // guaranteed second Sync, by which point the target is mapped and the ref wires
-                    // through the ordinary FIELD-VALUE DIFF pass as a ONE-OFF patch.
-                    filteredFields ??= new List<KeyValuePair<string, ValueNode>>(fields.Take(i));
-                    continue;
-                }
-
-                filteredFields?.Add(new KeyValuePair<string, ValueNode>(fieldKey, value));
-
-                if (value is ValueNode.ObjectRef || IsCataloguedAssetRef(value, assetCatalog))
-                {
-                    fieldExpressions ??= new Dictionary<string, string>();
-                    fieldExpressions[fieldKey] = RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, ownerAnchor, assetCatalog);
-                }
-            }
-
-            var emittedFields = filteredFields != null ? new FieldMap(filteredFields) : fields;
+            // The four-arm Unemittable/Dangling/Pending/Resolvable dispatch, its one owner shared
+            // with the prefab-instance added-component append site.
+            var (emittedFields, fieldExpressions) = SnapshotFieldEmission.EmitFieldSet(
+                fields, typeFullName, componentLogicalId, ownerAnchor,
+                resolvableTargets, pendingTargets, resolveOwnerHandle,
+                reportUnresolvable, assetCatalog, edits, conflicts);
 
             edits.Add(new AppendComponentStatement
             {
@@ -736,27 +787,12 @@ namespace SceneBuilder.Core.Reconcile
         // shapes.
         internal static void CollectAssetEntries(ValueNode node, List<AssetEntry> sink)
         {
-            switch (node)
+            foreach (var (_, value) in ValueWalk.Enumerate(node))
             {
-                case ValueNode.AssetRef(var r) when r != null && !r.IsBuiltin && !string.IsNullOrEmpty(r.Guid):
+                if (value is ValueNode.AssetRef(var r) && r != null && !r.IsBuiltin && !string.IsNullOrEmpty(r.Guid))
+                {
                     sink.Add(new AssetEntry { Guid = r.Guid, LastKnownPath = r.DisplayPath, TypeHint = r.TypeHint });
-                    break;
-
-                case ValueNode.List l:
-                    foreach (var item in l.Items)
-                    {
-                        CollectAssetEntries(item, sink);
-                    }
-
-                    break;
-
-                case ValueNode.Nested n:
-                    foreach (var (_, value) in n.Fields)
-                    {
-                        CollectAssetEntries(value, sink);
-                    }
-
-                    break;
+                }
             }
         }
 

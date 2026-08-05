@@ -18,6 +18,7 @@ namespace SceneBuilder.Core.Plan
     [JsonDerivedType(typeof(ReorderComponent), "ReorderComponent")]
     [JsonDerivedType(typeof(SetAssetRef), "SetAssetRef")]
     [JsonDerivedType(typeof(SetReference), "SetReference")]
+    [JsonDerivedType(typeof(SetArraySize), "SetArraySize")]
     [JsonDerivedType(typeof(InstantiatePrefab), "InstantiatePrefab")]
     [JsonDerivedType(typeof(SetInstanceOverride), "SetInstanceOverride")]
     [JsonDerivedType(typeof(AddInstanceComponent), "AddInstanceComponent")]

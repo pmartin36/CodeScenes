@@ -315,6 +315,19 @@ namespace SceneBuilder.Core.Reconcile
                 "form, so no value for this field can be written to code.",
                 recurrenceKey: $"unrepresentable-type-field:{componentTypeFullName}:{fieldKey}", location);
 
+        // A List field reaches, at any depth, an item with no compiling emission form (see
+        // ListValueEmission.HasUnemittableItem). Dropping just that item would shift every later
+        // item and silently move the other references, so the WHOLE field is left unwritten
+        // instead — never a partial array. Self-heals once the item's own condition resolves (the
+        // usual cause is a scene object not yet in the IdentityMap, which the same pass creates).
+        public static Conflict UnrepresentableListItem(
+            string componentLogicalId, string componentTypeFullName, string fieldKey, SourceSpan? location) =>
+            Conflict.Unrepresentable(
+                componentLogicalId, componentTypeFullName, fieldKey,
+                "A list item has no compiling emission form, and dropping it would shift every later " +
+                "item, so no value for this field can be written to code.",
+                recurrenceKey: $"unrepresentable-list-item:{componentLogicalId}:{fieldKey}", location);
+
         // A closed-grammar component (FitSize/SurfaceSnap) has a live field that returned to
         // its type default, but its dedicated fluent call throws on an empty argument list -- there
         // is no compiling form for "removed". Reuses MissingSourceAnchor's kind: same family as

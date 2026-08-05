@@ -230,6 +230,29 @@ namespace SceneBuilder.Editor
                     case SetReference setReference:
                         deferredReferences.Add(setReference);
                         break;
+                    case SetArraySize setArraySize:
+                        // Runs in the main loop, not the deferred pass: the array must already be at
+                        // its authored length before any per-index SetReference/SetAssetRef writes.
+                        if (result.ComponentsByLogicalId.TryGetValue(setArraySize.LogicalId, out var sizeComp))
+                        {
+                            if (!serializedByComponent.TryGetValue(setArraySize.LogicalId, out var sizeSo))
+                            {
+                                sizeSo = new SerializedObject(sizeComp);
+                                serializedByComponent[setArraySize.LogicalId] = sizeSo;
+                            }
+
+                            var arrayProp = sizeSo.FindProperty(setArraySize.Path);
+                            if (arrayProp == null || !arrayProp.isArray)
+                            {
+                                Debug.LogWarning($"[SceneBuilder] Array property '{setArraySize.Path}' not found on '{sizeComp}'.");
+                            }
+                            else
+                            {
+                                arrayProp.arraySize = setArraySize.Size;
+                            }
+                        }
+
+                        break;
                     case RemoveComponent removeComponent:
                         if (result.ComponentsByLogicalId.TryGetValue(removeComponent.LogicalId, out var rc))
                         {
@@ -280,6 +303,9 @@ namespace SceneBuilder.Editor
                         break;
                     case RevertRemovedChild revertRemovedChild:
                         InstanceOverrideExecutor.Apply(revertRemovedChild, result);
+                        break;
+                    default:
+                        Debug.LogWarning($"[SceneBuilder] Plan op '{op.GetType().Name}' has no executor arm and was not applied.");
                         break;
                 }
             }

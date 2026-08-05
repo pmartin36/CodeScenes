@@ -489,6 +489,8 @@ namespace SceneBuilder.Core.Reconcile
                         edits,
                         conflicts,
                         addedAssets,
+                        resolvableTargets,
+                        pendingTargets,
                         assetCatalog,
                         defaultsIndex);
                     continue;
@@ -553,28 +555,57 @@ namespace SceneBuilder.Core.Reconcile
             // A fix at any one of those call sites would leave the other two silently destroying data.
             EnsureNoAmbiguousDuplicateNames(actual.Roots);
 
-            // Every LogicalId targeted by an ObjectRef field ANYWHERE in the source model —
-            // cross-object references live outside the structural parent/child + owner/component
-            // dependency graph DetectRemovals otherwise walks, so a handle can be "still needed" by a
-            // sibling's field without being a structural dependent of it. Consulted below so a
-            // structural delete-cascade never strips a `var door = scene.Add(...)` declaration (or its
-            // own component statements) out from under a surviving `.Set(x => x.target, door)`
-            // argument — that produces non-compiling source (CS0103), never a style issue.
+            // Every LogicalId targeted by an ObjectRef reachable at ANY depth (a bare field, a list
+            // item, a nested member) ANYWHERE in the source model — cross-object references live
+            // outside the structural parent/child + owner/component dependency graph DetectRemovals
+            // otherwise walks, so a handle can be "still needed" by a sibling's field without being
+            // a structural dependent of it. Consulted below so a structural delete-cascade never
+            // strips a `var door = scene.Add(...)` declaration (or its own component statements) out
+            // from under a surviving `.Set(x => x.target, door)` argument — that produces
+            // non-compiling source (CS0103), never a style issue. A PrefabInstance's own override
+            // values and added-component fields are not GameObjectNode Components, so they need
+            // their own inclusion here.
             // A SELF-target is excluded: a node's own field can never be the reason its own
             // statement survives, or a self-referencing node deleted from the scene would be
             // silently retained forever instead of removed.
             var referencedByFieldTargets = new HashSet<string>(StringComparer.Ordinal);
+            void AddReferencedTargets(ValueNode value, string ownLogicalId)
+            {
+                foreach (var target in ObjectRefValues.Targets(value))
+                {
+                    if (target != ownLogicalId)
+                    {
+                        referencedByFieldTargets.Add(target);
+                    }
+                }
+            }
+
             foreach (var node in modelByLogicalId.Values)
             {
                 foreach (var component in node.Components)
                 {
                     foreach (var (_, value) in component.Fields)
                     {
-                        if (value is ValueNode.ObjectRef(var targetLogicalId)
-                            && targetLogicalId != null
-                            && targetLogicalId != node.LogicalId)
+                        AddReferencedTargets(value, node.LogicalId);
+                    }
+                }
+
+                if (node is PrefabInstanceNode instance)
+                {
+                    foreach (var propertyOverride in instance.Overrides)
+                    {
+                        AddReferencedTargets(propertyOverride.Value, node.LogicalId);
+                        if (propertyOverride.ObjectReference != null)
                         {
-                            referencedByFieldTargets.Add(targetLogicalId);
+                            AddReferencedTargets(propertyOverride.ObjectReference, node.LogicalId);
+                        }
+                    }
+
+                    foreach (var addedComponent in instance.AddedComponents)
+                    {
+                        foreach (var (_, value) in addedComponent.Component.Fields)
+                        {
+                            AddReferencedTargets(value, node.LogicalId);
                         }
                     }
                 }

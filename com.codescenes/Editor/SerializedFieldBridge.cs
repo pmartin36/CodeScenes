@@ -376,7 +376,26 @@ namespace SceneBuilder.Editor
                 case ValueNode.Unsupported:
                     // No-op (flagged upstream); never overwrite an unsupported value.
                     break;
+                default:
+                    Debug.LogWarning(
+                        $"[SceneBuilder] {LocationOf(p)}: value kind '{value.GetType().Name}' has no write " +
+                        "dispatch and was not applied. A scene or asset reference is written by SetReference / " +
+                        "SetAssetRef, never through a field value.");
+                    break;
             }
+        }
+
+        private static string LocationOf(SerializedProperty? p)
+        {
+            var target = p?.serializedObject?.targetObject;
+            if (target == null)
+            {
+                return "<unknown>";
+            }
+
+            var owner = target as Component;
+            var objectName = owner != null && owner.gameObject != null ? owner.gameObject.name : target.name;
+            return $"{objectName} > {target.GetType().Name}.{p!.propertyPath}";
         }
 
         private static void WritePrimitive(SerializedProperty p, ValueNode.Primitive prim)

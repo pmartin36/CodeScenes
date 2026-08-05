@@ -170,6 +170,12 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<Conflict> conflicts,
             List<AssetEntry> addedAssets,
+            // Scene-derived liveness sets built ONCE by Reconciler.Reconcile (Reconciler.cs:446/:459)
+            // — threaded to ReconcileAddedComponents/BuildAddInstanceComponent so a snapshot-only
+            // added component's ObjectRef fields get the same Unemittable/Dangling/Pending/Resolvable
+            // classification the plain-component append path already runs.
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
             // Catalogued AssetRef fields render as their typed `Assets.<...>` member chain —
             // threaded to BuildOverrideSetSpec/BuildAddInstanceComponent's RenderFieldValue calls.
             AssetCatalog? assetCatalog = null,
@@ -190,7 +196,7 @@ namespace SceneBuilder.Core.Reconcile
             var prefabGuid = snapshot.SourcePrefabGuid;
 
             ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, assetCatalog);
-            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, conflicts, assetCatalog, defaults);
+            ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, conflicts, resolvableTargets, pendingTargets, assetCatalog, defaults);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
             ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts, defaults);
             ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
@@ -300,6 +306,8 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
             List<Conflict> conflicts,
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
             AssetCatalog? assetCatalog = null,
             ComponentDefaultOmission.Index? defaults = null)
         {
@@ -321,7 +329,7 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
-                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, conflicts, assetCatalog, defaults);
+                var appendAddComponent = BuildAddInstanceComponent(snapshotComponent, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, conflicts, resolvableTargets, pendingTargets, assetCatalog, defaults);
                 var childPath = snapshotComponent.Target.ChildPath;
 
                 if (string.IsNullOrEmpty(childPath))
@@ -448,11 +456,15 @@ namespace SceneBuilder.Core.Reconcile
 
         // The added-component twin of BuildOverrideSetSpec — carries the
         // snapshot component's FULL field set into the append, symmetric with materialize's
-        // InstanceOverrideDiff.EmitAddedComponents. Scalars/AssetRef stay in Fields (rendered via
-        // SourceExpr.ValueNodeLiteral at apply time); each ObjectRef field is pre-rendered into
-        // FieldExpressions via ComponentReconciler.RenderFieldValue (same renderer BuildOverrideSetSpec
-        // and AppendComponentStatement already use) since ValueNodeLiteral has no ObjectRef arm. Every
-        // field's referenced assets are harvested via ComponentReconciler.CollectAssetEntries.
+        // InstanceOverrideDiff.EmitAddedComponents, through the same
+        // SnapshotFieldEmission.EmitFieldSet dispatch ComponentReconciler.EmitComponentAppend uses:
+        // an Unemittable list item or a Dangling ObjectRef target omits the field and reports it
+        // (UnrepresentableListItem / DanglingReference); a Pending target (a same-batch create
+        // candidate with no IdentityMap entry yet) omits the field silently and converges on the
+        // guaranteed second sync; a Resolvable/NotObjectRef value stays in Fields and is pre-rendered
+        // into FieldExpressions when ComponentReconciler.NeedsPreRender demands it. Never a partial
+        // array, never a raw non-identifier token, never a phantom handle. Every emitted field's
+        // referenced assets are harvested via ComponentReconciler.CollectAssetEntries.
         private static AppendInstanceAddComponent BuildAddInstanceComponent(
             AddedComponent snapshotComponent,
             string instanceLogicalId,
@@ -460,6 +472,8 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
             List<Conflict> conflicts,
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
             AssetCatalog? assetCatalog = null,
             // An added-instance-component field set carries
             // every serialized field the same as EmitComponentAppend's before omission; filter it
@@ -471,15 +485,18 @@ namespace SceneBuilder.Core.Reconcile
             var componentLogicalId = $"{instanceLogicalId}/{typeFullName}";
             var fields = ComponentDefaultOmission.OmitDefaults(typeFullName, component.Fields, defaults, componentLogicalId, conflicts);
 
-            Dictionary<string, string>? fieldExpressions = null;
-            foreach (var (fieldKey, value) in fields)
-            {
-                if (value is ValueNode.ObjectRef || ComponentReconciler.IsCataloguedAssetRef(value, assetCatalog))
-                {
-                    fieldExpressions ??= new Dictionary<string, string>();
-                    fieldExpressions[fieldKey] = ComponentReconciler.RenderFieldValue(value, typeFullName, resolveOwnerHandle, edits, instanceLogicalId, assetCatalog);
-                }
+            // A snapshot-only added component on a prefab instance is absent from the model, and the
+            // instance branch in Reconciler.Reconcile that reaches here never runs
+            // ComponentReconciler.ReconcileComponents (no field-value-diff pass exists for it), so
+            // this call is the ONLY report for a dangling/unemittable field here — reportUnresolvable
+            // is unconditionally true, unlike the mapped-owner ADD-path call to EmitComponentAppend.
+            var (emittedFields, fieldExpressions) = SnapshotFieldEmission.EmitFieldSet(
+                fields, typeFullName, componentLogicalId, instanceLogicalId,
+                resolvableTargets, pendingTargets, resolveOwnerHandle,
+                reportUnresolvable: true, assetCatalog, edits, conflicts);
 
+            foreach (var (_, value) in emittedFields)
+            {
                 ComponentReconciler.CollectAssetEntries(value, addedAssets);
             }
 
@@ -487,7 +504,7 @@ namespace SceneBuilder.Core.Reconcile
             {
                 Anchor = instanceLogicalId,
                 TypeFullName = typeFullName,
-                Fields = fields,
+                Fields = emittedFields,
                 FieldExpressions = fieldExpressions,
             };
         }
