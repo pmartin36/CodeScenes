@@ -235,6 +235,69 @@ public class RoundTripProofScene : ISceneDefinition
         }
     }
 
+    // Proves a code->scene source is a BUILD fixed point whose author's file survives the first
+    // sync: seed, let the caller assert the built scene, rebuild twice more (each must apply ZERO
+    // plan ops and must not be refused), then sync once -- which must apply zero patch edits and
+    // leave the builder file byte-identical, so a line the author wrote cannot have been silently
+    // pruned to reach convergence -- and let the caller assert the converged state while the scene
+    // and source are still live. `ProveCodeToScene` cannot express this: it never rebuilds, and its
+    // convergence check leaves the FIRST sync unasserted.
+    public static ProofResult ProveCodeToSceneFixedPoint(
+        string usings, string body,
+        Action<ProofContext> assertScene, Action<ProofContext> assertConverged)
+    {
+        var fixture = NewFixture();
+        try
+        {
+            var build = SeedScene(fixture, usings, body);
+
+            assertScene(new ProofContext(fixture.BuilderPath, fixture.SidecarPath, fixture.ScenePath, build, null));
+
+            for (var pass = 2; pass <= 3; pass++)
+            {
+                var rebuild = SceneBuilderBuild.Run(
+                    fixture.BuilderPath, fixture.ScenePath, fixture.SidecarPath, EditorSceneManager.GetActiveScene());
+                Assert.IsEmpty(
+                    rebuild.Diagnostics,
+                    $"Build {pass} of an unchanged source and scene was refused.\n"
+                        + string.Join("\n", rebuild.Diagnostics.Select(d => d.Message)));
+                Assert.AreEqual(
+                    0, rebuild.PlanOpCount,
+                    $"Build {pass} of an unchanged source and scene applied {rebuild.PlanOpCount} plan "
+                        + "op(s); a converged build applies none.");
+            }
+
+            var beforeFirstSync = File.ReadAllBytes(fixture.BuilderPath);
+            var firstSync = EmittedCodeCompiles.SyncAndAssertCompiles(
+                fixture.BuilderPath, fixture.SidecarPath, EditorSceneManager.GetActiveScene());
+            Assert.AreEqual(
+                0, firstSync.PatchEdits,
+                "The first sync over a converged build produced " + firstSync.PatchEdits
+                    + " patch edit(s); it must be a fixed point.");
+            Assert.IsFalse(
+                firstSync.Changed, "The first sync over a converged build reported Changed even though it must be a no-op.");
+            CollectionAssert.AreEqual(
+                beforeFirstSync, File.ReadAllBytes(fixture.BuilderPath),
+                "The first sync rewrote the author's builder source; a sync that pruned an authored line "
+                    + "would still look converged on the second sync, so only this assertion can see it.");
+
+            var convergenceSync = ConvergeToFixedPoint(fixture, "code->scene fixed point");
+
+            assertConverged(new ProofContext(fixture.BuilderPath, fixture.SidecarPath, fixture.ScenePath, build, convergenceSync));
+
+            return new ProofResult(
+                build,
+                driveSync: null,
+                convergenceSync: convergenceSync,
+                convergedSource: File.ReadAllText(fixture.BuilderPath),
+                convergedSidecar: File.ReadAllText(fixture.SidecarPath));
+        }
+        finally
+        {
+            Cleanup(fixture);
+        }
+    }
+
     public static ProofResult ProveSceneToCode(
         string usings, string body, Action<ProofContext> mutateScene, Action<ProofContext> assertSource)
     {

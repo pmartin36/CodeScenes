@@ -19,7 +19,7 @@ public class RoundTripProofHarnessUsageTests
     };
 
     private static readonly string[] HarnessEntryPoints =
-        { "ProveCodeToScene", "ProveSceneToCode", "ProveReauthoredCodeToScene" };
+        { "ProveCodeToScene", "ProveSceneToCode", "ProveReauthoredCodeToScene", "ProveCodeToSceneFixedPoint" };
 
     private static readonly string[] TestAttributeNames = { "Test", "TestCase", "TestCaseSource", "UnityTest" };
 
