@@ -67,8 +67,35 @@ authored `m_SortingLayer` non-convergent forever, since the excluded field is in
 nor the type template and the reconciler only walks snapshot fields. No builder authors it today, so
 nothing is broken; it is filed as `specs/35` D2 with the approach decision stated rather than guessed.
 
+**35 — reference writes, sorting-layer convergence, and cache invalidation.** Four defects spec 33's
+build surfaced, each adversarially audited before being written down rather than taken as filed —
+two of the original claims were REFUTED that way and never became work. D1: authoring a populated
+`List<GameObject>` resized the live array and left every element null, because `EmitFieldOp` had no
+arm for a list of `ObjectRef` and `WriteProperty` had no `ObjectRef` case and no `default:` arm, so
+each element fell through the switch silently. Descent is now owned by one mechanism over
+`ValueWalk`, and the four top-level-only gates route through it — two of which plan review found
+after the plan had named only two, and which would otherwise have shipped a `NotSupportedException`
+and a silent data-clearing patch (`7640919`). D3: the incremental snapshot cache had no invalidation
+site, so the manual Sync and Build menu commands could leave it serving nodes computed under a stale
+IdentityMap; it is now keyed on the map's generation at one site every assemble path inherits
+(`2a634a8`). D4: sync value-patches inside the author's own typed selector, which cannot take an
+`InstanceHandle`, so rewiring a field onto a prefab-instance root wrote source that would not
+compile; the authoring surface now shares a `SceneObjectHandle` base (`225400d`, `6018199`). D2 was
+held back for an explicit decision — excluded fields are ONE-WAY and made loud, reported through
+spec 33's located channel rather than pruned from the author's source, because silently deleting a
+line someone typed is its own surprise (`71482ab`, `d4931be`, `94a8b6e`).
+
+Its own build then exposed a regression in kind: D1 gave reference lists a rendering, and a list
+mixing a plain-GameObject target with a prefab-instance root emitted `new[] { door, tank }` —
+`CS0826`, silently, straight to disk, where before D1 the same input had thrown loudly. Fixed by
+rendering an explicit element type (`2c3dc36`). The test that should have caught it was green and
+asserting a false contract: it used two tokens that were both `NodeHandle`, so "all handle tokens
+stay implicitly typed" held by accident. Live-verified across all four items in a real editor —
+elements assigned by `ReferenceEquals` against the live roots, zero plan ops proven three ways,
+emitted source compiling on the rewire — at `passed=617 failed=0 skipped=0`.
+
 Still pending in `specs/`: 08 (M7 robustness, rescoped), 09 (M8 UnityEvents, reframed to typed
-method-lambda), 10 (M9 SerializeReference), 12 (M11 animation, blocked on Animator research),
-35 (reference-list writes producing null slots, the sorting-layer convergence regression, incremental
-snapshot-cache invalidation, and a typed selector sync can emit non-compiling). `00-foundation.md`
-stays in `specs/` as the living base contract.
+method-lambda), 10 (M9 SerializeReference), 12 (M11 animation, blocked on Animator research) and
+34 (licensing, blocked on two spikes). `00-foundation.md` stays in `specs/` as the living base
+contract. Unowned defects measured during builds, with no task claiming a fix, are tracked in
+`docs/open-defects.md`.

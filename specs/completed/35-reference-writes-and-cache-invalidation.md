@@ -10,7 +10,8 @@ future reader can check it without an editor.
 
 ## Build order
 
-D1, D3 and D4 are SHIPPED (see each section). **D2 is the only item left to build.**
+All four items are SHIPPED (see each section). Live-verified in a real editor; evidence at
+`.agent_handoffs/reference-writes-and-cache-invalidation/live-verify-spec35.md`.
 
 ## D1 — a populated list of scene references writes null slots
 
@@ -45,12 +46,13 @@ exactly that element and leaves the other assigned.
 
 ## D2 — an authored sorting layer never converges
 
+**SHIPPED at `71482ab`, `d4931be`, `94a8b6e`.** Do not re-plan D2; it is on `main` and gate-verified.
+
 **DECIDED (repo owner, approach (a)): excluded fields are ONE-WAY, made loud.** Keep the exclusion
 and report a source-authored excluded field through spec 33's located report channel, so the author
 is told the line does nothing. Approach (b) — pruning the line from their source — was rejected:
 silently deleting code someone typed is its own surprise, and it is the more invasive change.
 
-This item is the only one left to build in this spec.
 
 **A regression introduced by spec 33's C6.** `SerializedFieldExclusions` excludes `m_SortingLayer`
 on `UnityEngine.Renderer` and `SortingGroup`. Correct for its own purpose — one Inspector control

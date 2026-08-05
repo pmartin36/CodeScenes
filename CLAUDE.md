@@ -63,12 +63,18 @@ tasks each pay the multi-minute editor suite:
 Workflow({ scriptPath: "~/.claude/skills/tdd-pipeline/pipeline.workflow.js",
            args: { spec: "specs/<n>.md", noPush: true,
                    fastGateCommand: "GATE_SKIP_UNITY=1 ./verify.sh",
-                   slowPathGlobs: ["com.codescenes/**", "unity-gate/**"] } })
+                   slowPathGlobs: ["com.codescenes/**", "unity-gate/**"],
+                   testPathGlobs: ["unity-gate/Assets/GateTests/**", "SceneBuilder.Core.Tests/**"] } })
 ```
 
 A task is fast-gated only when its declared `TOUCHES` miss both slow globs; no touches, or a touch
 too broad to reason about, takes the full gate. Bucket boundaries and the final pass always run the
 full gate, so a task that mis-declares its scope is caught before anything commits.
+
+`testPathGlobs` drives two skips, and BOTH are off if you omit it. A task whose every `TOUCHES` entry
+is a test path gets no code-writer — it has nothing to implement, and a wrong call self-corrects when
+the validator routes `ROUTE_CODE`. A bucket that changes no production code, or holds a single task,
+gets no per-bucket scope pass — it has no seam to review. The FINAL cross-bucket pass always runs.
 
 ### Reading the gate's verdict — the ONLY reliable check is the `GATE PASS` line
 

@@ -3,32 +3,19 @@
 Read `CLAUDE.md` first; it is the operating contract and it wins over this file.
 This file says only what to do next and in what order.
 
-## Decision waiting for you
-
-**`specs/35` D2 — the sorting-layer convergence regression — needs an approach decision and is the
-one thing blocking a full spec-35 build.** Spec 33's C6 excluded `m_SortingLayer`; the excluded field
-is then in neither the snapshot nor the type template, so the Differ emits a plan op on every build
-forever, and the reconciler (which walks snapshot fields) can never prune the source line. Two ways
-to close it, written up in the spec:
-- **(a)** Excluded fields are one-way, made loud: report a source-authored excluded field through
-  spec 33's located report channel. Smaller, reuses a channel that now exists.
-- **(b)** Excluded fields are prunable: carry the adapter's excluded-path set into Core so the
-  reconciler emits a removal and the line disappears. Probably what a user expects.
-
-Nothing authors the field today, so nothing is broken right now.
-
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=580 failed=0 skipped=0)`.
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=617 failed=0 skipped=0)`.
 
-Shipped and live-verified: spec 33 in full (C5-C10, the located report channel, and the bidirectional
-round-trip proof suite), plus M-UI RectTransform sync (spec 13) and spec 32's C1-C4.
+Shipped and live-verified: specs 33 and 35 in full, M-UI RectTransform sync (13), and spec 32's C1-C4.
 
 Shipped, gate-verified only: spec 31, the hidden-serialized-field reader contract. Its headline claim
 - component enable/disable syncing scene->code - still has no live confirmation.
 
 Unowned defects measured during builds, each with no task claiming its fix, are tracked in
-`docs/open-defects.md`.
+`docs/open-defects.md`. Also open: 22 nullable-annotation compiler warnings, 17 of them in
+`com.codescenes/Runtime/SurfaceSnap.cs`. Warnings do not fail the gate; whether the adapter should be
+warning-clean is undecided.
 
 ## Order
 
@@ -48,21 +35,7 @@ they move out of the open list. One row needs judgement now: a typed asset catal
 `CS0542: 'Materials': member names cannot be the same as their enclosing type`. It came from a log
 predating the collapse-rule fix, so **check whether it still reproduces** before acting.
 
-### 2. Fix what is broken on `main` — `specs/35`
-
-Four defects spec 33's build surfaced, each adversarially audited rather than taken as filed.
-
-- **D1** — authoring a populated `List<GameObject>` of scene references writes N NULL slots.
-  Confirmed by construction: `WriteProperty` has no `ObjectRef` case and no `default:` arm, so every
-  element falls through the switch silently. This is C9's data loss reversed and nothing covers it.
-- **D2** — BLOCKED on the decision at the top of this file. Excluded from a build until you answer.
-- **D3** — the incremental snapshot cache has no invalidation site, so the manual Sync and Build menu
-  commands can leave it serving nodes computed under a stale IdentityMap: a spurious dangling-reference
-  warning and a suppressed field patch for one cycle.
-- **D4** — sync value-patches inside an author's typed selector, which cannot take an `InstanceHandle`,
-  so rewiring a field onto a prefab-instance root emits source that does not compile.
-
-### 3. Features, in this order
+### 2. Features, in this order
 
 - **`specs/09` M8 UnityEvents.** Unblocks the minigolf demo together with spec 13. The target model is
   already resolved in the spec: add `ComponentRef<T>` captured via `node.Ref<T>(ordinal)`. No model
