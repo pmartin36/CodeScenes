@@ -44,8 +44,31 @@ defect classes was originally found in a live editor while the gate sat green at
 "Verification status" section before trusting it. C5, C6 and the round-trip proof suite that would
 close that gap moved to `specs/33`; partial, explicitly unvalidated work on them sits in `795eba2`.
 
+**33 — boundary defects and round-trip proof.** Closed the two active defects on `main`: a
+code-authored `NodeHandle.None` now clears the live reference for both a native PPtr and a
+MonoBehaviour `GameObject` field (C9, `fb6d1da`), and a component referencing another component on
+its own GameObject emits source that compiles instead of `CS0841` (C10, `6ae66dc`, fix-forward only
+— no file carried the broken line). Its cross-cutting invariant, one located report channel with the
+object anchor, component type and field as required construction data, landed in `cca7349` and is
+what C5 and C7 both call rather than each formatting their own message. C5 reports the colliding
+candidates instead of returning a silent null, C6 stops one Inspector control yielding two authored
+fields, and C7 surfaces an unrepresentable field as a located console warning that never writes an
+advisory comment into the author's builder file (`87f38f6`). C8 dissolved on measurement: the spec
+claimed a value-preserving struct member reorder costs one plan op; a live EditMode probe recorded
+**zero** (`FieldMap.Equals` is key-based), and `scene.isDirty` turned out to be a vacuous instrument
+in batchmode, so it closed with the measurement recorded and nothing built (`a103bdf`). The
+bidirectional round-trip proof suite and its live pass landed in `474c0c6` behind a frozen shared
+harness whose two entry points perform drive-and-converge as a single call, so a proof cannot assert
+a round trip while omitting convergence. Final gate `passed=580 failed=0`, and 22 round-trip tests
+confirmed in a live editor, not batchmode alone.
+
+It also shipped one regression its own accept criteria could not see: C6's exclusion makes an
+authored `m_SortingLayer` non-convergent forever, since the excluded field is in neither the snapshot
+nor the type template and the reconciler only walks snapshot fields. No builder authors it today, so
+nothing is broken; it is filed as `specs/35` D2 with the approach decision stated rather than guessed.
+
 Still pending in `specs/`: 08 (M7 robustness, rescoped), 09 (M8 UnityEvents, reframed to typed
 method-lambda), 10 (M9 SerializeReference), 12 (M11 animation, blocked on Animator research),
-33 (boundary defects C5/C6, plus C7 unrepresentable UnityEvent visibility and C8 the no-op-edit
-write op, both found during 32's live verification, plus the bidirectional round-trip proof).
-`00-foundation.md` stays in `specs/` as the living base contract.
+35 (reference-list writes producing null slots, the sorting-layer convergence regression, incremental
+snapshot-cache invalidation, and a typed selector sync can emit non-compiling). `00-foundation.md`
+stays in `specs/` as the living base contract.
