@@ -3,18 +3,29 @@
 Read `CLAUDE.md` first; it is the operating contract and it wins over this file.
 This file says only what to do next and in what order.
 
+## Decision waiting for you
+
+**`specs/35` D2 — the sorting-layer convergence regression — needs an approach decision and is the
+one thing blocking a full spec-35 build.** Spec 33's C6 excluded `m_SortingLayer`; the excluded field
+is then in neither the snapshot nor the type template, so the Differ emits a plan op on every build
+forever, and the reconciler (which walks snapshot fields) can never prune the source line. Two ways
+to close it, written up in the spec:
+- **(a)** Excluded fields are one-way, made loud: report a source-authored excluded field through
+  spec 33's located report channel. Smaller, reuses a channel that now exists.
+- **(b)** Excluded fields are prunable: carry the adapter's excluded-path set into Core so the
+  reconciler emits a removal and the line disappears. Probably what a user expects.
+
+Nothing authors the field today, so nothing is broken right now.
+
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=517 failed=0 skipped=0)`.
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=580 failed=0 skipped=0)`.
 
-Shipped and live-verified: M-UI RectTransform sync (spec 13), and spec 32's serialization fidelity
-C1-C4 — the per-type default template and the value representation contract, plus
-`SceneBuilder.Core/Model/ValueWalk.cs` as the single walk every value path uses.
+Shipped and live-verified: spec 33 in full (C5-C10, the located report channel, and the bidirectional
+round-trip proof suite), plus M-UI RectTransform sync (spec 13) and spec 32's C1-C4.
 
 Shipped, gate-verified only: spec 31, the hidden-serialized-field reader contract. Its headline claim
-— component enable/disable syncing scene→code — has no live confirmation.
-
-On `main` but NOT validated: `795eba2` carries partial C5/C6 work. Spec 33 owns re-validating it.
+- component enable/disable syncing scene->code - still has no live confirmation.
 
 ## Order
 
@@ -34,17 +45,19 @@ they move out of the open list. One row needs judgement now: a typed asset catal
 `CS0542: 'Materials': member names cannot be the same as their enclosing type`. It came from a log
 predating the collapse-rule fix, so **check whether it still reproduces** before acting.
 
-### 2. Fix what is broken on `main` — `specs/33`
+### 2. Fix what is broken on `main` — `specs/35`
 
-C9 and C10 first; both are active defects, not features.
-- **C9** — authoring `NodeHandle.None` does not clear a reference, and the next sync rewrites the
-  source line back. The author's edit is lost with no conflict and no warning.
-- **C10** — a component referencing another component on its own GameObject emits `CS0841`. That is
-  the default shape of every Unity Button, and it does not self-heal.
+Four defects spec 33's build surfaced, each adversarially audited rather than taken as filed.
 
-Then C5 (report ambiguous short names instead of failing silently), C6 (the sorting-layer field pair),
-C7 (where an unrepresentable field surfaces), C8 (measure the dirty flag before building anything),
-and the round-trip proof suite.
+- **D1** — authoring a populated `List<GameObject>` of scene references writes N NULL slots.
+  Confirmed by construction: `WriteProperty` has no `ObjectRef` case and no `default:` arm, so every
+  element falls through the switch silently. This is C9's data loss reversed and nothing covers it.
+- **D2** — BLOCKED on the decision at the top of this file. Excluded from a build until you answer.
+- **D3** — the incremental snapshot cache has no invalidation site, so the manual Sync and Build menu
+  commands can leave it serving nodes computed under a stale IdentityMap: a spurious dangling-reference
+  warning and a suppressed field patch for one cycle.
+- **D4** — sync value-patches inside an author's typed selector, which cannot take an `InstanceHandle`,
+  so rewiring a field onto a prefab-instance root emits source that does not compile.
 
 ### 3. Features, in this order
 

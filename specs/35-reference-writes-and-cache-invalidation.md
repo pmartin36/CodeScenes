@@ -43,6 +43,9 @@ exactly that element and leaves the other assigned.
 
 ## D2 — an authored sorting layer never converges
 
+**BLOCKED: do not build this item.** It needs the (a)/(b) approach decision below, which is the
+repo owner's to make. A run over this spec builds D1, D3 and D4 only.
+
 **A regression introduced by spec 33's C6.** `SerializedFieldExclusions` excludes `m_SortingLayer`
 on `UnityEngine.Renderer` and `SortingGroup`. Correct for its own purpose — one Inspector control
 must not yield two authored fields — but it made the field unauthorable in a way that does not
