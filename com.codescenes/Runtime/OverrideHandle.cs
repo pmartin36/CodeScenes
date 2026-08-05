@@ -27,9 +27,11 @@ namespace SceneBuilder.Authoring
 
         /// <summary>
         /// Set a cross-object-reference field by typed member selector, e.g.
-        /// <c>e.Set((Joint j) =&gt; j.connectedBody, target)</c>. Pass <see cref="NodeHandle.None"/> to clear the slot.
+        /// <c>e.Set((Joint j) =&gt; j.connectedBody, target)</c>. The target is any scene object
+        /// handle — a GameObject or a prefab instance root. Pass <see cref="NodeHandle.None"/> to
+        /// clear the slot.
         /// </summary>
-        public OverrideHandle Set<TComponent, TValue>(Func<TComponent, TValue> selector, NodeHandle target) => this;
+        public OverrideHandle Set<TComponent, TValue>(Func<TComponent, TValue> selector, SceneObjectHandle target) => this;
 
         /// <summary>
         /// Set a field by serialized property path (e.g. <c>e.Set&lt;BoxCollider&gt;("m_Center.x", 1.0)</c>).

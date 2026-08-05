@@ -9,7 +9,7 @@ namespace SceneBuilder.Authoring
     /// Compile-time scaffolding only — SceneBuilder parses the source text to build the scene, so
     /// these methods return handles for chaining but perform no work at runtime.
     /// </remarks>
-    public sealed class NodeHandle
+    public sealed class NodeHandle : SceneObjectHandle
     {
         /// <summary>Assign this to a reference field to clear it, leaving the slot empty in the scene.</summary>
         public static readonly NodeHandle None = new NodeHandle();
@@ -58,12 +58,13 @@ namespace SceneBuilder.Authoring
         /// Snap to a surface: at most one horizontal (<paramref name="left"/>/<paramref name="right"/>),
         /// one vertical (<paramref name="up"/>/<paramref name="down"/>), and one depth
         /// (<paramref name="forward"/>/<paramref name="back"/>) axis, with an optional explicit
-        /// <paramref name="target"/> override (skips the raycast/fallback scan).
+        /// <paramref name="target"/> override (skips the raycast/fallback scan). The target is any
+        /// scene object handle — a GameObject or a prefab instance root.
         /// </summary>
         public NodeHandle SurfaceSnap(bool up = false, bool down = false,
                                   bool left = false, bool right = false,
                                   bool forward = false, bool back = false,
-                                  NodeHandle target = null) => this;
+                                  SceneObjectHandle target = null) => this;
 
         /// <summary>Set the GameObject tag.</summary>
         public NodeHandle Tag(string tag) => this;

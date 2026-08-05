@@ -17,7 +17,7 @@ namespace SceneBuilder.Authoring
     /// <see cref="AddComponent{T}()"/> and <see cref="RemoveComponent{T}"/>, and reach a nested target
     /// with <see cref="On(string, Action{ScopedHandle})"/>.
     /// </remarks>
-    public class InstanceHandle
+    public class InstanceHandle : SceneObjectHandle
     {
         /// <summary>Set the local transform. Rotation is authored in Euler degrees.</summary>
         public InstanceHandle Transform(

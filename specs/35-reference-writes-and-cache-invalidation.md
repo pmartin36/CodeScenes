@@ -144,17 +144,39 @@ no IdentityMap node entry and is omitted instead, so it does not reproduce.
 The component APPEND path is NOT affected and is not the defect: every sync-emitted component `Set`
 is hardcoded to the string spelling. Do not change it.
 
-**Build:** an instance-target reference emitted into a typed selector produces source that compiles —
-either the typed surface accepts an instance handle, or an instance target always renders in the
-spelling that binds.
+**Build:** an instance-target reference emitted into a typed selector produces source that compiles.
+
+**Chosen: (a), one mechanism.** `SceneObjectHandle` is the base of both `NodeHandle` and
+`InstanceHandle`, and every authoring parameter that accepts a scene-object reference is typed
+`SceneObjectHandle`: `ComponentHandle<T>.Set(selector, …)`, `OverrideHandle.Set(selector, …)`
+and `NodeHandle.SurfaceSnap(target:)`. The rule lives in the authoring type, so no emit site
+decides it and none can bypass it. `SurfaceSnap(target:)` is a third site of the same defect,
+found by that enumeration: it renders a pre-rendered handle the same way, and an instance
+target there produced `CS1503`. An `InstanceHandle` overload was not usable — `target` is one
+optional parameter among seven, so an overload differing only in its type is unresolvable
+whenever the parameter is omitted.
 
 **Accept when:** a field authored in the typed spelling and then rewired onto a prefab-instance root
 round-trips to source that compiles, and a second sync is a fixed point. `BuilderCompileCheck` stays
 green across that sync.
 
-**Also determine:** whether `PropertyOverride.PropertyPath` can carry the `member:` sigil as far as
-`SceneBuilder.Core/Reconcile/SourcePatchApplier.Instances.cs`, whose spelling branch would reproduce
-this at a second site. If it can, that site is in scope; if not, record why and leave it.
+**Determined: not reachable at the renderer.** `RenderOverrideSetCall` reads
+`OverrideSetSpec.PropertyPath`, and the only site that builds an `OverrideSetSpec` is
+`ReconcilerInstances.BuildOverrideSetSpec`, which copies the path verbatim from a SNAPSHOT
+override. A snapshot override's path comes from `PrefabInstanceProbe` through
+`SceneSnapshotReader`, and is Unity's `PropertyModification.propertyPath`, always a serialized
+path. The `member:` sigil is a parse-side artifact of the MODEL, and a model override never
+becomes an `OverrideSetSpec`; it emits a `DropInstanceCall`/`DropScopedOnCall` instead. The
+sigil therefore does reach `SourcePatchApplier.Instances.cs`, as a drop call-match key in
+`OverrideSetTargetsPath`, and never reaches the renderer. `AuthoredPathResolver` normalizes the
+model-side sigil before any diff, a second and independent barrier on a path that does not reach
+the renderer anyway. The site stays out of scope.
+
+The chosen D4 mechanism covers it regardless of reachability: rendered through the sigil branch,
+an instance-handle value emits `e.Set((Game.DoorOpener x) => x.target, tank)`, which binds
+against the widened `OverrideHandle.Set(selector, SceneObjectHandle)`. Both spellings and both
+renderer entry points (the root `.Override(...)` and the nested `.On(...)` twin) are pinned by
+`SceneBuilder.Core.Tests/InstanceOverrideSigilReachTests.cs`.
 
 ## Test plan
 

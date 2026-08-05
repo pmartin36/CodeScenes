@@ -11,7 +11,9 @@ using SceneBuilder.Core.Reconcile;
 
 // A component field referencing a PREFAB-INSTANCE ROOT must round-trip exactly like a reference to a
 // plain scene.Add(...) GameObject: the live property assigns, a settled rebuild emits no ops for the
-// reference, and a sync never reports it as dangling or rewrites the handle name away.
+// reference, and a sync never reports it as dangling or rewrites the handle name away. The same
+// contract holds when the field is authored in the typed member-selector spelling (c.Set(x => x.field,
+// target)) rather than the string spelling.
 public class RoundTripObjectRefPrefabInstanceTests
 {
     private const string FixturesDir = "Assets/GateTests/Fixtures_ObjRefInstance";
@@ -41,6 +43,15 @@ public class RoundTripObjectRefPrefabInstanceScene : ISceneDefinition
         "        var doorControl = scene.Add(\"DoorControl\");\n" +
         "        var openerControl = scene.Add(\"OpenerControl\");\n" +
         "        openerControl.Component<DoorOpener>(c => c.Set(\"target\", doorControl));";
+
+    // The TYPED spelling, targeting a plain node. The rewire moves it onto the instance root; sync
+    // patches only the value argument, so the selector survives and the argument becomes an
+    // InstanceHandle.
+    private const string TypedSelectorBody =
+        "        var tank = scene.Instance(\"" + PrefabPath + "\");\n" +
+        "        var door = scene.Add(\"Door\");\n" +
+        "        var opener = scene.Add(\"Opener\");\n" +
+        "        opener.Component<DoorOpener>(c => c.Set(x => x.target, door));";
 
     private static GameObject FindRoot(Scene scene, string name) =>
         scene.GetRootGameObjects().FirstOrDefault(go => go.name == name);
@@ -169,6 +180,90 @@ public class RoundTripObjectRefPrefabInstanceScene : ISceneDefinition
             Assert.AreEqual(0, result.PatchEdits, "A settled prefab-instance reference must sync as a no-op.");
             StringAssert.Contains(", tank)", File.ReadAllText(builderPath),
                 "The authored handle name must survive the sync, not be rewritten to a raw GlobalObjectId.");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Test]
+    public void SceneToCode_TypedSelectorRewiredOntoInstanceRoot_CompilesAndIsAFixedPoint()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sb_rtorpi_typed_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var builderPath = Path.Combine(dir, "RoundTripObjectRefPrefabInstanceScene.cs");
+            var sidecarPath = Path.Combine(dir, "RoundTripObjectRefPrefabInstanceScene.sbmap.json");
+            File.WriteAllText(builderPath, Source(TypedSelectorBody));
+
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            var scene = EditorSceneManager.GetActiveScene();
+            SceneBuilderBuild.Run(builderPath, ScenePath, sidecarPath, scene);
+
+            var opener = FindRoot(EditorSceneManager.GetActiveScene(), "Opener");
+            var instanceRoot = FindRoot(EditorSceneManager.GetActiveScene(), InstanceName);
+            Assert.IsNotNull(opener, "Opener was not created by SceneBuilderBuild.Run");
+            Assert.IsNotNull(instanceRoot, InstanceName + " instance root was not created by SceneBuilderBuild.Run");
+            opener.GetComponent<DoorOpener>().target = instanceRoot;
+
+            var result = EmittedCodeCompiles.SyncAndAssertCompiles(builderPath, sidecarPath, EditorSceneManager.GetActiveScene());
+
+            Assert.IsTrue(result.Changed, "Sync reported no change despite a typed-selector field rewired onto the instance root");
+            Assert.AreEqual(1, result.PatchEdits, "Rewiring the field onto the instance root must produce exactly one patch edit.");
+            Assert.AreEqual(0, result.CompileErrors.Length,
+                "The typed-selector rewire onto a prefab-instance root wrote source that does not compile.");
+            Assert.AreEqual(0, result.Conflicts.Count(c => c.Kind == ConflictKind.DanglingReference),
+                "A live, mapped prefab-instance-root target must never report DanglingReference.");
+
+            var rewritten = File.ReadAllText(builderPath);
+            StringAssert.Contains("c.Set(x => x.target, tank)", rewritten,
+                "The typed member selector must survive the sync, with only its value argument swapped to the instance handle.\n" + rewritten);
+            StringAssert.DoesNotContain("x.target, door", rewritten,
+                "Builder source still carries the old 'door' handle argument.\n" + rewritten);
+
+            var second = EmittedCodeCompiles.SyncAndAssertCompiles(builderPath, sidecarPath, EditorSceneManager.GetActiveScene());
+            Assert.AreEqual(0, second.PatchEdits, "A settled typed-selector instance reference must sync as a no-op.");
+            Assert.IsFalse(second.Changed, "A no-op re-sync must not report Changed=true.");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Test]
+    public void RoundTrip_TypedSelectorOnInstanceRoot_RebuildMaterializesTheInstanceRootAndReSyncIsANoOp()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sb_rtorpi_typedrt_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var builderPath = Path.Combine(dir, "RoundTripObjectRefPrefabInstanceScene.cs");
+            var sidecarPath = Path.Combine(dir, "RoundTripObjectRefPrefabInstanceScene.sbmap.json");
+            File.WriteAllText(builderPath, Source(TypedSelectorBody));
+
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            var scene = EditorSceneManager.GetActiveScene();
+            SceneBuilderBuild.Run(builderPath, ScenePath, sidecarPath, scene);
+
+            var opener = FindRoot(EditorSceneManager.GetActiveScene(), "Opener");
+            var instanceRoot = FindRoot(EditorSceneManager.GetActiveScene(), InstanceName);
+            opener.GetComponent<DoorOpener>().target = instanceRoot;
+            EmittedCodeCompiles.SyncAndAssertCompiles(builderPath, sidecarPath, EditorSceneManager.GetActiveScene());
+
+            SceneBuilderBuild.Run(builderPath, ScenePath, sidecarPath, EditorSceneManager.GetActiveScene());
+            var rebuiltOpener = FindRoot(EditorSceneManager.GetActiveScene(), "Opener");
+            var rebuiltInstanceRoot = FindRoot(EditorSceneManager.GetActiveScene(), InstanceName);
+            Assert.AreSame(rebuiltInstanceRoot, rebuiltOpener.GetComponent<DoorOpener>().target,
+                "Rebuilding from the typed-selector source did not materialize the instance root as the target.");
+
+            var second = EmittedCodeCompiles.SyncAndAssertCompiles(builderPath, sidecarPath, EditorSceneManager.GetActiveScene());
+            Assert.AreEqual(0, second.PatchEdits,
+                "NOT CONVERGED: the no-op re-sync's reconcile produced " + second.PatchEdits + " patch edit(s).");
+            Assert.IsFalse(second.Changed,
+                "NOT CONVERGED: a Sync immediately after a rebuild, with no further scene change, reported Changed=true.");
         }
         finally
         {

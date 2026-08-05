@@ -4,8 +4,9 @@ using static SceneBuilder.Authoring.AssetRefs;
 
 // Compiles the spec's spatial authoring examples (specs/19-spatial-authoring-components.md
 // §"Authoring API") so the real .FitSize/.SurfaceSnap call-sites and overload resolution — the
-// aspect-locked overload, the explicit tuple `size:` overload, and the target-override /
-// depth-axis SurfaceSnap forms — are exercised by the Unity compile, not just NodeHandle.cs alone.
+// aspect-locked overload, the explicit tuple `size:` overload, the target-override /
+// depth-axis SurfaceSnap forms, and a prefab-instance SurfaceSnap target — are exercised by the
+// Unity compile, not just NodeHandle.cs alone.
 // Lives in its own asmdef (referencing SceneBuilder.Authoring) rather than GateFixtures, which is
 // deliberately reference-free (BuilderProjectInjectorTests.ReferencesAuthoring_ReadsTheRealEditorAssemblyGraph
 // asserts GateFixtures reports no Authoring reference).
@@ -36,5 +37,13 @@ public class SpatialAuthoringExamplesFixture : ISceneDefinition
              .Component<MeshFilter>(c => c.Set("m_Mesh", Builtin("Quad")))
              .FitSize(width: 0.8f)
              .SurfaceSnap(back: true);
+
+        // Sign snapped up onto a prefab instance root — SurfaceSnap's target accepts either kind
+        // of scene object handle.
+        var shelf = scene.Instance("Assets/Prefabs/Shelf.prefab");
+        scene.Add("Sign")
+             .Component<MeshFilter>(c => c.Set("m_Mesh", Builtin("Quad")))
+             .FitSize(height: 0.2f)
+             .SurfaceSnap(up: true, target: shelf);
     }
 }

@@ -163,3 +163,59 @@ STATUS: READY
   `expected.Roots.Length`) or deferring the field-introducing patch until the target's declaration
   precedes it in text — a Reconciler/StatementPlacement contract change, not a localized patch.
   OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
+
+- SEVERITY low — four gate fixture headers and one test header state that
+  `SceneBuilderRouter.Discover()` is TypeCache-backed and routes only "a REAL compiled type":
+  `unity-gate/Assets/Fixtures/AutoSceneToCodeScene.cs`, `AutoCodeToSceneScene.cs`,
+  `AutoIntegrationScene.cs`, `AutoConflictScene.cs`, and `unity-gate/Assets/GateTests/AutoSceneToCodeTests.cs:22-24`
+  ("a temp-dir seed is invisible to TypeCache and would silently no-op ExecuteSceneToCode"). Measured
+  false: `com.codescenes/Editor/SceneBuilderRouter.cs:61-92` is a plain
+  `Directory.GetFiles(SceneBuilderPaths.BuildersDirectory, "*.cs")` scan, its own class doc at `:43-49`
+  says builders "are never compiled, so a Unity type index cannot see them — the `.cs` file IS the unit",
+  and `unity-gate/Assets/GateTests/MultiSceneRoutingTests.cs:127-145`
+  (`MultiScene_Discover_EnumeratesOutOfAssetsBuilders`) pins discovery of a builder with NO compiled
+  counterpart anywhere in the domain. Consequence: a test author following the comment adds an
+  unnecessary compiled `ISceneDefinition` fixture under `Assets/`, which costs a domain reload on the
+  gate and implies a constraint the product does not have. Comments only; no observable behavior
+  changes. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
+
+- SEVERITY low — spec 35 D3's "Reachable sequence, every step an ordinary UI action with auto-sync
+  armed" (`specs/35-reference-writes-and-cache-invalidation.md:104-113`) never says how its step-1
+  precondition arises — a scene object that a MAPPED object references but the IdentityMap does not
+  know — and that precondition does not survive hand-creating the target while auto is armed. Derived
+  by construction: creating the object publishes `CreateGameObjectHierarchy` and wiring the field
+  publishes `ChangeGameObjectOrComponentProperties`, both handled at
+  `com.codescenes/Editor/SceneBuilderAutoSync.cs:232-247` -> `NotifySceneChanged` (`:287`) -> a
+  scene->code cycle `SettleSeconds = 0.4` later (`:45-46`, `:328-369`), whose `DetectAppends` maps the
+  target with its live GlobalObjectId (`SceneBuilder.Core/Reconcile/ReconcilerAppends.cs:215-221`).
+  So under armed auto the raw-goid window is bounded by one 0.4 s debounce. Scene LOAD publishes none
+  of the handled `ObjectChangeKind`s (`:230-266`), so a scene opened from disk that ALREADY contains
+  such an object holds the precondition indefinitely — that is the durable reachable state, and it is
+  the state b2-t2's EditMode test models implicitly (it never wires the executors, so no cycle ever
+  runs). Consequence: a reader of the spec can conclude the sequence is reachable within 0.4 s of any
+  hand edit, and a later test author can build a scenario that self-heals before step 2. Does NOT
+  relax b2-t3's DELIVERABLE: b2-t3's live pass reproduces the durable case explicitly (scene saved,
+  closed and reopened from disk with the target already wired). OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
+
+- SEVERITY low — three gate tests blanket-suppress the emitted-source compile check around a real
+  sync, for a reason the product has since fixed, so a non-compiling emission in those tests is
+  invisible. `SyncIgnoringFacadeCompileNoise` in
+  `unity-gate/Assets/GateTests/NestedTypedEmitTests.cs:88-100`,
+  `unity-gate/Assets/GateTests/NestedRoundTripTests.cs:104-116` and
+  `unity-gate/Assets/GateTests/TypedInstanceOverrideSyncTests.cs:92-104` sets
+  `LogAssert.ignoreFailingMessages = true` around `SceneBuilderSync.Run`, which swallows the
+  `Debug.LogError` that `BuilderCompileCheck.CheckAndReport`
+  (`com.codescenes/Editor/BuilderCompileCheck.cs:286`, called at
+  `com.codescenes/Editor/SceneBuilderSync.cs:287`) raises for a `DOES NOT COMPILE` emission; those
+  three files also bypass the `EmittedCodeCompiles.SyncAndAssertCompiles` seam
+  (`unity-gate/Assets/GateTests/EmittedCodeCompiles.cs:44`), so nothing else asserts it there. The
+  stated cause is stale: `TypedInstanceOverrideSyncTests.cs:88-90` says "Bug 5 (facade CS0103
+  compile-noise) is a separate task (b5) not yet fixed", and b5 shipped —
+  `com.codescenes/Editor/PrefabFacadeStubEmitter.cs` feeds `BuilderCompileCheck` a `Prefabs` stub
+  precisely so facade authoring binds. Measured on the current tree: with the three suppressions
+  removed (`= true` -> `= prevIgnore`) an isolated batchmode EditMode run of those three classes is
+  `<test-run result="Passed" total="5" passed="5" failed="0" skipped="0">`; the suppressions were
+  restored afterwards. Not measured: a FULL-suite run without them, where cross-test manifest state
+  differs. Consequence: `EmittedCodeCompiles.cs:20-22`'s "a future test cannot silently skip it by
+  forgetting to opt in" is false for these three, and the compile class of bug CLAUDE.md calls a bug
+  outright can land there unseen. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.

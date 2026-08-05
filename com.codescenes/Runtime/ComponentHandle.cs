@@ -28,8 +28,9 @@ namespace SceneBuilder.Authoring
 
         /// <summary>
         /// Set a cross-object-reference field by typed member selector, e.g.
-        /// <c>c.Set(r =&gt; r.target, door)</c>. Pass <see cref="NodeHandle.None"/> to clear the slot.
+        /// <c>c.Set(r =&gt; r.target, door)</c>. The target is any scene object handle — a GameObject
+        /// or a prefab instance root. Pass <see cref="NodeHandle.None"/> to clear the slot.
         /// </summary>
-        public ComponentHandle<T> Set<TValue>(Func<T, TValue> selector, NodeHandle target) => this;
+        public ComponentHandle<T> Set<TValue>(Func<T, TValue> selector, SceneObjectHandle target) => this;
     }
 }

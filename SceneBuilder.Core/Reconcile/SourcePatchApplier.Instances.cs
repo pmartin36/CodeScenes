@@ -218,6 +218,12 @@ namespace SceneBuilder.Core.Reconcile
             return $"Override(e => {body})";
         }
 
+        // Key spelling follows the path's form: a "member:<name>" key renders the typed selector
+        // `(T x) => x.<name>`, any other key renders the string form `Set<T>("path", ...)`. Every
+        // spec built by ReconcilerInstances.BuildOverrideSetSpec carries a SNAPSHOT override's path,
+        // which is Unity's serialized propertyPath, so the sigil form here serves patches built
+        // directly against this API. The sigil does reach this file from a drop edit, where
+        // OverrideSetTargetsPath matches it as a call-match key.
         private static string RenderOverrideSetCall(OverrideSetSpec set)
         {
             var valueText = set.ValueExpression ?? SourceExpr.ValueNodeLiteral(set.Value);
