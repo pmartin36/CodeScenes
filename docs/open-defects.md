@@ -229,3 +229,14 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   Dead prose in an archive; nothing observable changes. Raised as a b3-t1 finding by
   `scope/bucket-b3.md` and NOT fixed by the routed iteration, which addressed the guard-completeness
   finding only; `specs/completed/` is in no task's TOUCHES in this plan. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
+
+- SEVERITY med — every build marks the scene dirty and saves it, whether or not the plan did
+  anything. `com.codescenes/Editor/SceneBuilderBuild.cs:241-242` calls
+  `EditorSceneManager.MarkSceneDirty(scene)` then `EditorSceneManager.SaveScene(scene, scenePath)`
+  inside the suppression scope, with no check on `plan.Ops.Length`, so a converged build that
+  reports `0 plan op(s)` still re-saves the scene asset. Auto-sync builds on every debounced change,
+  so a scene that already matches its code is rewritten on a keystroke that changed nothing. Found
+  while specifying spec 35 D2, whose earlier draft wrongly blamed the phantom plan op for this; the
+  op suppression does not touch it. Not measured for user-visible impact — whether the written bytes
+  actually differ, and what it costs in editor I/O and version-control noise, is unknown and worth
+  measuring before designing a fix. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.

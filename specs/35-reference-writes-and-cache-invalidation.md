@@ -82,8 +82,33 @@ right now. The defect is that hand-authoring it becomes a silent, permanent non-
 **Build (approach (a)).** A source-authored field that the adapter excludes is detected and
 reported through spec 33's located report channel — the same channel C5 and C7 use, not a second
 one — naming the object, the component type and the field, and saying the line has no effect. The
-build must also stop emitting a plan op for it, or the console goes quiet while the scene keeps
-re-saving on every keystroke, which is the actual defect.
+build also stops emitting a plan op for it.
+
+**Correction, measured:** an earlier draft of this spec claimed the plan op is what causes the scene
+to re-save on every keystroke. That is FALSE. `com.codescenes/Editor/SceneBuilderBuild.cs:241-242`
+calls `EditorSceneManager.MarkSceneDirty` then `SaveScene` unconditionally, outside any check on
+`plan.Ops.Length`, so a zero-op build re-saves too. Suppressing the op does not stop the save.
+
+The op is still wrong and still suppressed, for its own reason: it is a phantom. It names a field
+Unity discards (`InspectorVisibilityRuleTests.ReadComponent_SortingLayerIndexAloneIsDiscardedByUnity`),
+so it can never take effect, and it makes every build report work it did not do. The
+unconditional-save behaviour is a separate, larger question and is OUT OF SCOPE here — it is filed
+in `docs/open-defects.md`, not folded into this item.
+
+**BOTH emission paths, not just the differ's field loop.** A matched component reaches the field
+comparison in `SceneBuilder.Core/Diff/Differ.cs`; an UNMATCHED one takes the `AddComponent` branch
+carrying every authored field verbatim, and the create path routes every component through that
+branch, so the FIRST build in a session emits the excluded field with no report unless both are
+covered. A deliverable that only exercises a matched component leaves the loud half of this
+approach silent exactly when an author first writes the line.
+
+**The check, not just the rule.** The deliverable includes a check that fails when a site emits an
+op carrying an excluded field, driven through the matched AND create paths — not a rule stated in
+one place and trusted everywhere else.
+
+**Direction: build only.** The report fires on the code→scene build, where the authored line is
+acted on. The scene→code sync direction is out of scope: it authors nothing, and `Reconciler` does
+not read the differ's conflicts today.
 
 The set of excluded fields lives adapter-side (`SerializedFieldExclusions`) and the differ that
 emits the op lives in Core, so the two halves have to meet somewhere. That crossing is this item's
