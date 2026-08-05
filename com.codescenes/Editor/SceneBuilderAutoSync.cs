@@ -489,7 +489,7 @@ namespace SceneBuilder.Editor
             var assembler = GetAssembler(route.BuilderName);
             // M5: resolve live scene-object reference fields to LogicalId (mapped) / raw GlobalObjectId
             // (unmapped) — the reconcile-feeding incremental read path, mirroring the cold Sync path.
-            var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
+            var sceneRef = SceneRefResolver.ForMap(map);
             var snapshot = ids.Count == 0
                 ? assembler.AssembleCold(scene, sceneRef)          // sceneSaved catch-all
                 : assembler.AssembleIncremental(scene, ids, sceneRef);
@@ -618,11 +618,11 @@ namespace SceneBuilder.Editor
             // against it. No sidecar yet -> explicit null (an ObjectRef read as Unsupported is harmless
             // here: the baseline is only used for desired-vs-desired code diffs and scene-vs-baseline
             // field attribution, never written back).
-            System.Func<UnityEngine.Object, string?>? sceneRef = null;
+            var sceneRef = SceneRefResolver.None;
             if (File.Exists(route.SidecarPath))
             {
                 var map = IdentityMapJson.Deserialize(File.ReadAllText(route.SidecarPath));
-                sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
+                sceneRef = SceneRefResolver.ForMap(map);
             }
 
             _baselines[route.BuilderName] = (File.ReadAllText(route.BuilderPath), assembler.AssembleCold(scene, sceneRef));
@@ -674,7 +674,7 @@ namespace SceneBuilder.Editor
             // M5: same reverse-map every reconcile-feeding read applies, so the live snapshot's
             // ObjectRefs agree with the baseline's for unchanged fields (idempotent field attribution).
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
-            var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
+            var sceneRef = SceneRefResolver.ForMap(map);
             var liveSnapshot = ids.Count == 0
                 ? assembler.AssembleCold(scene, sceneRef)
                 : assembler.AssembleIncremental(scene, ids, sceneRef);

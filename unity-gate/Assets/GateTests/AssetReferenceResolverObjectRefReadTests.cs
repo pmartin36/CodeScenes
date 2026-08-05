@@ -289,9 +289,8 @@ public class AssetReferenceResolverObjectRefReadTests
         public List<string> Fields = new List<string>();
     }
 
-    private static ResolverOmissionScan ScanForOmittableResolvers(Assembly assembly)
+    private static ResolverOmissionScan ScanForOmittableResolvers(Assembly assembly, System.Type resolverType)
     {
-        var resolverType = typeof(System.Func<UnityEngine.Object, string>);
         const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic |
             BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
 
@@ -374,7 +373,8 @@ public class AssetReferenceResolverObjectRefReadTests
     [Test]
     public void SceneRefResolverParameters_AreRequired_NotDefaulted()
     {
-        var scan = ScanForOmittableResolvers(typeof(SerializedFieldBridge).Assembly);
+        var scan = ScanForOmittableResolvers(
+            typeof(SerializedFieldBridge).Assembly, typeof(System.Func<UnityEngine.Object, string>));
 
         Assert.IsEmpty(scan.Parameters,
             "Every scene-ref resolver parameter must be REQUIRED, not defaulted, so a caller cannot " +
@@ -391,7 +391,8 @@ public class AssetReferenceResolverObjectRefReadTests
     [Test]
     public void SceneRefResolverGuard_DetectsEveryOmissionShape()
     {
-        var scan = ScanForOmittableResolvers(Assembly.GetExecutingAssembly());
+        var scan = ScanForOmittableResolvers(
+            Assembly.GetExecutingAssembly(), typeof(System.Func<UnityEngine.Object, string>));
 
         CollectionAssert.Contains(scan.Parameters,
             "ResolverGuardOffenderFixture.Read(resolveSceneRef)",
@@ -402,5 +403,52 @@ public class AssetReferenceResolverObjectRefReadTests
         CollectionAssert.Contains(scan.Fields,
             "ResolverGuardOffenderFixture.Sticky",
             "The scan must detect a non-readonly resolver field. Found: " + string.Join(", ", scan.Fields));
+    }
+
+    // Deliberate offender fixture: never instantiated, referenced only by reflection, so
+    // SceneRefResolverGenerationGuard_DetectsEveryOmissionShape can prove the scan detects each
+    // omission shape for the SceneRefResolver type (which carries the invalidation generation), not
+    // just the Func-typed resolver.
+    private static class SceneRefResolverGuardOffenderFixture
+    {
+        public static SceneRefResolver Sticky;
+
+        public static SceneRefResolver Settable { get; set; }
+
+        public static void Read(SerializedProperty p, SceneRefResolver sceneRef = null)
+        {
+        }
+    }
+
+    [Test]
+    public void SceneRefResolverGeneration_CannotBeOmitted()
+    {
+        var scan = ScanForOmittableResolvers(typeof(SerializedFieldBridge).Assembly, typeof(SceneRefResolver));
+
+        Assert.IsEmpty(scan.Parameters,
+            "Every SceneRefResolver parameter must be REQUIRED, not defaulted, so a caller cannot " +
+            "silently omit the cache-invalidation generation. Offending: " + string.Join(", ", scan.Parameters));
+        Assert.IsEmpty(scan.Properties,
+            "No type may expose a settable SceneRefResolver property — sticky mutable state could " +
+            "serve a node cache built under a stale generation. Offending: " + string.Join(", ", scan.Properties));
+        Assert.IsEmpty(scan.Fields,
+            "No type may expose a non-readonly SceneRefResolver field — sticky mutable state could " +
+            "serve a node cache built under a stale generation. Offending: " + string.Join(", ", scan.Fields));
+    }
+
+    [Test]
+    public void SceneRefResolverGenerationGuard_DetectsEveryOmissionShape()
+    {
+        var scan = ScanForOmittableResolvers(Assembly.GetExecutingAssembly(), typeof(SceneRefResolver));
+
+        CollectionAssert.Contains(scan.Parameters,
+            "SceneRefResolverGuardOffenderFixture.Read(sceneRef)",
+            "The scan must detect a defaulted SceneRefResolver parameter. Found: " + string.Join(", ", scan.Parameters));
+        CollectionAssert.Contains(scan.Properties,
+            "SceneRefResolverGuardOffenderFixture.Settable",
+            "The scan must detect a settable SceneRefResolver property. Found: " + string.Join(", ", scan.Properties));
+        CollectionAssert.Contains(scan.Fields,
+            "SceneRefResolverGuardOffenderFixture.Sticky",
+            "The scan must detect a non-readonly SceneRefResolver field. Found: " + string.Join(", ", scan.Fields));
     }
 }

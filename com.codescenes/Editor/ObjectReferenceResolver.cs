@@ -171,9 +171,16 @@ namespace SceneBuilder.Editor
         /// GameObject/Component (e.g. an in-memory, non-scene object) → null.
         /// </summary>
         public static Func<UnityEngine.Object, string?> BuildSceneRefResolver(IdentityMap map)
-        {
-            var goidToLogicalId = IdentityNodeIndex.GlobalObjectIdToLogicalId(map);
+            => BuildFromIndex(IdentityNodeIndex.GlobalObjectIdToLogicalId(map));
 
+        /// <summary>
+        /// The one closure implementation behind <see cref="BuildSceneRefResolver"/>, taking an
+        /// already-built goid-&gt;LogicalId projection so <see cref="SceneRefResolver.ForMap"/> can
+        /// derive the resolve delegate and its generation from the SAME projection without building
+        /// it twice.
+        /// </summary>
+        internal static Func<UnityEngine.Object, string?> BuildFromIndex(IReadOnlyDictionary<string, string> goidToLogicalId)
+        {
             return obj =>
             {
                 var go = obj as GameObject ?? (obj as Component)?.gameObject;
