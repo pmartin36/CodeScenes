@@ -69,7 +69,22 @@ namespace SceneBuilder.Core.Reconcile
         /// kind has a rendering that parses back via <c>ValueNodeParser.Parse</c> to an equal
         /// <see cref="ValueNode"/>.
         /// </summary>
-        public static string ValueNodeLiteral(ValueNode node, AssetCatalog? assetCatalog = null) => node switch
+        public static string ValueNodeLiteral(ValueNode node, AssetCatalog? assetCatalog = null) =>
+            ValueWalk.Fold<string>(
+                node,
+                (listNode, items) => listNode.Items.Count == 0
+                    ? ListValueEmission.EmptyArrayLiteral
+                    : ListValueEmission.ArrayPrefix(listNode) + string.Join(", ", items) + " }",
+                (nestedNode, members) => "new " + nestedNode.TypeName + " { " +
+                    string.Join(", ", members.Select(member => member.Key + " = " + member.Value)) +
+                    " }",
+                leaf => LeafLiteral(leaf, assetCatalog));
+
+        /// <summary>
+        /// Renders one non-container <see cref="ValueNode"/> (a leaf reached at the root or below a
+        /// <see cref="ValueWalk.Fold{T}"/> descent) as a C# expression.
+        /// </summary>
+        private static string LeafLiteral(ValueNode node, AssetCatalog? assetCatalog) => node switch
         {
             ValueNode.Primitive(PrimitiveKind.Bool, bool b) => b ? "true" : "false",
             ValueNode.Primitive(PrimitiveKind.Int, int i) => IntLiteral(i),
@@ -94,13 +109,6 @@ namespace SceneBuilder.Core.Reconcile
                 $"new UnityEngine.Quaternion({FloatLiteral(v.X)}, {FloatLiteral(v.Y)}, {FloatLiteral(v.Z)}, {FloatLiteral(v.W)})",
             ValueNode.Color(var v) =>
                 $"new UnityEngine.Color({FloatLiteral(v.R)}, {FloatLiteral(v.G)}, {FloatLiteral(v.B)}, {FloatLiteral(v.A)})",
-
-            ValueNode.List { Items.Count: 0 } => ListValueEmission.EmptyArrayLiteral,
-            ValueNode.List list => ListValueEmission.ArrayPrefix(list) + string.Join(", ", list.Items.Select(item => ValueNodeLiteral(item, assetCatalog))) + " }",
-
-            ValueNode.Nested nested => "new " + nested.TypeName + " { " +
-                string.Join(", ", nested.Fields.Select(kv => kv.Key + " = " + ValueNodeLiteral(kv.Value, assetCatalog))) +
-                " }",
 
             ValueNode.Unsupported unsupported => unsupported.RawToken,
 

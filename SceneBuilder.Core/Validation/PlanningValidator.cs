@@ -148,43 +148,29 @@ namespace SceneBuilder.Core.Validation
             IResolutionProvider resolver,
             string file)
         {
-            switch (value)
+            // The DESCENT is ValueWalk.Enumerate, the one recursion over a value's container
+            // structure: it yields the value itself and every descendant in pre-order. This pass is
+            // side-effecting and reports under the enclosing TOP-LEVEL field key, so the yielded
+            // path is unused.
+            foreach (var (_, node) in ValueWalk.Enumerate(value))
             {
-                case ValueNode.AssetRef assetRef:
-                    var reference = assetRef.Ref;
-                    if (reference == null)
-                    {
-                        break;
-                    }
+                if (node is not ValueNode.AssetRef assetRef || assetRef.Ref is null)
+                {
+                    continue;
+                }
 
-                    // SubAsset defaults to "" (no sub-object authored) — normalize to null so
-                    // providers' `subAsset != null` checks (e.g. DiskResolutionProvider deferring
-                    // to the editor) only fire when a sub-asset name was actually authored.
-                    var subAsset = string.IsNullOrEmpty(reference.SubAsset) ? null : reference.SubAsset;
+                var reference = assetRef.Ref;
 
-                    var resolution = reference.IsBuiltin
-                        ? resolver.ResolveBuiltin(reference.DisplayPath, reference.TypeHint)
-                        : resolver.ResolveAssetPath(reference.DisplayPath, subAsset);
+                // SubAsset defaults to "" (no sub-object authored) — normalize to null so
+                // providers' `subAsset != null` checks (e.g. DiskResolutionProvider deferring
+                // to the editor) only fire when a sub-asset name was actually authored.
+                var subAsset = string.IsNullOrEmpty(reference.SubAsset) ? null : reference.SubAsset;
 
-                    EmitAssetDiagnostic(bag, componentLogicalId, topLevelKey, reference.DisplayPath, resolution, parse, source, file);
-                    break;
+                var resolution = reference.IsBuiltin
+                    ? resolver.ResolveBuiltin(reference.DisplayPath, reference.TypeHint)
+                    : resolver.ResolveAssetPath(reference.DisplayPath, subAsset);
 
-                case ValueNode.Nested nested:
-                    foreach (var nestedField in nested.Fields)
-                    {
-                        WalkAssetValue(bag, componentLogicalId, topLevelKey, nestedField.Value, parse, source, resolver, file);
-                    }
-                    break;
-
-                case ValueNode.List list:
-                    foreach (var item in list.Items)
-                    {
-                        WalkAssetValue(bag, componentLogicalId, topLevelKey, item, parse, source, resolver, file);
-                    }
-                    break;
-
-                default:
-                    break;
+                EmitAssetDiagnostic(bag, componentLogicalId, topLevelKey, reference.DisplayPath, resolution, parse, source, file);
             }
         }
 

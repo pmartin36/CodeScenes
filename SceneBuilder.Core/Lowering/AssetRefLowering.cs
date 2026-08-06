@@ -69,20 +69,17 @@ namespace SceneBuilder.Core.Lowering
                 new KeyValuePair<string, ValueNode>(kv.Key, LowerNode(kv.Value, resolvers))));
         }
 
-        private static ValueNode LowerNode(ValueNode node, Resolvers resolvers)
-        {
-            switch (node)
-            {
-                case ValueNode.AssetRef assetRef:
-                    return LowerAssetRef(assetRef, resolvers);
-                case ValueNode.List list:
-                    return new ValueNode.List(list.Items.Select(item => LowerNode(item, resolvers)).ToList());
-                case ValueNode.Nested nested:
-                    return new ValueNode.Nested(nested.TypeName, LowerFieldMap(nested.Fields, resolvers));
-                default:
-                    return node;
-            }
-        }
+        // The DESCENT is ValueWalk.Map, the one recursion over a value's container structure; this
+        // pass supplies only its per-node decision. The resolvers are captured, so no context is
+        // threaded. dropEmptiedNested: false -- lowering replaces one leaf kind and drops nothing,
+        // so an emptied nested value survives exactly as it was found.
+        private static ValueNode LowerNode(ValueNode node, Resolvers resolvers) =>
+            ValueWalk.Map(
+                node,
+                0,
+                visit: (n, _) => n is ValueNode.AssetRef assetRef ? LowerAssetRef(assetRef, resolvers) : n,
+                descend: (_, context, _) => context,
+                dropEmptiedNested: false)!;
 
         private static ValueNode.AssetRef LowerAssetRef(ValueNode.AssetRef assetRef, Resolvers resolvers)
         {

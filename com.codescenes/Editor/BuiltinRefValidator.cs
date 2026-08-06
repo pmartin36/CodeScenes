@@ -135,25 +135,18 @@ namespace SceneBuilder.Editor
 
         private static void ValidateField(string objectName, string componentTypeName, string path, ValueNode node)
         {
-            switch (node)
+            // The DESCENT is ValueWalk.Enumerate, the one recursion over a value's container
+            // structure: it yields the value itself at path "" and every descendant in pre-order,
+            // spelling a list item "[i]" and a nested member ".key" — the exact spellings this
+            // pass reports. Concatenating onto the enclosing field key reproduces the path it
+            // composed by hand, and pre-order is what makes the FIRST unresolvable reference the
+            // one that throws.
+            foreach (var (childPath, child) in ValueWalk.Enumerate(node))
             {
-                case ValueNode.AssetRef assetRef:
-                    ValidateAssetRef(objectName, componentTypeName, path, assetRef.Ref);
-                    break;
-                case ValueNode.List list:
-                    for (var i = 0; i < list.Items.Count; i++)
-                    {
-                        ValidateField(objectName, componentTypeName, $"{path}[{i}]", list.Items[i]);
-                    }
-
-                    break;
-                case ValueNode.Nested nested:
-                    foreach (var kv in nested.Fields)
-                    {
-                        ValidateField(objectName, componentTypeName, $"{path}.{kv.Key}", kv.Value);
-                    }
-
-                    break;
+                if (child is ValueNode.AssetRef assetRef)
+                {
+                    ValidateAssetRef(objectName, componentTypeName, path + childPath, assetRef.Ref);
+                }
             }
         }
 

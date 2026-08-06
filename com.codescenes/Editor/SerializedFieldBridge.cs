@@ -28,7 +28,7 @@ namespace SceneBuilder.Editor
     /// (<c>ColorBlock.m_NormalColor</c> -&gt; <c>normalColor</c>) via
     /// <see cref="SerializedMemberMap.TryPublicMemberName"/> on read and
     /// <see cref="SerializedMemberMap.TrySerializedName"/> on write, so <c>ReadNested</c> and
-    /// <c>WriteProperty</c>'s <c>Nested</c> arm never disagree on a member's name.
+    /// <c>WriteTarget.Member</c> never disagree on a member's name.
     /// </summary>
     public static class SerializedFieldBridge
     {
@@ -136,6 +136,11 @@ namespace SceneBuilder.Editor
         // must be skipped whole — partially rendering it emits uncompilable value tokens. A Nested
         // value's own unrepresentable MEMBERS are excluded at the member level instead (spec 32 C4,
         // NestedValueEmission.Project) — the rest of the struct still round-trips.
+        //
+        // Its recursion stays hand-rolled and list-only. ValueWalk.Any descends Nested members as
+        // well, so routing this through it would start reporting a whole struct as unrepresentable
+        // because one member is, dropping the entire field from source where NestedValueEmission.Project
+        // excludes that one member and round-trips the rest.
         private static bool ContainsUnsupported(ValueNode value) => value switch
         {
             ValueNode.Unsupported => true,
@@ -315,8 +320,65 @@ namespace SceneBuilder.Editor
             WriteProperty(prop, value);
         }
 
-        private static void WriteProperty(SerializedProperty p, ValueNode value)
+        // The DESCENT is ValueWalk.Descend, the one recursion over a value's container structure. It
+        // enters a node before its children and hands each child the context its parent produced, so
+        // what stays here is per-node work only: write the leaf, size the array before its elements
+        // are entered, resolve the struct type a nested value's own members map through.
+        private static void WriteProperty(SerializedProperty p, ValueNode value) =>
+            ValueWalk.Descend(
+                value,
+                new WriteTarget(p, null),
+                enter: EnterNode,
+                item: (_, target, index) => target.Element(index),
+                member: (_, target, key) => target.Member(key));
+
+        // Where a node is written, plus the managed struct Type resolved on the ENCLOSING nested
+        // value: the map each of THAT value's own member keys goes through, and nothing deeper. A
+        // nested member's own members map through the type resolved at their own node. A null
+        // Property means there is no live property here, so the node and everything under it is left
+        // exactly as found, which is how a member key matching no child property skips its whole
+        // subtree without writing or warning.
+        private readonly struct WriteTarget
         {
+            internal WriteTarget(SerializedProperty? property, Type? structType)
+            {
+                Property = property;
+                StructType = structType;
+            }
+
+            internal SerializedProperty? Property { get; }
+
+            internal Type? StructType { get; }
+
+            internal WriteTarget Element(int index) =>
+                Property == null ? default : new WriteTarget(Property.GetArrayElementAtIndex(index), null);
+
+            // Maps the PUBLIC member key back to its serialized child name before FindPropertyRelative.
+            // A key that does not map through it (the type itself doesn't resolve, or this specific key
+            // isn't a known public spelling) falls back to the key verbatim -- this is what keeps a
+            // legacy raw-serialized-name builder writing correctly.
+            internal WriteTarget Member(string key)
+            {
+                if (Property == null)
+                {
+                    return default;
+                }
+
+                var serializedKey = StructType != null && SerializedMemberMap.TrySerializedName(StructType, key, out var mapped)
+                    ? mapped
+                    : key;
+                return new WriteTarget(Property.FindPropertyRelative(serializedKey), null);
+            }
+        }
+
+        private static WriteTarget EnterNode(ValueNode value, WriteTarget target)
+        {
+            var p = target.Property;
+            if (p == null)
+            {
+                return default;
+            }
+
             switch (value)
             {
                 case ValueNode.Primitive prim:
@@ -341,37 +403,21 @@ namespace SceneBuilder.Editor
                     p.colorValue = new UnityEngine.Color(c.Value.R, c.Value.G, c.Value.B, c.Value.A);
                     break;
                 case ValueNode.List list:
+                    // Sizing is this node's OWN work, not its descent: element contexts are derived
+                    // after this returns, so the array is sized before any element is reached, and an
+                    // empty list still truncates the live array to zero.
                     p.arraySize = list.Items.Count;
-                    for (var i = 0; i < list.Items.Count; i++)
-                    {
-                        WriteProperty(p.GetArrayElementAtIndex(i), list.Items[i]);
-                    }
-
                     break;
-                case ValueNode.Nested nested:
+                case ValueNode.Nested:
                 {
-                    // Resolve the struct/class Type the SAME way ReadNested does, then map each
-                    // PUBLIC member key back to its serialized child name before
-                    // FindPropertyRelative. A key that does not map through it (the type itself
-                    // doesn't resolve, or this specific key isn't a known public spelling) falls back
-                    // to FindPropertyRelative(key) verbatim -- this is what keeps a legacy
-                    // raw-serialized-name builder writing correctly.
+                    // Resolve the struct/class Type the SAME way ReadNested does, from the target
+                    // object's type plus THIS node's own propertyPath, and hand it to this node's
+                    // members. Resolving it here, once per nested value rather than once per member, is
+                    // the single reflection walk per node the write path has always done.
                     var rootType = p.serializedObject.targetObject?.GetType();
-                    var structType = rootType != null ? SerializedMemberMap.ResolveManagedFieldType(rootType, p.propertyPath) : null;
-
-                    foreach (var (key, child) in nested.Fields)
-                    {
-                        var serializedKey = structType != null && SerializedMemberMap.TrySerializedName(structType, key, out var mapped)
-                            ? mapped
-                            : key;
-                        var childProp = p.FindPropertyRelative(serializedKey);
-                        if (childProp != null)
-                        {
-                            WriteProperty(childProp, child);
-                        }
-                    }
-
-                    break;
+                    return new WriteTarget(
+                        p,
+                        rootType != null ? SerializedMemberMap.ResolveManagedFieldType(rootType, p.propertyPath) : null);
                 }
                 case ValueNode.Unsupported:
                     // No-op (flagged upstream); never overwrite an unsupported value.
@@ -383,6 +429,8 @@ namespace SceneBuilder.Editor
                         "SetAssetRef, never through a field value.");
                     break;
             }
+
+            return target;
         }
 
         private static string LocationOf(SerializedProperty? p)
