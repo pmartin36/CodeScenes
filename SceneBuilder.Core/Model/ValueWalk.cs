@@ -4,12 +4,16 @@ using System.Collections.Generic;
 namespace SceneBuilder.Core.Model
 {
     /// <summary>
-    /// THE recursion over a value's container structure. Every pass that transforms a
-    /// <see cref="ValueNode"/> — the source-side normalizer, the emit-side reduction, the
-    /// representability filter — routes its descent through <see cref="Map{TContext}"/> instead of
-    /// re-deriving <c>switch (node) { Nested => ..., List => ... }</c> for itself. Each pass then
-    /// supplies only its own per-node decision, and none of them can ship having silently skipped a
-    /// container kind: a kind added to the grammar is handled for all of them by editing this file.
+    /// THE recursion over a value's container structure. Every pass that walks a
+    /// <see cref="ValueNode"/> routes its descent through one of the four primitives here —
+    /// <see cref="Map{TContext}"/> to transform, <see cref="Fold{T}"/> to reduce to something that is
+    /// not a value, <see cref="Enumerate"/> to visit with paths, <see cref="Descend{TContext}"/> to
+    /// enter parents before children carrying context down — instead of re-deriving
+    /// <c>switch (node) { Nested => ..., List => ... }</c> for itself. Each pass then supplies only
+    /// its own per-node decision, and none of them can ship having silently skipped a container kind:
+    /// a kind added to the grammar is handled for all of them by editing this file. The
+    /// <c>ValueContainerDescentScanTests</c> guard fails when a site outside this file re-derives
+    /// that switch. See the remarks for which primitive each pass uses and why.
     /// </summary>
     /// <remarks>
     /// Primitive and context per pass:
