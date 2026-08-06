@@ -94,6 +94,42 @@ stay implicitly typed" held by accident. Live-verified across all four items in 
 elements assigned by `ReferenceEquals` against the live roots, zero plan ops proven three ways,
 emitted source compiling on the rewire — at `passed=617 failed=0 skipped=0`.
 
+## 36 - Uniform value descent
+
+`ValueWalk` documented itself as THE recursion over a value's container structure, but five passes
+did not use it: `AssetRefLowering` and `BuiltinRefValidator` each hand-rolled the same
+`switch (node) { AssetRef / List / Nested / default }`, `PlanningValidator.WalkAssetValue` had a
+third copy, `SerializedFieldBridge.WriteProperty` inlined its own, and `SourceExpr.ValueNodeLiteral`
+could not route through anything because it returns a `string` and `Map` is node-in/node-out.
+Nothing was broken, because no feature had added a container kind since those accumulated. M8 adds
+one, so every one of those passes would have walked straight past a UnityEvent listener's
+references: an authored asset target would have kept an empty `Guid` forever, re-syncing on every
+pass and then being skipped at execution.
+
+All five now route through `ValueWalk`, which gained `Fold<T>` (for renderers) and
+`Descend<TContext>` (parent-before-children with the list index, which `WriteProperty` needs to
+reach `GetArrayElementAtIndex`). `Fold` takes one delegate per container kind deliberately: adding a
+kind changes the signature, so every call site fails to compile until its author says how the new
+kind renders.
+
+Removing the `default:` arms and letting the compiler find the gaps was measured and rejected: C#
+reports `CS8509` on a switch over an `abstract record` with sealed cases even when every case is
+covered, so a discard arm is mandatory. Enforcement is a Roslyn token scan instead
+(`ValueContainerDescentScanTests`), matching `ValueNode.List`/`ValueNode.Nested` in any position
+rather than textual prefixes, because most descent here is written as switch-expression arms that
+`case`/`is` matching misses entirely.
+
+Behavior preservation was proven structurally: every characterization test committed in a bucket
+whose diff touches zero production files, so its green gate is after-the-fact `git`-checkable proof
+those tests passed against unmodified code, plus a content-hash pin over the pre-existing tests of
+all five passes, retired once the migrations landed. A second permanent guard
+(`GateTestMetaFileTests`) asserts every `unity-gate` test file has its sibling `.meta`, because a
+missing one means Unity never imports the test, so it never runs and the suite is green for the
+wrong reason. Gate `passed=637 failed=0 skipped=0`. Live-verified in a real editor: materials
+(an `AssetRef` nested in a `List`), builtin meshes and `Vector3` nested values all resolved on
+Materialize, a second build applied zero plan ops, and an Inspector edit of `m_Size` synced back as
+`new UnityEngine.Vector3(7f, 8f, 9f)` through the new `Fold`-based renderer.
+
 Still pending in `specs/`: 08 (M7 robustness, rescoped), 09 (M8 UnityEvents, reframed to typed
 method-lambda), 10 (M9 SerializeReference), 12 (M11 animation, blocked on Animator research) and
 34 (licensing, blocked on two spikes). `00-foundation.md` stays in `specs/` as the living base
