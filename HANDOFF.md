@@ -5,7 +5,18 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=617 failed=0 skipped=0)`.
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=637 failed=0 skipped=0)`
+(2026-08-06, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
+skip is not a Unity pass).
+
+**Spec 36 (uniform value descent) is BUILT and gate-green, NOT yet live-verified.** All five passes now
+route container descent through `ValueWalk`; `Fold<T>` and `Descend<TContext>` shipped alongside `Map`
+and `Enumerate`. Two PERMANENT guards landed: `ValueContainerDescentScanTests` (a Roslyn token scan
+failing when any site outside `ValueWalk.cs` re-derives a container switch) and `GateTestMetaFileTests`
+(every `unity-gate` test `.cs` has its sibling `.meta`, so a test cannot silently never run). The
+feature-scoped content pin retired as designed. Live verification is BLOCKED: the `com.unity.pipeline`
+package is cached in neither `unity-gate/` nor `../Unity/SceneBuilderTest`, and priming it needs a human
+to open the project once through the Hub. Until that runs, 36 stays in `specs/` and is not "complete".
 
 Shipped and live-verified: specs 33 and 35 in full, M-UI RectTransform sync (13), and spec 32's C1-C4.
 
@@ -37,7 +48,9 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/36` Uniform value descent. BLOCKS 09 — build it first.** Not yet started; no code committed.
+- **`specs/36` Uniform value descent. BUILT AND GATE-GREEN 2026-08-06; awaiting live-verify only.**
+  Commits `2a72f72`, `f181ed1`, `c637075`, `6902f31`, `442ba7b`. No longer blocks 09 for correctness;
+  09 can start now. Original problem statement, kept because it explains why 09 needed it:
   `ValueWalk` documents itself as THE container recursion, but five passes hand-roll their own walk or
   cannot use it: `AssetRefLowering.cs:72-85`, `PlanningValidator.WalkAssetValue:151-188`,
   `BuiltinRefValidator.cs:138-150`, `SerializedFieldBridge.cs`, and `SourceExpr.ValueNodeLiteral:60-110`
