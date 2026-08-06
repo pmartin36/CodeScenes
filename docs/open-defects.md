@@ -291,3 +291,42 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   mechanical, behavior-free edit: none of the three files appears in b1-t1's pinned baseline
   (`SceneBuilder.Core.Tests/PinnedTestBaseline.json`), so the pin does not block it. Does not relax
   any DELIVERABLE clause. OWNER: unassigned. FOUND-BY: uniform-value-descent.
+
+- SEVERITY low — the Roslyn source-scan plumbing is duplicated across the two guard tests in the Core
+  test suite. `SceneBuilder.Core.Tests/ValueContainerDescentScanTests.cs` reproduces three members
+  already present in `SceneBuilder.Core.Tests/ObjectRefDescentScanTests.cs`: `EnclosingMember`
+  (`ObjectRefDescentScanTests.cs:132-147` vs `ValueContainerDescentScanTests.cs:145-160`, byte
+  identical), `ProductionFiles` (`:71-99` vs `:83-109`, identical but for the exempt relative path)
+  and the `DescendantTokens` -> `IdentifierToken` -> previous `DotToken` -> `ValueNode` qualifier
+  extraction skeleton (`:104-130` vs `:114-143`, identical but for the matched identifier set).
+  Measured on the current tree at validation of `uniform-value-descent` b4-t2. Both members are
+  private to their class and `ObjectRefDescentScanTests.cs` is not in b4-t2's declared TOUCHES, so no
+  task in that feature could extract the shared helper without an undeclared write. Fix is one new
+  internal helper file in `SceneBuilder.Core.Tests/` plus a mechanical edit to both scan tests; it
+  changes no assertion. Does not relax any DELIVERABLE clause. OWNER: unassigned.
+  FOUND-BY: uniform-value-descent.
+
+- SEVERITY low — two hand-rolled `ValueNode` container descents remain in production because no
+  `ValueWalk` primitive expresses their shape. `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:750,766`
+  (`AuthoredTextIsCurrent`, 4 tokens) is a PAIRED walk comparing two values position by position and
+  every `ValueWalk` primitive takes ONE node; `SceneBuilder.Core/Reconcile/NestedValueEmission.cs:255,256,273,287,290,307`
+  (`Complete`, 7 tokens) recurses into `Nested` producing a key set that is the UNION of the value's
+  and the default's, which `ValueWalk.Map` cannot express (the production comment at
+  `NestedValueEmission.cs:250-252` states this). Measured by the token scan in
+  `SceneBuilder.Core.Tests/ValueContainerDescentScanTests.cs`, which ships both as declared inventory
+  entries with written reasons. `specs/36-uniform-value-descent.md:283-284` and `:300-304` license a
+  declared entry with a reason, so this relaxes no DELIVERABLE clause. Retiring them needs a paired
+  `Any` and a union-producing `Map` on `ValueWalk`, a behavior-affecting design change.
+  OWNER: unassigned. FOUND-BY: uniform-value-descent.
+
+- SEVERITY low — DANGLING artifact reference inside this register. The repo-root-walk entry above
+  cites `SceneBuilder.Core.Tests/PinnedTestBaseline.json` as an existing file ("none of the three
+  files appears in b1-t1's pinned baseline (`...PinnedTestBaseline.json`), so the pin does not block
+  it"). Measured at validation of `uniform-value-descent` b4-t3: that JSON, plus
+  `PinnedTestBaselineTests.cs` and `PinnedBaselineCompletenessTests.cs`, were deleted by b4-t3 (the
+  feature-scoped pin's planned retirement), and `docs/open-defects.md` is outside b4-t3's declared
+  TOUCHES, so that task could not edit it. The claim the parenthetical supports (the repo-root-walk
+  migration is unblocked) remains true and is now unconditional; only the citation points at a file
+  that no longer exists. Fix is one prose edit, naturally folded into whoever clears the repo-root
+  duplication entry. Does not relax any DELIVERABLE clause. OWNER: unassigned.
+  FOUND-BY: uniform-value-descent.

@@ -1,0 +1,347 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Xunit;
+
+namespace SceneBuilder.Core.Tests
+{
+    // A site-granular guard on "ONE mechanism owns descending into a ValueNode container": every
+    // raw `ValueNode.List` / `ValueNode.Nested` token in production source (SceneBuilder.Core/**,
+    // com.codescenes/**) must either be declared here with a reason, or fail the scan. A new
+    // hand-rolled switch in a new member fails on being undeclared; an extra occurrence inside an
+    // already-declared member fails on its count.
+    public class ValueContainerDescentScanTests
+    {
+        private sealed record Site(string RelativePath, string Member, int Count, string Reason);
+        private readonly record struct Match(string RelativePath, string Member, int Line, string Pattern);
+
+        // The declared, legitimate inventory of sites whose container handling is not expressed
+        // through SceneBuilder.Core.Model.ValueWalk. A (file, member) pair absent here allows ZERO
+        // `ValueNode.List` / `ValueNode.Nested` tokens. Reconciled against a live scan of the tree,
+        // so its counts move when production moves.
+        private static IReadOnlyList<Site> DeclaredInventory { get; } = new[]
+        {
+            new Site("com.codescenes/Editor/SerializedEnumNormalizer.cs", "NormalizeNode", 1,
+                "the per-node arm of a walk callback: it rewrites THIS Nested node's TypeName spelling and returns it. The members are the walk's business, not this arm's."),
+            new Site("com.codescenes/Editor/SerializedFieldBridge.cs", "ContainsUnsupported", 1,
+                "List-only representability filter, not a value descent. ValueWalk.Any descends Nested members as well, so routing it through ValueWalk would drop a whole struct field that carries one unrepresentable member, where NestedValueEmission.Project excludes that member and round-trips the rest. Left as it stands."),
+            new Site("com.codescenes/Editor/SerializedFieldBridge.cs", "EnterNode", 2,
+                "Names both container kinds to do a node's OWN write work, sizing the array before its elements are entered and resolving the struct type that node's members map through. The recursion is ValueWalk.Descend's; no child property is derived here."),
+            new Site("com.codescenes/Editor/SerializedFieldBridge.cs", "ReadList", 1,
+                "Construct a container node from a live SerializedProperty tree. What is walked is the property tree, not a ValueNode, so ValueWalk has no shape for it."),
+            new Site("com.codescenes/Editor/SerializedFieldBridge.cs", "ReadNested", 1,
+                "Construct a container node from a live SerializedProperty tree. What is walked is the property tree, not a ValueNode, so ValueWalk has no shape for it."),
+            new Site("SceneBuilder.Core/Materialize/Materializer.cs", "EmitFieldOp", 1,
+                "emits one plan op per reference-list index at the depth the write boundary supports; the recursion carries a PLAN PATH and appends ops rather than producing a value, a shape no ValueWalk primitive expresses."),
+            new Site("SceneBuilder.Core/Materialize/Materializer.cs", "IsReferenceList", 1,
+                "classifies a list's items for that one-level per-index lowering, not a descent."),
+            new Site("SceneBuilder.Core/Model/ValueNode.cs", "ValueNode", 2,
+                "the union's JsonDerivedType registration."),
+            new Site("SceneBuilder.Core/Parsing/ValueNodeParser.cs", "ParseNested", 1,
+                "construct the node from one parsed C# initializer; what is walked is the syntax tree, not a ValueNode."),
+            new Site("SceneBuilder.Core/Parsing/ValueNodeParser.cs", "ParseList", 1,
+                "construct the node from one parsed C# initializer; what is walked is the syntax tree, not a ValueNode."),
+            new Site("SceneBuilder.Core/Reconcile/ComponentReconciler.cs", "AuthoredTextIsCurrent", 4,
+                "a PAIRED walk comparing two values position-by-position; every ValueWalk primitive takes ONE node, so none expresses it."),
+            new Site("SceneBuilder.Core/Reconcile/ComponentReconciler.cs", "ReconcileComponents", 2,
+                "two top-level kind tests choosing the per-MEMBER default rule (NestedValueEmission.Project) over whole-value equality for a Nested field; neither descends."),
+            new Site("SceneBuilder.Core/Reconcile/ComponentReconciler.Defaults.cs", "IsAtDefault", 1,
+                "one top-level kind test, routing a Nested field to NestedValueEmission.Project; no descent."),
+            new Site("SceneBuilder.Core/Reconcile/ComponentReconciler.Defaults.cs", "OmitDefaults", 1,
+                "one top-level kind test, routing a Nested field to NestedValueEmission.Project; no descent."),
+            new Site("SceneBuilder.Core/Reconcile/ListValueEmission.cs", "ArrayPrefix", 1,
+                "a parameter TYPE, not a match: the emitter is handed the List node whose prefix it names."),
+            new Site("SceneBuilder.Core/Reconcile/ListValueEmission.cs", "EmittedTypeToken", 2,
+                "names ONE item's rendered C# type; the List arm returns a token and never looks inside."),
+            new Site("SceneBuilder.Core/Reconcile/ListValueEmission.cs", "HasUnemittableItem", 1,
+                "the per-node predicate INSIDE a ValueWalk.Any descent; the descent is ValueWalk's."),
+            new Site("SceneBuilder.Core/Reconcile/NestedValueEmission.cs", "Complete", 7,
+                "the one nested pass ValueWalk.Map cannot express: its result's key set is the UNION of the value's and the default's, so it ADDS members rather than mapping the ones present (NestedValueEmission.cs:250-252 states this in the production comment)."),
+            new Site("SceneBuilder.Core/Reconcile/NestedValueEmission.cs", "ExcludeUnrepresentable", 1,
+                "one top-level kind guard before handing the node to ValueWalk.Map; the descent is Map's."),
+            new Site("SceneBuilder.Core/Reconcile/NestedValueEmission.cs", "IsRepresentable", 1,
+                "a per-node representability rule applied inside a ValueWalk.Map descent."),
+            new Site("SceneBuilder.Core/Reconcile/NestedValueEmission.cs", "Project", 2,
+                "two top-level kind tests deciding whether the projected result is an EMPTY nested node; the descent belongs to Reduce and ExcludeUnrepresentable."),
+            new Site("SceneBuilder.Core/Reconcile/NestedValueEmission.cs", "Reduce", 5,
+                "one top-level guard plus per-node and per-context arms inside ValueWalk.Map's callbacks (paired-default threading); the descent is Map's."),
+        };
+
+        private static readonly string[] ScanRoots = { "SceneBuilder.Core", "com.codescenes" };
+
+        // The one site exempt by relative path (not bare filename): its own body legitimately
+        // descends the containers it is named for.
+        private const string ValueWalkRelativePath = "SceneBuilder.Core/Model/ValueWalk.cs";
+
+        // Every production `.cs` file under ScanRoots, relative to repoRoot, excluding obj/bin
+        // output and SceneBuilder.Core/Model/ValueWalk.cs itself (by relative path, not bare
+        // filename — a second file sharing that name elsewhere must not inherit the exemption).
+        private static IEnumerable<string> ProductionFiles(string repoRoot)
+        {
+            foreach (var scanRoot in ScanRoots)
+            {
+                var rootPath = Path.Combine(repoRoot, scanRoot);
+                if (!Directory.Exists(rootPath))
+                {
+                    continue;
+                }
+
+                foreach (var file in Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories))
+                {
+                    var relative = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
+                    if (relative.Contains("/obj/") || relative.Contains("/bin/"))
+                    {
+                        continue;
+                    }
+
+                    if (relative == ValueWalkRelativePath)
+                    {
+                        continue;
+                    }
+
+                    yield return relative;
+                }
+            }
+        }
+
+        // Every `ValueNode.List` / `ValueNode.Nested` qualified-identifier TOKEN in `sourceText`, in
+        // ANY syntactic position, with its enclosing member and line. A syntax-only parse: comment
+        // and XML-doc trivia carry no tokens, so prose mentioning either name can never match.
+        private static IEnumerable<Match> ContainerTokens(string sourceText, string relativePath)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
+            var root = tree.GetRoot();
+
+            foreach (var token in root.DescendantTokens())
+            {
+                if (token.Kind() != SyntaxKind.IdentifierToken
+                    || (token.Text != "List" && token.Text != "Nested"))
+                {
+                    continue;
+                }
+
+                var dot = token.GetPreviousToken();
+                if (dot.Kind() != SyntaxKind.DotToken)
+                {
+                    continue;
+                }
+
+                var qualifier = dot.GetPreviousToken();
+                if (qualifier.Text != "ValueNode")
+                {
+                    continue;
+                }
+
+                var pattern = "ValueNode." + token.Text;
+                var line = token.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+                yield return new Match(relativePath, EnclosingMember(token), line, pattern);
+            }
+        }
+
+        private static string EnclosingMember(SyntaxToken token)
+        {
+            for (var node = token.Parent; node != null; node = node.Parent)
+            {
+                switch (node)
+                {
+                    case MethodDeclarationSyntax m: return m.Identifier.Text;
+                    case LocalFunctionStatementSyntax l: return l.Identifier.Text;
+                    case ConstructorDeclarationSyntax c: return c.Identifier.Text;
+                    case PropertyDeclarationSyntax p: return p.Identifier.Text;
+                    case TypeDeclarationSyntax t: return t.Identifier.Text;
+                }
+            }
+
+            return "<top-level>";
+        }
+
+        // One message per (file, member) whose actual token count differs from its declared count,
+        // scoped to the files `matches` actually covers -- a declared site whose file was never
+        // fed through ContainerTokens is out of scope for this call, not silently satisfied.
+        // Names the file, the member, the matched pattern(s) with line(s), and the remedy.
+        private static IReadOnlyList<string> Violations(IEnumerable<Match> matches, IReadOnlyCollection<Site> inventory)
+        {
+            var byKey = new Dictionary<(string RelativePath, string Member), List<Match>>();
+            var scannedPaths = new HashSet<string>();
+            foreach (var match in matches)
+            {
+                scannedPaths.Add(match.RelativePath);
+                var key = (match.RelativePath, match.Member);
+                if (!byKey.TryGetValue(key, out var list))
+                {
+                    list = new List<Match>();
+                    byKey[key] = list;
+                }
+
+                list.Add(match);
+            }
+
+            var expected = inventory
+                .Where(s => scannedPaths.Contains(s.RelativePath))
+                .ToDictionary(s => (s.RelativePath, s.Member), s => s.Count);
+
+            var violations = new List<string>();
+            foreach (var key in expected.Keys.Union(byKey.Keys))
+            {
+                var expectedCount = expected.GetValueOrDefault(key, 0);
+                var actual = byKey.GetValueOrDefault(key, new List<Match>());
+                if (expectedCount == actual.Count)
+                {
+                    continue;
+                }
+
+                var found = actual.Count == 0
+                    ? "none"
+                    : string.Join(", ", actual.Select(m => $"{m.Pattern}@{m.Line}"));
+
+                violations.Add(
+                    $"{key.RelativePath} :: {key.Member} — expected {expectedCount} container-kind token(s), " +
+                    $"found {actual.Count} ({found}). Route this site's container descent through " +
+                    "SceneBuilder.Core.Model.ValueWalk, or declare it in DeclaredInventory with its reason.");
+            }
+
+            return violations;
+        }
+
+        [Fact]
+        public void Scan_ProductionSource_MatchesDeclaredInventory_NoUndeclaredDescent()
+        {
+            var repoRoot = RepoRootLocator.Find();
+            var files = ProductionFiles(repoRoot).ToList();
+            Assert.True(files.Count > 0, "scan found zero production .cs files -- repo root resolution is broken");
+
+            var matches = new List<Match>();
+            foreach (var relativePath in files)
+            {
+                var fullPath = Path.Combine(repoRoot, relativePath);
+                matches.AddRange(ContainerTokens(File.ReadAllText(fullPath), relativePath));
+            }
+
+            Assert.True(matches.Count > 0,
+                "scan found zero ValueNode.List / ValueNode.Nested token sites -- the token match itself is broken");
+
+            var violations = Violations(matches, DeclaredInventory);
+            Assert.True(violations.Count == 0, string.Join("\n", violations));
+        }
+
+        private const string SwitchExpressionSyntheticSource = @"
+namespace SceneBuilder.Core.Model
+{
+    using SceneBuilder.Core.Model;
+
+    internal static class Synthetic
+    {
+        private static int SwitchArm(ValueNode node) => node switch
+        {
+            ValueNode.List list => list.Items.Count,
+            _ => 0,
+        };
+
+        private static int CaseForm(ValueNode node)
+        {
+            switch (node)
+            {
+                case ValueNode.Nested n:
+                    return 1;
+                default:
+                    return 0;
+            }
+        }
+
+        private static bool IsForm(ValueNode node) => node is ValueNode.List;
+
+        private static int ParamForm(ValueNode.Nested node) => 0;
+
+        private static ValueNode NewForm() => new ValueNode.List();
+
+        /// <see cref=""ValueNode.List""/> is only documentation prose, never a real token.
+        private static int TriviaOnly() => 0;
+    }
+}
+";
+
+        [Fact]
+        public void Scan_SwitchExpressionArm_IsMatched_NotOnlyCaseAndIsForms()
+        {
+            var byMember = ContainerTokens(SwitchExpressionSyntheticSource, "Synthetic.cs")
+                .GroupBy(m => m.Member)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            Assert.True(
+                byMember.TryGetValue("SwitchArm", out var switchArm) && switchArm.Count == 1 && switchArm[0].Pattern == "ValueNode.List",
+                "switch-expression arm 'ValueNode.List list =>' was not matched as 'ValueNode.List'");
+            Assert.True(
+                byMember.TryGetValue("CaseForm", out var caseForm) && caseForm.Count == 1 && caseForm[0].Pattern == "ValueNode.Nested",
+                "'case ValueNode.Nested n:' was not matched as 'ValueNode.Nested'");
+            Assert.True(
+                byMember.TryGetValue("IsForm", out var isForm) && isForm.Count == 1 && isForm[0].Pattern == "ValueNode.List",
+                "'node is ValueNode.List' was not matched as 'ValueNode.List'");
+            Assert.True(
+                byMember.TryGetValue("ParamForm", out var paramForm) && paramForm.Count == 1 && paramForm[0].Pattern == "ValueNode.Nested",
+                "parameter type 'ValueNode.Nested node' was not matched as 'ValueNode.Nested'");
+            Assert.True(
+                byMember.TryGetValue("NewForm", out var newForm) && newForm.Count == 1 && newForm[0].Pattern == "ValueNode.List",
+                "'new ValueNode.List(...)' was not matched as 'ValueNode.List'");
+            Assert.False(
+                byMember.ContainsKey("TriviaOnly"),
+                "an XML doc comment mentioning ValueNode.List must not be matched -- trivia carries no tokens");
+        }
+
+        private const string ReintroducedSwitchSource = @"
+namespace SceneBuilder.Core.Lowering
+{
+    using SceneBuilder.Core.Model;
+
+    internal static class AssetRefLowering
+    {
+        private static ValueNode LowerNode(ValueNode node)
+        {
+            switch (node)
+            {
+                case ValueNode.List list:
+                    return list;
+                case ValueNode.Nested nested:
+                    return nested;
+                default:
+                    return node;
+            }
+        }
+    }
+}
+";
+
+        [Fact]
+        public void Scan_ReintroducedHandRolledSwitch_FailsNamingFileAndPatternAndRemedy()
+        {
+            const string relativePath = "SceneBuilder.Core/Lowering/AssetRefLowering.cs";
+            var matches = ContainerTokens(ReintroducedSwitchSource, relativePath).ToList();
+            var violations = Violations(matches, DeclaredInventory);
+
+            Assert.True(violations.Count == 1,
+                $"expected exactly one violation for a reintroduced hand-rolled switch, found {violations.Count}: {string.Join(" | ", violations)}");
+
+            var message = violations[0];
+            Assert.Contains(relativePath, message);
+            Assert.Contains("LowerNode", message);
+            Assert.Contains("ValueNode.List", message);
+            Assert.Contains("ValueNode.Nested", message);
+            Assert.Contains("ValueWalk", message);
+        }
+
+        [Fact]
+        public void DeclaredInventory_EveryEntryCarriesAWrittenReason()
+        {
+            foreach (var site in DeclaredInventory)
+            {
+                Assert.True(!string.IsNullOrWhiteSpace(site.Reason),
+                    $"{site.RelativePath} :: {site.Member} declares no written reason");
+                Assert.True(site.Count > 0,
+                    $"{site.RelativePath} :: {site.Member} declares Count <= 0, which allows zero tokens and does not belong in the inventory");
+            }
+        }
+    }
+}
