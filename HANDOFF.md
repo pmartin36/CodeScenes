@@ -9,24 +9,19 @@ Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=637 failed=0 sk
 (2026-08-06, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
 skip is not a Unity pass).
 
-**Spec 36 (uniform value descent) is BUILT and gate-green, NOT yet live-verified.** All five passes now
-route container descent through `ValueWalk`; `Fold<T>` and `Descend<TContext>` shipped alongside `Map`
-and `Enumerate`. Two PERMANENT guards landed: `ValueContainerDescentScanTests` (a Roslyn token scan
-failing when any site outside `ValueWalk.cs` re-derives a container switch) and `GateTestMetaFileTests`
-(every `unity-gate` test `.cs` has its sibling `.meta`, so a test cannot silently never run). The
-feature-scoped content pin retired as designed. Live verification is BLOCKED: the `com.unity.pipeline`
-package is cached in neither `unity-gate/` nor `../Unity/SceneBuilderTest`, and priming it needs a human
-to open the project once through the Hub. Until that runs, 36 stays in `specs/` and is not "complete".
+**Spec 36 (uniform value descent) SHIPPED and live-verified 2026-08-06** — moved to
+`specs/completed/`. All five passes route container descent through `ValueWalk`, which gained
+`Fold<T>` and `Descend<TContext>`. Two PERMANENT guards landed: `ValueContainerDescentScanTests`
+(Roslyn token scan, fails when any site outside `ValueWalk.cs` re-derives a container switch) and
+`GateTestMetaFileTests` (every `unity-gate` test `.cs` has its sibling `.meta`, so a test cannot
+silently never run). Live log: `SceneBuilderTest/Logs/live-verify-spec36.log`.
 
-Shipped and live-verified: specs 33 and 35 in full, M-UI RectTransform sync (13), and spec 32's C1-C4.
-
-Shipped, gate-verified only: spec 31, the hidden-serialized-field reader contract. Its headline claim
-- component enable/disable syncing scene->code - still has no live confirmation.
-
-Unowned defects measured during builds, each with no task claiming its fix, are tracked in
-`docs/open-defects.md`. Also open: 22 nullable-annotation compiler warnings, 17 of them in
-`com.codescenes/Runtime/SurfaceSnap.cs`. Warnings do not fail the gate; whether the adapter should be
-warning-clean is undecided.
+Measured during that live pass, NOT caused by 36 and unowned: the demo scene reports a steady
+9 plan ops on every build (its `FitSize`/`SurfaceSnap` move transforms after a build, so the next
+build sees real drift; an isolated probe without spatial components went 11 ops then 0), and
+`[CodeScenes] SurfaceSnap on 'New Game Object' has no Renderer/mesh bounds to snap` fires on every
+DemoScene build against an object that is not in the builder. Neither is in `docs/open-defects.md`
+yet; neither was investigated.
 
 ## Order
 
@@ -48,20 +43,7 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/36` Uniform value descent. BUILT AND GATE-GREEN 2026-08-06; awaiting live-verify only.**
-  Commits `2a72f72`, `f181ed1`, `c637075`, `6902f31`, `442ba7b`. No longer blocks 09 for correctness;
-  09 can start now. Original problem statement, kept because it explains why 09 needed it:
-  `ValueWalk` documents itself as THE container recursion, but five passes hand-roll their own walk or
-  cannot use it: `AssetRefLowering.cs:72-85`, `PlanningValidator.WalkAssetValue:151-188`,
-  `BuiltinRefValidator.cs:138-150`, `SerializedFieldBridge.cs`, and `SourceExpr.ValueNodeLiteral:60-110`
-  (a renderer returning `string`, which `Map` cannot express — spec 36 adds `Fold<T>` for it). Nothing is
-  broken today because no feature has added a container kind since those accumulated. M8 adds one, so
-  every one of those passes walks straight past a UnityEvent listener's refs. Measured consequence: an
-  authored asset target keeps `Guid == ""` forever, re-syncing on every pass and skipping the listener at
-  execution. Removing the `default:` arms is NOT an available guard — C# reports CS8509 on a switch over
-  `abstract record` + sealed cases even when every case is covered (verified by spike), so a discard arm
-  is mandatory and enforcement comes from routing plus a scan test.
-- **`specs/09` M8 UnityEvents.** Blocked on 36. Its `.agent_handoffs/m8-unityevents/tasks.md` is STALE —
+- **`specs/09` M8 UnityEvents. NEXT — unblocked, 36 shipped.** Its `.agent_handoffs/m8-unityevents/tasks.md` is STALE —
   it carries hand-edits that assigned the descent migrations to M8's own b1-t1. Relaunch M8 FRESH after
   36 lands (the tree will have moved); do not resume that plan. The target model is
   already resolved in the spec: add `ComponentRef<T>` captured via `node.Ref<T>(ordinal)`. No model
