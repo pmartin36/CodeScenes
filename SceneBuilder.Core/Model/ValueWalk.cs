@@ -11,6 +11,28 @@ namespace SceneBuilder.Core.Model
     /// supplies only its own per-node decision, and none of them can ship having silently skipped a
     /// container kind: a kind added to the grammar is handled for all of them by editing this file.
     /// </summary>
+    /// <remarks>
+    /// Primitive and context per pass:
+    /// <list type="bullet">
+    /// <item><description><c>AssetRefLowering.LowerNode</c> — <see cref="Map{TContext}"/>, no context
+    /// (the resolvers are captured); <c>dropEmptiedNested: false</c>, since it replaces one leaf kind
+    /// and drops nothing.</description></item>
+    /// <item><description><c>PlanningValidator.WalkAssetValue</c> — <see cref="Enumerate"/>, no
+    /// context; side-effecting, builds no value, and reports under the top-level field key, so the
+    /// yielded path is unused.</description></item>
+    /// <item><description><c>SourceExpr.ValueNodeLiteral</c> — <see cref="Fold{T}"/> with
+    /// <c>T = string</c>, no context (the asset catalog is captured); the container delegates render
+    /// array/initializer syntax, the leaf delegate the per-kind literal.</description></item>
+    /// <item><description><c>BuiltinRefValidator.ValidateField</c> — <see cref="Enumerate"/>, context
+    /// is the field key it prefixes onto each yielded path; <c>[i]</c> / <c>.member</c> are the
+    /// spellings it reports.</description></item>
+    /// <item><description><c>SerializedFieldBridge.WriteProperty</c> — <see cref="Descend{TContext}"/>,
+    /// context is the live <c>SerializedProperty</c> plus the struct type resolved on the enclosing
+    /// nested value. It needs a list item's index (to reach <c>GetArrayElementAtIndex</c>) and the
+    /// parent entered first with its resolved type handed down (to reach
+    /// <c>FindPropertyRelative</c> under the mapped member name).</description></item>
+    /// </list>
+    /// </remarks>
     public static class ValueWalk
     {
         /// <summary>
@@ -150,6 +172,101 @@ namespace SceneBuilder.Core.Model
         /// </summary>
         public static IEnumerable<(string Path, ValueNode Node)> Enumerate(ValueNode node) =>
             EnumerateAt(node, "");
+
+        /// <summary>
+        /// Reduces <paramref name="node"/> bottom-up: every child is folded before its parent's
+        /// container delegate runs, so a container delegate never combines an unfolded child into
+        /// its result.
+        /// </summary>
+        /// <param name="list">
+        /// Runs on a <see cref="ValueNode.List"/> after every item has been folded, given the
+        /// original node and the folded items in source order.
+        /// </param>
+        /// <param name="nested">
+        /// Runs on a <see cref="ValueNode.Nested"/> after every member has been folded, given the
+        /// original node and the folded members in source order.
+        /// </param>
+        /// <param name="leaf">Runs on every non-container node, given the node itself.</param>
+        public static T Fold<T>(
+            ValueNode node,
+            Func<ValueNode.List, IReadOnlyList<T>, T> list,
+            Func<ValueNode.Nested, IReadOnlyList<KeyValuePair<string, T>>, T> nested,
+            Func<ValueNode, T> leaf)
+        {
+            switch (node)
+            {
+                case ValueNode.List listNode:
+                {
+                    var items = new List<T>(listNode.Items.Count);
+                    foreach (var item in listNode.Items)
+                    {
+                        items.Add(Fold(item, list, nested, leaf));
+                    }
+
+                    return list(listNode, items);
+                }
+
+                case ValueNode.Nested nestedNode:
+                {
+                    var members = new List<KeyValuePair<string, T>>(nestedNode.Fields.Count);
+                    foreach (var (memberKey, memberValue) in nestedNode.Fields)
+                    {
+                        members.Add(new KeyValuePair<string, T>(memberKey, Fold(memberValue, list, nested, leaf)));
+                    }
+
+                    return nested(nestedNode, members);
+                }
+
+                // Every other kind is a leaf.
+                default:
+                    return leaf(node);
+            }
+        }
+
+        /// <summary>
+        /// Walks <paramref name="node"/> top-down for a side-effecting pass that builds no value:
+        /// <paramref name="enter"/> runs on a node before its children, using the context its parent
+        /// produced, and returns the context its own children derive from.
+        /// </summary>
+        /// <param name="enter">
+        /// Runs on a node before its children, with the context its parent produced for it, and
+        /// returns the context its children are derived from. A side-effecting pass acts here (write
+        /// the leaf, set <c>arraySize</c>, resolve the struct type). A pass that must leave a subtree
+        /// untouched expresses that through the context it returns: <c>ValueWalk</c> never inspects
+        /// <typeparamref name="TContext"/>.
+        /// </param>
+        /// <param name="item">Supplies a <see cref="ValueNode.List"/> item's context, given the list, the context
+        /// <paramref name="enter"/> returned for it, and the item's index.</param>
+        /// <param name="member">Supplies a <see cref="ValueNode.Nested"/> member's context, given the nested node, the
+        /// context <paramref name="enter"/> returned for it, and the member key.</param>
+        public static void Descend<TContext>(
+            ValueNode node,
+            TContext context,
+            Func<ValueNode, TContext, TContext> enter,
+            Func<ValueNode.List, TContext, int, TContext> item,
+            Func<ValueNode.Nested, TContext, string, TContext> member)
+        {
+            var childContext = enter(node, context);
+
+            switch (node)
+            {
+                case ValueNode.List list:
+                    for (var i = 0; i < list.Items.Count; i++)
+                    {
+                        Descend(list.Items[i], item(list, childContext, i), enter, item, member);
+                    }
+
+                    break;
+
+                case ValueNode.Nested nested:
+                    foreach (var (memberKey, memberValue) in nested.Fields)
+                    {
+                        Descend(memberValue, member(nested, childContext, memberKey), enter, item, member);
+                    }
+
+                    break;
+            }
+        }
 
         private static IEnumerable<(string Path, ValueNode Node)> EnumerateAt(ValueNode node, string path)
         {

@@ -279,3 +279,15 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   to decide the recurrence key first: auto-sync builds on every debounced change, so surfacing a
   keyless per-pass conflict on the build path would log on every keystroke. OWNER: unassigned.
   FOUND-BY: excluded-field-one-way-report.
+
+- SEVERITY low — the repo-root walk `private static string RepoRoot([CallerFilePath] string here = "")`
+  (walk upward to the directory containing `SceneBuilder.sln`) is duplicated across the Core test
+  suite. Measured copies: `SceneBuilder.Core.Tests/ObjectRefDescentScanTests.cs:54`,
+  `SceneBuilder.Core.Tests/ListValueEmissionTests.cs:530`,
+  `SceneBuilder.Core.Tests/AuthoringBindHarness.cs:17`. Feature `uniform-value-descent` b1-t1 added a
+  fourth site as the intended single owner, `SceneBuilder.Core.Tests/RepoRootLocator.cs:12`, and its
+  task block scopes migrating the pre-existing copies OUT, so the tree now holds four copies of the
+  same walk. New call sites (b1-t2, b4-t2) use the helper; the three old ones do not. Migration is a
+  mechanical, behavior-free edit: none of the three files appears in b1-t1's pinned baseline
+  (`SceneBuilder.Core.Tests/PinnedTestBaseline.json`), so the pin does not block it. Does not relax
+  any DELIVERABLE clause. OWNER: unassigned. FOUND-BY: uniform-value-descent.

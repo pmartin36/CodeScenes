@@ -37,7 +37,20 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/09` M8 UnityEvents.** Unblocks the minigolf demo together with spec 13. The target model is
+- **`specs/36` Uniform value descent. BLOCKS 09 — build it first.** Not yet started; no code committed.
+  `ValueWalk` documents itself as THE container recursion, but five passes hand-roll their own walk or
+  cannot use it: `AssetRefLowering.cs:72-85`, `PlanningValidator.WalkAssetValue:151-188`,
+  `BuiltinRefValidator.cs:138-150`, `SerializedFieldBridge.cs`, and `SourceExpr.ValueNodeLiteral:60-110`
+  (a renderer returning `string`, which `Map` cannot express — spec 36 adds `Fold<T>` for it). Nothing is
+  broken today because no feature has added a container kind since those accumulated. M8 adds one, so
+  every one of those passes walks straight past a UnityEvent listener's refs. Measured consequence: an
+  authored asset target keeps `Guid == ""` forever, re-syncing on every pass and skipping the listener at
+  execution. Removing the `default:` arms is NOT an available guard — C# reports CS8509 on a switch over
+  `abstract record` + sealed cases even when every case is covered (verified by spike), so a discard arm
+  is mandatory and enforcement comes from routing plus a scan test.
+- **`specs/09` M8 UnityEvents.** Blocked on 36. Its `.agent_handoffs/m8-unityevents/tasks.md` is STALE —
+  it carries hand-edits that assigned the descent migrations to M8's own b1-t1. Relaunch M8 FRESH after
+  36 lands (the tree will have moved); do not resume that plan. The target model is
   already resolved in the spec: add `ComponentRef<T>` captured via `node.Ref<T>(ordinal)`. No model
   change — `ObjectRef` already carries a bare LogicalId and the IdentityMap already has
   `Kind=="Component"` entries.
@@ -75,8 +88,31 @@ Two stops, opposite handling — conflating them wastes a full run:
   ```
   Resume REQUIRES re-passing `args` or it bails with "no input" — including the gate-scoping pair
   (see CLAUDE.md), which is not recorded in the run and is silently off if omitted.
-- **Halted on plan validation** — the cached plan IS the problem, so resuming reproduces it. Hand-fix
-  `.agent_handoffs/<feature>/tasks.md` (gitignored) and relaunch FRESH.
+- **Halted on plan validation** — the cached plan IS the problem, so resuming reproduces it. What to
+  change depends on WHICH halt this is, and the relaunch mode is the whole game:
+  - **First halt:** fix the spec or `args`, relaunch with `{ spec: ... }`. Re-intake is right here.
+  - **Second halt onward:** hand-fix `.agent_handoffs/<feature>/tasks.md` (gitignored) and relaunch
+    with `tasksReady: true`, NOT with `{ spec }`:
+    ```
+    args: { feature: "<name>", tasksReady: true, noPush: true,
+            fastGateCommand: "GATE_SKIP_UNITY=1 ./verify.sh",
+            slowPathGlobs: ["com.codescenes/**", "unity-gate/**"],
+            testPathGlobs: ["unity-gate/Assets/GateTests/**", "SceneBuilder.Core.Tests/**"] }
+    ```
+    Passing `{ spec }` re-runs intake, which DISCARDS your hand-fixed `tasks.md` and generates a new
+    decomposition. You then review a different artifact every round: fixed issues stay fixed, but the
+    fresh plan makes fresh omissions, so the finding count never falls. Measured on spec 36: seven
+    rounds of spec-fix-and-regenerate never converged; switching to `tasksReady` dropped it to one
+    high per round, each strictly downstream of the previous fix, at ~115k tokens instead of ~160k.
+  - **Reproduce literals IN `tasks.md`.** Agents read the handoff protocol, `tasks.md`, sibling
+    `research.md` and the `SOURCE:` spec. A deliverable saying "with the spec's signature" or "every
+    file in the spec's floor" is a reference, not a contract. Paste exact signatures and enumerated
+    filenames in.
+  - **Two signs to stop editing and change something else:** the same class of finding returning in
+    new clothes (you are writing rules as prose — an invariant needs an owning task, one shared
+    mechanism, and a check that fails on bypass), or a requirement whose enforcement lives in the
+    harness rather than the repo (agent behavior is in `~/.claude/agents/tdd-*.md`; re-express the
+    guarantee as build order, a committed artifact, or a test).
 
 Editing feature code under a paused run is safe as long as the full gate passes afterward: a cached
 GREEN verdict only lies if behavior broke, and the gate catches that. Editing the harness
