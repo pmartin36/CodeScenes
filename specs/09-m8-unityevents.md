@@ -274,7 +274,10 @@ slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, hud,
 ## Risks/notes
 - **Mode ↔ ArgMode table** (`PersistentListenerMode`): `0 EventDefined`→`dynamic`,
   `1 Void`→`void`, `2 Object`→`object`, `3 Int`→`int`, `4 Float`→`float`, `5 String`→`string`,
-  `6 Bool`→`bool`. `UnityEventCallState`: `0 Off`, `1 RuntimeOnly`, `2 EditorAndRuntime`. In dynamic
+  `6 Bool`→`bool`. `UnityEventCallState`: `0 Off`, `1 EditorAndRuntime`, `2 RuntimeOnly` — CORRECTED 2026-08-06 from
+  MEASUREMENT against the real editor during M8's b1-t3 (this document previously had RuntimeOnly and
+  EditorAndRuntime swapped; the authority is `SceneBuilder.Core/Model/UnityEventProjection.cs`, which
+  pins the numbers with an EditMode assertion). In dynamic
   mode the method's parameter types are those of the event's generic args (`UnityEvent<T…>`), derivable
   from the field type; Core stores only target+method and lets the adapter wire via the dynamic API.
 - `m_TargetAssemblyTypeName` / `m_ObjectArgumentAssemblyTypeName` are Unity-populated; Core stores the
