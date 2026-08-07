@@ -233,3 +233,124 @@ Reading notes for whoever picks this up:
   FOUND-BY: m8-unityevents (b1-t3 validation).
 
 STATUS: READY
+
+
+## Appended from the second plan (reroll), extracted 2026-08-07
+
+Same reading rules as above: measurements true, task-id ownership void.
+
+
+Feature-level register of real defects measured during this run that the measuring task must not fix.
+
+- SEVERITY med — `SceneBuilder.Core/Reconcile/SourcePatchApplier.cs` is 941 lines (`wc -l`,
+  re-measured b1-t1 iteration 1) against the 1000-line budget enforced at
+  `SceneBuilder.Core.Tests/ObjectRefDescentScanTests.cs:242` — 59 lines of headroom. No split task
+  exists for it (b1-t1 splits `Reconciler.cs` only, and `SourcePatchApplier.cs` is outside b1-t1's
+  TOUCHES). b4-t3 edits it and self-imposes "at most a dispatch hook" (deliverable (h)) but carries
+  no ASSUMPTION or escalation path for the case where that hook plus its wiring exceeds 59 lines,
+  which would land the file over the gate mid-task. Same finding as plan-review.md MED-3, which
+  remains unrouted: plan-review.md is not read by the task agents, so this register is its channel.
+  OWNER: b4-t3 — attack it as an assumption at research time (measure the real hook size before
+  writing it; if it does not fit, split `SourcePatchApplier.cs` first rather than growing it).
+
+- SEVERITY low — a `ComponentData` reached ONLY through a prefab-instance channel carries an EMPTY
+  `GlobalObjectId` after b1-t2 (a). MEASURED: b1-t2 populates the component goid at the general
+  snapshot read (`com.codescenes/Editor/SceneSnapshotReader.cs:181-183`, the one site that builds
+  `SnapshotNode.Components`); the two OTHER `SerializedFieldBridge.ReadComponent` production call
+  sites — `com.codescenes/Editor/PrefabInstanceProbe.Overrides.cs:288` (an instance's
+  `AddedComponents[]`) and `com.codescenes/Editor/PrefabInstanceProbe.Nested.cs:267` (an instance's
+  `AddedGameObjects[]` node components) — do not stamp one and are outside b1-t2's TOUCHES. A
+  listener whose target is an added component ON a prefab instance therefore has no goid in the
+  snapshot, so it cannot enter the PENDING set and falls to Dangling.
+  OWNER: b4-t4 — it owns the pending-target path that consumes the goid; decide there whether the
+  instance channels are in scope for §13 convergence or an explicitly stated boundary.
+
+- SEVERITY low — the new `ConflictKind.UnsyncableListener` report surfaces as a console NOTE, not a
+  WARNING. MEASURED: `com.codescenes/Editor/ConflictSurfacing.cs:183-186` labels only
+  `UnrepresentableValue` and `UnauthorableField` as WARNING and everything else as NOTE. A listener
+  the user wired in the Inspector that is NOT reaching their code is the same user-visible class of
+  event as `UnrepresentableValue` (spec 09:196-197 calls it fail-loud), so it should read WARNING.
+  `ConflictSurfacing.cs` is in no M8 task's TOUCHES.
+  OWNER: b4-t1 — the first task that constructs the report from the scene->code direction.
+
+- SEVERITY med — `SceneBuilder.Core.Tests/ModeArgBypassScanTests.cs` does not guard what
+  `tasks.md:241-242` claims ("`ModeArgBypassScanTests` fails the adapter if it grows a mode table of
+  its own"). MEASURED in the current tree (b1-t2 research iteration 3): Scan A's allowlist
+  (`:78-84`, PINNED at `:222-231`) is exactly `{SceneBuilder.Core/Model/UnityEventProjection.cs,
+  com.codescenes/Editor/UnityEventWriter.cs, com.codescenes/Editor/UnityEventReader.cs}`, and
+  `ls com.codescenes/Editor/UnityEvent*` returns no matches — both adapter entries are reserved
+  names for files that do not exist yet. Scan B (`:236-247`) fires only on the identifiers
+  `ListenerArgMode` / `ListenerCallState`, which a hand-written raw-integer mode/arg table would
+  never name. So a mode table written inside `UnityEventWriter.cs` or `UnityEventReader.cs` is
+  invisible to BOTH scans and spec 09:219-220 ("Adapter carries no mode/arg logic beyond calling the
+  typed API Core selects") is unguarded exactly where the adapter listener code lands. b1-t2 is the
+  wrong owner — shrinking an allowlist for two files that do not exist guards nothing.
+  `ModeArgBypassScanTests.cs` is in no M8 task's TOUCHES, so widening is required.
+  OWNER: b3-t1 — it creates `UnityEventWriter.cs`, the first real allowlisted adapter file
+  (b4-t1 creates the second, `UnityEventReader.cs`). Same finding as
+  `scope/bucket-b1.md` finding 1 and `plan-review.md` MED-1.
+
+- SEVERITY low — the ordinal-within-type component-key rule (spec 09:31, "Type.FullName +
+  ordinal-within-type") is hand-written SIX times, three of them character-identical. MEASURED
+  (b1-t2 research iteration 4, `rg -n 'ordinalByType'`):
+  `SceneBuilder.Core/Diff/Differ.cs:380`, `SceneBuilder.Core/Identity/IdentityRemapper.cs:215` and
+  `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:804` are the same `ComputeComponentKeys(
+  ComponentData[])` body verbatim; `IdentityRemapper.cs:231` (`ComputePriorComponentKeys`),
+  `SceneBuilder.Core/Parsing/BuilderParser.cs:649` and
+  `SceneBuilder.Core/Parsing/BuilderParser.Instance.cs:169` re-spell it over different element
+  types. The rule DID drift: `ReconcilerInstances.Nested.cs:177-183` used the array INDEX instead
+  of the ordinal until b1-t2 fixed it, and no test caught it. Only
+  `ComponentReconciler.ComputeComponentKeys` is shared (four callers:
+  `ComponentReconciler.cs:65,:97`, `ReconcilerAppends.cs:231`,
+  `ReconcilerInstances.Nested.cs:177`). `Differ.cs`, `IdentityRemapper.cs`, `BuilderParser.cs` and
+  `BuilderParser.Instance.cs` are in NO M8 task's TOUCHES, so no task in this run can consolidate
+  them; b1-t2 consumed an existing copy rather than adding a seventh.
+  OWNER: unassigned — needs its own task (hoist one internal helper, e.g. onto
+  `ComponentTargetResolution`, and route all six sites through it) in a run whose TOUCHES can hold
+  those four files.
+
+- SEVERITY low — two more stale `Reconciler.cs:<line>` prose pointers in the Core test suite, both
+  PRE-EXISTING (measured wrong against `HEAD` too, so NOT caused by b1-t1's move — it only widened
+  the gap). MEASURED b1-t1 iteration 2: (1)
+  `SceneBuilder.Core.Tests/IdCollisionDataLossTests.cs:14` says "`Reconciler.FlattenModel`
+  (Reconciler.cs:952-959)"; `Reconciler.cs` is 852 lines, so that range is past EOF, and
+  `FlattenModel` is at `Reconciler.cs:825-832`. (2)
+  `SceneBuilder.Core.Tests/RectTransformReconcileTests.cs:74` says "Anti-loop rule (mirrors `rot:`,
+  Reconciler.cs:792-807)"; `:792-807` is now `Reconciler.MaskDriven` and the `rot:` anti-loop rule is
+  the comment at `Reconciler.cs:745-760`. Comment text only; both tests pass. This is the third and
+  fourth instance of the same rot in one file — the durable form is a type-qualified
+  `Reconciler.<Method>` pointer with no line range, which is what survived the move at `Differ.cs:94`,
+  `ComponentReconciler.cs:10` and `ChainedComponentEditTests.cs:603`.
+  OWNER: unassigned — no M8 task touches either file, and b1-t1 is one routed finding wide.
+
+- SEVERITY low — two stale prose pointers in PRODUCTION Core, both MEASURED pre-existing at `HEAD`
+  (b1-t1 research iteration 3), so b1-t1 does not own them and its comment-repair diff deliberately
+  leaves both untouched. (1) `SceneBuilder.Core/Reconcile/ReconcilerInstances.cs:165` says the facade
+  catalog is "Threaded here from Reconciler.cs"; the actual caller of `HandleInstanceNode` is
+  `SceneBuilder.Core/Reconcile/ReconcilerAppends.cs:72`, and that appends split predates M8
+  (`Reconciler.cs:11-12` is unchanged at `HEAD`). (2)
+  `SceneBuilder.Core/Reconcile/SourcePatchApplier.cs:576` calls `ComponentReconciler.cs:390` the
+  "REORDER-pass gate"; `git show HEAD:SceneBuilder.Core/Reconcile/ComponentReconciler.cs | sed -n
+  '390p'` is a `continue;` inside a dangling-reference conflict arm, the same as today, so the
+  pointer was already wrong before M8 and b1-t1 made no line-shifting edit above `:390` in that file.
+  Comment text only; no behaviour, no assertion. This is the fifth and sixth site of the same rot.
+  Fix: type-qualified `<Type>.<Member>` with no file name and no line range, the form that survived
+  the move at `Differ.cs:94`, `ComponentReconciler.cs:10`, `ChainedComponentEditTests.cs:361`.
+  OWNER: unassigned — no M8 task touches either region.
+
+- SEVERITY low — `SceneBuilder.Core.Tests/UnrepresentableLocatedDataTests.cs` re-lists the
+  located-kind set instead of deriving it from `Conflict.RequiresLocatedReport`, in the same two
+  places the routed b1-t2 iteration-4 finding names. MEASURED (b1-t2 research iteration 5): (1)
+  `:148-150` says "FromReport is the private mechanism it (and AmbiguousTypeName) shares internally";
+  `FromReport` (`Conflict.cs:141`) is now shared by all FOUR located factories (`Conflict.cs:160`,
+  `:172`, `:197`, `:213`). (2) `:175` filters the `ConflictDetector` sweep with
+  `conflict.Kind != ConflictKind.UnrepresentableValue`, so a future `ConflictDetector` factory
+  producing `UnauthorableField` or `UnsyncableListener` is skipped silently. LATENT today, not a live
+  hole: `rg -n 'Kind = ConflictKind\.' ConflictDetector.cs` yields only `AmbiguousAnchor` (`:89`) and
+  every located report it builds goes through `Conflict.Unrepresentable` (`:281,297,312,325`), so the
+  filter is currently equivalent to `!RequiresLocatedReport`. Fix is the move already applied at
+  `AmbiguousShortNameReportTests.cs:90,108`: derive from the rule, do not enumerate. The file is in
+  no M8 task's TOUCHES.
+  OWNER: unassigned — needs a task whose TOUCHES can hold `UnrepresentableLocatedDataTests.cs`.
+
+STATUS: READY
