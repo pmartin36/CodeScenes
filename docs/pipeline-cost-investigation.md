@@ -144,8 +144,20 @@ in `HANDOFF.md:88-101` and not followed.
 
 ## Not established (the two dead investigations)
 
-- **When the regression started, and whether a specific harness commit caused it.** `~/.claude` is
-  a git repo; the harness's own evolution is reconstructable. Unanswered.
+- **When the regression started.** NOT answerable from `~/.claude`'s git history — that repo is
+  brand new, created *in response to* this problem after the previous spec already struggled. Do not
+  send an agent to mine it; there is nothing there yet. The investigation that died was working from
+  that false premise, so its loss costs less than it appears.
+
+  Two things follow. First, the usable sources for "when" are `.agent_handoffs/` (~35 feature
+  directories with mtimes, oldest to newest), the ~88 workflow journals from 07-16 onward, and
+  `_lessons/ledger-archive.md` (13 already-applied lessons — each one likely added a rule, so the
+  archive is a proxy for harness accretion over time).
+
+  Second, and more important: **the regression predates this week.** Tracking began because the
+  spec BEFORE 36 was already painful. So spec 36 and M8 are not where this started, they are where
+  it became impossible to ignore — which means a per-feature cost curve across those ~35 handoff
+  directories is the highest-value unanswered question, and it does not depend on the dead agent.
 - **A quantified per-phase token breakdown** (intake / research / test / code / validate / scope).
 - **Whether cost is superlinear in spec size**, which would argue for capping spec size rather than
   tuning the harness.
