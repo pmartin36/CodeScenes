@@ -17,8 +17,8 @@ namespace SceneBuilder.Editor
     /// </summary>
     public static class SceneSnapshotReader
     {
-        private static readonly Func<GameObject, string> DefaultResolver =
-            go => GlobalObjectId.GetGlobalObjectIdSlow(go).ToString();
+        private static readonly Func<UnityEngine.Object, string> DefaultResolver =
+            obj => GlobalObjectId.GetGlobalObjectIdSlow(obj).ToString();
 
         /// <summary>
         /// Cold read with a scene-object identity resolver (M5, see
@@ -31,7 +31,7 @@ namespace SceneBuilder.Editor
         public static SceneSnapshot Read(Scene scene, Func<UnityEngine.Object, string?>? resolveSceneRef) =>
             Read(scene, DefaultResolver, resolveSceneRef);
 
-        private static SceneSnapshot Read(Scene scene, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        private static SceneSnapshot Read(Scene scene, Func<UnityEngine.Object, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var roots = new List<SnapshotNode>();
             foreach (var go in scene.GetRootGameObjects())
@@ -124,7 +124,7 @@ namespace SceneBuilder.Editor
             }
         }
 
-        internal static SnapshotNode ReadNode(GameObject go, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        internal static SnapshotNode ReadNode(GameObject go, Func<UnityEngine.Object, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var t = go.transform;
 
@@ -158,7 +158,7 @@ namespace SceneBuilder.Editor
         /// only for a caller with no scene-identity resolver to offer, e.g. a fresh-component template
         /// read).
         /// </summary>
-        internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<GameObject, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<UnityEngine.Object, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
         {
             var t = go.transform;
 
@@ -179,7 +179,7 @@ namespace SceneBuilder.Editor
                         continue;
                     }
 
-                    components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef));
+                    components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef) with { GlobalObjectId = resolveId(component) });
                 }
             }
 

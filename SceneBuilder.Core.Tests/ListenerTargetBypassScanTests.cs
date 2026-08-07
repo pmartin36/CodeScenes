@@ -187,17 +187,15 @@ namespace SceneBuilder.Editor
 
         // ---- Scan B: the component-LogicalId '#' format ---------------------------------------
 
-        // The nine shipped sites that compose or parse a component LogicalId, each excluded here
-        // for a stated reason, plus the new owner. BuilderParser.cs and BuilderParser.Instance.cs
-        // are deliberately ABSENT: both route through ComposeLogicalId and carry no literal '#' of
-        // their own.
+        // The format's owner plus the three surviving sites, each excluded here for a stated
+        // reason. ComponentReconciler.cs, ReconcilerInstances.Nested.cs, ComponentPatchApplier.cs
+        // and PlanExecutor.cs route through ComposeLogicalId/TryParseLogicalId/OwnerOfLogicalId and
+        // carry no component-LogicalId format token of their own, so none of the four is
+        // allowlisted. BuilderParser.cs and BuilderParser.Instance.cs are the same case and were
+        // never on this list.
         private static readonly string[] ComponentLogicalIdFormatAllowlist =
         {
             "SceneBuilder.Core/Identity/ComponentTargetResolution.cs",
-            "SceneBuilder.Core/Reconcile/ComponentReconciler.cs",
-            "SceneBuilder.Core/Reconcile/ReconcilerInstances.Nested.cs",
-            "SceneBuilder.Core/Reconcile/ComponentPatchApplier.cs",
-            "com.codescenes/Editor/PlanExecutor.cs",
             "com.codescenes/Editor/InstanceOverrideExecutor.cs",
             "com.codescenes/Editor/SceneHierarchyPath.cs",
             "com.codescenes/Editor/PrefabInstanceProbe.cs",

@@ -372,11 +372,8 @@ namespace SceneBuilder.Editor
         // ComponentTypeNormalizer rewrites Op.Type.FullName to the resolved/qualified CLR name
         // (e.g. "Rigidbody" -> "UnityEngine.Rigidbody") while the component's LogicalId keeps the
         // ORIGINAL authored token — a literal marker match would silently miss and no-op the add.
-        internal static string? OwnerOf(string componentLogicalId)
-        {
-            var idx = componentLogicalId.LastIndexOf('/');
-            return idx < 0 ? null : componentLogicalId.Substring(0, idx);
-        }
+        internal static string? OwnerOf(string componentLogicalId) =>
+            ComponentTargetResolution.OwnerOfLogicalId(componentLogicalId);
 
         private static void MoveComponentToIndex(Component component, int toIndex)
         {

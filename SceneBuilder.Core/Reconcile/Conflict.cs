@@ -54,6 +54,25 @@ namespace SceneBuilder.Core.Reconcile
         // Conflict.UnauthorableField, which requires the object anchor, the component type full
         // name and the field key.
         UnauthorableField,
+
+        // m8: one persistent listener could not be synced in either direction (empty method name,
+        // an unresolved target/object argument, Unity's legal "Missing" target, or no public C#
+        // spelling for the event field). Constructed only through Conflict.UnsyncableListener,
+        // which requires the component anchor, the component type full name, the event field key,
+        // the listener's index and a ListenerReportReason.
+        UnsyncableListener,
+    }
+
+    // Why one persistent listener is left alone in BOTH directions. Required (no default) at
+    // Conflict.UnsyncableListener, so a new condition must add an inhabitant here rather than
+    // spell its own report.
+    public enum ListenerReportReason
+    {
+        EmptyMethodName,
+        UnresolvedTarget,
+        UnresolvedObjectArgument,
+        MissingTarget,
+        UnresolvedEventMemberName,
     }
 
     public sealed record Conflict
@@ -74,13 +93,16 @@ namespace SceneBuilder.Core.Reconcile
         public string? GlobalObjectId { get; init; }
 
         // The kinds whose located data is REQUIRED: constructible only through Unrepresentable,
-        // AmbiguousTypeName or UnauthorableField, none of which can be called without a
-        // LocatedReport. Adding a kind here makes every other construction of it throw --
-        // deterministically, on first execution, not data-dependently.
-        private static bool RequiresLocatedReport(ConflictKind kind) =>
+        // AmbiguousTypeName, UnauthorableField or UnsyncableListener, none of which can be called
+        // without a LocatedReport. Adding a kind here makes every other construction of it throw
+        // -- deterministically, on first execution, not data-dependently. Internal (not private)
+        // so the located-kind sweep in SceneBuilder.Core.Tests derives its set from this rule
+        // rather than re-listing it.
+        internal static bool RequiresLocatedReport(ConflictKind kind) =>
             kind == ConflictKind.UnrepresentableValue
             || kind == ConflictKind.AmbiguousTypeName
-            || kind == ConflictKind.UnauthorableField;
+            || kind == ConflictKind.UnauthorableField
+            || kind == ConflictKind.UnsyncableListener;
 
         public ConflictKind Kind
         {
@@ -89,8 +111,9 @@ namespace SceneBuilder.Core.Reconcile
                 ? value
                 : throw new System.ArgumentException(
                     "An UnrepresentableValue report is constructed through Conflict.Unrepresentable(...), " +
-                    "an AmbiguousTypeName report through Conflict.AmbiguousTypeName(...) and an " +
-                    "UnauthorableField report through Conflict.UnauthorableField(...), all of which " +
+                    "an AmbiguousTypeName report through Conflict.AmbiguousTypeName(...), an " +
+                    "UnauthorableField report through Conflict.UnauthorableField(...) and an " +
+                    "UnsyncableListener report through Conflict.UnsyncableListener(...), all of which " +
                     "require the object anchor, the component type full name and the field/member key. " +
                     "Set Located, not Kind.");
         }
@@ -110,9 +133,8 @@ namespace SceneBuilder.Core.Reconcile
         // Null = an event, surfaced every time it happens.
         public string? RecurrenceKey { get; init; }
 
-        // The located-report data (anchor, component type full name, field/member key) an
-        // UnrepresentableValue or AmbiguousTypeName conflict must carry; every other kind leaves
-        // this null.
+        // The located-report data (anchor, component type full name, field/member key) a kind
+        // satisfying RequiresLocatedReport must carry; every other kind leaves this null.
         public LocatedReport? Located { get; init; }
 
         private static Conflict FromReport(
@@ -178,5 +200,41 @@ namespace SceneBuilder.Core.Reconcile
                 new LocatedReport(componentLogicalId, componentTypeFullName, fieldKey, LineHasNoEffect),
                 recurrenceKey: $"unauthorable-field:{componentLogicalId}:{fieldKey}",
                 location: null);
+
+        // THE one sentence stating what happened to a listener that could not be synced.
+        public const string ListenerLeftAsIs =
+            "This listener is left exactly as it is, in the scene and in code, until this is fixed.";
+
+        // THE construction of an unsyncable-listener report: the component anchor, the component
+        // type full name, the event field key, the listener's index within that event and the
+        // reason are all required positionally, and the recurrence key is composed here -- so the
+        // write direction and the read direction cannot spell the same condition differently.
+        public static Conflict UnsyncableListener(
+            string componentLogicalId, string componentTypeFullName, string eventFieldKey,
+            int listenerIndex, ListenerReportReason reason) =>
+            FromReport(
+                ConflictKind.UnsyncableListener,
+                new LocatedReport(componentLogicalId, componentTypeFullName, eventFieldKey,
+                    $"Listener at index {listenerIndex}: {ReasonSentence(reason)} {ListenerLeftAsIs}"),
+                recurrenceKey: $"unsyncable-listener:{componentLogicalId}:{eventFieldKey}:{listenerIndex}:{reason}",
+                location: null);
+
+        // The one sentence naming WHY the listener could not be synced, chosen by reason so both
+        // the write direction and the read direction produce the same sentence for the same
+        // condition.
+        private static string ReasonSentence(ListenerReportReason reason) => reason switch
+        {
+            ListenerReportReason.EmptyMethodName =>
+                "This listener has no method name.",
+            ListenerReportReason.UnresolvedTarget =>
+                "This listener's target could not be resolved.",
+            ListenerReportReason.UnresolvedObjectArgument =>
+                "This listener's object-mode argument could not be resolved.",
+            ListenerReportReason.MissingTarget =>
+                "This listener's target is Unity's \"Missing\" reference.",
+            ListenerReportReason.UnresolvedEventMemberName =>
+                "This event field has no public C# spelling.",
+            _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),
+        };
     }
 }

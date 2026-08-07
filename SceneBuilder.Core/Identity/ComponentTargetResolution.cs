@@ -137,8 +137,19 @@ namespace SceneBuilder.Core.Identity
         public static string ComposeLogicalId(string ownerLogicalId, string typeFullName, int ordinal) =>
             $"{ownerLogicalId}/{typeFullName}#{ordinal}";
 
+        // The OWNER half alone, split positionally at the LAST '/'. Deliberately does NOT require a
+        // '#{ordinal}' suffix: PlanExecutor's AddComponent execution asks this of an id whose TYPE
+        // token may have been rewritten by ComponentTypeNormalizer, and answering null for an id
+        // that merely lacks a well-formed ordinal would silently no-op the add. TryParseLogicalId is
+        // the STRICTER inverse, for a caller that needs the type or the ordinal too.
+        public static string? OwnerOfLogicalId(string componentLogicalId)
+        {
+            var slashIndex = componentLogicalId.LastIndexOf('/');
+            return slashIndex < 0 ? null : componentLogicalId.Substring(0, slashIndex);
+        }
+
         // Inverts ComposeLogicalId: the owner splits at the LAST '/' (an owner LogicalId may itself
-        // contain '/'), the type/ordinal split at the LAST '#' -- agreeing with PlanExecutor.OwnerOf's
+        // contain '/'), the type/ordinal split at the LAST '#' -- agreeing with OwnerOfLogicalId's
         // rule. A string with no '/' or no '#' after it, or a non-numeric ordinal, returns false.
         public static bool TryParseLogicalId(
             string logicalId, out string ownerLogicalId, out string typeFullName, out int ordinal)

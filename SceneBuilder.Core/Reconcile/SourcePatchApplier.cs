@@ -595,7 +595,7 @@ namespace SceneBuilder.Core.Reconcile
             {
                 // b3-t5: the statement-removal applier can land EARLIER in this same batch
                 // (a parent GameObject removed alongside a closure-authored child that resolves to
-                // the SAME statement, Reconciler.cs's DetectRemovals cascade) — by the time this
+                // the SAME statement, Reconciler.DetectRemovals cascade) — by the time this
                 // applier runs, the tracked statement may already be gone. No-op rather than throw,
                 // for the same reason the chained arm below already null-guards.
                 var currentStatement = currentRoot.GetCurrentNode(statement);
@@ -666,7 +666,7 @@ namespace SceneBuilder.Core.Reconcile
                 appliers.Add(currentRoot =>
                 {
                     // The owner's own RemoveStatement can land EARLIER in this same batch
-                    // (Reconciler.cs's DetectRemovals cascade emits the owner first, its chained
+                    // (Reconciler.DetectRemovals cascade emits the owner first, its chained
                     // components second) — by the time this applier runs, the enclosing statement
                     // (and this invocation with it) may already be gone.
                     var current = currentRoot.GetCurrentNode(invocation);
@@ -683,7 +683,7 @@ namespace SceneBuilder.Core.Reconcile
             {
                 // b3-t5: the SAME batch can carry a RemoveStatement for a closure-authored
                 // parent AND one for each of its Kind=="Component"/"GameObject" dependents that
-                // resolve to this SAME statement (Reconciler.cs's DetectRemovals cascade) — by the
+                // resolve to this SAME statement (Reconciler.DetectRemovals cascade) — by the
                 // time a later applier in the batch runs, this statement may already be gone.
                 var current = currentRoot.GetCurrentNode(statement);
                 return current == null ? currentRoot : currentRoot.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;

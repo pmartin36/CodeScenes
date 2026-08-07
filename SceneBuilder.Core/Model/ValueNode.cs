@@ -32,6 +32,20 @@ namespace SceneBuilder.Core.Model
             PrimitiveKind Kind,
             object? Value) : ValueNode
         {
+            // Value is `object?` so it round-trips as whatever boxed CLR type the caller constructed
+            // it with, but System.Text.Json materializes an `object`-typed member as a boxed
+            // JsonElement. Normalizing against Kind HERE — at construction, the same shape
+            // ValueNode.Enum uses for TypeFullName above — means every consumer of Value
+            // (UnityEventProjection.ToPersistentCall's casts, SerializedFieldBridge.WritePrimitive's
+            // Convert.To*, and every other reader) gets the boxed CLR value with no per-site opt-in.
+            private readonly object? _value = Normalize(Kind, Value);
+
+            public object? Value
+            {
+                get => _value;
+                init => _value = Normalize(Kind, value);
+            }
+
             public static Primitive Bool(bool value) => new(PrimitiveKind.Bool, value);
             public static Primitive Int(int value) => new(PrimitiveKind.Int, value);
             public static Primitive Long(long value) => new(PrimitiveKind.Long, value);
@@ -39,16 +53,12 @@ namespace SceneBuilder.Core.Model
             public static Primitive Double(double value) => new(PrimitiveKind.Double, value);
             public static Primitive String(string value) => new(PrimitiveKind.String, value);
 
-            // Value is `object?` so it round-trips as whatever boxed CLR type the caller
-            // constructed it with; System.Text.Json deserializes an `object`-typed member as a
-            // boxed JsonElement, not the original boxed primitive, so default record equality
-            // (which compares Value by reference/EqualityComparer<object>.Default) breaks across
-            // a JSON round-trip. Normalize both sides against Kind before comparing — same
-            // rationale as this file's other hand-rolled Equals overrides (Enum, List).
+            // Value is normalized by construction (above), so re-normalizing here would be dead
+            // defensive code — Kind + the already-normalized Value are compared directly.
             public bool Equals(Primitive? other) =>
-                other is not null && Kind == other.Kind && Equals(Normalize(Kind, Value), Normalize(other.Kind, other.Value));
+                other is not null && Kind == other.Kind && Equals(Value, other.Value);
 
-            public override int GetHashCode() => HashCode.Combine(Kind, Normalize(Kind, Value));
+            public override int GetHashCode() => HashCode.Combine(Kind, Value);
 
             private static object? Normalize(PrimitiveKind kind, object? raw)
             {

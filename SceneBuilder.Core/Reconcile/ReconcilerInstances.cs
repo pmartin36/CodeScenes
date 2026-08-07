@@ -9,8 +9,8 @@ using SceneBuilder.Core.Parsing;
 namespace SceneBuilder.Core.Reconcile
 {
     // Scene->code append of a prefab-instance root. Split out of ReconcilerAppends.cs
-    // per the project's file-size budget (Reconciler.cs is at 854 lines) — third partial-class
-    // file, no visibility change.
+    // per the project's file-size budget — one of the `Reconciler` partial-class files, no
+    // visibility change.
     public static partial class Reconciler
     {
         // Mirrors the plain-node branch in DetectAppends (index/parent-handle resolution,
@@ -170,7 +170,7 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<Conflict> conflicts,
             List<AssetEntry> addedAssets,
-            // Scene-derived liveness sets built ONCE by Reconciler.Reconcile (Reconciler.cs:446/:459)
+            // Scene-derived liveness sets built ONCE by Reconciler.Reconcile
             // — threaded to ReconcileAddedComponents/BuildAddInstanceComponent so a snapshot-only
             // added component's ObjectRef fields get the same Unemittable/Dangling/Pending/Resolvable
             // classification the plain-component append path already runs.

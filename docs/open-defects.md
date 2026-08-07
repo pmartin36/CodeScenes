@@ -396,3 +396,90 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   unowned; only its justification changes. Evidence:
   `.agent_handoffs/m8-unityevents/b1-t3/gate-output.log` (both runs, complete). OWNER: unassigned.
   FOUND-BY: m8-unityevents.
+
+- SEVERITY low — the ordinal-within-type component-key rule (spec 09:31, "Type.FullName +
+  ordinal-within-type") is hand-written SIX times, three of them character-identical. MEASURED at
+  m8-unityevents b1-t2 validation (`rg -n 'ordinalByType'`, current tree):
+  `SceneBuilder.Core/Diff/Differ.cs:380`, `SceneBuilder.Core/Identity/IdentityRemapper.cs:215` and
+  `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:806` carry the same
+  `ComputeComponentKeys(ComponentData[])` body verbatim; `IdentityRemapper.cs:231`
+  (`ComputePriorComponentKeys`), `SceneBuilder.Core/Parsing/BuilderParser.cs:649` and
+  `SceneBuilder.Core/Parsing/BuilderParser.Instance.cs:169` re-spell it over different element
+  types. The rule DID drift and no test caught it: `ReconcilerInstances.Nested.cs:177-183` composed
+  the ARRAY INDEX rather than the ordinal until m8 b1-t2 fixed it, mis-naming the component in a
+  user-visible located report (`[Rigidbody, BoxCollider]` anchored `.../BoxCollider#1` where the
+  canonical id is `#0`). Only `ComponentReconciler.ComputeComponentKeys` is shared (four callers:
+  `ComponentReconciler.cs:65,:97`, `ReconcilerAppends.cs:231`, `ReconcilerInstances.Nested.cs:177`).
+  Fix: hoist ONE internal helper (e.g. onto `SceneBuilder.Core/Identity/ComponentTargetResolution.cs`,
+  which already owns `ComposeLogicalId`/`TryParseLogicalId`/`OwnerOfLogicalId`) and route all six
+  sites through it. `Differ.cs`, `IdentityRemapper.cs`, `BuilderParser.cs` and
+  `BuilderParser.Instance.cs` were in no m8 task's TOUCHES, so no task in that run could consolidate
+  them; b1-t2 consumed an existing copy rather than adding a seventh. Needs its own task in a run
+  whose TOUCHES can hold those four files. OWNER: unassigned. FOUND-BY: m8-unityevents.
+
+- SEVERITY low — three adapter sites still hand-parse the component-LogicalId format
+  `"{ownerLogicalId}/{TypeFullName}#{ordinal}"` instead of routing through its Core owner
+  `SceneBuilder.Core/Identity/ComponentTargetResolution.cs`. MEASURED at m8-unityevents b1-t2
+  validation: `com.codescenes/Editor/InstanceOverrideExecutor.cs:215-221` (`StripOrdinal`, splits on
+  the last `/` then the last `#` to recover the bare TYPE token, and its comment still points at
+  `PlanExecutor.OwnerOf`, now a one-line delegate to `ComponentTargetResolution.OwnerOfLogicalId`);
+  `com.codescenes/Editor/SceneHierarchyPath.cs:72` (`lastSegment.Contains('#')` to decide a
+  component id resolves to its owner); `com.codescenes/Editor/PrefabInstanceProbe.cs:122`
+  (`sb.Append('#')` composing the ordinal suffix by hand). m8 b1-t2 migrated the four sites its
+  deliverable named (`ComponentReconciler.cs`, `ReconcilerInstances.Nested.cs`,
+  `ComponentPatchApplier.cs`, `PlanExecutor.cs`) and removed them from the guard's allowlist; these
+  three stay allowlisted at
+  `SceneBuilder.Core.Tests/ListenerTargetBypassScanTests.cs:190-198`, so the format still has four
+  independent spellings and the guard's own header claims a per-entry reason that is not written.
+  Two of the three need shapes `ComponentTargetResolution` does not expose today: a LENIENT bare
+  type-token accessor (`StripOrdinal`, which must tolerate a missing `#`, unlike the strict
+  `TryParseLogicalId`) and a "does this id name a component" predicate. Fix: add those two members
+  beside `ComposeLogicalId`/`TryParseLogicalId`/`OwnerOfLogicalId`, migrate all three sites, and
+  shrink the allowlist to the owner alone. OWNER: unassigned. FOUND-BY: m8-unityevents.
+
+- SEVERITY low — two stale line-numbered prose pointers into `Reconciler.cs` in the Core test
+  suite. MEASURED at m8-unityevents b1-t1 validation, and re-measured against `HEAD` to confirm
+  they are PRE-EXISTING (not caused by b1-t1's `DetectRemovals` extraction, which only widened the
+  gap): (1) `SceneBuilder.Core.Tests/IdCollisionDataLossTests.cs:14` says "`Reconciler.FlattenModel`
+  (Reconciler.cs:952-959)"; at `HEAD` `FlattenModel` was at `Reconciler.cs:939-946` and today it is
+  at `:825-832`, with the file 852 lines, so the cited range is past EOF. (2)
+  `SceneBuilder.Core.Tests/RectTransformReconcileTests.cs:74` says "Anti-loop rule (mirrors `rot:`,
+  Reconciler.cs:792-807)"; at `HEAD` `:792-807` was the middle of `DetectRemovals` and the `rot:`
+  anti-loop comment was at `:862`, today it is `Reconciler.MaskDriven` and the `rot:` comment is at
+  `:745-760`. Comment text only; both tests pass. This is the third and fourth instance of the same
+  rot in one file. Fix: use a type-qualified `Reconciler.<Method>` pointer with no line range, the
+  form that survived the move at `SceneBuilder.Core/Diff/Differ.cs:94`,
+  `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:10` and
+  `SceneBuilder.Core.Tests/ChainedComponentEditTests.cs:603`. No m8 task touches either file.
+  OWNER: unassigned. FOUND-BY: m8-unityevents.
+
+- SEVERITY low — two stale prose pointers into a sibling file, in production Core. MEASURED at
+  m8-unityevents b1-t1 validation and re-measured against `HEAD` to confirm both are PRE-EXISTING
+  (not caused by b1-t1's `DetectRemovals` extraction): (1)
+  `SceneBuilder.Core/Reconcile/ReconcilerInstances.cs:165` says "Threaded here from Reconciler.cs";
+  the actual caller is `SceneBuilder.Core/Reconcile/ReconcilerAppends.cs:72`, and the appends split
+  predates this task (`Reconciler.cs:11-12` is unchanged at `HEAD`). (2)
+  `SceneBuilder.Core/Reconcile/SourcePatchApplier.cs:576` says "(ComponentReconciler.cs:390) keeps
+  this unreached whenever ParseResult.ChainedComponents"; at `HEAD`, `ComponentReconciler.cs:390` is
+  the same dangling-reference-conflict `continue;` it is today, not the REORDER-pass gate the
+  sentence describes. Comment text only. Fix: use a type-qualified pointer with no line range, the
+  form that survived the move at `SceneBuilder.Core/Diff/Differ.cs:94` and
+  `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:10`. No m8 task touches either site's owning
+  logic. OWNER: unassigned. FOUND-BY: m8-unityevents.
+
+- SEVERITY low — `SceneBuilder.Core.Tests/UnrepresentableLocatedDataTests.cs` re-lists the
+  located-kind set instead of deriving it from `Conflict.RequiresLocatedReport`. MEASURED at
+  m8-unityevents b1-t2 validation, current tree: (1) `:148-150` says "`FromReport` is the private
+  mechanism it (and AmbiguousTypeName) shares internally"; `FromReport` (`Conflict.cs:140`) is now
+  shared by all FOUR located factories (`Conflict.cs:159`, `:171`, `:196`, `:212`). (2) `:175`
+  filters the `ConflictDetector` reflection sweep with
+  `conflict.Kind != ConflictKind.UnrepresentableValue`, so a future `ConflictDetector` factory
+  producing `UnauthorableField` or `UnsyncableListener` is skipped silently. LATENT today, not a
+  live hole: `ConflictDetector` sets only `AmbiguousAnchor` directly (`:89`) and builds every
+  located report through `Conflict.Unrepresentable` (`:281,297,312,325`), so the filter is
+  currently equivalent to `!RequiresLocatedReport`; the broader guard
+  `AmbiguousShortNameReportTests.Conflict_EveryPublicFactoryProducingALocatedKind_CarriesTheLocatedData`
+  (`:93-118`) already derives its set from the rule and covers all four kinds. Fix: apply the same
+  move here, derive from `Conflict.RequiresLocatedReport` rather than enumerate. The file is in no
+  m8 task's TOUCHES, so no task in that run could hold it. OWNER: unassigned. FOUND-BY:
+  m8-unityevents.

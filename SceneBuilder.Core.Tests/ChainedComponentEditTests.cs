@@ -358,7 +358,7 @@ public class TwoChainedComponentsScene : ISceneDefinition
             var canvasRendererId = parsed.ComponentAnchors.Keys.Single(k => k.Contains("CanvasRenderer"));
             var quitButtonNodeId = FindNode(parsed.Model.Roots, "QuitButton").LogicalId;
 
-            // Mirrors Reconciler.cs's REAL DetectRemovals cascade (Reconciler.cs:799-813): removing
+            // Mirrors the REAL Reconciler.DetectRemovals cascade (ReconcilerRemovals.cs): removing
             // a node emits a RemoveStatement for the owner AND for EVERY one of its Kind=="Component"
             // dependents — QuitButton has two (the chained Image and the statement-form
             // CanvasRenderer) — all in the SAME patch, owner first.

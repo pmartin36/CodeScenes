@@ -12,5 +12,10 @@ namespace SceneBuilder.Core.Model
 
         [JsonPropertyOrder(2)]
         public FieldMap Fields { get; init; } = FieldMap.Empty;
+
+        // The component's own GlobalObjectId, distinct from its owning GameObject's
+        // (SnapshotNode.GlobalObjectId). "" means not stamped.
+        [JsonPropertyOrder(3)]
+        public string GlobalObjectId { get; init; } = "";
     }
 }

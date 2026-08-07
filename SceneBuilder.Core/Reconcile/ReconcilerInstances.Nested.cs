@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
@@ -173,11 +174,13 @@ namespace SceneBuilder.Core.Reconcile
                 return node;
             }
 
+            var keys = ComponentReconciler.ComputeComponentKeys(node.Components);
             var filtered = new ComponentData[node.Components.Length];
             for (var i = 0; i < node.Components.Length; i++)
             {
                 var component = node.Components[i];
-                var componentLogicalId = $"{instanceLogicalId}/{component.Type.FullName}#{i}";
+                var componentLogicalId = ComponentTargetResolution.ComposeLogicalId(
+                    instanceLogicalId, keys[i].TypeFullName, keys[i].Ordinal);
                 filtered[i] = component with
                 {
                     Fields = ComponentDefaultOmission.OmitDefaults(component.Type.FullName, component.Fields, defaults, componentLogicalId, conflicts),

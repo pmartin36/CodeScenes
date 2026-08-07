@@ -87,6 +87,9 @@ namespace SceneBuilder.Core.Tests
 
         // Reflection sweep over every public static Conflict factory, so a future factory
         // producing a located kind cannot slip past this check by having an unusual signature.
+        // The located-kind set is DERIVED from Conflict.RequiresLocatedReport rather than
+        // re-listed here, so a fifth located kind is swept automatically instead of silently
+        // passing the moment its factory compiles.
         [Fact]
         public void Conflict_EveryPublicFactoryProducingALocatedKind_CarriesTheLocatedData()
         {
@@ -102,8 +105,7 @@ namespace SceneBuilder.Core.Tests
                 var args = factory.GetParameters().Select(p => SynthesizeArg(p.ParameterType)).ToArray();
                 var conflict = (Conflict)factory.Invoke(null, args)!;
 
-                if (conflict.Kind != ConflictKind.UnrepresentableValue
-                    && conflict.Kind != ConflictKind.AmbiguousTypeName)
+                if (!Conflict.RequiresLocatedReport(conflict.Kind))
                 {
                     continue;
                 }
@@ -118,9 +120,11 @@ namespace SceneBuilder.Core.Tests
         private static object? SynthesizeArg(Type t)
         {
             if (t == typeof(string)) return "x";
+            if (t == typeof(int)) return 0;
             if (t == typeof(IReadOnlyList<string>)) return new[] { "A.X", "B.X" };
             if (t == typeof(SourceSpan?)) return null;
             if (t == typeof(ConflictKind)) return ConflictKind.AmbiguousAnchor;
+            if (t == typeof(ListenerReportReason)) return ListenerReportReason.EmptyMethodName;
             if (t == typeof(LocatedReport)) return new LocatedReport("x", "x", "x", "detail");
             throw new NotSupportedException($"extend the argument synthesizer for {t}");
         }

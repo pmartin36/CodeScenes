@@ -32,7 +32,7 @@ namespace SceneBuilder.Editor
         public SceneSnapshot AssembleCold(Scene scene, SceneRefResolver sceneRef)
         {
             Ids.Clear();
-            Ids.WarmBatch(CollectAllGameObjects(scene));
+            Ids.WarmBatch(CollectAllObjects(scene));
 
             var nodeByGoEntityId = new Dictionary<EntityId, SnapshotNode>();
 
@@ -68,6 +68,7 @@ namespace SceneBuilder.Editor
             }
 
             var changedGo = new HashSet<EntityId>();
+            var idsToInvalidate = new List<EntityId>();
             foreach (var entityId in changedEntityIds)
             {
                 var obj = EditorUtility.EntityIdToObject(entityId);
@@ -77,13 +78,19 @@ namespace SceneBuilder.Editor
                     go = component.gameObject;
                 }
 
-                if (go != null)
+                if (go != null && changedGo.Add(go.GetEntityId()))
                 {
-                    changedGo.Add(go.GetEntityId());
+                    // Invalidate the GameObject's own id AND its components' ids (same rule as
+                    // ObjectsOwnedBy/CollectAllObjects): a changed GameObject re-resolves to a
+                    // fresh id, and its components must not keep whatever was cached before.
+                    foreach (var owned in ObjectsOwnedBy(go))
+                    {
+                        idsToInvalidate.Add(owned.GetEntityId());
+                    }
                 }
             }
 
-            Ids.Invalidate(changedGo);
+            Ids.Invalidate(idsToInvalidate);
 
             var priorNodes = _nodeByGoEntityId;
             var nodeByGoEntityId = new Dictionary<EntityId, SnapshotNode>();
@@ -150,17 +157,18 @@ namespace SceneBuilder.Editor
             }
         }
 
-        private static List<Object> CollectAllGameObjects(Scene scene)
+        // Every GameObject AND every non-Transform component the cold read (ReadNodeShallow) will
+        // resolve an id for, so the cold warm stays one batched call instead of N per-component
+        // slow resolves on the per-keystroke sync path.
+        private static List<Object> CollectAllObjects(Scene scene)
         {
             var result = new List<Object>();
 
             void Walk(GameObject go)
             {
-                result.Add(go);
+                result.AddRange(ObjectsOwnedBy(go));
 
-                // Never warm ids for a prefab instance's internals (never enumerated by the reader,
-                // and would be a per-keystroke GetGlobalObjectIdSlow cost — CLAUDE.md sync-performance
-                // constraint).
+                // Never descend into a prefab instance's internals (never enumerated by the reader).
                 if (PrefabInstanceProbe.IsInstanceRoot(go))
                 {
                     return;
@@ -179,6 +187,33 @@ namespace SceneBuilder.Editor
             }
 
             return result;
+        }
+
+        // Every id-bearing object a single GameObject owns: itself, plus every non-null,
+        // non-Transform component ReadNodeShallow resolves an id for. A prefab instance root's
+        // components are never enumerated by the reader (and would be a per-keystroke
+        // GetGlobalObjectIdSlow cost — CLAUDE.md sync-performance constraint), so only the
+        // GameObject itself counts there. The single source of this rule so the warm cache
+        // (CollectAllObjects) and the invalidate path (AssembleIncremental) cannot drift apart.
+        private static IEnumerable<Object> ObjectsOwnedBy(GameObject go)
+        {
+            yield return go;
+
+            if (PrefabInstanceProbe.IsInstanceRoot(go))
+            {
+                yield break;
+            }
+
+            var t = go.transform;
+            foreach (var component in go.GetComponents<Component>())
+            {
+                if (component == null || component == t)
+                {
+                    continue;
+                }
+
+                yield return component;
+            }
         }
     }
 }

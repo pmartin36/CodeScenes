@@ -10,7 +10,7 @@ namespace SceneBuilder.Core.Reconcile
     // IdentityMap entry). Mirrors Reconciler.DetectAppends/DetectRemovals architecturally but
     // does NOT consume Differ's component ChangeOps (those are Materialize-directed: desired
     // side = source -> scene; Reconcile needs the inverse, scene -> source.
-    internal static class ComponentReconciler
+    internal static partial class ComponentReconciler
     {
         // Handles add/remove/reorder, the field-value loop, and the conflict path. Keep the
         // signature stable across all call sites.
@@ -675,7 +675,7 @@ namespace SceneBuilder.Core.Reconcile
             // field (every hand-built test call stays green unchanged).
             ComponentDefaultOmission.Index? defaults = null)
         {
-            var componentLogicalId = $"{ownerEffectiveId}/{typeFullName}#{ordinal}";
+            var componentLogicalId = ComponentTargetResolution.ComposeLogicalId(ownerEffectiveId, typeFullName, ordinal);
 
             fields = ComponentDefaultOmission.OmitDefaults(typeFullName, fields, defaults, componentLogicalId, conflicts);
 
@@ -799,8 +799,11 @@ namespace SceneBuilder.Core.Reconcile
         internal static ComponentData[] ExcludeTransform(ComponentData[] components) =>
             components.Where(c => c.Type.FullName != "UnityEngine.Transform").ToArray();
 
-        // Mirrors Differ.ComputeComponentKeys (Differ.cs:257-270) — Differ.cs is out of this
-        // slice's touch scope, so the tiny ordinal helper is duplicated here rather than shared.
+        // The ordinal-within-type rule: each component's key pairs its type with the count of
+        // same-type components before it in the array, not its array index. Mirrors
+        // Differ.ComputeComponentKeys (Diff/Differ.cs:380-393), a separate private copy for that
+        // module. This copy is the shared rule for the reconcile module: consumed here and by
+        // ReconcilerInstances.Nested.cs:177.
         internal static (string TypeFullName, int Ordinal)[] ComputeComponentKeys(ComponentData[] components)
         {
             var keys = new (string TypeFullName, int Ordinal)[components.Length];

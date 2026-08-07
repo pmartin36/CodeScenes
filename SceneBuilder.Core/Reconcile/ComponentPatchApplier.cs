@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
@@ -366,23 +367,9 @@ namespace SceneBuilder.Core.Reconcile
         // A component LogicalId is always synthesized "{ownerLogicalId}/{TypeFullName}#{ordinal}"
         // (BuilderParser.AssignComponentLogicalIds) — the one place an anchor string reliably encodes
         // its component's type without threading TypeFullName onto IntroduceComponentField itself.
-        private static bool IsSpatialComponentAnchor(string anchor)
-        {
-            var hashIndex = anchor.LastIndexOf('#');
-            if (hashIndex <= 0)
-            {
-                return false;
-            }
-
-            var slashIndex = anchor.LastIndexOf('/', hashIndex - 1);
-            if (slashIndex < 0)
-            {
-                return false;
-            }
-
-            var typeFullName = anchor.Substring(slashIndex + 1, hashIndex - slashIndex - 1);
-            return SpatialComponentSource.IsSpatial(typeFullName);
-        }
+        private static bool IsSpatialComponentAnchor(string anchor) =>
+            ComponentTargetResolution.TryParseLogicalId(anchor, out _, out var typeFullName, out _)
+            && SpatialComponentSource.IsSpatial(typeFullName);
 
         // ---- Component-aware anchor resolution -------------------------------------------------
 
