@@ -88,6 +88,32 @@ Gate at the time: `GATE PASS: Core + Unity EditMode green (passed=657 failed=0 s
 - The EditMode fixture surface (`unity-gate/Assets/Fixtures/UnityEventFixtures.cs`, and
   `DoorOpenerFixture.cs` EXTENDED with `Open()` — it has one; do not plan to add it).
 
+**ALSO SHIPPED (second b1, commit `3325907`):** `Reconciler.cs` was extracted (966 -> 852 lines) and
+`ComponentReconciler` made partial, so the later reconcile tasks are not fighting over 34 lines of
+headroom; and the four foundation gaps below were CLOSED — the component `GlobalObjectId` and the public
+C# member spelling now reach Core on the snapshot, `ValueNode.Primitive` normalises a boxed `JsonElement`
+at its use sites, and the component-LogicalId bypass scan landed. Do not re-plan any of it.
+
+**THE ADAPTER'S SERIALIZED-PATH VOCABULARY — decide this ONCE, in one task, before either adapter file
+exists.** Learned by getting it wrong twice. The invariant "the adapter carries no mode/arg logic"
+(09:219-220) is only enforceable if the adapter never spells a serialized path itself, and the guard that
+polices it, `ModeArgBypassScanTests`, has two interacting traps:
+- Its Scan A allowlist was seeded with `UnityEventWriter.cs` and `UnityEventReader.cs` — files that did
+  not exist yet — so the adapter is unguarded from the moment it appears.
+- Its token list matches STRING LITERALS, and includes `m_Mode`, `m_Arguments`, `m_IntArgument` and the
+  rest. So simply removing the allowlist entry turns the adapter's own MANDATORY code
+  (`FindPropertyRelative("m_Mode")` on the `m_PersistentCalls.m_Calls` + `SerializedObject` route) into a
+  violation and a red gate.
+The only shape that works: ONE task owns a Core-side vocabulary of the serialized spellings, placed in
+`UnityEventProjection.cs` (already the sole allowlisted Core file), covering the COMPLETE field set from
+09:179-181 — `m_Target`, `m_MethodName`, `m_Mode`, `m_CallState`, `m_Arguments` and its
+`m_ObjectArgument`/`m_IntArgument`/`m_FloatArgument`/`m_StringArgument`/`m_BoolArgument`, plus
+`m_TargetAssemblyTypeName` and `m_ObjectArgumentAssemblyTypeName`, and the `m_PersistentCalls.m_Calls`
+root. A SUBSET does not work: any spelling left out is one both adapter files then invent independently,
+which is the divergence the hoist exists to prevent. That task also removes both allowlist entries and
+adds the missing spellings to the scan's token list, so the guard covers what it claims to.
+`PersistentCallFields` carries C# property names only and is NOT that vocabulary.
+
 **Foundation gaps measured DURING that run, which the remaining work must own.** These are recorded with
 their file:line evidence in `docs/m8-measured-defects.md`; read it before planning, because each cost a
 live editor run to establish and none is derivable from this spec:
