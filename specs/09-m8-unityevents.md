@@ -69,6 +69,41 @@
 >   type; no general `using`-injection is added. An unchanged listener's authored token is preserved
 >   verbatim (span-local reconcile); only new appends use the lambda form.
 
+## ALREADY SHIPPED — do not re-plan this (commit `30a9613`, 2026-08-06)
+
+The model layer of this milestone is BUILT, GATE-GREEN and COMMITTED. A decomposition of this spec must
+plan only what remains, and must treat the following as existing code to build ON, not work to schedule.
+Gate at the time: `GATE PASS: Core + Unity EditMode green (passed=657 failed=0 skipped=0)`.
+
+- `ValueNode.UnityEventListeners` + the `UnityEventListener` record, registered in the polymorphic JSON
+  union, with `ValueWalk` descending into each listener's `Target` and `ArgValue`
+  (`SceneBuilder.Core/Model/UnityEventListener.cs`, `ValueNode.cs`, `ValueWalk.cs`).
+- The component-target CLASSIFIER: one total function to a discriminated result over
+  SceneObject / Asset / DanglingNull / Unresolvable, applied to a listener `Target` and an object-mode
+  `ArgValue` alike, plus the scan that fails a site classifying a reference without it
+  (`SceneBuilder.Core/Identity/ComponentTargetResolution.cs`, `SceneBuilder.Core.Tests/ListenerTargetBypassScanTests.cs`).
+- The model <-> persistent-call PROJECTION, total and reversible over all seven modes
+  (`SceneBuilder.Core/Model/UnityEventProjection.cs`), with the mode and call-state numbers MEASURED
+  against a live editor. That measurement is what corrected this spec's own `UnityEventCallState` line.
+- The EditMode fixture surface (`unity-gate/Assets/Fixtures/UnityEventFixtures.cs`, and
+  `DoorOpenerFixture.cs` EXTENDED with `Open()` — it has one; do not plan to add it).
+
+**Foundation gaps measured DURING that run, which the remaining work must own.** These are recorded with
+their file:line evidence in `docs/m8-measured-defects.md`; read it before planning, because each cost a
+live editor run to establish and none is derivable from this spec:
+- A component's own `GlobalObjectId` reaches Core NOWHERE on the snapshot, so §13 convergence for a
+  component listener target has no data path.
+- The public C# member spelling (`m_OnValueChanged` -> `onValueChanged`) needed to render
+  `.OnEvent(x => x.onValueChanged, ...)` is adapter-side only and likewise absent from the snapshot.
+- `ValueNode.Primitive.Value` normalises a boxed `JsonElement` for equality/hashing ONLY, so a
+  `SetUnityEvent` op deserialized from plan JSON and then applied throws `InvalidCastException`.
+- The component-LogicalId bypass scan allowlists per FILE, and three of those files are where the
+  remaining listener code lands, so the format invariant is unguarded exactly there.
+
+Both of the first two are the same shape: an ADAPTER task needing a `SceneBuilder.Core/Model/*` addition.
+Hoist all snapshot-model additions into ONE owning task that declares those files; splitting them across
+the adapter tasks that consume them is what forced two separate re-plans.
+
 ### Additions to the contract
 This milestone introduces new types/ops not in `00-foundation.md`. They are flagged here per §3's rule.
 
