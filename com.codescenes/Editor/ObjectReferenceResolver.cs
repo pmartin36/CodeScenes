@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using SceneBuilder.Core.Identity;
+using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Editor
@@ -195,12 +196,47 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
+        /// Stamps a LIVE listener reference (a persistent-call target or an object-mode argument)
+        /// into the Unity-free <see cref="StampedReference"/> form
+        /// <see cref="SceneBuilder.Core.Identity.ComponentTargetResolution.Classify"/> decides over.
+        /// No Component-&gt;GameObject normalization: that belongs to reference FIELDS and stays in
+        /// <see cref="BuildFromIndex"/>. <paramref name="resolveGlobalObjectId"/> is REQUIRED so a
+        /// caller on the per-keystroke sync path passes a cache rather than silently paying
+        /// <see cref="GlobalObjectId.GetGlobalObjectIdSlow"/>.
+        /// </summary>
+        public static StampedReference StampListenerReference(
+            UnityEngine.Object? obj, Func<UnityEngine.Object, string> resolveGlobalObjectId)
+        {
+            if (obj == null)
+            {
+                return StampedReference.Dangling;
+            }
+
+            var classified = AssetReferenceResolver.ReadObjectReferenceValue(obj, resolveSceneRef: null);
+            return classified is ValueNode.AssetRef { Ref: { } assetRef }
+                ? StampedReference.Asset(assetRef)
+                : StampedReference.Scene(resolveGlobalObjectId(obj));
+        }
+
+        /// <summary>
+        /// Resolves a listener's component/GameObject <c>targetLogicalId</c> back to the live
+        /// object it names, with NO type coercion (a listener has no declared field type to coerce
+        /// to) -- reuses the shipped <see cref="ResolveTarget"/> ladder rather than a parallel copy.
+        /// </summary>
+        public static UnityEngine.Object? ResolveListenerTarget(
+            string targetLogicalId,
+            IReadOnlyDictionary<string, GameObject> gameObjectsByLogicalId,
+            IReadOnlyDictionary<string, Component> componentsByLogicalId,
+            IdentityMap map, Scene scene)
+            => ResolveTarget(targetLogicalId, wantedType: null, gameObjectsByLogicalId, componentsByLogicalId, map, scene);
+
+        /// <summary>
         /// Resolves <paramref name="targetLogicalId"/> to a live in-scene object: the execution's
         /// live maps first (a target created THIS Materialize has no GlobalObjectId yet and can ONLY
         /// be found here); falling back to the <see cref="IdentityMap"/>'s GlobalObjectId for an
         /// already-existing, unmodified-this-Materialize object.
         /// </summary>
-        private static UnityEngine.Object? ResolveTarget(
+        internal static UnityEngine.Object? ResolveTarget(
             string targetLogicalId, Type? wantedType,
             IReadOnlyDictionary<string, GameObject> gameObjectsByLogicalId,
             IReadOnlyDictionary<string, Component> componentsByLogicalId,

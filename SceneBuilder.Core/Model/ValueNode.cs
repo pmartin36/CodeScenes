@@ -23,6 +23,7 @@ namespace SceneBuilder.Core.Model
     [JsonDerivedType(typeof(ValueNode.Unsupported), "Unsupported")]
     [JsonDerivedType(typeof(ValueNode.AssetRef), "AssetRef")]
     [JsonDerivedType(typeof(ValueNode.ObjectRef), "ObjectRef")]
+    [JsonDerivedType(typeof(ValueNode.UnityEventListeners), "UnityEventListeners")]
     public abstract record ValueNode
     {
         public sealed record Primitive(
@@ -164,5 +165,24 @@ namespace SceneBuilder.Core.Model
         // Default record equality is correct: string? TargetLogicalId compared ordinal +
         // null-safe (both-null == equal), per spec §64-68. No custom Equals.
         public sealed record ObjectRef(string? TargetLogicalId) : ValueNode;
+
+        // A UnityEvent field's persistent-call list, in authored (array) order. An empty list is a
+        // legal value meaning "the event has no listeners" and is never dropped.
+        public sealed record UnityEventListeners(IReadOnlyList<UnityEventListener> Listeners) : ValueNode
+        {
+            public bool Equals(UnityEventListeners? other) =>
+                other is not null && Listeners.SequenceEqual(other.Listeners);
+
+            public override int GetHashCode()
+            {
+                var hash = new HashCode();
+                foreach (var listener in Listeners)
+                {
+                    hash.Add(listener);
+                }
+
+                return hash.ToHashCode();
+            }
+        }
     }
 }

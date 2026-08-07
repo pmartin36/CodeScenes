@@ -121,10 +121,49 @@ namespace SceneBuilder.Core.Model
                     return new ValueNode.List(items);
                 }
 
+                case ValueNode.UnityEventListeners listeners:
+                {
+                    var rebuilt = new List<UnityEventListener>(listeners.Listeners.Count);
+                    for (var i = 0; i < listeners.Listeners.Count; i++)
+                    {
+                        var original = listeners.Listeners[i];
+                        rebuilt.Add(new UnityEventListener(
+                            MapListenerSlot(original.Target, listeners, context, i, "Target", visit, descend, dropEmptiedNested),
+                            original.MethodName,
+                            original.ArgMode,
+                            MapListenerSlot(original.ArgValue, listeners, context, i, "ArgValue", visit, descend, dropEmptiedNested),
+                            original.CallState));
+                    }
+
+                    return new ValueNode.UnityEventListeners(rebuilt);
+                }
+
                 // Every other kind is a leaf: whatever `visit` returned is the result.
                 default:
                     return visited;
             }
+        }
+
+        // A listener's slot presence is fixed by its ArgMode, so a slot is never dropped: a `null`
+        // mapped result (from `visit` or an emptied-nested rule) leaves the slot exactly as found,
+        // rather than constructing a listener the model would reject.
+        private static ValueNode? MapListenerSlot<TContext>(
+            ValueNode? slot,
+            ValueNode.UnityEventListeners parent,
+            TContext context,
+            int listenerIndex,
+            string slotName,
+            Func<ValueNode, TContext, ValueNode?> visit,
+            Func<ValueNode, TContext, string?, TContext> descend,
+            bool dropEmptiedNested)
+        {
+            if (slot is null)
+            {
+                return null;
+            }
+
+            var slotContext = descend(parent, context, "[" + listenerIndex + "]." + slotName);
+            return MapNode(slot, slotContext, visit, descend, dropEmptiedNested, isRoot: false) ?? slot;
         }
 
         /// <summary>
@@ -163,6 +202,22 @@ namespace SceneBuilder.Core.Model
 
                     return false;
 
+                case ValueNode.UnityEventListeners listeners:
+                    foreach (var listener in listeners.Listeners)
+                    {
+                        if (listener.Target is not null && Any(listener.Target, predicate))
+                        {
+                            return true;
+                        }
+
+                        if (listener.ArgValue is not null && Any(listener.ArgValue, predicate))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+
                 default:
                     return false;
             }
@@ -171,8 +226,11 @@ namespace SceneBuilder.Core.Model
         /// <summary>
         /// Yields <paramref name="node"/> itself at path <c>""</c>, then every descendant in
         /// pre-order: a <see cref="ValueNode.List"/> item at <c>parent + "[" + i + "]"</c>, a
-        /// <see cref="ValueNode.Nested"/> member at <c>parent + "." + memberKey</c>. Every other
-        /// kind is a leaf. Callers concatenate the yielded path onto their own field key/path.
+        /// <see cref="ValueNode.Nested"/> member at <c>parent + "." + memberKey</c>, a
+        /// <see cref="ValueNode.UnityEventListeners"/> slot at
+        /// <c>parent + "[" + i + "]." + ("Target" | "ArgValue")</c> (non-null slots only, per
+        /// listener in array order). Every other kind is a leaf. Callers concatenate the yielded
+        /// path onto their own field key/path.
         /// </summary>
         public static IEnumerable<(string Path, ValueNode Node)> Enumerate(ValueNode node) =>
             EnumerateAt(node, "");
@@ -191,11 +249,18 @@ namespace SceneBuilder.Core.Model
         /// original node and the folded members in source order.
         /// </param>
         /// <param name="leaf">Runs on every non-container node, given the node itself.</param>
+        /// <param name="listeners">
+        /// Runs on a <see cref="ValueNode.UnityEventListeners"/> after every reachable listener slot
+        /// (<c>Target</c>, then <c>ArgValue</c>, per listener in array order) has been folded, keyed
+        /// <c>"[i].Target"</c> / <c>"[i].ArgValue"</c> — same bottom-up contract as
+        /// <paramref name="list"/> and <paramref name="nested"/>.
+        /// </param>
         public static T Fold<T>(
             ValueNode node,
             Func<ValueNode.List, IReadOnlyList<T>, T> list,
             Func<ValueNode.Nested, IReadOnlyList<KeyValuePair<string, T>>, T> nested,
-            Func<ValueNode, T> leaf)
+            Func<ValueNode, T> leaf,
+            Func<ValueNode.UnityEventListeners, IReadOnlyList<KeyValuePair<string, T>>, T> listeners)
         {
             switch (node)
             {
@@ -204,7 +269,7 @@ namespace SceneBuilder.Core.Model
                     var items = new List<T>(listNode.Items.Count);
                     foreach (var item in listNode.Items)
                     {
-                        items.Add(Fold(item, list, nested, leaf));
+                        items.Add(Fold(item, list, nested, leaf, listeners));
                     }
 
                     return list(listNode, items);
@@ -215,10 +280,32 @@ namespace SceneBuilder.Core.Model
                     var members = new List<KeyValuePair<string, T>>(nestedNode.Fields.Count);
                     foreach (var (memberKey, memberValue) in nestedNode.Fields)
                     {
-                        members.Add(new KeyValuePair<string, T>(memberKey, Fold(memberValue, list, nested, leaf)));
+                        members.Add(new KeyValuePair<string, T>(memberKey, Fold(memberValue, list, nested, leaf, listeners)));
                     }
 
                     return nested(nestedNode, members);
+                }
+
+                case ValueNode.UnityEventListeners listenersNode:
+                {
+                    var slots = new List<KeyValuePair<string, T>>();
+                    for (var i = 0; i < listenersNode.Listeners.Count; i++)
+                    {
+                        var listener = listenersNode.Listeners[i];
+                        if (listener.Target is not null)
+                        {
+                            slots.Add(new KeyValuePair<string, T>(
+                                "[" + i + "].Target", Fold(listener.Target, list, nested, leaf, listeners)));
+                        }
+
+                        if (listener.ArgValue is not null)
+                        {
+                            slots.Add(new KeyValuePair<string, T>(
+                                "[" + i + "].ArgValue", Fold(listener.ArgValue, list, nested, leaf, listeners)));
+                        }
+                    }
+
+                    return listeners(listenersNode, slots);
                 }
 
                 // Every other kind is a leaf.
@@ -243,12 +330,18 @@ namespace SceneBuilder.Core.Model
         /// <paramref name="enter"/> returned for it, and the item's index.</param>
         /// <param name="member">Supplies a <see cref="ValueNode.Nested"/> member's context, given the nested node, the
         /// context <paramref name="enter"/> returned for it, and the member key.</param>
+        /// <param name="listenerSlot">
+        /// Supplies a <see cref="ValueNode.UnityEventListeners"/> slot's context, given the node, the
+        /// context <paramref name="enter"/> returned for it, the listener's index, and the slot name
+        /// (<c>"Target"</c> or <c>"ArgValue"</c>).
+        /// </param>
         public static void Descend<TContext>(
             ValueNode node,
             TContext context,
             Func<ValueNode, TContext, TContext> enter,
             Func<ValueNode.List, TContext, int, TContext> item,
-            Func<ValueNode.Nested, TContext, string, TContext> member)
+            Func<ValueNode.Nested, TContext, string, TContext> member,
+            Func<ValueNode.UnityEventListeners, TContext, int, string, TContext> listenerSlot)
         {
             var childContext = enter(node, context);
 
@@ -257,7 +350,7 @@ namespace SceneBuilder.Core.Model
                 case ValueNode.List list:
                     for (var i = 0; i < list.Items.Count; i++)
                     {
-                        Descend(list.Items[i], item(list, childContext, i), enter, item, member);
+                        Descend(list.Items[i], item(list, childContext, i), enter, item, member, listenerSlot);
                     }
 
                     break;
@@ -265,7 +358,26 @@ namespace SceneBuilder.Core.Model
                 case ValueNode.Nested nested:
                     foreach (var (memberKey, memberValue) in nested.Fields)
                     {
-                        Descend(memberValue, member(nested, childContext, memberKey), enter, item, member);
+                        Descend(memberValue, member(nested, childContext, memberKey), enter, item, member, listenerSlot);
+                    }
+
+                    break;
+
+                case ValueNode.UnityEventListeners listeners:
+                    for (var i = 0; i < listeners.Listeners.Count; i++)
+                    {
+                        var listener = listeners.Listeners[i];
+                        if (listener.Target is not null)
+                        {
+                            Descend(
+                                listener.Target, listenerSlot(listeners, childContext, i, "Target"), enter, item, member, listenerSlot);
+                        }
+
+                        if (listener.ArgValue is not null)
+                        {
+                            Descend(
+                                listener.ArgValue, listenerSlot(listeners, childContext, i, "ArgValue"), enter, item, member, listenerSlot);
+                        }
                     }
 
                     break;
@@ -295,6 +407,29 @@ namespace SceneBuilder.Core.Model
                         foreach (var entry in EnumerateAt(list.Items[i], path + "[" + i + "]"))
                         {
                             yield return entry;
+                        }
+                    }
+
+                    break;
+
+                case ValueNode.UnityEventListeners listeners:
+                    for (var i = 0; i < listeners.Listeners.Count; i++)
+                    {
+                        var listener = listeners.Listeners[i];
+                        if (listener.Target is not null)
+                        {
+                            foreach (var entry in EnumerateAt(listener.Target, path + "[" + i + "].Target"))
+                            {
+                                yield return entry;
+                            }
+                        }
+
+                        if (listener.ArgValue is not null)
+                        {
+                            foreach (var entry in EnumerateAt(listener.ArgValue, path + "[" + i + "].ArgValue"))
+                            {
+                                yield return entry;
+                            }
                         }
                     }
 

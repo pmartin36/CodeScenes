@@ -6,8 +6,9 @@ namespace SceneBuilder.Core.Model
 {
     /// <summary>
     /// Owns "an ObjectRef is reached at any depth" for a <see cref="ValueNode"/> — a bare
-    /// <see cref="ValueNode.ObjectRef"/>, or one carried inside a <see cref="ValueNode.List"/> item
-    /// or a <see cref="ValueNode.Nested"/> member at any depth. Built on <see cref="ValueWalk"/>.
+    /// <see cref="ValueNode.ObjectRef"/>, or one carried inside a <see cref="ValueNode.List"/> item,
+    /// a <see cref="ValueNode.Nested"/> member, or a <see cref="ValueNode.UnityEventListeners"/>
+    /// listener's <c>Target</c>/<c>ArgValue</c> slot, at any depth. Built on <see cref="ValueWalk"/>.
     /// Every parameter is required (no defaults) so a call site cannot silently omit one.
     /// </summary>
     public static class ObjectRefValues

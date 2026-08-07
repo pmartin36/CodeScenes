@@ -33,7 +33,7 @@ namespace SceneBuilder.Editor
             var index = IdentityNodeIndex.GlobalObjectIdToLogicalId(map);
             return new SceneRefResolver(
                 ObjectReferenceResolver.BuildFromIndex(index),
-                "map:" + IdentityNodeIndex.MappedNodeGeneration(index));
+                "map:" + IdentityNodeIndex.ProjectionGeneration(index));
         }
     }
 }

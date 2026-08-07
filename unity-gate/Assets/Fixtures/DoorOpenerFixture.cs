@@ -6,4 +6,8 @@ using UnityEngine;
 public class DoorOpener : MonoBehaviour
 {
     public GameObject target;
+
+    private int _openCount;
+    public int OpenCount => _openCount;
+    public void Open() { _openCount++; }
 }

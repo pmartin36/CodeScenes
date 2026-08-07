@@ -33,13 +33,29 @@ namespace SceneBuilder.Core.Identity
                 .GroupBy(e => e.GlobalObjectId)
                 .ToDictionary(g => g.Key, g => g.First().LogicalId);
 
+        /// IsMappedComponent is Kind=="Component" AND a non-empty GlobalObjectId — the component
+        /// counterpart of IsMappedNode. A Component's own GlobalObjectId always differs from its
+        /// owning GameObject's, so this projection and GlobalObjectIdToLogicalId never collide.
+        public static bool IsMappedComponent(IdentityMapEntry entry) =>
+            entry.Kind == Component && !string.IsNullOrEmpty(entry.GlobalObjectId);
+
+        /// GlobalObjectId -> component LogicalId over mapped components, first-wins on a duplicate goid.
+        public static Dictionary<string, string> GlobalObjectIdToComponentLogicalId(IdentityMap map) =>
+            map.Entries
+                .Where(IsMappedComponent)
+                .GroupBy(e => e.GlobalObjectId)
+                .ToDictionary(g => g.Key, g => g.First().LogicalId);
+
         /// Order-insensitive content key over the MAPPED-NODE projection — the only part of an IdentityMap a
         /// scene-ref resolver's answers depend on. Equal projections => equal key; any added/removed/retargeted
         /// mapped node => different key. Assets[] and non-node entries do not participate.
         public static string MappedNodeGeneration(IdentityMap map)
-            => MappedNodeGeneration(GlobalObjectIdToLogicalId(map));
+            => ProjectionGeneration(GlobalObjectIdToLogicalId(map));
 
-        public static string MappedNodeGeneration(IReadOnlyDictionary<string, string> goidToLogicalId)
+        /// Order-insensitive content key over any goid->LogicalId projection (mapped nodes, mapped
+        /// components, or a caller's own combination of both). Equal projections => equal key; any
+        /// added/removed/retargeted entry => different key.
+        public static string ProjectionGeneration(IReadOnlyDictionary<string, string> goidToLogicalId)
         {
             unchecked
             {

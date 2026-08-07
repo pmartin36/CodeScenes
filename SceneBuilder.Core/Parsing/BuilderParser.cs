@@ -651,7 +651,7 @@ namespace SceneBuilder.Core.Parsing
             {
                 var ordinal = ordinalByType.TryGetValue(component.TypeFullName, out var count) ? count : 0;
                 ordinalByType[component.TypeFullName] = ordinal + 1;
-                component.LogicalId = $"{node.LogicalId}/{component.TypeFullName}#{ordinal}";
+                component.LogicalId = ComponentTargetResolution.ComposeLogicalId(node.LogicalId, component.TypeFullName, ordinal);
             }
 
             foreach (var child in node.Children)

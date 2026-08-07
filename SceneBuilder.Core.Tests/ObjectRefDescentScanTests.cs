@@ -47,6 +47,12 @@ namespace SceneBuilder.Core.Tests
                 "the per-ref render function ObjectRefValues.Substitute applies to one already-descended ref"),
             new("SceneBuilder.Core/Reconcile/NestedValueEmission.cs", "IsRepresentable", 1,
                 "a per-node representability rule applied inside a ValueWalk.Map descent"),
+            new("SceneBuilder.Core/Model/UnityEventListener.cs", "ValidateTarget", 1,
+                "the listener target-slot kind rule: null | ObjectRef | AssetRef | Unsupported; one already-whole reference, no container"),
+            new("SceneBuilder.Core/Model/UnityEventListener.cs", "ValidateArgValue", 1,
+                "the object-mode argument's kind rule, the same one-reference test as the target slot"),
+            new("SceneBuilder.Core/Identity/ComponentTargetResolution.cs", "ToValueNode", 2,
+                "the ONE lowering of a classified listener reference into a listener's Target/ArgValue slot: SceneObject -> ObjectRef(LogicalId), Unresolvable -> ObjectRef(raw GlobalObjectId)"),
         };
 
         private static readonly string[] ScanRoots = { "SceneBuilder.Core", "com.codescenes" };

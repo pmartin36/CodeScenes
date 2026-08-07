@@ -343,5 +343,146 @@ namespace SceneBuilder.Core.Lowering
                     $"{site.RelativePath} :: {site.Member} declares Count <= 0, which allows zero tokens and does not belong in the inventory");
             }
         }
+
+        // A count-free, PER-FILE guard on `ValueNode.UnityEventListeners`: unlike the count-keyed
+        // List/Nested inventory above, a listener consumer's row cannot be pre-seeded with an exact
+        // count before that consumer's own member exists. A file is permitted to name the kind iff
+        // it OWNS the kind by name (every UnityEvent-specific file this feature adds is
+        // `*UnityEvent*.cs`), or its relative path is on the allowlist below -- seeded once with
+        // every consumer this feature creates and never edited again. An allowlisted file with ZERO
+        // occurrences is fine: the allowlist grants PERMISSION, not obligation, which is what makes
+        // its rows pre-seedable ahead of source not yet written.
+        private static readonly string[] UnityEventListenersTokenAllowlist =
+        {
+            "SceneBuilder.Core/Model/ValueNode.cs",
+            "SceneBuilder.Core/Model/ValueWalk.cs",
+            "SceneBuilder.Core/Diff/Differ.cs",
+            "SceneBuilder.Core/Materialize/Materializer.cs",
+            "SceneBuilder.Core/Plan/PlanOp.cs",
+            "SceneBuilder.Core/Plan/PlanOps.cs",
+            "SceneBuilder.Core/Parsing/BuilderParser.cs",
+            "SceneBuilder.Core/Reconcile/Reconciler.cs",
+            "SceneBuilder.Core/Reconcile/ComponentReconciler.cs",
+            "SceneBuilder.Core/Reconcile/SourcePatchApplier.cs",
+            "SceneBuilder.Core/Reconcile/SourceExpr.cs",
+            "SceneBuilder.Core/Reconcile/ComponentPatchApplier.cs",
+            "com.codescenes/Editor/SerializedFieldBridge.cs",
+            "com.codescenes/Editor/PlanExecutor.cs",
+        };
+
+        private static bool IsUnityEventListenersTokenPermitted(string relativePath) =>
+            Path.GetFileName(relativePath).Contains("UnityEvent", StringComparison.Ordinal)
+            || UnityEventListenersTokenAllowlist.Contains(relativePath);
+
+        // A sibling of ContainerTokens matching the third container kind: the same syntax-only
+        // qualifier-dot-identifier shape, kept as its own scanner so a newly permitted file's
+        // tokens never perturb the count-keyed List/Nested inventory above.
+        private static IEnumerable<Match> UnityEventListenersTokens(string sourceText, string relativePath)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
+            var root = tree.GetRoot();
+
+            foreach (var token in root.DescendantTokens())
+            {
+                if (token.Kind() != SyntaxKind.IdentifierToken || token.Text != "UnityEventListeners")
+                {
+                    continue;
+                }
+
+                var dot = token.GetPreviousToken();
+                if (dot.Kind() != SyntaxKind.DotToken)
+                {
+                    continue;
+                }
+
+                var qualifier = dot.GetPreviousToken();
+                if (qualifier.Text != "ValueNode")
+                {
+                    continue;
+                }
+
+                var line = token.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+                yield return new Match(relativePath, EnclosingMember(token), line, "ValueNode.UnityEventListeners");
+            }
+        }
+
+        private static IReadOnlyList<string> UnityEventListenersViolations(
+            IEnumerable<string> relativePaths, Func<string, string> readText)
+        {
+            var violations = new List<string>();
+            foreach (var relativePath in relativePaths)
+            {
+                if (IsUnityEventListenersTokenPermitted(relativePath))
+                {
+                    continue;
+                }
+
+                var matches = UnityEventListenersTokens(readText(relativePath), relativePath).ToList();
+                if (matches.Count == 0)
+                {
+                    continue;
+                }
+
+                violations.Add(
+                    $"{relativePath} names ValueNode.UnityEventListeners at " +
+                    string.Join(", ", matches.Select(m => $"{m.Member}@{m.Line}")) +
+                    " but is neither a *UnityEvent*.cs file nor on the allowlist. Route this site's " +
+                    "container descent through SceneBuilder.Core.Model.ValueWalk, or add the file to the allowlist.");
+            }
+
+            return violations;
+        }
+
+        [Fact]
+        public void Scan_ProductionSource_UnityEventListenersTokenOnlyInPermittedFiles()
+        {
+            var repoRoot = RepoRootLocator.Find();
+            var files = ProductionFiles(repoRoot).ToList();
+            Assert.True(files.Count > 0, "scan found zero production .cs files -- repo root resolution is broken");
+
+            var violations = UnityEventListenersViolations(
+                files, relativePath => File.ReadAllText(Path.Combine(repoRoot, relativePath)));
+
+            Assert.True(violations.Count == 0, string.Join("\n", violations));
+        }
+
+        [Fact]
+        public void Scan_UndeclaredFileNamingUnityEventListeners_FailsNamingFileAndKindAndRemedy()
+        {
+            const string relativePath = "com.codescenes/Editor/SomePass.cs";
+            const string synthetic = @"
+namespace SceneBuilder.Core.Whatever
+{
+    using SceneBuilder.Core.Model;
+
+    internal static class SomePass
+    {
+        private static bool IsListeners(ValueNode node) => node is ValueNode.UnityEventListeners;
+    }
+}
+";
+            var violations = UnityEventListenersViolations(new[] { relativePath }, _ => synthetic);
+
+            Assert.True(violations.Count == 1,
+                $"expected exactly one violation for an undeclared file, found {violations.Count}: {string.Join(" | ", violations)}");
+
+            var message = violations[0];
+            Assert.Contains(relativePath, message);
+            Assert.Contains("UnityEventListeners", message);
+            Assert.Contains("ValueWalk", message);
+        }
+
+        [Fact]
+        public void Scan_AllowlistedFileWithNoTokens_IsPermitted()
+        {
+            const string relativePath = "SceneBuilder.Core/Materialize/Materializer.cs";
+            Assert.Contains(relativePath, UnityEventListenersTokenAllowlist);
+
+            var violations = UnityEventListenersViolations(
+                new[] { relativePath },
+                _ => "namespace SceneBuilder.Core.Materialize { internal static class Materializer { } }");
+
+            Assert.Empty(violations);
+        }
     }
 }

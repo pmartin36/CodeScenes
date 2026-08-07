@@ -174,7 +174,7 @@ namespace SceneBuilder.Core.Parsing
                 var cb = builder.AddedComponents[i];
                 var ordinal = ordinalByType.TryGetValue(cb.TypeFullName, out var count) ? count : 0;
                 ordinalByType[cb.TypeFullName] = ordinal + 1;
-                cb.LogicalId = $"{builder.LogicalId}/{cb.TypeFullName}#{ordinal}";
+                cb.LogicalId = ComponentTargetResolution.ComposeLogicalId(builder.LogicalId, cb.TypeFullName, ordinal);
 
                 var target = cb.ChildPath == ""
                     ? new OverrideTarget()

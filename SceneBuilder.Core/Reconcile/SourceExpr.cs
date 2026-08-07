@@ -78,7 +78,10 @@ namespace SceneBuilder.Core.Reconcile
                 (nestedNode, members) => "new " + nestedNode.TypeName + " { " +
                     string.Join(", ", members.Select(member => member.Key + " = " + member.Value)) +
                     " }",
-                leaf => LeafLiteral(leaf, assetCatalog));
+                leaf => LeafLiteral(leaf, assetCatalog),
+                (listenersNode, slots) => throw new NotSupportedException(
+                    "SourceExpr.ValueNodeLiteral: a UnityEvent listener list is authored as .OnClick(...) / " +
+                    ".OnEvent(...), not as a field-value literal."));
 
         /// <summary>
         /// Renders one non-container <see cref="ValueNode"/> (a leaf reached at the root or below a

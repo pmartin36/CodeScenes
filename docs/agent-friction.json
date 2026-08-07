@@ -2,25 +2,25 @@
   "entries": {
     "Assertion failed on expression: '!gAlreadyClosing'": {
       "class": "ENVIRONMENT",
-      "count": 2,
+      "count": 3,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-07-31",
+      "last_seen": "2026-08-06",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "Assertion failed on expression: '!gAlreadyClosing'"
     },
     "Assertion failed on expression: 'm_PodArrays.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 1,
+      "count": 2,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-07-31",
+      "last_seen": "2026-08-06",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
       "verbatim": "Assertion failed on expression: 'm_PodArrays.empty()'"
     },
     "Assertion failed on expression: 'm_RendererNodes.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 1,
+      "count": 2,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-07-31",
+      "last_seen": "2026-08-06",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
       "verbatim": "Assertion failed on expression: 'm_RendererNodes.empty()'"
     },
@@ -64,6 +64,14 @@
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "Command 'set_serialized_field' failed: Target '/Canvas/Panel' is a GameObject. Pass --component <TypeName> to pick a component on it, or target a specific component directly (use its instanceId/globalId), to read or set serialized fields."
     },
+    "ExecuteCommandByName: Parameter validation failed: Required parameter 'asset' is missing or empty": {
+      "class": "TOOLING",
+      "count": 1,
+      "first_seen": "2026-08-06",
+      "last_seen": "2026-08-06",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-spec36.log",
+      "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'asset' is missing or empty"
+    },
     "ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty": {
       "class": "TOOLING",
       "count": 1,
@@ -71,6 +79,14 @@
       "last_seen": "2026-07-31",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty"
+    },
+    "ExecuteCommandByName: Parameter validation failed: Required parameter 'file' is missing or empty": {
+      "class": "TOOLING",
+      "count": 2,
+      "first_seen": "2026-08-06",
+      "last_seen": "2026-08-06",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-spec36.log",
+      "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'file' is missing or empty"
     },
     "[SceneBuilder] Sync wrote DemoScene.cs: emitted builder source DOES NOT COMPILE (<n> error(s)). | line 784: CS0542: 'Materials': member names cannot be the same as their enclosing type": {
       "class": "PRODUCT",
@@ -99,6 +115,11 @@
       "bytes": 167575,
       "head": "e80cdd42235e5bcb",
       "size": 167575
+    },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec36.log": {
+      "bytes": 297980,
+      "head": "3669795a0acdc693",
+      "size": 297980
     }
   }
 }
