@@ -18,6 +18,11 @@ namespace SceneBuilder.Authoring
         internal AssetReference()
         {
         }
+
+        /// <summary>This asset reference, typed as <typeparamref name="T"/> so it can be written as a
+        /// UnityEvent listener's object argument (e.g. <c>m.SetMaterial(Assets.Materials.Red.As&lt;UnityEngine.Material&gt;())</c>).
+        /// Compile-time cast scaffolding only — it performs no work at runtime.</summary>
+        public T As<T>() => default!;
     }
 
     /// <summary>

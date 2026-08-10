@@ -53,10 +53,11 @@ public class NotWired
 ";
             await AnalyzerVerifier.VerifyAsync(inertSource);
 
-            // (b) REAL: a self-contained stub where OnClick DOES bind to a real method symbol,
-            // wiring a listener whose parameter count (1) does not match the expected 0-arity
-            // UnityEvent signature -> exactly one SB1201 at the referenced method's name node.
-            const string mismatchSource = @"
+            // (b) A bound OnClick wiring a static in-call argument that matches the referenced
+            // method's own single parameter is a LEGAL persistent-call form: zero diagnostics.
+            // Matched against the 0-arity clean case below (isolates that silence holds at both
+            // arities, not just zero).
+            const string oneArgLegalSource = @"
 public static class Btn
 {
     public static void OnClick<T>(T target, System.Action<T> listener) { }
@@ -77,13 +78,8 @@ public class Caller
     }
 }
 ";
-            var mismatchTree = CSharpSyntaxTree.ParseText(mismatchSource);
-            var expectedMismatch = ExpectedAt(DiagnosticDescriptors.SB1201, MethodNameNode(mismatchTree, "SetLevel"));
+            await AnalyzerVerifier.VerifyAsync(oneArgLegalSource);
 
-            await AnalyzerVerifier.VerifyAsync(mismatchSource, expectedMismatch);
-
-            // Matching clean assertion: a bound OnClick wiring a 0-arity public method -> zero
-            // diagnostics (isolates that SB1201 fires on arity mismatch, not on binding alone).
             const string cleanSource = @"
 public static class Btn
 {
@@ -105,6 +101,90 @@ public class Caller
 }
 ";
             await AnalyzerVerifier.VerifyAsync(cleanSource);
+
+            // (c) A genuine mismatch: Unity persists at most one static argument, so a lambda
+            // call supplying two is a mismatch regardless of the referenced method's own arity.
+            const string twoArgsSuppliedSource = @"
+public static class Btn
+{
+    public static void OnClick<T>(T target, System.Action<T> listener) { }
+}
+
+public class Target
+{
+    public void SetTwo(int a, int b) { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var t = new Target();
+        Btn.OnClick(t, x => x.SetTwo(1, 2));
+    }
+}
+";
+            var twoArgsTree = CSharpSyntaxTree.ParseText(twoArgsSuppliedSource);
+            var expectedTwoArgs = ExpectedAt(DiagnosticDescriptors.SB1201, MethodNameNode(twoArgsTree, "SetTwo"));
+
+            await AnalyzerVerifier.VerifyAsync(twoArgsSuppliedSource, expectedTwoArgs);
+
+            // (d) A genuine mismatch reachable only once arity is judged against the CALL, not a
+            // constant: one argument supplied against a method whose second parameter is
+            // optional (2 declared parameters) — Unity matches by exact signature, so this does
+            // not bind at runtime even though plain C# overload resolution accepts the call.
+            const string optionalParamMismatchSource = @"
+public static class Btn
+{
+    public static void OnClick<T>(T target, System.Action<T> listener) { }
+}
+
+public class Target
+{
+    public void SetWithDefault(int a, int b = 0) { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var t = new Target();
+        Btn.OnClick(t, x => x.SetWithDefault(5));
+    }
+}
+";
+            var optionalParamTree = CSharpSyntaxTree.ParseText(optionalParamMismatchSource);
+            var expectedOptionalParam = ExpectedAt(DiagnosticDescriptors.SB1201, MethodNameNode(optionalParamTree, "SetWithDefault"));
+
+            await AnalyzerVerifier.VerifyAsync(optionalParamMismatchSource, expectedOptionalParam);
+
+            // (e) SB1202 is reachable now that a matching arity no longer short-circuits at a
+            // fixed 0: a 0-arity but non-public referenced method still fires the accessibility
+            // diagnostic.
+            const string nonPublicZeroArgSource = @"
+public static class Btn
+{
+    public static void OnClick<T>(T target, System.Action<T> listener) { }
+}
+
+public class Target
+{
+    internal void Close() { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var t = new Target();
+        Btn.OnClick(t, x => x.Close());
+    }
+}
+";
+            var nonPublicTree = CSharpSyntaxTree.ParseText(nonPublicZeroArgSource);
+            var expectedNonPublic = ExpectedAt(DiagnosticDescriptors.SB1202, MethodNameNode(nonPublicTree, "Close"));
+
+            await AnalyzerVerifier.VerifyAsync(nonPublicZeroArgSource, expectedNonPublic);
         }
 
         [Fact]

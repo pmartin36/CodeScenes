@@ -53,6 +53,8 @@ namespace SceneBuilder.Core.Tests
                 "the object-mode argument's kind rule, the same one-reference test as the target slot"),
             new("SceneBuilder.Core/Identity/ComponentTargetResolution.cs", "ToValueNode", 2,
                 "the ONE lowering of a classified listener reference into a listener's Target/ArgValue slot: SceneObject -> ObjectRef(LogicalId), Unresolvable -> ObjectRef(raw GlobalObjectId)"),
+            new("SceneBuilder.Core/Parsing/BuilderParser.UnityEvents.cs", "ClassifyStaticArg", 1,
+                "matches an already-lowered value's kind to pick ArgMode; one already-whole reference, no container, the same one-reference test ValidateArgValue applies"),
         };
 
         private static readonly string[] ScanRoots = { "SceneBuilder.Core", "com.codescenes" };

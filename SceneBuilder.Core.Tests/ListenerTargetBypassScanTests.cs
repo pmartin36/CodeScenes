@@ -75,13 +75,13 @@ namespace SceneBuilder.Core.Tests
             "m_PersistentCalls", "GetPersistentTarget",
         };
 
-        // Seeded once and never edited again (same rule as ValueContainerDescentScanTests'
-        // UnityEventListeners allowlist).
+        // UnityEventReader.cs / UnityEventWriter.cs are deliberately NOT here: after
+        // ModeArgBypassScanTests' Scan A closes to SceneBuilder.Core/Model/UnityEventProjection.cs
+        // alone, neither adapter path may spell a persistent-call token, target or argument
+        // included, so this allowlist agrees with that one about the same two files.
         private static readonly string[] PersistentCallTargetAllowlist =
         {
             "com.codescenes/Editor/ObjectReferenceResolver.cs",
-            "com.codescenes/Editor/UnityEventReader.cs",
-            "com.codescenes/Editor/UnityEventWriter.cs",
             "SceneBuilder.Core/Model/UnityEventProjection.cs",
         };
 

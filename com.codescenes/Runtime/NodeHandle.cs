@@ -98,5 +98,10 @@ namespace SceneBuilder.Authoring
         /// (typed member selector).
         /// </summary>
         public NodeHandle Component<T>(Action<ComponentHandle<T>> configure) => this;
+
+        /// <summary>Capture a reference to a component already added to this GameObject, to pass as a
+        /// UnityEvent listener target. <paramref name="ordinal"/> selects among several components of the
+        /// same type on this GameObject (0 = the first).</summary>
+        public ComponentRef<T> Ref<T>(int ordinal = 0) => new ComponentRef<T>();
     }
 }

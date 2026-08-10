@@ -67,6 +67,98 @@ public class CompileCheckRectTransformScene : ISceneDefinition
     }
 }";
 
+    // The `.Ref<T>()`/`.OnClick(...)` void listener-wiring form must compile against the real
+    // ComponentRef<T>/NodeHandle.Ref<T>/ComponentHandle<T>.OnClick<TTarget> authoring surface and
+    // a real global-namespace DoorOpener.Open() (unity-gate/Assets/Fixtures/DoorOpenerFixture.cs).
+    private const string OnClickSource = @"
+using SceneBuilder.Authoring;
+public class CompileCheckOnClickScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var opener = scene.Add(""Door"").Component<DoorOpener>(_ => { }).Ref<DoorOpener>();
+        scene.Add(""QuitButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(opener, o => o.Open()));
+    }
+}";
+
+    [Test]
+    public void OnClickSource_CompilesWithNoDiagnostics()
+    {
+        var errors = BuilderCompileCheck.Check(OnClickSource);
+
+        Assert.IsEmpty(
+            errors.Select(e => e.ToString()),
+            "`.Ref<T>()`/`.OnClick(...)` must compile against the real authoring API.");
+    }
+
+    // The rest of the listener-wiring authoring surface: a static argument selected by the wired
+    // method's own arity (int/float/string/bool + an asset-arg and a scene-arg via the typed
+    // `.As<T>()`/`.As()` pass-throughs), a `callState:` argument, the `dynamic:` method-group
+    // `.OnEvent(...)` form (plain/two-generic/subclassed event fields), the void `.OnEvent(...)`
+    // form, several listeners on one field, an asset TARGET, and a GameObject target — every form
+    // from deliverables (a)-(g), compiled against the REAL fixtures under unity-gate/Assets/Fixtures
+    // and the real typed asset catalog rather than Core's syntax-only parser.
+    private static string ListenerSurfaceSource() => $@"
+using SceneBuilder.Authoring;
+public class CompileCheckListenerSurfaceScene : ISceneDefinition
+{{
+    public void Build(SceneRoot scene)
+    {{
+        var lamp = scene.Add(""Lamp"").Component<Lamp>(_ => {{ }}).Ref<Lamp>();
+        var mixer = scene.Add(""Mixer"").Component<Mixer>(_ => {{ }}).Ref<Mixer>();
+        var marquee = scene.Add(""Marquee"").Component<Marquee>(_ => {{ }}).Ref<Marquee>();
+        var hud = scene.Add(""Hud"").Component<Hud>(_ => {{ }}).Ref<Hud>();
+        var repeater = scene.Add(""Repeater"").Component<Repeater>(_ => {{ }}).Ref<Repeater>();
+        var pinger = scene.Add(""Pinger"").Component<Pinger>(_ => {{ }}).Ref<Pinger>();
+        var door = scene.Add(""DoorNode"");
+
+        scene.Add(""IntButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(lamp, l => l.SetLevel(3)));
+        scene.Add(""FloatButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(mixer, m => m.SetVol(0.5f)));
+        scene.Add(""StringButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(marquee, m => m.SetText(""hi"")));
+        scene.Add(""BoolButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(marquee, m => m.SetVisible(true)));
+        scene.Add(""AssetArgButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(marquee, m => m.SetMaterial({AssetCatalogBuildFixtures.TypedRocksStone}.As<UnityEngine.Material>())));
+        scene.Add(""SceneArgButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(marquee, m => m.SetSubject(door.As<UnityEngine.GameObject>())));
+        scene.Add(""VoidRepeaterButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(repeater, r => r.Apply()));
+        scene.Add(""IntRepeaterButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(repeater, r => r.Apply(2)));
+        scene.Add(""CallStateButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(mixer, m => m.SetVol(0.25f), callState: UnityEngine.Events.UnityEventCallState.EditorAndRuntime));
+        scene.Add(""AssetTargetButton"").Component<UnityEngine.UI.Button>(b => b.OnClick<Marquee>({AssetCatalogBuildFixtures.TypedRocksStone}, m => m.SetText(""asset-target"")));
+        scene.Add(""GameObjectTargetButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(door, g => g.SetActive(false)));
+        scene.Add(""OrderButton"").Component<UnityEngine.UI.Button>(b =>
+        {{
+            b.OnClick(lamp, l => l.SetLevel(1));
+            b.OnClick(mixer, m => m.SetVol(0.75f));
+        }});
+
+        scene.Add(""EventHost"").Component<Pinger>(p =>
+        {{
+            p.OnEvent(x => x.onPinged, hud, h => h.Refresh());
+            p.OnEvent(x => x.onLevelChanged, mixer, m => m.SetVol, dynamic: true);
+            p.OnEvent(x => x.onBothChanged, pinger, q => q.SetBoth, dynamic: true);
+            p.OnEvent(x => x.onCounted, lamp, l => l.SetLevel, dynamic: true);
+        }});
+    }}
+}}";
+
+    [Test]
+    public void ListenerSurfaceSource_CompilesWithNoDiagnostics()
+    {
+        AssetCatalogBuildFixtures.Create();
+        try
+        {
+            var errors = BuilderCompileCheck.Check(ListenerSurfaceSource());
+
+            Assert.IsEmpty(
+                errors.Select(e => e.ToString()),
+                "The full listener-wiring authoring surface (static args, callState, dynamic "
+                    + "OnEvent, asset/GameObject targets) must compile against the real authoring "
+                    + "API and fixtures.");
+        }
+        finally
+        {
+            AssetCatalogBuildFixtures.Delete();
+        }
+    }
+
     [Test]
     public void CleanSource_CompilesWithNoDiagnostics()
     {

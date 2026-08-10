@@ -34,6 +34,12 @@ namespace SceneBuilder.Core.Parsing
         // (BuildHandles, BuilderParser.cs:72), assigned at :103.
         public IReadOnlyDictionary<string, string> Handles { get; init; } = new Dictionary<string, string>();
 
+        // One entry per parsed component, keyed by the component's FINAL LogicalId, mapping to its
+        // handle (var) name — the component-space twin of Handles, populated from a
+        // `.Ref<T>()`-captured var whose composed id matched an actual component. Populated by
+        // BuilderParser (ResolveComponentRefs, BuilderParser.UnityEvents.cs) in ParseCore.
+        public IReadOnlyDictionary<string, string> ComponentHandles { get; init; } = new Dictionary<string, string>();
+
         // b1-t2: one NodeAnchor per parsed node, pre-order/document order, NEVER collapsed
         // by LogicalId — two nodes resolving to the same LogicalId (a colliding hand-authored
         // `.Id(...)`) produce TWO entries here, unlike Anchors (a dict, which collapses them to

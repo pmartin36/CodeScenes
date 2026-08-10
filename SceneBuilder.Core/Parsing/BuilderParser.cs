@@ -80,7 +80,21 @@ namespace SceneBuilder.Core.Parsing
                 handlesByName.TryAdd(kv.Value, kv.Key);
             }
 
-            model = ObjectRefLowering.Lower(model, name => handlesByName.TryGetValue(name, out var id) ? id : null);
+            // `.Ref<T>()`-captured component vars, resolved now that every component's
+            // LogicalId is final. Kept as its own name->LogicalId map (never merged into
+            // handlesByName) so a listener target always resolves against the component space
+            // FIRST -- the invariant that a listener target is a component LogicalId, never the
+            // owning GameObject's, holds by construction.
+            var componentRefsByName = ResolveComponentRefs(ctx);
+            var componentHandles = new Dictionary<string, string>();
+            foreach (var kv in componentRefsByName)
+            {
+                componentHandles.TryAdd(kv.Value, kv.Key);
+            }
+
+            model = ObjectRefLowering.Lower(model, name =>
+                componentRefsByName.TryGetValue(name, out var componentId) ? componentId :
+                handlesByName.TryGetValue(name, out var nodeId) ? nodeId : null);
 
             // File-scope PLAIN `using` directives (no Alias, no static keyword), in document
             // order. `root.Usings` is file-scope-only by construction (namespace-nested and
@@ -100,7 +114,7 @@ namespace SceneBuilder.Core.Parsing
                 .Concat(ctx.FacadeConflicts)
                 .ToList();
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, Ambiguities = ambiguities, Usings = usings, ChainedComponents = chainedComponents };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, ComponentHandles = componentHandles, Ambiguities = ambiguities, Usings = usings, ChainedComponents = chainedComponents };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -219,7 +233,9 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
-            var explicitId = ApplyChainedCalls(node, calls, ctx);
+            var (remainingCalls, refCall) = SplitTrailingComponentRef(calls);
+
+            var explicitId = ApplyChainedCalls(node, remainingCalls, ctx);
             if (explicitId != null)
             {
                 node.LogicalId = explicitId;
@@ -232,17 +248,14 @@ namespace SceneBuilder.Core.Parsing
             // chained calls on one statement (`crate.Component<A>().Component<B>();`) each still
             // live partly inside a chain another call also occupies, so none of them qualifies;
             // they stay StatementAnchored = false (the pinned default) like every other chained
-            // shape.
+            // shape. Reads the ORIGINAL unsplit `calls` so a trailing `.Ref<T>()` keeps this
+            // conservative false.
             if (statementLevel && calls.Count == 1 && calls[0].Method is "Component" or "FitSize" or "SurfaceSnap")
             {
                 node.Components[node.Components.Count - 1].StatementAnchored = true;
             }
 
-            if (handleName != null)
-            {
-                ctx.Handles[handleName] = node;
-                node.Handle = handleName;
-            }
+            BindChainHandle(node, handleName, refCall, ctx);
         }
 
         private static void ProcessAddChain(IdentifierNameSyntax receiver, List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls, string? handleName, ParserContext ctx)
@@ -273,18 +286,17 @@ namespace SceneBuilder.Core.Parsing
             var node = new NodeBuilder { Name = name };
             node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
 
-            var explicitId = ApplyChainedCalls(node, calls.Skip(1).ToList(), ctx);
+            var (remainingCalls, refCall) = SplitTrailingComponentRef(calls.Skip(1).ToList());
+            var explicitId = ApplyChainedCalls(node, remainingCalls, ctx);
 
             var siblingIndex = targetList.Count;
             var parentLogicalId = parentNode?.LogicalId;
-            node.LogicalId = ctx.Resolver.Resolve(handleName, explicitId, parentLogicalId, name, siblingIndex);
+            // A trailing `.Ref<T>()` names a COMPONENT, not this GameObject, so the var is withheld
+            // from LogicalId resolution -- the node still gets its synthesized/explicit id.
+            node.LogicalId = ctx.Resolver.Resolve(refCall == null ? handleName : null, explicitId, parentLogicalId, name, siblingIndex);
 
             targetList.Add(node);
-            if (handleName != null)
-            {
-                ctx.Handles[handleName] = node;
-                node.Handle = handleName;
-            }
+            BindChainHandle(node, handleName, refCall, ctx);
 
             if (addArgs.Count > 1)
             {
@@ -423,7 +435,8 @@ namespace SceneBuilder.Core.Parsing
         }
 
         // Mirrors ProcessClosure but self-contained: a component closure only contains
-        // `x.Set(...)` calls on the lambda parameter, no node handles / nested Add.
+        // `x.Set(...)`/`x.OnClick(...)`/`x.OnEvent(...)` calls on the lambda parameter, no node
+        // handles / nested Add.
         private static void ProcessComponentClosure(ExpressionSyntax closureExpression, ComponentBuilder cb, ParserContext ctx)
         {
             if (closureExpression is not SimpleLambdaExpressionSyntax lambda)
@@ -458,19 +471,38 @@ namespace SceneBuilder.Core.Parsing
 
         private static void ProcessComponentSetCall(ExpressionSyntax expression, string paramName, ComponentBuilder cb, ParserContext ctx)
         {
-            if (expression is not InvocationExpressionSyntax setInvocation ||
-                setInvocation.Expression is not MemberAccessExpressionSyntax setMemberAccess ||
-                setMemberAccess.Name.Identifier.Text != "Set" ||
-                setMemberAccess.Expression is not IdentifierNameSyntax setReceiver ||
-                setReceiver.Identifier.Text != paramName)
+            if (expression is not InvocationExpressionSyntax invocation ||
+                invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                memberAccess.Expression is not IdentifierNameSyntax receiver ||
+                receiver.Identifier.Text != paramName)
             {
                 throw Unreachable();
             }
 
-            var (key, value, valueSpan) = ParseSetCall(setInvocation, ctx);
-            cb.Fields.Add(new KeyValuePair<string, ValueNode>(key, value));
-            cb.FieldValueSpans.Add(new KeyValuePair<string, SourceSpan>(key, valueSpan));
+            switch (memberAccess.Name.Identifier.Text)
+            {
+                case "Set":
+                    var (key, value, valueSpan) = ParseSetCall(invocation, ctx);
+                    cb.Fields.Add(new KeyValuePair<string, ValueNode>(key, value));
+                    cb.FieldValueSpans.Add(new KeyValuePair<string, SourceSpan>(key, valueSpan));
+                    break;
+                case "OnClick":
+                    ParseListenerCall(invocation, cb, ctx, isOnEvent: false);
+                    break;
+                case "OnEvent":
+                    ParseListenerCall(invocation, cb, ctx, isOnEvent: true);
+                    break;
+                default:
+                    throw Unreachable();
+            }
         }
+
+        // The ONE composer of the transient `member:<name>` field key (§ field-key convention):
+        // every `r => r.member`-shaped selector — `.Set(x => x.field, ...)`, `.Override(...).Set(...)`,
+        // and `.OnEvent(x => x.field, ...)` alike — routes through this so the key spelling can never
+        // drift between the three call sites.
+        private static string MemberFieldKey(MemberAccessExpressionSyntax selectorBody) =>
+            "member:" + selectorBody.Name.Identifier.Text;
 
         // Field-key convention (§ field-key convention): string-literal arg0 -> verbatim key
         // (no m_/accessibility mangling); `r => r.member` lambda arg0 -> provisional
@@ -493,7 +525,7 @@ namespace SceneBuilder.Core.Parsing
             }
             else if (keyExpr is SimpleLambdaExpressionSyntax { Body: MemberAccessExpressionSyntax memberAccess })
             {
-                key = "member:" + memberAccess.Name.Identifier.Text;
+                key = MemberFieldKey(memberAccess);
             }
             else
             {
@@ -798,6 +830,13 @@ namespace SceneBuilder.Core.Parsing
             public FacadeCatalog? FacadeCatalog { get; }
             public AssetCatalog? AssetCatalog { get; }
             public Dictionary<string, NodeBuilder> Handles { get; } = new();
+
+            // The component-ref address space -- a `.Ref<T>()`-terminated chain's declared var,
+            // mapping to the owning node + the captured type/ordinal (final composition is
+            // deferred to ResolveComponentRefs, once every component LogicalId is final). Disjoint
+            // from Handles by construction: a chain binds its var to exactly one of the two.
+            public Dictionary<string, (NodeBuilder Node, string TypeFullName, int Ordinal)> ComponentRefs { get; } = new();
+
             public List<NodeBuilder> Roots { get; } = new();
             public List<Conflict> FacadeConflicts { get; } = new();
         }

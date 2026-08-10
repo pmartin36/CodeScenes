@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="../SceneBuilder.Core/SceneBuilder.Core.csproj" />
     <ProjectReference Include="../SceneBuilder.Grammar/SceneBuilder.Grammar.csproj" />
+    <ProjectReference Include="../SceneBuilder.DocGen/SceneBuilder.DocGen.csproj" />
   </ItemGroup>
 
 </Project>

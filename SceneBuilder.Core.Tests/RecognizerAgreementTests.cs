@@ -296,6 +296,18 @@ public class RectTransformNonLiteralScene : ISceneDefinition
 }
 ");
 
+            // ---- ComponentRef<T> / .OnClick(...) -------------------------------------------------
+            yield return Case("Valid_ComponentRef_OnClick", @"
+public class ValidComponentRefOnClickScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var opener = scene.Add(""Door"").Component<DoorOpener>(_ => { }).Ref<DoorOpener>();
+        scene.Add(""QuitButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(opener, o => o.Open()));
+    }
+}
+");
+
             // ---- COMPLETENESS EXTENSION: one case per body-grammar throw site NOT already above,
             // so acceptance-parity (recognizer flags IFF parser throws) is proven at EVERY throw
             // the dedup removes. Each body wraps the offending statement in a valid Build shell.
@@ -350,6 +362,22 @@ public class RectTransformNonLiteralScene : ISceneDefinition
             yield return Body("FitSize_AspectPlusExplicit", @"scene.Add(""A"").FitSize(width: 2f, size: (1,1,1));");
             yield return Body("SurfaceSnap_LeftRight", @"scene.Add(""A"").SurfaceSnap(left: true, right: true);");
             yield return Body("SurfaceSnap_ForwardBack", @"scene.Add(""A"").SurfaceSnap(forward: true, back: true);");
+
+            // ComponentRef<T> / .OnClick(...) ----------------------------------------------------------
+            yield return Body("Ref_NotLastInChain", @"var x = scene.Add(""A"").Ref<Rigidbody>().Tag(""y"");");
+            yield return Body("Ref_MultipleTypeArguments", @"var x = scene.Add(""A"").Ref<Rigidbody, Collider>();");
+            yield return Body("Ref_NonNumericArgument", @"var x = scene.Add(""A"").Ref<Rigidbody>(""oops"");");
+            yield return Body("OnClick_WrongArgCount", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other));");
+            yield return Body("OnClick_FirstArgNotIdentifier", @"scene.Add(""A"").Component<Button>(b => b.OnClick(5, o => o.Open()));");
+            yield return Body("OnClick_SecondArgNotLambda", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, 5));");
+            // A single in-call static argument is a legal persistent-call form (Unity persists at
+            // most one), so the still-rejected shape is TWO supplied arguments, not one.
+            yield return Body("OnClick_TooManyStaticArgs", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, o => o.Open(1, 2)));");
+            // An enum member access is not a persistable Unity static-argument kind — no ArgMode
+            // slot exists for it.
+            yield return Body("OnClick_EnumStaticArgument", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, o => o.SetMode(MyEnum.Fast)));");
+            // A long literal outside int range cannot narrow into the persistent call's int slot.
+            yield return Body("OnClick_StaticArgumentOutOfIntRange", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, o => o.SetCount(9999999999L)));");
         }
 
         private static object[] Body(string name, string statements) => Case(name, $@"

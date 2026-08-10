@@ -5,6 +5,7 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using SceneBuilder.Core.Model;
 using Xunit;
 
 namespace SceneBuilder.Core.Tests
@@ -67,20 +68,26 @@ namespace SceneBuilder.Core.Tests
 
         private static readonly string[] ScanARoots = { "SceneBuilder.Core", "com.codescenes" };
 
-        private static readonly string[] ScanATokens =
+        // The non-serialized Unity API names a bypass could also hand-write instead of routing
+        // through UnityEventProjection. Not a serialized spelling, so not part of PersistentCallPaths.
+        private static readonly string[] ApiNameTokens =
         {
-            "m_Mode", "m_CallState", "m_Arguments", "m_IntArgument", "m_FloatArgument", "m_StringArgument",
-            "m_BoolArgument", "PersistentListenerMode", "SetPersistentListenerState", "GetPersistentListenerState",
+            "PersistentListenerMode", "SetPersistentListenerState", "GetPersistentListenerState",
             "AddVoidPersistentListener", "AddIntPersistentListener", "AddFloatPersistentListener",
             "AddStringPersistentListener", "AddBoolPersistentListener", "AddObjectPersistentListener",
         };
 
-        // Seeded once and never edited again (same rule as ListenerTargetBypassScanTests' allowlists).
+        // Derived from PersistentCallPaths.All rather than hand-maintained: extending the
+        // vocabulary widens this guard automatically.
+        private static readonly string[] ScanATokens =
+            PersistentCallPaths.All.Concat(ApiNameTokens).ToArray();
+
+        // Closed to Core's projection alone: PersistentCallPaths is the single owner of every
+        // serialized spelling, so the two adapter paths (UnityEventWriter.cs, UnityEventReader.cs)
+        // are no longer permitted to spell one themselves and were removed from this list.
         private static readonly string[] ScanAAllowlist =
         {
             "SceneBuilder.Core/Model/UnityEventProjection.cs",
-            "com.codescenes/Editor/UnityEventWriter.cs",
-            "com.codescenes/Editor/UnityEventReader.cs",
         };
 
         private static IEnumerable<Match> ScanATokensIn(string sourceText, string relativePath)
@@ -219,16 +226,96 @@ namespace SceneBuilder.Editor
         }
 
         [Fact]
-        public void ScanA_Allowlist_ContainsExactlyTheThreeSeededPaths()
+        public void ScanA_Allowlist_ContainsOnlyCoresProjection()
         {
             Assert.Equal(
-                new[]
-                {
-                    "SceneBuilder.Core/Model/UnityEventProjection.cs",
-                    "com.codescenes/Editor/UnityEventWriter.cs",
-                    "com.codescenes/Editor/UnityEventReader.cs",
-                },
+                new[] { "SceneBuilder.Core/Model/UnityEventProjection.cs" },
                 ScanAAllowlist);
+        }
+
+        [Fact]
+        public void ScanA_TokenList_CoversEverySerializedSpellingInTheVocabulary()
+        {
+            Assert.NotEmpty(PersistentCallPaths.All);
+
+            foreach (var spelling in PersistentCallPaths.All)
+            {
+                Assert.Contains(spelling, ScanATokens);
+            }
+
+            foreach (var apiName in ApiNameTokens)
+            {
+                Assert.Contains(apiName, ScanATokens);
+            }
+        }
+
+        [Fact]
+        public void ScanA_UnityEventWriterSpellingASerializedPathItself_IsNowAViolation()
+        {
+            const string relativePath = "com.codescenes/Editor/UnityEventWriter.cs";
+            const string synthetic = @"
+namespace SceneBuilder.Editor
+{
+    using UnityEditor;
+
+    internal static class UnityEventWriter
+    {
+        private static void Write(SerializedProperty call) { call.FindPropertyRelative(""m_Mode"").intValue = 3; }
+    }
+}
+";
+            var violations = ScanAViolations(new[] { relativePath }, _ => synthetic);
+
+            Assert.True(violations.Count == 1,
+                $"expected exactly one violation, found {violations.Count}: {string.Join(" | ", violations)}");
+            Assert.Contains(relativePath, violations[0]);
+            Assert.Contains("m_Mode", violations[0]);
+            Assert.Contains("UnityEventProjection", violations[0]);
+        }
+
+        [Fact]
+        public void ScanA_UnityEventReaderHandWritingAModeTable_IsNowAViolation()
+        {
+            const string relativePath = "com.codescenes/Editor/UnityEventReader.cs";
+            const string synthetic = @"
+namespace SceneBuilder.Editor
+{
+    internal static class UnityEventReader
+    {
+        private static readonly int[] ModeTable = { PersistentListenerMode.EventDefined, PersistentListenerMode.Void };
+        private const string ArgPath = ""m_IntArgument"";
+    }
+}
+";
+            var violations = ScanAViolations(new[] { relativePath }, _ => synthetic);
+
+            Assert.True(violations.Count == 1,
+                $"expected exactly one violation, found {violations.Count}: {string.Join(" | ", violations)}");
+            Assert.Contains(relativePath, violations[0]);
+        }
+
+        [Fact]
+        public void ScanA_NewlyGuardedTokenInAnUndeclaredFile_IsAViolation()
+        {
+            const string relativePath = "com.codescenes/Editor/SomeOtherPass.cs";
+            const string synthetic = @"
+namespace SceneBuilder.Editor
+{
+    using UnityEditor;
+
+    internal static class SomeOtherPass
+    {
+        private static SerializedProperty AssemblyType(SerializedProperty call) =>
+            call.FindPropertyRelative(""m_TargetAssemblyTypeName"");
+    }
+}
+";
+            var violations = ScanAViolations(new[] { relativePath }, _ => synthetic);
+
+            Assert.True(violations.Count == 1,
+                $"expected exactly one violation, found {violations.Count}: {string.Join(" | ", violations)}");
+            Assert.Contains(relativePath, violations[0]);
+            Assert.Contains("m_TargetAssemblyTypeName", violations[0]);
         }
 
         // ---- Scan B: the adapter never names the model's argument-mode enums --------------------

@@ -483,3 +483,19 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   move here, derive from `Conflict.RequiresLocatedReport` rather than enumerate. The file is in no
   m8 task's TOUCHES, so no task in that run could hold it. OWNER: unassigned. FOUND-BY:
   m8-unityevents.
+
+- SEVERITY low — b1-t2's widening of the component-closure sub-grammar also opened a SECOND, untested
+  surface: the prefab-instance `.AddComponent<T>(c => ...)` closure. MEASURED at b1-t2 validation on the
+  current tree by reading both call graphs: `BuilderParser.Instance.cs:322` (`ApplyAddComponent`) and
+  `FlatShapeRecognizer.Instance.cs:305` both call the SAME `ProcessComponentClosure` that b1-t2 widened, and
+  `com.codescenes/Runtime/InstanceHandle.cs:57,134` + `ScopedHandle.cs:30` type the config lambda as
+  `Action<ComponentHandle<T>>`, which now carries `OnClick<TTarget>`. So
+  `inst.AddComponent<Button>(c => c.OnClick(opener, o => o.Open()));` COMPILES, RECOGNIZES with zero
+  violations, and PARSES into `NodeBuilder.AddedComponents[i].Fields["m_OnClick"]` today. Parser and
+  recognizer widened together, so there is no mirror divergence; the hole is that no test covers the path and
+  no m8 task declares it. If b2/b3 materialize listeners only off `NodeBuilder.Components`, an authored
+  `.OnClick` on a prefab-instance added component is a silent no-op. Fix: either cover the
+  `AddedComponents` path in materialization or reject `.OnClick` in `ApplyAddComponent`'s closure on both
+  mirror sides. LATENT until listener materialization ships.
+  OWNER: unassigned — needs a task that can hold `BuilderParser.Instance.cs` +
+  `FlatShapeRecognizer.Instance.cs` (or the listener materializer). FOUND-BY: m8-unityevents.

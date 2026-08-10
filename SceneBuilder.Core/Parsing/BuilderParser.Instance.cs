@@ -274,7 +274,7 @@ namespace SceneBuilder.Core.Parsing
                 }
 
                 typeFullName = parameter.Type.ToString().Trim();
-                propertyPath = "member:" + memberAccess.Name.Identifier.Text;
+                propertyPath = MemberFieldKey(memberAccess);
             }
             else if (keyExpr is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
             {

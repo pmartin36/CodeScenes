@@ -103,9 +103,14 @@ namespace SceneBuilder.Grammar
                 return;
             }
 
-            ApplyChainedCalls(calls, ctx);
+            var (remainingCalls, refCall) = SplitTrailingComponentRef(calls);
+            ApplyChainedCalls(remainingCalls, ctx);
 
-            if (handleName != null)
+            if (refCall != null)
+            {
+                CheckComponentRefCall(refCall, ctx);
+            }
+            else if (handleName != null)
             {
                 ctx.Scope.Add(handleName);
             }
@@ -131,9 +136,14 @@ namespace SceneBuilder.Grammar
                 Report(ctx, addArgs[0].Expression, SB1001, "Expected a string literal");
             }
 
-            ApplyChainedCalls(calls.Skip(1).ToList(), ctx);
+            var (remainingCalls, refCall) = SplitTrailingComponentRef(calls.Skip(1).ToList());
+            ApplyChainedCalls(remainingCalls, ctx);
 
-            if (handleName != null)
+            if (refCall != null)
+            {
+                CheckComponentRefCall(refCall, ctx);
+            }
+            else if (handleName != null)
             {
                 ctx.Scope.Add(handleName);
             }
@@ -246,8 +256,8 @@ namespace SceneBuilder.Grammar
         }
 
         // Mirrors ProcessComponentClosure/ProcessComponentSetCall — the Component<T>() and
-        // AddComponent<T>() closure sub-grammar (`c => c.Set(key,value)` calls only). Every Fail
-        // site in this sub-grammar maps to SB1003 (research.md).
+        // AddComponent<T>() closure sub-grammar (`c => c.Set(key,value)`, `c => c.OnClick(...)` or
+        // `c => c.OnEvent(...)` calls only). Every Fail site in this sub-grammar maps to SB1003.
         private static void ProcessComponentClosure(ExpressionSyntax closureExpression, RecognizerContext ctx)
         {
             if (closureExpression is not SimpleLambdaExpressionSyntax lambda)
@@ -265,7 +275,7 @@ namespace SceneBuilder.Grammar
                     {
                         if (statement is not ExpressionStatementSyntax exprStatement)
                         {
-                            Report(ctx, statement, SB1003, "Unsupported statement in component closure (expected .Set(...) calls)");
+                            Report(ctx, statement, SB1003, "Unsupported statement in component closure (expected .Set(...), .OnClick(...) or .OnEvent(...) calls)");
                             continue;
                         }
 
@@ -285,16 +295,34 @@ namespace SceneBuilder.Grammar
 
         private static void ProcessComponentSetCall(ExpressionSyntax expression, string paramName, RecognizerContext ctx)
         {
-            if (expression is not InvocationExpressionSyntax setInvocation ||
-                setInvocation.Expression is not MemberAccessExpressionSyntax setMemberAccess ||
-                setMemberAccess.Name.Identifier.Text != "Set" ||
-                setMemberAccess.Expression is not IdentifierNameSyntax setReceiver ||
-                setReceiver.Identifier.Text != paramName)
+            if (expression is not InvocationExpressionSyntax invocation ||
+                invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                memberAccess.Expression is not IdentifierNameSyntax receiver ||
+                receiver.Identifier.Text != paramName)
             {
-                Report(ctx, expression, SB1003, "Expected a `.Set(...)` call in component closure");
+                Report(ctx, expression, SB1003, "Expected a `.Set(...)`, `.OnClick(...)` or `.OnEvent(...)` call in component closure");
                 return;
             }
 
+            switch (memberAccess.Name.Identifier.Text)
+            {
+                case "Set":
+                    CheckSetCall(invocation, ctx);
+                    break;
+                case "OnClick":
+                    CheckListenerCall(invocation, ctx, isOnEvent: false);
+                    break;
+                case "OnEvent":
+                    CheckListenerCall(invocation, ctx, isOnEvent: true);
+                    break;
+                default:
+                    Report(ctx, expression, SB1003, "Expected a `.Set(...)`, `.OnClick(...)` or `.OnEvent(...)` call in component closure");
+                    break;
+            }
+        }
+
+        private static void CheckSetCall(InvocationExpressionSyntax setInvocation, RecognizerContext ctx)
+        {
             var setArgs = setInvocation.ArgumentList.Arguments;
             if (setArgs.Count != 2)
             {

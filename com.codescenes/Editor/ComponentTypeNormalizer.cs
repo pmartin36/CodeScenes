@@ -54,6 +54,7 @@ namespace SceneBuilder.Editor
                 FlagPresence = parse.FlagPresence,
                 FieldArgumentSpans = parse.FieldArgumentSpans,
                 Handles = parse.Handles,
+                ComponentHandles = parse.ComponentHandles,
                 NodeAnchors = parse.NodeAnchors,
                 Ambiguities = parse.Ambiguities,
                 Usings = parse.Usings,

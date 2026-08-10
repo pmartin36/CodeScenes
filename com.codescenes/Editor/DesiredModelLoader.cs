@@ -123,8 +123,18 @@ namespace SceneBuilder.Editor
             // a path stale from a move/rename recovers its GUID from the sidecar Assets[] cache; only a
             // GUID that maps to NOTHING (asset truly deleted) fails loud. Built-in refs route through
             // ResolveBuiltin — the always-on unlocated backstop the pre-pass above enriches.
+            // ResetCatalogStampedAssetRefs runs first: a typed `Assets.<Group>...<Leaf>` catalog
+            // chain (ValueNodeParser.TryParseAssetChain) stamps a Guid straight from the catalog at
+            // PARSE time, paired with the catalog's own main-asset LOOKUP FileId placeholder — never
+            // the live AssetDatabase-native identity Lower's resolver computes. Trusting that stamp
+            // here would skip real resolution and leave the desired model's FileId permanently
+            // disagreeing with a materialized snapshot's freshly-read one — a non-converging sync
+            // (same failure mode this type's own remarks document above for an unlowered ref).
             var assetResolver = new AssetReferenceResolver.LoweringResolver(existingMap?.Assets);
-            var desired = AssetRefLowering.Lower(resolved, assetResolver.Resolve, assetResolver.ResolveBuiltin);
+            var desired = AssetRefLowering.Lower(
+                AssetRefLowering.ResetCatalogStampedAssetRefs(resolved),
+                assetResolver.Resolve,
+                assetResolver.ResolveBuiltin);
 
             // b5-t3: lower PrefabInstanceNode.SourcePrefab the same way — a display path resolved to
             // its (guid, fileId, typeHint) via the SAME harvesting resolver, so the sidecar Assets[]

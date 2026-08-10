@@ -51,11 +51,12 @@ namespace SceneBuilder.Core.Tests
                 .ToArray();
         }
 
-        // The Game.DoorOpener fixture type + its supporting UnityEngine/Prefabs stubs, shared by
-        // every test that binds an emitted instance-target or override expression against a
-        // component field. One copy so a fixture type change lands in one place.
+        // The Game.DoorOpener fixture type + its supporting Prefabs stub, shared by every test that
+        // binds an emitted instance-target or override expression against a component field. One
+        // copy so a fixture type change lands in one place. GameObject/Material come from the
+        // always-prepended UnityEngineStubs below, not declared here (a second declaration would be
+        // CS0101).
         internal const string DoorOpenerStubs = @"
-namespace UnityEngine { public class GameObject { } public class Material { } }
 namespace Game
 {
     public class DoorOpener
@@ -70,6 +71,49 @@ public static class Prefabs { public static TankRef Tank => null; }
 public class TankRef : SceneBuilder.Authoring.PrefabRef { }
 ";
 
+        // The `.Ref<T>()`/`.OnClick(...)` compile-proof stub: a global-namespace target type
+        // carrying a public zero-argument `Open()` (the wireable method) so both the positive and
+        // negative binding proofs have something to compile against. `UnityEngine.UI.Button` comes
+        // from the always-prepended UnityEngineStubs below.
+        internal const string UnityEventStubs = @"
+public class DoorOpener
+{
+    public void Open() { }
+}
+";
+
+        // The shared minimal UnityEngine surface every com.codescenes/Runtime authoring member
+        // might reference (ComponentHandle<T>.OnClick/OnEvent, SceneObjectHandle.As<T>, ...),
+        // prepended to every BindErrors compilation so no caller has to redeclare it -- the whole
+        // Runtime directory is always compiled in (AuthoringSources), regardless of which member a
+        // given test exercises, so every type its signatures mention must resolve.
+        private const string UnityEngineStubs = @"
+namespace UnityEngine
+{
+    public class Object { }
+    public class Component : Object { }
+    public class GameObject : Object { public void SetActive(bool value) { } }
+    public class MonoBehaviour : Component { }
+    public class Material : Object { }
+    public class Sprite : Object { }
+}
+namespace UnityEngine.UI { public class Button : UnityEngine.MonoBehaviour { } }
+namespace UnityEngine.Events
+{
+    public class UnityEvent { }
+    public class UnityEvent<T0> { }
+    public class UnityEvent<T0, T1> { }
+}
+";
+
+        // UnityEventCallState is the one piece of UnityEngineStubs a caller sometimes redeclares
+        // itself (a richer local enum for a specific compile proof) -- added only when the
+        // caller's own typeStubs doesn't already mention it, so neither caller collides with this
+        // shared default (CS0101).
+        private const string UnityEventCallStateStub = @"
+namespace UnityEngine.Events { public enum UnityEventCallState { Off, EditorAndRuntime, RuntimeOnly } }
+";
+
         // Binds [builderSource] + [typeStubs] + the real authoring sources and returns every C#
         // error diagnostic's message text.
         internal static IReadOnlyList<string> BindErrors(string builderSource, string typeStubs)
@@ -78,7 +122,14 @@ public class TankRef : SceneBuilder.Authoring.PrefabRef { }
             {
                 CSharpSyntaxTree.ParseText(builderSource),
                 CSharpSyntaxTree.ParseText(typeStubs),
+                CSharpSyntaxTree.ParseText(UnityEngineStubs),
             };
+
+            if (!typeStubs.Contains("UnityEventCallState"))
+            {
+                trees.Add(CSharpSyntaxTree.ParseText(UnityEventCallStateStub));
+            }
+
             foreach (var source in AuthoringSources())
             {
                 trees.Add(CSharpSyntaxTree.ParseText(source));

@@ -33,7 +33,7 @@ namespace CodeScenes.Analyzers
 
         public static readonly DiagnosticDescriptor SB1003 = new(
             "SB1003",
-            "Component closure must contain only .Set(...) calls",
+            "Component closure must contain only .Set(...), .OnClick(...) or .OnEvent(...) calls",
             "{0}",
             ShapeCategory,
             DiagnosticSeverity.Error,

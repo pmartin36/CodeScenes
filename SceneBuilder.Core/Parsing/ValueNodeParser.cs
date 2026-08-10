@@ -376,7 +376,20 @@ namespace SceneBuilder.Core.Parsing
 
             if (catalog.TryGetEntry(group, folders, leaf, out var entry))
             {
-                node = new ValueNode.AssetRef(new AssetRef { DisplayPath = entry.Path, SubAsset = entry.SubAsset });
+                // Stamps the catalog's own Guid/FileId immediately, so a caller inspecting the
+                // parsed model directly (before any lowering) already sees a resolved AssetRef.
+                // The catalog's FileId is a main-asset LOOKUP placeholder, not the live
+                // AssetDatabase-native identity — AssetRefLowering.ResetCatalogStampedAssetRefs
+                // clears this stamp back to unresolved before Lower runs, so the desired-model
+                // pipeline (DesiredModelLoader.Load) always re-verifies against the live asset
+                // database rather than trusting it.
+                node = new ValueNode.AssetRef(new AssetRef
+                {
+                    DisplayPath = entry.Path,
+                    SubAsset = entry.SubAsset,
+                    Guid = entry.Guid,
+                    FileId = entry.FileId,
+                });
                 return true;
             }
 

@@ -57,16 +57,22 @@ namespace CodeScenes.Analyzers
                     continue;
                 }
 
-                const int expectedArity = 0; // Button.onClick is a void UnityEvent.
+                // The expected arity is the COUNT of arguments supplied inside the wired method's
+                // own lambda call, not a fixed constant: a persistent call may carry at most ONE
+                // static argument (spec 09), and Unity binds by exact signature, so a call
+                // supplying 0 or 1 argument is legal only when it matches the referenced method's
+                // own declared parameter count.
+                var supplied = lambdaBodyInvocation.ArgumentList.Arguments.Count;
+                var mismatch = referenced.Parameters.Length != supplied || supplied > 1;
 
-                if (referenced.Parameters.Length != expectedArity)
+                if (mismatch)
                 {
                     ctx.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticDescriptors.SB1201,
                         referencedNameNode.GetLocation(),
                         referenced.Name,
                         eventName,
-                        "()"));
+                        ExpectedShape(supplied)));
                 }
                 else if (referenced.DeclaredAccessibility != Accessibility.Public)
                 {
@@ -76,6 +82,15 @@ namespace CodeScenes.Analyzers
                 }
             }
         }
+
+        // The MessageFormat's `{2}` — the shape the referenced method's signature was expected to
+        // match, phrased in terms of what was actually supplied at the call site.
+        private static string ExpectedShape(int supplied) => supplied switch
+        {
+            0 => "()",
+            1 => "(one static argument)",
+            _ => "() or one static argument",
+        };
 
         /// <summary>
         /// Finds an argument shaped `x => x.Method(...)` — a simple/parenthesized lambda whose

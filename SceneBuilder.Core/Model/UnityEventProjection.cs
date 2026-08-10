@@ -4,10 +4,78 @@ using System.Linq;
 
 namespace SceneBuilder.Core.Model
 {
+    /// <summary>
+    /// The ONE vocabulary of the SERIALIZED field spellings a UnityEvent persistent call uses. Both adapter
+    /// directions take every spelling from here and hold none of their own; ModeArgBypassScanTests' Scan A
+    /// enforces that, and derives its own token list from All.
+    /// Lives in this file deliberately: UnityEventProjection.cs is the only path Scan A allowlists, so a
+    /// separate file would make these literals a violation of the very guard they exist to serve.
+    /// MEASURED against UnityEngine.CoreModule.dll (Unity 6000.5.3f1) -- PersistentCall, ArgumentCache,
+    /// PersistentCallGroup.m_Calls, UnityEventBase.m_PersistentCalls.
+    /// </summary>
+    public static class PersistentCallPaths
+    {
+        // PersistentCall
+        public const string Target = "m_Target";
+        public const string TargetAssemblyTypeName = "m_TargetAssemblyTypeName";
+        public const string MethodName = "m_MethodName";
+        public const string Mode = "m_Mode";
+        public const string Arguments = "m_Arguments";
+        public const string CallState = "m_CallState";
+
+        // ArgumentCache -- the m_Arguments child
+        public const string ObjectArgument = "m_ObjectArgument";
+        public const string ObjectArgumentAssemblyTypeName = "m_ObjectArgumentAssemblyTypeName";
+        public const string IntArgument = "m_IntArgument";
+        public const string FloatArgument = "m_FloatArgument";
+        public const string StringArgument = "m_StringArgument";
+        public const string BoolArgument = "m_BoolArgument";
+
+        // The call-array root, relative to the UnityEvent field's own propertyPath.
+        public const string PersistentCalls = "m_PersistentCalls";
+        public const string Calls = "m_Calls";
+        public const string CallsRelativePath = PersistentCalls + "." + Calls;
+
+        public static readonly IReadOnlyList<string> CallFields = new[]
+        {
+            Target, TargetAssemblyTypeName, MethodName, Mode, Arguments, CallState,
+        };
+
+        public static readonly IReadOnlyList<string> ArgumentFields = new[]
+        {
+            ObjectArgument, ObjectArgumentAssemblyTypeName, IntArgument, FloatArgument, StringArgument, BoolArgument,
+        };
+
+        public static readonly IReadOnlyList<string> All =
+            CallFields.Concat(ArgumentFields).Concat(new[] { PersistentCalls, Calls }).ToList();
+
+        public static string CallsArrayPath(string eventPropertyPath)
+        {
+            if (string.IsNullOrWhiteSpace(eventPropertyPath))
+            {
+                throw new ArgumentException("eventPropertyPath must be non-empty.", nameof(eventPropertyPath));
+            }
+
+            return $"{eventPropertyPath}.{CallsRelativePath}";
+        }
+
+        public static string ArgumentRelativePath(string argumentField)
+        {
+            if (!ArgumentFields.Contains(argumentField))
+            {
+                throw new ArgumentException(
+                    $"'{argumentField}' is not one of the ArgumentCache fields.", nameof(argumentField));
+            }
+
+            return $"{Arguments}.{argumentField}";
+        }
+    }
+
     // The raw serialized fields of one persistent call, as UnityEngine.Events.PersistentCall +
     // ArgumentCache store them (m_Target, m_MethodName, m_Mode, m_Arguments.*, m_CallState).
-    // m_TargetAssemblyTypeName / m_ObjectArgumentAssemblyTypeName are deliberately absent: the
-    // adapter derives them from the live resolved target at write time.
+    // The record omits m_TargetAssemblyTypeName / m_ObjectArgumentAssemblyTypeName: the adapter
+    // derives them from the live resolved target at write time (their spellings live on
+    // PersistentCallPaths above).
     public sealed record PersistentCallFields
     {
         public ValueNode? Target { get; init; }
