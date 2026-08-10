@@ -5,9 +5,15 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=637 failed=0 skipped=0)`
-(2026-08-06, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
-skip is not a Unity pass).
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=663 failed=0 skipped=0)`
+(2026-08-07; the Core-only trigger skips layer 2 on a pure-Core change, and a skip is not a Unity
+pass — force it with `GATE_FORCE_UNITY=1`). `verify.sh` now discounts one known host engine message
+by exact text (`69a74df`); a crash or any other error still fails.
+
+**M8 (specs/09) is PART-BUILT: bucket b1 only, twice over.** `30a9613` landed the model layer, the
+`Reconciler.cs` split and four foundation deltas; the spec's ALREADY SHIPPED section records what not
+to re-plan. b2/b3 are not built. Its plan has been regenerated twice and hand-patched about a dozen
+times — see section 0 before touching it.
 
 **Spec 36 (uniform value descent) SHIPPED and live-verified 2026-08-06** — moved to
 `specs/completed/`. All five passes route container descent through `ValueWalk`, which gained
@@ -25,15 +31,78 @@ yet; neither was investigated.
 
 ## Order
 
-### 1. Harness first — it pays for itself across everything after
+### 0. FIRST — the pipeline cost regression. Nothing else starts until Phase 1 lands.
+
+**Read `docs/investigation/VERDICT.md`.** Four independent investigations, 2026-08-07. The supporting
+reports are beside it (`codebase.md`, `pipeline-economics.md`, `cost-trend.md`, `agent-forensics.md`)
+plus the derived per-agent dataset `pipeline-agent-tokens.csv` (1,942 rows).
+
+Why this is first: a feature now costs **12.6x** what it did on 07-16 (6.8M raw tokens/task -> 85.9M),
+**57% of all pipeline runs die in plan validation having produced zero code**, and 25% of tasks consume
+59% of all task-cycle tokens. Building anything before fixing that pays the multiplier on every task.
+
+Two things to know before reading anything older than this date:
+- **Every token figure recorded before 2026-08-07 is wrong.** The harness `tokens` field is the final
+  CONTEXT-WINDOW SIZE, not spend (one agent: reported 74,987, actual 1,911,842). `cost-log.md`'s
+  `tokensOutput` is output-only, which is 0.56% of what actually moves. Real totals are in the verdict.
+- **The regression is a STEP CHANGE on 07-29**, not gradual, and not caused by the codebase growing or
+  by process accretion (both were tested and refuted). It coincides with the model switching
+  `claude-opus-4-8` -> `claude-opus-5`, with a confound that cannot be resolved from existing data:
+  the harness repo has no history, so a prompt edit in the same 11-hour window is not excluded.
+
+**Do Phase 1 first (about a day, all harness-side, none of it depends on resolving that confound):**
+halt plan validation only on HIGH findings; severity-gate validator routes using the `isNit` predicate
+that already exists; add a no-change-iteration guard (one task ran 9 iterations having written code
+once, 2h05m, re-running the full gate each time); cut `MAX_LOOPS` to 2; stop re-running four agents for
+a one-line fix.
+
+**Then Phase 2** (cap TOUCHES at 6 and deliverables at ~100 words — rework goes 11-26% -> 64-75% above
+that line, measured across 342 tasks; split `tasks.md` per task; bound `history.md`; delete accreted
+prompt sections).
+
+**Then Phase 3**, the codebase constant: delete the 1000-line file-size budget (it cost a full pipeline
+task today and blocks the next M8 bucket), count-free allowlists, a generated value-kind index so
+`TOUCHES` is derived rather than guessed, and fix the `ordinalByType` `#1`/`#0` drift — a real shipped
+bug at `ReconcilerInstances.Nested.cs:180`.
+
+**D1, alongside and gating nothing:** a one-feature A/B to separate model from prompt. Until it runs,
+do not invest in anything premised on which of the two it is.
+
+Edit the harness ONLY with no pipeline run active, and run
+`node ~/.claude/skills/tdd-pipeline-edit/harness/all.mjs` before and after every change to
+`pipeline.workflow.js` — write the failing scenario first.
+
+### 0b. Then the backlog that accumulated on 2026-08-06/07
+
+1. **Fix the `ComponentDefaultTemplate` probe leaking a console error on every build.** Bug fix via
+   subagent, RED-first, NOT the pipeline and NOT a spec. `Register` harvests defaults by creating a
+   throwaway GameObject and `AddComponent`-ing the type, which fires user `OnValidate` on a bare
+   object: `[CodeScenes] SurfaceSnap on 'New Game Object' has no Renderer/mesh bounds to snap.` fires
+   on EVERY build of any scene containing a `SurfaceSnap`. Fix the CLASS at the probe (suppress
+   narrowly around `Create` + `CollectFields`, restore in a `finally`), never in `SurfaceSnap`, or the
+   trap stays armed for every user MonoBehaviour with a logging `OnValidate`. Regression test belongs
+   in the existing `unity-gate/Assets/GateTests/ComponentDefaultTemplateTests.cs`. Stack:
+   `SceneBuilderTest/Logs/live-verify-spec36.log` ~line 2532.
+2. **Live-verify M8** once it lands — AFTER the log-leak fix, so the console is clean when judging it.
+   Project is `/home/paul/Source/Unity/SceneBuilderTest` (NOT `/home/paul/Unity/...`).
+3. **Document the three pipeline behaviours that keep costing runs**: resume replays cached VERDICTS
+   (it keys on `(prompt, opts)` and prompts carry only the task id, so no plan edit busts one task's
+   cache — it only helps when work was INTERRUPTED); past ~3 hand-fix rounds regenerate the plan
+   instead of patching it (measured 0 -> 9 -> 13 findings while patching, 0 on both rerolls); put
+   hard-won knowledge in the SPEC, not the plan, because a reroll inherits the spec and bins the plan.
+4. **Run `/tdd-learnings`.** The ledger has five backfilled decomposition classes at counts 3-8 plus
+   whatever the halt recorder has added since `02e8069`. Note 63 of 94 entries are already classified
+   `pipeline:agent-behavior` — the ledger's own verdict agrees with the investigation.
+
+### 1. Harness housekeeping (still after the above)
 
 **1b. Sweep existing pipeline prose from the codebase.** `verify.sh` now lints comments for task ids,
 `research.md` citations, iteration numbers and pending-state prose — but only on lines the working
 diff ADDS. Everything already in the tree is invisible to it. One sweep closes that.
 
-**1d. Run `/tdd-learnings`.** Eight recurring entries remain active (13 were applied and archived to
-`ledger-archive.md`). Most are evidence-discipline: RED confirmed for the wrong reason, stale-test
-sweeps scoped too narrowly, a deliverable dropped with a prose rationale.
+**1d. `/tdd-learnings` — MOVED to section 0b item 4**, which carries the current ledger state
+(five backfilled decomposition classes, plus 63 of 94 entries already classified
+`pipeline:agent-behavior`). Do it there, not here.
 
 **1e. Review `docs/agent-friction.md`.** It populates itself from Unity editor logs via a `Stop` hook;
 nobody needs to run anything. Promote recurring `PRODUCT` rows to spec items and set their `status` so
@@ -43,9 +112,13 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/09` M8 UnityEvents. NEXT — unblocked, 36 shipped.** Its `.agent_handoffs/m8-unityevents/tasks.md` is STALE —
-  it carries hand-edits that assigned the descent migrations to M8's own b1-t1. Relaunch M8 FRESH after
-  36 lands (the tree will have moved); do not resume that plan. The target model is
+- **`specs/09` M8 UnityEvents. PART-BUILT (b1 only) and PAUSED pending section 0.** Do not resume it
+  before Phase 1 lands — it is the most expensive feature in the tree and every task pays the
+  multiplier. Three superseded plans sit in `.agent_handoffs/_superseded-m8-plan*`/`_stale-*`; the live
+  one is `m8-unityevents/`. Read the spec's ALREADY SHIPPED and serialized-path-vocabulary sections
+  first; both were learned by getting it wrong twice. Measured defects that cost live editor runs are
+  in `docs/m8-measured-defects.md` (ownership by task id is void, the measurements are not). The target
+  model is
   already resolved in the spec: add `ComponentRef<T>` captured via `node.Ref<T>(ordinal)`. No model
   change — `ObjectRef` already carries a bare LogicalId and the IdentityMap already has
   `Kind=="Component"` entries.
