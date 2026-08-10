@@ -43,12 +43,51 @@ raw (2 tasks in 3.6 hours, 08-07) — **12.6x**.
 `claude-opus-4-8`; every run from 07-29 11:27 records `claude-opus-5`. Nothing else in the repo
 changed that morning.
 
-**This is a correlation with a real confound, and it cannot currently be resolved.** The harness repo
-has no history before this week, so a prompt edit inside that same 11-hour window cannot be ruled
-out. Two investigations reached this boundary independently and both stopped at the same wall.
-Recommendation D1 exists to break the tie before anyone invests in it.
+**RESOLVED 2026-08-07 — the confound is broken, and the model is the dominant cause.**
+(`confound-resolution.md`.) The prompts did not change:
 
-**What it is NOT** — three hypotheses the data kills:
+- Every workflow-side prompt template for all seven roles first appears 07-16 and last appears
+  08-06/07 — all straddle the boundary **unchanged**. The only new template in the corpus is a
+  `GATE_SKIP_UNITY=1` validator variant from 08-04.
+- The agent `.md` bodies are not stored in transcripts, so they were tested indirectly by turn-1
+  prompt-prefix token accounting. There IS a step at the boundary: **+2,130 tokens, near-uniform
+  across all seven roles** (2,076–2,145). That uniformity is the tell — seven different agent files
+  with different tool sets cannot be hand-edited to the same delta. It is a shared harness-side
+  prefix that shipped with the rollout, not an authored change. `CLAUDE.md` (both), skills, plugins
+  and the Claude Code version are all excluded by direct check.
+- Boundary confirmed from data: `claude-opus-4-8` last invocation 07-29T04:43Z, `claude-opus-5`
+  first 07-29T15:17Z, nothing between, and **no old-model run afterwards**.
+
+**The natural control settles it.** `tdd-test-writer` and `tdd-code-writer` run `claude-sonnet-5` and
+did so on BOTH sides of the boundary. Across it:
+
+| | turns per invocation | output tokens |
+|---|---|---|
+| roles whose model changed (opus) | **1.70–2.04x** | **2.0–3.1x** |
+| roles whose model did not (sonnet) | 1.27–1.37x | 1.27–1.28x |
+
+Daily means for the opus roles are flat at 29.1–36.0 for nine working days (SD under 2), then 62.4
+on 07-30 and 74.7 on 07-31. That is the 32 → 78 series, and it moves for exactly the roles whose
+model changed.
+
+**Cost decomposition.** Turns per task 205.7 → 505.9 (**2.46x**) = 1.61x more agent invocations per
+task (5.01 → 8.08 — i.e. retries) × 1.53x more turns per invocation. The retry multiplier is not
+independent evidence: retries are ordered by `tdd-validator`, itself an opus role.
+
+**Honest bounds, as stated by the investigation.** Crediting the whole sonnet-role rise (~1.3x) to
+the shared prefix is an upper bound, since some of it is contamination — research blueprints from the
+opus role are 2.1x longer — and some is opus-ordered retries. Of the ~2.0x opus rise, roughly three
+quarters of the excess sits with the model swap. Still unsettled: the 07-28/07-30 agent `.md` bodies
+are genuinely gone (they changed somewhere in 07-17→08-04, but the token accounting says not on
+07-29), and task difficulty is not randomized across the boundary.
+
+**What this changes.** The remediation is now aimed at the right thing. The expensive roles are the
+deliberative ones — research, validator, scope-validator, decomposition-validator — and they are
+also where the process-versus-correctness waste was measured. Two levers that did not exist before
+this result: **bound what a deliberative role may spend** (Phase 1), and **choose the model per
+role** rather than per pipeline, which the sonnet control shows is a real and measured dial.
+
+**What it is NOT****What it is NOT** — three hypotheses the data kills:
 
 - **Codebase growth.** During the flat era the Core *doubled* (8,174 → 15,537 lines; 172 → 401
   EditMode tests) with per-dispatch cost unchanged. After 07-29 it grew 1.2x more while cost
@@ -171,10 +210,14 @@ question, and two items are outright bugs.
 | P12 | **Commit a generated value-kind index** and feed it to `task-deconstruct` so `TOUCHES` is derived, not guessed. Add fail-loud defaults at the 16 silent dispatch sites. | 1.5d | Attacks the 9–13 "file in no TOUCHES" defect class, the constant multiplier. |
 | P13 | **Give `ordinalByType` one owner and fix the `#1`/`#0` drift.** | 1d | A real shipped bug. |
 
-### Diagnostic — run alongside, gates nothing
+### Phase 0 — now unlocked by the confound result
 
-**D1. One-feature A/B to separate model from prompt.** The only way to resolve §1's confound.
-Until it runs, do not invest in anything premised on the cause being one or the other.
+| # | Change | Effort | Expected saving |
+|---|---|---|---|
+| P0 | **Set the model per agent ROLE, not per pipeline.** The deliberative roles (research, validator, scope-validator, decomposition-validator) carry the 1.70–2.04x turn increase and 2.0–3.1x output increase; the two roles already on `claude-sonnet-5` held at 1.27–1.37x through the same boundary. Trial a cheaper model on the review roles first — they read and judge rather than author, and they are where the measured process-vs-correctness waste sits. | 30m to change, one feature to evaluate | Directly targets the ~2.46x turns-per-task rise at its measured source. |
+
+**D1 (was: A/B to separate model from prompt) — DONE, not needed.** Resolved by reading the
+transcripts instead of spending a feature. See §1.
 
 ---
 
