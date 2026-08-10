@@ -244,7 +244,34 @@ Any filter must apply to the validator's issues only.
 | P12 | **Commit a generated value-kind index** and feed it to `task-deconstruct` so `TOUCHES` is derived, not guessed. Add fail-loud defaults at the 16 silent dispatch sites. | 1.5d | Attacks the 9–13 "file in no TOUCHES" defect class, the constant multiplier. |
 | P13 | **Give `ordinalByType` one owner and fix the `#1`/`#0` drift.** | 1d | A real shipped bug. |
 
-### Phase 0 — now unlocked by the confound result
+### Phase 0 — APPLIED 2026-08-07
+
+**The default model was set back to 4.8.** That is the single highest-leverage change in this
+document and it is done. Per §1, the roles that switched to Opus 5 carried a 1.70–2.04x turn
+increase and 2.0–3.1x output increase while the two Sonnet roles held at ~1.3x through the same
+boundary; reverting the default targets that at its measured source.
+
+**The next feature run is now a natural experiment, and it is worth instrumenting deliberately.**
+Everything after 07-29 confounds "model" with "harness with no cost brakes". A run on 4.8 with the
+harness unchanged separates them for the first time:
+
+- If cost per task returns to roughly the 07-16 baseline (~6.8M raw, 7 tasks in 19 minutes), the
+  model was carrying nearly all of it and Phases 1–3 are optimisation, not rescue.
+- If it lands part-way, the gap is the harness amplifiers — no plan-repair path, `MAX_LOOPS` 3, no
+  no-change guard, unbounded `history.md` re-injection — and THAT gap is the honest budget for the
+  remaining work.
+
+Measure it from the agent transcripts the same way `pipeline-agent-tokens.csv` was built (the harness
+`tokens` field is a context-window size, not spend — see §0). One feature is enough.
+
+**Two cautions.** Nothing measured today is a 4.8 baseline: this entire investigation, and both M8
+implementation runs, ran on Opus 5. And the reversion is blunt where P0 was targeted — it returns the
+deliberative roles to 4.8 along with everything else. If the trial shows quality regressions in the
+review roles specifically, the per-role dial is still available: two of those routes on a green gate
+caught real data loss (a component, and a whole child GameObject, silently deleted from builder
+source), so some of that deliberation was earning its cost.
+
+### Phase 0 — original analysis (superseded by the above, kept for the reasoning)
 
 | # | Change | Effort | Expected saving |
 |---|---|---|---|
