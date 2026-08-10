@@ -186,11 +186,45 @@ question, and two items are outright bugs.
 
 | # | Change | Effort | Expected saving |
 |---|---|---|---|
-| P1 | **Halt plan validation only on HIGH findings.** Record med/low to the ledger and proceed. | 1h | 57% of runs currently die here; 75% of findings are med/low. |
-| P2 | **Severity-gate validator routes.** An `isNit` predicate already exists in the harness — use it. A green gate plus a prose complaint becomes an advisory, not a route. | 2h | 73% of green-gate routes were process findings. |
+| P1 | **Add a bounded plan-repair loop (cap 2 passes).** THE REAL FIX for the 57%. There is no repair path today: the validator runs once and the run returns. **61% of HIGH findings (43/70) state a fix that is a `tasks.md` edit** — add an edge, add a TOUCHES entry, name the owner. The halt discards a repair the validator has already written out. | 4h | Directly addresses the 50 halted runs; most were repairable in place. |
+| P2 | **Replace the severity gate with a CLASS filter.** Halt on: deterministic harness findings, unowned mandatory artifact, un-hoisted shared interface/invariant, measurably false claim in `tasks.md`, CLAUDE.md hard-fail consequences. On a 48-finding sample this halts 31 instead of 48 and waves through nothing consequential. Severity does not track class (TOUCHES-overlap appears 7 high / 9 med / 3 low). | 4h | Cuts halts ~35% without the risk in the note below. |
+| P2b | **Attach ledgered findings to the owning task's DEFECTS/ASSUMPTIONS block, not to a ledger.** Research is required to attack assumptions adversarially; ledgers here were MEASURED to be read by nobody — `plan-review.md` MED-3 had to be re-recorded verbatim by a later agent noting "plan-review.md is not read by the task agents", and `docs/open-defects.md` is referenced by nothing while holding nine unassigned defects. | 2h | Stops findings being recorded into a void. |
 | P3 | **Add a no-change guard.** If an iteration writes no files, stop and escalate instead of re-running. | 1h | Kills the 9-iteration / 2h05m loop class outright. |
 | P4 | **Cut `MAX_LOOPS` 3 → 2.** | 15m | Bounds the tail; 25% of tasks burn 59% of tokens. |
 | P5 | **Don't re-run four agents for a one-line fix.** Route straight to the code-writer when a finding names one file and needs no test change. | 2h | Observed: full research→test→code→validate cycles spent on a single doc comment. |
+
+
+### CORRECTION — two Phase 1 items were withdrawn after audit (`severity-audit.md`)
+
+**"Halt only on HIGH findings" was a NO-OP and its premise was false.** The harness does not halt on
+any finding; it halts when the decomposition validator returns `valid:false`, and that agent's prompt
+*already* says `valid=false if any high-severity gap` (`pipeline.workflow.js:401,404`). Across 81
+plan-validation runs: all 50 that halted carried at least one HIGH, and the 31 that proceeded carried
+147 findings of which **zero** were high. The change would have altered **0 of 50 halts**. My "75% of
+findings are med/low" was a fact about the finding population, not about the halt trigger.
+
+**"Severity-gate the validator's routing" was UNSAFE.** Severity is unreliable in the dangerous
+direction: on a 48-finding sample, **15 of 32 MED/LOW (47%) would have caused a real failure** —
+non-compiling emitted source, silent identity loss on reload, gate-red file-size breaches, a Plan op
+with no executor arm. There are **24 cross-severity near-duplicate pairs**: the same defect rated LOW
+in one run and HIGH in another.
+
+**Gate colour is worthless as a routing signal.** Of 21 validator verdicts that routed rework with
+`GATE_PASSED: yes`, only **3 were cosmetic**. The other 16 include two data-loss defects (auto-sync
+silently deleting a component, and a whole child GameObject, from builder source), two uncaught-
+exception parser crashes on ordinary keystrokes, and false published API copy shipping to `api.json`.
+The population is green by construction, so greenness carries no information. This supersedes the
+"73% of green-gate routes are process findings" figure in §3(c).
+
+**`isNit` exists (`pipeline.workflow.js:690-696`) and is not fit for this.** It is only called on
+`SCOPE_OUT.findings`; `VALIDATOR_OUT` has no severity field or findings array, so on a per-task
+verdict it returns `false` for every input. Its keyword half misses **40% of HIGH findings** (28/70).
+It has produced zero `flaggedNits` across 88 journals — it has never fired.
+
+**Implementation warning.** The deterministic checks at `:350` (unknown dep), `:358` (cycle) and
+`:394` (TOUCHES overlap) push plain strings with **no severity prefix**. A naive
+`planIssues.filter(i => /high/i.test(i))` silently deletes the three checks with a perfect hit rate.
+Any filter must apply to the validator's issues only.
 
 ### Phase 2 — cap the inputs (half a day, `task-deconstruct` + protocol)
 

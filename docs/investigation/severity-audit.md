@@ -265,3 +265,161 @@ Compared to today: same halt behavior on HIGH, 35% fewer halting findings overal
 consequential findings waved through in the sample. Compared to the proposal: the proposal ledgers 15
 consequential findings that this filter catches.
 
+## Question 4: the `isNit` predicate
+
+**It exists.** `~/.claude/skills/tdd-pipeline/pipeline.workflow.js:690-696`, verbatim:
+
+```js
+const NIT_SEVERITY = /^(low|nit|nits|minor|info|informational|trivial|cosmetic|style|advisory)$/
+const BEHAVIORAL_DETAIL = /(\bfail|\bregress|\bcrash|\bthrow|\bexception|data loss|\bincorrect|\bwrong\b|\bbroken\b|\bbreaks\b|null ?ref|does not (work|run|compile|match)|gate red|red gate|\buncovered\b|\buntested\b|missing test|no test\b|not covered|\bunreachable\b|\bsilently\b|\bdiverge)/i
+function isNit(f) {
+  const sev = String((f && f.severity) || '').trim().toLowerCase()
+  if (!NIT_SEVERITY.test(sev)) return false
+  return !BEHAVIORAL_DETAIL.test(String((f && f.detail) || ''))
+}
+```
+
+Three things about it matter for the proposal, and all three are measured.
+
+**1. It cannot be applied to the per-task validator at all.** `isNit` is called in exactly one place,
+`scopeValidate` at `:712-713`, over `SCOPE_OUT.findings`. The per-task validator emits `VALIDATOR_OUT`
+(`:106-119`), whose fields are `status`, `gatePassed`, `gateExitCode`, `behavioralEvidence`,
+`diagnosis`, `lesson`. **There is no severity field and no findings array.** Feed a validator verdict
+to `isNit` and `sev` is `""`, `NIT_SEVERITY` fails, and it returns `false` for every input. The second
+proposal ("stop the per-task validator routing rework when the gate is GREEN and the finding is
+cosmetic") cannot be implemented on top of `isNit` without first adding a severity or class field to
+`VALIDATOR_OUT` and teaching `tdd-validator.md` to populate it. That is new classification, not reuse.
+
+**2. Its keyword half is not fit to gate a routing decision.** Measured against the 507 plan findings:
+**28 of 70 HIGH findings (40%) contain no `BEHAVIORAL_DETAIL` keyword**, as do 121 of 198 MEDIUM. A
+predicate that misses 40% of the findings everyone agrees are serious is not a consequence detector,
+it is a vocabulary matcher. Applied to the 135 real low-severity scope findings in the journals it
+returns `true` for 82. Most of those 82 are genuinely trivial and exactly what the code comment
+describes (a handoff doc missing its terminal `STATUS:` line, a stray `STATUS: READY` token mid-file,
+a stale code comment). But in the first 14, three are not:
+
+- "Latent cross-bucket seam interaction [...] newly made reachable by this feature; found by code
+  reading, **unexercised** by any test (gate green)". `unexercised` is not in the keyword list;
+  `uncovered` and `untested` are.
+- "Deliverable-named EditMode test `unity-gate/Assets/GateTests/InstanceAddReconcileTests.cs` [...] is
+  **absent from disk**". A deliverable clause that did not ship, classified as a nit.
+- "The surface scan enforcing the D4 'one mechanism' invariant is one-directional [...] a future
+  authoring member declar[ing] [...]". A bypassable invariant guard, classified as a nit.
+
+That is roughly a 20% false-negative rate on the class of findings that matter, driven entirely by
+word choice.
+
+**3. It has never fired in this repo.** Zero `flaggedNits` entries appear in any of the 88 workflow
+journals. The 215 scope findings recorded all predate the predicate, so this is not evidence it is
+broken; it is evidence it is **unproven in production** and must not be treated as a validated
+component to build a routing gate on.
+
+Verdict on the claim: the predicate exists, it is correctly scoped to a cheap-collection decision on
+scope findings where a wrong call is recoverable, and it is **not** fit as-is for gating routing on
+per-task validator verdicts.
+
+## Question 4b: what the per-task routing proposal would actually wave through
+
+The second proposal targets a measured population of 21 validator verdicts (of 480 total, 4.4%) that
+routed rework while `GATE_PASSED: yes`. Deduplicating two double-recorded events gives 19 distinct
+events. Judged individually:
+
+Genuinely cosmetic (3):
+
+- `m-ui-recttransform/b3-t3`: a stale comment block in `FlagApplyTests.cs` naming a deleted symbol.
+  Two comment restatements, zero executable change.
+- `serialization-fidelity/b3-t2`: a missing class-doc paragraph that was deliverable clause 4.
+- `uniform-value-descent/b3-t4`: a handoff payload wording fix in `code-writer.md`, no production
+  change (though it exists to stop b4-t2 consuming one of two divergent reason strings).
+
+Real, and several severe (15):
+
+| feature / task | what routing caught behind a green gate |
+| --- | --- |
+| m-ui-recttransform b3-t5 iter4 | the configure-lambda remove branch deletes the whole lambda argument, so a routine Inspector component-delete under auto-sync silently deletes a component the user kept, or a whole child GameObject, from the builder source |
+| m-ui-recttransform b3-t5 iter3 | `IsChainedNonStatementCall` misclassifies a component call, so a `RemoveStatement` deletes the enclosing node statement and the GameObject with it |
+| m8-unityevents b1-t3 iter2 | seven static-argument forms and two listener-target forms that the recognizer accepts and `BuilderParser.Parse` then kills with an uncaught exception; plus a convergence fix shipped as an opt-in, against CLAUDE.md's opt-in rule |
+| m8-unityevents b1-t3 iter3 | `callState: UnityEventCallState.RuntimeOnl` (an ordinary typo under live sync) escapes the recognizer and kills `BuilderParser.Parse` with an uncaught `InvalidOperationException` |
+| m8-unityevents b1-t2 iter1/iter2 | SB1003's published Title and `FlatShapeRecognizer.cs:278`'s message still tell the user a component closure accepts only `.Set(...)` after this task made `.OnClick(...)` legal. The Title ships to `api.json` and renders on the marketing site |
+| serialization-fidelity b1-t1 | a test bent `Index.IsDefault` from "I have no default for this field" into "this field is at its default, omit it", a data-loss semantics on the emit path |
+| m-ui-recttransform b3-t5 iter5 | the mandated EditMode file was never created; the fix's most damaging paths ship untested |
+| m-builtin-resources b2-t2 | two spec-named deliverable tests do not exist; no test anywhere drives a resolved built-in ref through the Materializer |
+| m5-cross-object-references b5-t2 | a BEHAVIORAL:yes deliverable with zero captured evidence, its only proof deferred to a task that had not run |
+| serialization-fidelity b2-t1 | the C1 headline scenario is exercised by no test in the repo |
+| excluded-field-one-way-report b1-t1 | the report contract proven at one site only, which the task's own ASSUMPTIONS ruled out |
+| _superseded-m8 b1-t2 | `AssembleIncremental` invalidates GameObjects but not their components, so on the shipped auto-sync path a node re-resolves against a stale cached goid |
+| _superseded-m8 b1-t2 iter3 | `MemberSpelling.cs:25` promises `StringComparer.Ordinal` over a dictionary built with the default `ValueTuple` comparer |
+| _superseded-m8 b1-t1 | an over-asserting test forced a `LazyReadOnlyList<T>` workaround into production `ValueWalk.Fold` |
+| reference-writes b2-t1 | a stale comment from this task's own commit, plus the `docs/open-defects.md` register being unreferenced and looking truncated |
+
+Two data-loss defects and two parser crashes are in that list. Every one of them was found while the
+gate was green, which is the whole reason the validator's review step exists. **"Gate is GREEN" is
+worthless as a safety signal here by construction:** it is true for 100% of this population.
+
+The only defensible version of the second proposal is: give `VALIDATOR_OUT` an explicit
+`findingClass` field, and skip routing only for the classes that are provably non-executable
+(`stale-comment`, `doc-only`, `handoff-payload`). That would have skipped 3 of 19 and routed 16. It
+would not have been driven by the gate colour at all.
+
+## Question 5: the safe version of this change
+
+### The real cause of the 57%
+
+The halt rate is not caused by over-strict severity handling. It is caused by there being **no repair
+path**. `pipeline.workflow.js` calls the decomposition validator exactly once (`:400-403`), pushes its
+issues into `planIssues` if `valid === false`, and at `:415` logs, records a lesson, and `return`s.
+There is no loop back to the intake/deconstruct agent. A plan with one fixable gap costs the whole run.
+
+And the gaps are overwhelmingly fixable in the plan text. Measured across the 70 HIGH findings:
+
+- **70% (49/70) state an explicit fix** ("Fix:", "FIX in the plan:", "Remedy:", "Required:").
+- **61% (43/70) state a fix that is a `tasks.md` edit**: add a dependency edge, add a file to TOUCHES,
+  add a deliverable clause, name the owner, hoist a shared interface into its own task.
+
+The halt throws away a repair the validator has already written. That is the highest-value change
+available, and it does not require trusting a severity label.
+
+### Recommended change, in order of confidence
+
+**1. Add a bounded plan-repair loop (do this one first).** On `valid: false`, hand `planIssues` back to
+the intake/deconstruct agent with an instruction to revise `tasks.md` and return, then re-validate. Cap
+at 2 repair passes; halt on the third with the findings as today. Every constraint that makes this safe
+already exists: the validator is independent and read-only, the DAG and TOUCHES checks are
+deterministic and re-run on the revised plan, and nothing is committed at this stage. m8-unityevents
+halted 18 times and uniform-value-descent 12 times; those are hand-repair cycles a bounded loop
+absorbs.
+
+**2. Replace the severity gate with the class filter (section on question 3).** Halt on D/O/S/F/C;
+ledger the rest. This is what the proposal was reaching for, expressed in the variable that actually
+predicts consequence. On the 48-finding sample it halts 31 instead of 48 and wave-throughs nothing
+consequential.
+
+**3. Attach ledgered findings to the owning task, not to a ledger.** The proposal's "record
+medium/low to a ledger" half is already disproven in this repo. `plan-review.md` MED-3 was ledgered,
+then re-recorded verbatim in `docs/m8-measured-defects.md` by a later agent with the note *"plan-review.md
+is not read by the task agents, so this register is its channel"*, and `docs/open-defects.md` was found
+to be referenced by nothing in the repo while holding nine unassigned defects. A finding a downstream
+agent never reads is indistinguishable from a discarded one. The mechanism that works here is the one
+the repo already uses when it works: put the finding in the owning task's DEFECTS/ASSUMPTIONS block,
+which research is required to attack adversarially, and it arrives in front of the agent who can act
+on it.
+
+### Implementation warning, non-negotiable
+
+The harness's own deterministic `planIssues` (`:350` unknown dependency, `:358` dependency cycle,
+`:394` TOUCHES overlap) are pushed as **plain strings with no `high:`/`med:`/`low:` prefix**. Only the
+validator's issues get a prefix, at `:404`. A naive "halt only on HIGH" implemented as
+`planIssues.filter(i => /high/i.test(i))` silently drops all three deterministic checks. Those are the
+checks with a perfect hit rate, and the script's own comment says so: *"a deterministic check has a
+perfect hit rate where the prose did not"*. Whatever filter ships must be applied to the validator's
+issues only, and the deterministic issues must halt unconditionally.
+
+### What not to do
+
+- Do not gate on the gate's colour. In the 19-event population where the second proposal applies, the
+  gate is green in 100% of cases by construction, including two data-loss defects and two parser
+  crashes.
+- Do not reuse `isNit` for routing. It has no input to read on `VALIDATOR_OUT`, it misses 40% of HIGH
+  findings on its keyword half, and it has never fired in production here.
+- Do not treat "record it somewhere" as a mitigation. Two ledgers in this repo were measured to be
+  read by nobody.
