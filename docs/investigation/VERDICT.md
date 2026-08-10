@@ -87,7 +87,7 @@ also where the process-versus-correctness waste was measured. Two levers that di
 this result: **bound what a deliberative role may spend** (Phase 1), and **choose the model per
 role** rather than per pipeline, which the sonnet control shows is a real and measured dial.
 
-**What it is NOT****What it is NOT** — three hypotheses the data kills:
+**What it is NOT** — three hypotheses the data kills:
 
 - **Codebase growth.** During the flat era the Core *doubled* (8,174 → 15,537 lines; 172 → 401
   EditMode tests) with per-dispatch cost unchanged. After 07-29 it grew 1.2x more while cost
