@@ -85,14 +85,31 @@ namespace SceneBuilder.Editor
             try
             {
                 temp = new GameObject { hideFlags = HideFlags.HideAndDontSave };
-                var component = Create(temp, type);
-                if (component != null)
+
+                // Harvesting a type's defaults AddComponents it onto this bare throwaway object, which
+                // fires the component's OnValidate on an object with no siblings. Any user MonoBehaviour
+                // whose OnValidate logs (e.g. SurfaceSnap warning it has no Renderer to snap against)
+                // would leak that to the console on every build that touches such a type. Suppress
+                // logging NARROWLY around the probe only, and always restore — so every current and
+                // future logging OnValidate inherits the fix here, not per-component.
+                var logger = Debug.unityLogger;
+                var prevLogEnabled = logger.logEnabled;
+                logger.logEnabled = false;
+                try
                 {
-                    // Read back through the SAME field walk the live read uses, so template and
-                    // creation cannot diverge. A freshly-created component's reference fields are all
-                    // null, so a null resolver is the correct, explicit answer here.
-                    var fields = SerializedFieldBridge.CollectFields(new SerializedObject(component), resolveSceneRef: null);
-                    TemplatesByTypeName[fullName] = new FieldMap(fields);
+                    var component = Create(temp, type);
+                    if (component != null)
+                    {
+                        // Read back through the SAME field walk the live read uses, so template and
+                        // creation cannot diverge. A freshly-created component's reference fields are all
+                        // null, so a null resolver is the correct, explicit answer here.
+                        var fields = SerializedFieldBridge.CollectFields(new SerializedObject(component), resolveSceneRef: null);
+                        TemplatesByTypeName[fullName] = new FieldMap(fields);
+                    }
+                }
+                finally
+                {
+                    logger.logEnabled = prevLogEnabled;
                 }
             }
             catch

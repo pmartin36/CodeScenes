@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.UI;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -122,6 +123,19 @@ public class ComponentDefaultTemplateScene : ISceneDefinition
             "not Unity's raw AddComponent default (WorldSpace).");
     }
 
+    // Regression (bug class): the default-template harvest AddComponents the probed type onto a
+    // throwaway bare GameObject, firing its OnValidate with no siblings. Any user MonoBehaviour whose
+    // OnValidate logs (e.g. SurfaceSnap warning it has no Renderer to snap against) must NOT leak that
+    // to the console during the harvest. Suppression lives at the probe in ComponentDefaultTemplate,
+    // so every current and future logging OnValidate inherits it -- not fixed per-component. A
+    // purpose-built probe proves the CLASS, not one hard-coded component.
+    [Test]
+    public void Register_ComponentWithLoggingOnValidate_DoesNotLeakToConsole()
+    {
+        ComponentDefaultTemplate.Register(typeof(LoggingOnValidateProbe));
+        LogAssert.NoUnexpectedReceived();
+    }
+
     // Deliverable 1 (gate-enforced, not just documented): ComponentDefaultTemplate.Create must be
     // the ONE component-creation primitive. A raw `.AddComponent(...)` call anywhere else in the
     // package is a silent bypass a future EditorCreationDefaults entry would never reach.
@@ -166,5 +180,16 @@ public class ComponentDefaultTemplateScene : ISceneDefinition
             "ComponentDefaultTemplate.Create(owner, type), not a raw .AddComponent(...) call, so a " +
             "future EditorCreationDefaults entry applies at every creation site with no per-caller " +
             "opt-in. Violations:\n" + string.Join("\n", violations));
+    }
+}
+
+// A MonoBehaviour that logs an error from OnValidate on a bare object -- the exact shape (e.g.
+// SurfaceSnap with no Renderer) that leaks to the console during ComponentDefaultTemplate's harvest.
+// Only ever added to a throwaway HideAndDontSave GameObject by Register, never saved to a scene.
+public class LoggingOnValidateProbe : MonoBehaviour
+{
+    private void OnValidate()
+    {
+        Debug.LogError("[CodeScenesTest] LoggingOnValidateProbe.OnValidate leaked during the default-template harvest.");
     }
 }
