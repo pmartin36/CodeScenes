@@ -356,6 +356,7 @@ namespace SceneBuilder.Core.Lowering
         {
             "SceneBuilder.Core/Model/ValueNode.cs",
             "SceneBuilder.Core/Model/ValueWalk.cs",
+            "SceneBuilder.Core/Diff/ChangeOp.cs",
             "SceneBuilder.Core/Diff/Differ.cs",
             "SceneBuilder.Core/Materialize/Materializer.cs",
             "SceneBuilder.Core/Plan/PlanOp.cs",

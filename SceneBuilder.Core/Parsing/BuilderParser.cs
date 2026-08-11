@@ -727,9 +727,13 @@ namespace SceneBuilder.Core.Parsing
         // ---- Fail-loud helper -----------------------------------------------------------
 
         // Reserved for the pre-recognition discovery layer (FindBuildMethod / block-body check),
-        // which runs BEFORE RecognizeOrThrow and is NOT part of the flat-shape body grammar. Every
-        // body-shape rejection now originates SOLELY from SceneBuilder.Grammar.FlatShapeRecognizer
-        // (via RecognizeOrThrow) — the single grammar source — so the body walk no longer calls Fail.
+        // which runs BEFORE RecognizeOrThrow and is NOT part of the flat-shape body grammar. Almost
+        // every body-shape rejection originates SOLELY from SceneBuilder.Grammar.FlatShapeRecognizer
+        // (via RecognizeOrThrow) — the single grammar source. The one exception is ReadCallState's
+        // unknown-name arm (BuilderParser.UnityEvents.cs), which calls Fail as defense-in-depth: the
+        // recognizer already rejects an unknown callState name before the body walk runs, so that arm
+        // is unreachable via Parse() and exists only so recognizer/parser drift surfaces as a located
+        // ParseException instead of a crash.
         private static ParseException Fail(SyntaxNode node, string message)
         {
             var position = node.GetLocation().GetLineSpan().StartLinePosition;

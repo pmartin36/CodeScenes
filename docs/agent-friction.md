@@ -9,12 +9,12 @@ recur. `TOOLING` is Unity's Pipeline CLI. `ENVIRONMENT` is the editor/host.
 
 | Count | Class | First | Last | Message |
 |---|---|---|---|---|
+| 4 | ENVIRONMENT | 2026-07-31 | 2026-08-11 | Assertion failed on expression: '!gAlreadyClosing' |
 | 4 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'get_component_properties' failed: 'type' is required when 'target' is a GameObject. |
-| 3 | ENVIRONMENT | 2026-07-31 | 2026-08-06 | Assertion failed on expression: '!gAlreadyClosing' |
+| 3 | ENVIRONMENT | 2026-07-31 | 2026-08-11 | Assertion failed on expression: 'm_PodArrays.empty()' |
+| 3 | ENVIRONMENT | 2026-07-31 | 2026-08-11 | Assertion failed on expression: 'm_RendererNodes.empty()' |
 | 3 | PRODUCT | 2026-07-31 | 2026-07-31 | [SceneBuilder] Sync wrote LiveVerifyConsole.cs: emitted builder source DOES NOT COMPILE (1 error(s)). \| line 23: CS0841: Cannot use local variable 'button' before it is declared |
 | 3 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'find_assets' failed: At least one of type, name, or label is required. |
-| 2 | ENVIRONMENT | 2026-07-31 | 2026-08-06 | Assertion failed on expression: 'm_PodArrays.empty()' |
-| 2 | ENVIRONMENT | 2026-07-31 | 2026-08-06 | Assertion failed on expression: 'm_RendererNodes.empty()' |
 | 2 | PRODUCT | 2026-07-31 | 2026-07-31 | [SceneBuilder] Sync wrote DemoScene.cs: emitted builder source DOES NOT COMPILE (2 error(s)). \| line 784: CS0542: 'Materials': member names cannot be the same as their enclosing type |
 | 2 | TOOLING | 2026-08-06 | 2026-08-06 | ExecuteCommandByName: Parameter validation failed: Required parameter 'file' is missing or empty |
 | 1 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'set_serialized_field' failed: Could not resolve object reference: No loaded object with instanceId 568105589213755260. |

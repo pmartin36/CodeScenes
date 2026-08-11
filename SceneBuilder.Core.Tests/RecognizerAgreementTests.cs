@@ -378,6 +378,9 @@ public class ValidComponentRefOnClickScene : ISceneDefinition
             yield return Body("OnClick_EnumStaticArgument", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, o => o.SetMode(MyEnum.Fast)));");
             // A long literal outside int range cannot narrow into the persistent call's int slot.
             yield return Body("OnClick_StaticArgumentOutOfIntRange", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, o => o.SetCount(9999999999L)));");
+            // An unknown callState member name is not one of Off/RuntimeOnly/EditorAndRuntime — no
+            // ListenerCallState slot exists for it.
+            yield return Body("OnClick_BogusCallState", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, o => o.Open(), callState: SomeType.Bogus));");
         }
 
         private static object[] Body(string name, string statements) => Case(name, $@"

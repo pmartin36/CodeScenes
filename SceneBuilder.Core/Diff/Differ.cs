@@ -316,6 +316,21 @@ namespace SceneBuilder.Core.Diff
                                 ? defaultValue
                                 : null;
 
+                        if (field.Value is ValueNode.UnityEventListeners desiredListeners)
+                        {
+                            if (!known || !desiredListeners.Equals(actualValue as ValueNode.UnityEventListeners))
+                            {
+                                setFieldOps.Add(new SetUnityEvent
+                                {
+                                    LogicalId = ownerLogicalId,
+                                    ComponentLogicalId = desiredComponent.LogicalId,
+                                    Path = field.Key,
+                                    Listeners = desiredListeners,
+                                });
+                            }
+                            continue;
+                        }
+
                         if (!known || NestedValueEmission.Emittable(actualValue, fieldDefault) != NestedValueEmission.Emittable(field.Value, fieldDefault))
                         {
                             setFieldOps.Add(new SetField

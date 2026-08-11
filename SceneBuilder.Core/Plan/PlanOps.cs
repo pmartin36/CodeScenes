@@ -56,6 +56,18 @@ namespace SceneBuilder.Core.Plan
         public ValueNode Value { get; init; } = ValueNode.Primitive.Int(0);
     }
 
+    // Mirrors Change.SetUnityEvent (ChangeOp.cs): one op replaces the full ordered persistent-call
+    // list at Path.
+    public sealed record SetUnityEvent : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public string Path { get; init; } = "";
+
+        [JsonPropertyOrder(2)]
+        public ValueNode.UnityEventListeners Listeners { get; init; }
+            = new ValueNode.UnityEventListeners(System.Array.Empty<UnityEventListener>());
+    }
+
     public sealed record AddComponent : PlanOp
     {
         [JsonPropertyOrder(1)]

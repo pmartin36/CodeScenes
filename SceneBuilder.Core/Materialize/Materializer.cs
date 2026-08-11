@@ -132,6 +132,14 @@ namespace SceneBuilder.Core.Materialize
                     case Change.SetField setField:
                         EmitFieldOp(setField.ComponentLogicalId, setField.Path, setField.Value, passB, skipped);
                         break;
+                    case Change.SetUnityEvent setUnityEvent:
+                        passB.Add(new SetUnityEvent
+                        {
+                            LogicalId = setUnityEvent.ComponentLogicalId,
+                            Path = setUnityEvent.Path,
+                            Listeners = setUnityEvent.Listeners,
+                        });
+                        break;
                     case Change.RemoveComponent removeComponent:
                         passB.Add(new RemoveComponent { LogicalId = removeComponent.ComponentLogicalId });
                         break;

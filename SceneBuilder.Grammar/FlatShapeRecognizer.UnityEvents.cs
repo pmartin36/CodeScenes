@@ -103,10 +103,20 @@ namespace SceneBuilder.Grammar
                 return;
             }
 
-            if (callStateArg != null && callStateArg.Expression is not MemberAccessExpressionSyntax)
+            if (callStateArg != null)
             {
-                Report(ctx, callStateArg.Expression, SB1003, "Expected a member access like `UnityEventCallState.Off`");
-                return;
+                if (callStateArg.Expression is not MemberAccessExpressionSyntax callStateAccess)
+                {
+                    Report(ctx, callStateArg.Expression, SB1003, "Expected a member access like `UnityEventCallState.Off`");
+                    return;
+                }
+
+                var callStateName = callStateAccess.Name.Identifier.Text;
+                if (callStateName != "Off" && callStateName != "RuntimeOnly" && callStateName != "EditorAndRuntime")
+                {
+                    Report(ctx, callStateArg.Expression, SB1003, $"Unknown callState '{callStateName}'; expected Off, RuntimeOnly, or EditorAndRuntime");
+                    return;
+                }
             }
 
             var isDynamic = false;

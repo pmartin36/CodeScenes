@@ -33,6 +33,14 @@ namespace SceneBuilder.Analyzers.Tests
                 .Select(m => m!.Name)
                 .Single();
 
+        // Same lookup, but for a method GROUP reference (e.g. `h => h.SetValue`, not invoked) —
+        // the dynamic OnEvent form's diagnostic location.
+        private static SimpleNameSyntax MethodGroupNameNode(SyntaxTree tree, string methodName) =>
+            tree.GetRoot().DescendantNodes().OfType<MemberAccessExpressionSyntax>()
+                .Where(m => m.Name.Identifier.Text == methodName)
+                .Select(m => m.Name)
+                .Single();
+
         [Fact]
         public async Task Analyzer_UnityEventSignatureScaffold_InertToday()
         {
@@ -185,6 +193,204 @@ public class Caller
             var expectedNonPublic = ExpectedAt(DiagnosticDescriptors.SB1202, MethodNameNode(nonPublicTree, "Close"));
 
             await AnalyzerVerifier.VerifyAsync(nonPublicZeroArgSource, expectedNonPublic);
+        }
+
+        [Fact]
+        public async Task Analyzer_OnEventStaticForm_ArityMismatch_FlagsSB1201()
+        {
+            // Static/void `.OnEvent(target, x => x.Method(args))` runs the SAME within-lambda
+            // arity check as `.OnClick`: a mismatch between the referenced method's declared
+            // parameter count and the args supplied in the lambda body flags SB1201.
+            const string mismatchSource = @"
+public static class Evt
+{
+    public static void OnEvent<T>(T target, System.Action<T> listener) { }
+}
+
+public class Target
+{
+    public void SetTwo(int a, int b) { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var t = new Target();
+        Evt.OnEvent(t, x => x.SetTwo(1, 2));
+    }
+}
+";
+            var mismatchTree = CSharpSyntaxTree.ParseText(mismatchSource);
+            var expectedMismatch = ExpectedAt(DiagnosticDescriptors.SB1201, MethodNameNode(mismatchTree, "SetTwo"));
+
+            await AnalyzerVerifier.VerifyAsync(mismatchSource, expectedMismatch);
+        }
+
+        [Fact]
+        public async Task Analyzer_OnEventStaticForm_MatchingArity_IsSilent()
+        {
+            // A matching arity (referenced method's own parameter count equals the args supplied
+            // in the lambda body) stays silent, same as `.OnClick`.
+            const string matchingSource = @"
+public static class Evt
+{
+    public static void OnEvent<T>(T target, System.Action<T> listener) { }
+}
+
+public class Target
+{
+    public void Open() { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var t = new Target();
+        Evt.OnEvent(t, x => x.Open());
+    }
+}
+";
+            await AnalyzerVerifier.VerifyAsync(matchingSource);
+        }
+
+        [Fact]
+        public async Task Analyzer_OnEventDynamicForm_GenericArgMismatch_FlagsSB1201()
+        {
+            // Dynamic form `.OnEvent(x => x.evt, target, h => h.Method, dynamic: true)`: the
+            // method group's candidate overloads are matched against the selected event field's
+            // own `UnityEvent<T0..Tn>` generic argument list. No candidate overload matches
+            // `(float)` here (only `(int, int)` exists) -> SB1201 at the method-group name node.
+            const string mismatchSource = @"
+namespace UnityEngine.Events
+{
+    public class UnityEvent<T> { }
+}
+
+public class SliderEvent : UnityEngine.Events.UnityEvent<float> { }
+
+public class Slider
+{
+    public SliderEvent onValueChanged;
+}
+
+public class Hud
+{
+    public void SetValue(int a, int b) { }
+}
+
+public class Handle<T>
+{
+    public void OnEvent<TArg, TTarget>(
+        System.Func<T, UnityEngine.Events.UnityEvent<TArg>> unityEvent,
+        TTarget target,
+        System.Func<TTarget, System.Action<TArg>> method,
+        bool dynamic) { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var handle = new Handle<Slider>();
+        var hud = new Hud();
+        handle.OnEvent(c => c.onValueChanged, hud, h => h.SetValue, dynamic: true);
+    }
+}
+";
+            var mismatchTree = CSharpSyntaxTree.ParseText(mismatchSource);
+            var expectedMismatch = ExpectedAt(DiagnosticDescriptors.SB1201, MethodGroupNameNode(mismatchTree, "SetValue"));
+
+            await AnalyzerVerifier.VerifyAsync(mismatchSource, expectedMismatch);
+        }
+
+        [Fact]
+        public async Task Analyzer_OnEventDynamicForm_MatchingGenericArg_IsSilent()
+        {
+            // A method-group candidate matching the event's generic arg list `(float)` stays
+            // silent.
+            const string matchingSource = @"
+namespace UnityEngine.Events
+{
+    public class UnityEvent<T> { }
+}
+
+public class SliderEvent : UnityEngine.Events.UnityEvent<float> { }
+
+public class Slider
+{
+    public SliderEvent onValueChanged;
+}
+
+public class Hud
+{
+    public void SetValue(float v) { }
+}
+
+public class Handle<T>
+{
+    public void OnEvent<TArg, TTarget>(
+        System.Func<T, UnityEngine.Events.UnityEvent<TArg>> unityEvent,
+        TTarget target,
+        System.Func<TTarget, System.Action<TArg>> method,
+        bool dynamic) { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var handle = new Handle<Slider>();
+        var hud = new Hud();
+        handle.OnEvent(c => c.onValueChanged, hud, h => h.SetValue, dynamic: true);
+    }
+}
+";
+            await AnalyzerVerifier.VerifyAsync(matchingSource);
+        }
+
+        [Fact]
+        public async Task Analyzer_OnEventDynamicForm_UnderivableEventType_StaysSilent()
+        {
+            // A genuinely-underivable site (a non-generic `UnityEvent` base, so the event's own
+            // generic arg list cannot be read) stays silent rather than guessing.
+            const string underivableSource = @"
+namespace UnityEngine.Events
+{
+    public class UnityEvent { }
+}
+
+public class Slider
+{
+    public UnityEngine.Events.UnityEvent onValueChanged;
+}
+
+public class Hud
+{
+    public void SetValue(float v) { }
+}
+
+public class Handle<T>
+{
+    public void OnEvent<TTarget>(
+        System.Func<T, UnityEngine.Events.UnityEvent> unityEvent,
+        TTarget target,
+        System.Func<TTarget, System.Action<float>> method,
+        bool dynamic) { }
+}
+
+public class Caller
+{
+    public void Wire()
+    {
+        var handle = new Handle<Slider>();
+        var hud = new Hud();
+        handle.OnEvent(c => c.onValueChanged, hud, h => h.SetValue, dynamic: true);
+    }
+}
+";
+            await AnalyzerVerifier.VerifyAsync(underivableSource);
         }
 
         [Fact]

@@ -278,7 +278,9 @@ namespace SceneBuilder.Core.Parsing
 
         // `callState: <MemberAccess>` reads the member NAME only, regardless of qualifier depth —
         // `UnityEventCallState.Off` and `UnityEngine.Events.UnityEventCallState.Off` both lower the
-        // same way.
+        // same way. The recognizer rejects an unknown callState name before the body walk runs, so
+        // both throw sites below are unreachable via Parse(); they throw a located ParseException
+        // (not Unreachable()) purely so recognizer/parser drift fails loud instead of crashing.
         private static ListenerCallState ReadCallState(ExpressionSyntax expr)
         {
             if (expr is MemberAccessExpressionSyntax memberAccess)
@@ -288,11 +290,11 @@ namespace SceneBuilder.Core.Parsing
                     "Off" => ListenerCallState.Off,
                     "EditorAndRuntime" => ListenerCallState.EditorAndRuntime,
                     "RuntimeOnly" => ListenerCallState.RuntimeOnly,
-                    _ => throw Unreachable(),
+                    _ => throw Fail(expr, $"Unknown callState '{memberAccess.Name.Identifier.Text}'; expected Off, RuntimeOnly, or EditorAndRuntime"),
                 };
             }
 
-            throw Unreachable();
+            throw Fail(expr, "Expected a member access like `UnityEventCallState.Off`");
         }
 
         // The ONE place a parsed listener is added to a component field: appends to an existing

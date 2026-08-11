@@ -93,6 +93,16 @@ namespace SceneBuilder.Core.Diff
         public ValueNode Value { get; init; } = ValueNode.Primitive.Int(0);
     }
 
+    // Mirrors Plan.SetUnityEvent (PlanOps.cs): one op replaces the full ordered persistent-call
+    // list at Path.
+    public sealed record SetUnityEvent : ChangeOp
+    {
+        public string ComponentLogicalId { get; init; } = "";
+        public string Path { get; init; } = "";
+        public ValueNode.UnityEventListeners Listeners { get; init; }
+            = new ValueNode.UnityEventListeners(System.Array.Empty<UnityEventListener>());
+    }
+
     public sealed record ReorderComponent : ChangeOp
     {
         public string ComponentLogicalId { get; init; } = "";
