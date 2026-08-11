@@ -25,6 +25,10 @@ namespace SceneBuilder.Core.Serialization
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 WriteIndented = true,
+                // A live component field can legitimately hold Infinity/NaN (e.g. Unity's own
+                // Joint.breakForce/breakTorque default to Mathf.Infinity) — the canonical form must be
+                // able to round-trip it rather than throwing.
+                NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
             };
 
             options.Converters.Add(new FieldMapJsonConverter());

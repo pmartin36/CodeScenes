@@ -38,6 +38,14 @@ namespace SceneBuilder.Editor
             // Domain-reload survival: static ctor re-runs on every reload and re-arms iff the
             // persisted master toggle is on (SceneBuilderAutoToggle.Enabled defaults true).
             ApplyToggleState();
+
+            // Reload resync: schedule AFTER ApplyToggleState() so the editor's scenes are restored
+            // before it runs (delayCall fires post-load). Recovers an external edit that fired no
+            // ObjectChangeEvent while this domain was unloaded.
+            if (IsArmed)
+            {
+                EditorApplication.delayCall += SceneBuilderResync.ResyncAllOpenScenes;
+            }
         }
 
         public static bool IsArmed { get; private set; }
@@ -118,6 +126,10 @@ namespace SceneBuilder.Editor
             ObjectChangeEvents.changesPublished += OnChangesPublished;
             EditorSceneManager.sceneSaved += OnSceneSaved;
             EditorApplication.update += OnUpdate;
+            EditorApplication.focusChanged -= OnFocusChanged;
+            EditorApplication.focusChanged += OnFocusChanged;
+            EditorSceneManager.sceneOpened -= OnSceneOpened;
+            EditorSceneManager.sceneOpened += OnSceneOpened;
             StartWatcher();
 
             IsArmed = true;
@@ -129,10 +141,25 @@ namespace SceneBuilder.Editor
             ObjectChangeEvents.changesPublished -= OnChangesPublished;
             EditorSceneManager.sceneSaved -= OnSceneSaved;
             EditorApplication.update -= OnUpdate;
+            EditorApplication.focusChanged -= OnFocusChanged;
+            EditorSceneManager.sceneOpened -= OnSceneOpened;
             StopWatcher();
 
             IsArmed = false;
         }
+
+        /// <summary>Focus-regain hook: recovers an external edit that fired no ObjectChangeEvent while the editor was unfocused.</summary>
+        private static void OnFocusChanged(bool focused)
+        {
+            if (focused)
+            {
+                SceneBuilderResync.ResyncActiveScene();
+            }
+        }
+
+        /// <summary>Scene-open hook: resyncs a scene the moment it is opened, before any edit is made in it.</summary>
+        private static void OnSceneOpened(Scene scene, OpenSceneMode mode) =>
+            SceneBuilderResync.ResyncScene(scene);
 
         /// <summary>
         /// Play-mode gate (b7-t1, spec checklist #12): disarm on entering Play (no scene-edit

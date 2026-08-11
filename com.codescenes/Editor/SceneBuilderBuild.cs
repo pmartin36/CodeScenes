@@ -276,6 +276,15 @@ namespace SceneBuilder.Editor
             // the file watcher driving code->scene would fire on it for nothing.
             SceneBuilderPaths.WriteIfChanged(sidecarPath, IdentityMapJson.Serialize(map));
 
+            // Checkpoint the artifacts this Build just committed: the scene changed (re-read the
+            // snapshot post-save); the source did not, so `desired` (already resolved above, against
+            // the PRE-harvest asset cache) is reused rather than re-derived — re-deriving against the
+            // just-merged `map.Assets` would break move-recovery for any authored path the harvest
+            // just overwrote the cache's LastKnownPath for (LoweringResolver.RecoverGuidFromCache).
+            var statePath = SceneBuilderPaths.StateForSidecar(sidecarPath);
+            var committedSnapshot = SceneSnapshotReader.Read(scene, ObjectReferenceResolver.BuildSceneRefResolver(map));
+            SyncCheckpointWriter.Write(statePath, scenePath, desired, committedSnapshot, map);
+
             // No AssetDatabase.Refresh(): the sidecar lives outside Assets/ (nothing to import), and the
             // scene was already registered with the AssetDatabase by EditorSceneManager.SaveScene above.
             // A Refresh here would cost a domain reload for no gain.

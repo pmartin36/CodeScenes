@@ -38,6 +38,10 @@ unity-gate/*.csproj
 unity-gate/*.sln
 unity-gate/ProjectSettings/SceneTemplateSettings.json
 
+# ---- builder sidecars + sync checkpoints (regenerated per gate run; never committed) ----
+*.sbmap.json
+*.sbstate.json
+
 # ---- OS ----
 .DS_Store
 Thumbs.db

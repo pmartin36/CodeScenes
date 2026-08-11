@@ -31,11 +31,36 @@ namespace SceneBuilder.Editor
         /// <summary>Absolute path of the builders folder. May not exist yet — see <see cref="EnsureBuildersDirectory"/>.</summary>
         public static string BuildersDirectory => Path.Combine(ProjectRoot, BuildersFolderName);
 
+        /// <summary>File suffix of an identity sidecar.</summary>
+        public const string SidecarSuffix = ".sbmap.json";
+
+        /// <summary>File suffix of a sync checkpoint.</summary>
+        public const string StateSuffix = ".sbstate.json";
+
         /// <summary>Absolute path of the builder source for <paramref name="builderName"/>.</summary>
         public static string Builder(string builderName) => Path.Combine(BuildersDirectory, builderName + ".cs");
 
         /// <summary>Absolute path of the identity sidecar for <paramref name="builderName"/>.</summary>
-        public static string Sidecar(string builderName) => Path.Combine(BuildersDirectory, builderName + ".sbmap.json");
+        public static string Sidecar(string builderName) => Path.Combine(BuildersDirectory, builderName + SidecarSuffix);
+
+        /// <summary>Absolute path of the sync checkpoint for <paramref name="builderName"/>.</summary>
+        public static string State(string builderName) => Path.Combine(BuildersDirectory, builderName + StateSuffix);
+
+        /// <summary>
+        /// Absolute path of the sync checkpoint co-located with the sidecar at <paramref name="sidecarPath"/>
+        /// (i.e. <c>&lt;name&gt;.sbstate.json</c> next to <c>&lt;name&gt;.sbmap.json</c>), derived from the
+        /// sidecar path itself rather than <see cref="BuildersDirectory"/> so a caller using a non-default
+        /// sidecar location still gets the checkpoint alongside it.
+        /// </summary>
+        public static string StateForSidecar(string sidecarPath)
+        {
+            var dir = Path.GetDirectoryName(sidecarPath) ?? "";
+            var fileName = Path.GetFileName(sidecarPath);
+            var baseName = fileName.EndsWith(SidecarSuffix, System.StringComparison.Ordinal)
+                ? fileName[..^SidecarSuffix.Length]
+                : Path.GetFileNameWithoutExtension(fileName);
+            return Path.Combine(dir, baseName + StateSuffix);
+        }
 
         /// <summary>Folder, directly under <see cref="BuildersDirectory"/>, holding tool-generated (never hand-authored) files.</summary>
         public const string GeneratedFolderName = "Generated";
@@ -114,6 +139,38 @@ namespace SceneBuilder.Editor
             }
 
             File.WriteAllText(path, contents);
+            return true;
+        }
+
+        /// <summary>
+        /// Compare-before-write like <see cref="WriteTextIfChanged"/>, but the write itself is atomic:
+        /// content lands in a sibling <c>.tmp</c> file first, then is renamed over <paramref name="path"/>
+        /// (<see cref="File.Replace(string,string,string)"/> when <paramref name="path"/> already exists,
+        /// otherwise <see cref="File.Move(string,string)"/>), so a crash or interrupt mid-write never
+        /// leaves a partial/corrupt file at <paramref name="path"/>. Never routes through
+        /// <see cref="SuppressionScope"/> — a sync checkpoint is a tool-generated state file, not a
+        /// builder source/sidecar the code-&gt;scene file watcher needs to drop as a self-echo. Returns
+        /// true when a write actually happened.
+        /// </summary>
+        public static bool WriteTextAtomicIfChanged(string path, string contents)
+        {
+            if (File.Exists(path) && string.Equals(File.ReadAllText(path), contents, System.StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var tempPath = path + ".tmp";
+            File.WriteAllText(tempPath, contents);
+
+            if (File.Exists(path))
+            {
+                File.Replace(tempPath, path, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(tempPath, path);
+            }
+
             return true;
         }
 

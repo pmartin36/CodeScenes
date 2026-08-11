@@ -319,6 +319,14 @@ namespace SceneBuilder.Editor
             // sidecar .json, both under <ProjectRoot>/SceneBuilders/ — outside the roots Unity scans, so
             // there is nothing to import. Refreshing here would trigger a domain reload on every sync.
 
+            // Checkpoint the artifacts this Reconcile just committed: the source + sidecar changed (a
+            // scene->code sync), the scene did not — re-derive the source model from the just-written
+            // source and re-read the just-written sidecar, but reuse the ALREADY-READ scene snapshot.
+            var statePath = SceneBuilderPaths.StateForSidecar(sidecarPath);
+            var committedMap = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+            var committedSourceModel = DesiredModelLoader.Load(currentSource, committedMap, facadeCatalog, assetCatalog).Desired;
+            SyncCheckpointWriter.Write(statePath, committedMap.Scene, committedSourceModel, snapshot, committedMap);
+
             return new SyncResult
             {
                 EditsApplied = editsApplied,
@@ -583,6 +591,17 @@ namespace SceneBuilder.Editor
             result.EditsApplied = editsApplied;
             result.Changed = editsApplied > 0 || sidecarWritten;
             result.CompileErrors = compileErrors;
+
+            // Checkpoint the artifacts this Reconcile just committed — identical shape to Run's,
+            // reusing `liveSnapshot` (the reconcile ran against it; the scene is unchanged by a
+            // scene->code sync). The caller then runs SceneBuilderBuild.Run against the source this
+            // wrote, which refreshes the checkpoint via the Materialize path — writing here keeps the
+            // "every reconcile commit writes a checkpoint" invariant whole.
+            var statePath = SceneBuilderPaths.StateForSidecar(sidecarPath);
+            var committedMap = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+            var committedSourceModel = DesiredModelLoader.Load(currentSource, committedMap, facadeCatalog, assetCatalog).Desired;
+            SyncCheckpointWriter.Write(statePath, committedMap.Scene, committedSourceModel, liveSnapshot, committedMap);
+
             return result;
         }
 
