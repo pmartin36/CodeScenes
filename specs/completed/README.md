@@ -130,8 +130,35 @@ wrong reason. Gate `passed=637 failed=0 skipped=0`. Live-verified in a real edit
 Materialize, a second build applied zero plan ops, and an Inspector edit of `m_Size` synced back as
 `new UnityEngine.Vector3(7f, 8f, 9f)` through the new `Fold`-based renderer.
 
-Still pending in `specs/`: 08 (M7 robustness, rescoped), 09 (M8 UnityEvents, reframed to typed
-method-lambda), 10 (M9 SerializeReference), 12 (M11 animation, blocked on Animator research) and
-34 (licensing, blocked on two spikes). `00-foundation.md` stays in `specs/` as the living base
-contract. Unowned defects measured during builds, with no task claiming a fix, are tracked in
-`docs/open-defects.md`.
+Still pending in `specs/`: 09 (M8 UnityEvents, reframed to typed method-lambda), 10 (M9
+SerializeReference), 12 (M11 animation, blocked on Animator research) and 34 (licensing, blocked on
+two spikes). `00-foundation.md` stays in `specs/` as the living base contract. Unowned defects
+measured during builds, with no task claiming a fix, are tracked in `docs/open-defects.md`.
+
+## 08 - M7 robustness (rescoped)
+
+The bidirectional loop's hardening pass. Two of the spec's five deliverables were already shipped
+under M-Auto (self-triggered event suppression via `SuppressionScope`, and domain-reload
+re-subscribe via `[InitializeOnLoad]`), so this build delivered the genuinely-remaining three:
+persisted resync state, external-edit recovery on reload/focus, and a determinism/no-churn audit.
+
+Core (`d5f621d`) added `SyncCheckpoint` — a sibling `FooScene.sbstate.json` holding the canonical
+`LastSnapshotHash`/`LastSourceHash`/`LastSidecarHash` — and `CheckpointRouter`, which decides sync
+direction on reload from those hashes: only-scene-changed => scene->code Reconcile, only-source
+=> code->scene Materialize, both-changed => conflict surfaced (never last-write-wins). Hashing goes
+through the existing canonical serializer (`CanonicalHash` over `SceneModelSerializer`/
+`IdentityMapJson`), not in-memory `GetHashCode`. A second Core bucket (`00b522e`) added the
+determinism, round-trip-idempotence and no-id-churn audits as headless tests. The adapter
+(`87c8ba3`) added `SceneBuilderResync` (the reload + focus-regain full-snapshot resync, authority
+is a fresh snapshot per §5, not the event stream) and `SyncCheckpointWriter`, persisting state to
+disk so nothing sync-critical survives only in static fields a reload would clear.
+
+Gate `passed=679 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`). Live-verified in a real editor
+(`unity-live-verify`, log `SceneBuilderTest/Logs/live-verify-m7-1.log`) on an isolated `M7Fixture`
+to avoid the demo scene's known FitSize/SurfaceSnap drift: self-event suppression produced no echo
+re-patch, `sbstate.json` wrote all three hashes and was byte-stable on a no-op rebuild, a
+disk/`sceneOpened` edit resynced source with no ObjectChangeEvent, a forced domain reload re-armed
+subscriptions and resynced from disk, a 10x round-trip kept every GlobalObjectId/LogicalId
+byte-identical, and two builds produced identical sidecar+sbstate. The one slice not observable
+headless is OS focus-event *delivery*; the resync/routing logic it triggers was exercised via the
+equivalent `sceneOpened` hook and a direct call to the focus target `ResyncActiveScene()`.

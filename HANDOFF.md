@@ -5,15 +5,16 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=663 failed=0 skipped=0)`
-(2026-08-07; the Core-only trigger skips layer 2 on a pure-Core change, and a skip is not a Unity
-pass — force it with `GATE_FORCE_UNITY=1`). `verify.sh` now discounts one known host engine message
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=679 failed=0 skipped=0)`
+(2026-08-11, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
+skip is not a Unity pass — force it). `verify.sh` now discounts one known host engine message
 by exact text (`69a74df`); a crash or any other error still fails.
 
-**M8 (specs/09) is PART-BUILT: bucket b1 only, twice over.** `30a9613` landed the model layer, the
-`Reconciler.cs` split and four foundation deltas; the spec's ALREADY SHIPPED section records what not
-to re-plan. b2/b3 are not built. Its plan has been regenerated twice and hand-patched about a dozen
-times — see section 0 before touching it.
+**M8 (specs/09) is PART-BUILT.** b1 is committed (`30a9613` model layer + `Reconciler.cs` split + four
+foundation deltas; `e1ae5d5` b1-t3 path vocabulary + ComponentRef authoring), but **b1-t3 is
+INCOMPLETE and b2+ (the editor adapter, authoring API and sidecar work) is unbuilt.** The live plan
+(`.agent_handoffs/m8-unityevents/`) covers b1 only and is stale. Full state and how to resume: the M8
+entry under section 2.
 
 **Spec 36 (uniform value descent) SHIPPED and live-verified 2026-08-06** — moved to
 `specs/completed/`. All five passes route container descent through `ValueWalk`, which gained
@@ -98,19 +99,17 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/09` M8 UnityEvents. PART-BUILT (b1 only) and PAUSED pending section 0.** Do not resume it
-  before Phase 1 lands — it is the most expensive feature in the tree and every task pays the
-  multiplier. Three superseded plans sit in `.agent_handoffs/_superseded-m8-plan*`/`_stale-*`; the live
-  one is `m8-unityevents/`. Read the spec's ALREADY SHIPPED and serialized-path-vocabulary sections
-  first; both were learned by getting it wrong twice. Measured defects that cost live editor runs are
-  in `docs/m8-measured-defects.md` (ownership by task id is void, the measurements are not). The target
-  model is
-  already resolved in the spec: add `ComponentRef<T>` captured via `node.Ref<T>(ordinal)`. No model
-  change — `ObjectRef` already carries a bare LogicalId and the IdentityMap already has
-  `Kind=="Component"` entries.
-- **`specs/08` M7 robustness.** Smallest remaining. Suppression and reload re-subscribe already
-  shipped under M-Auto; what is left is `SyncCheckpoint` hash routing, external-edit reconcile on
-  focus-regain, and a determinism audit. Highest data-loss protection per hour spent.
+- **`specs/09` M8 UnityEvents. PART-BUILT: b1 committed, b1-t3 INCOMPLETE, b2+ unbuilt.** Cost is no
+  longer a blocker (4.8 is back at baseline), so it is clear to build on 4.8. Do it after M7 closes and
+  after the log-leak fix (0b#1), so its live-verify console is clean. Do NOT resume-by-id into the live
+  plan (`m8-unityevents/`; b1-only and stale, with three superseded plans in
+  `.agent_handoffs/_superseded-m8-plan*`/`_stale-*` beside it): treat the spec's ALREADY SHIPPED section
+  as done and decompose the remainder (b1-t3's unfinished work plus b2+) fresh. Read the spec's ALREADY
+  SHIPPED and serialized-path-vocabulary sections first. Measured defects that cost live editor runs are
+  in `docs/m8-measured-defects.md` (ownership-by-task-id is void; the measurements are not). Model is
+  resolved in the spec: add `ComponentRef<T>` via `node.Ref<T>(ordinal)`, no model change (`ObjectRef`
+  carries a bare LogicalId, IdentityMap has `Kind=="Component"` entries). Expect higher per-task cost
+  than M7 (largest spec; difficulty, not a 4.8 regression).
 - **`specs/10` M9 SerializeReference.** Depends on `ValueWalk` being right: a `ManagedReference`'s
   fields may contain further `ManagedReference`s, nesting arbitrarily. If recursion is wrong anywhere,
   this is where it hurts most.
