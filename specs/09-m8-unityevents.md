@@ -308,6 +308,18 @@ that forwards the event's own runtime argument(s) to the method (multi-arg `Unit
   `MethodName`, `ArgMode`, `ArgValue`, or `CallState`. Emits a single `SetUnityEvent` op for the field.
 - **Materialize → Plan** — a desired listener list different from actual lowers to one
   `SetUnityEvent(path, listeners)` op; identical lists produce **no** op (idempotent, no-op stability).
+  **Sequencing constraint (a real cross-direction dependency — decompose accordingly).** There are TWO
+  levels of no-op idempotence proof and they do not belong to the same task. The pure-Core proof
+  (`Diff`/`Materialize` over a hand-built desired list and an equal hand-built `SceneSnapshot` ⇒ zero
+  ops) is headless and belongs with the `Diff`/`SetUnityEvent` work. The **live-scene** proof (a second
+  `Materialize` against the REAL editor scene after a write emits ZERO plan ops) cannot hold until the
+  scene→code **READ** exists: `Materialize` diffs desired against a snapshot read from the live
+  component, and until the adapter reads a `UnityEvent` field back AS `ValueNode.UnityEventListeners`
+  (today `m_OnClick` surfaces as an unrepresentable note and `Diff` has no `SetUnityEvent` handling),
+  `actual` reads Unsupported while `desired` is `UnityEventListeners`, so a `SetUnityEvent` op re-emits
+  on every pass. Therefore the live "second Materialize = zero ops" EditMode assertion must DEPEND ON the
+  listener-read task (or ride the bidirectional round-trip task that already depends on both directions);
+  it must NOT sit in a write-only bucket that declares no dependency on the reader.
 - **Reconcile → SourcePatch** — a listener delta observed in the snapshot patches the exact authoring
   call span: adds/removes an `.OnClick(...)`/`.OnEvent(...)` statement, or rewrites its
   target / method / arg / callstate argument in place, formatting-preserving (§5). A target that
@@ -386,7 +398,10 @@ slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, hud,
 - **Listener ordering**: two-listener event preserves order through Materialize and Reconcile.
 - **Listener removal**: actual has fewer/no listeners than expected → Reconcile deletes the matching
   `.OnClick(...)` statement (or empties the list) via `SourcePatch`; empty list serializes as cleared.
-- **Diff idempotence**: identical desired/actual listener lists → zero `SetUnityEvent` ops.
+- **Diff idempotence** (pure-Core, headless): identical hand-built desired/actual listener lists → zero
+  `SetUnityEvent` ops. This is the Core-level proof and needs no adapter reader. The LIVE-scene
+  second-Materialize-emits-zero-ops proof is separate and carries the reader dependency stated under
+  "Materialize → Plan".
 - **CallState round-trip**: `EditorAndRuntime` / `Off` survive both directions.
 - **Dynamic (EventDefined) round-trip**: an `m_Mode == 0` listener → `ArgMode="dynamic"`, no
   `ArgValue`, target+method preserved; round-trips; authoring emits the `dynamic: true` form; a
