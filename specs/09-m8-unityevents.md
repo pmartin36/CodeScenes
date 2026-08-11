@@ -94,6 +94,48 @@ headroom; and the four foundation gaps below were CLOSED — the component `Glob
 C# member spelling now reach Core on the snapshot, `ValueNode.Primitive` normalises a boxed `JsonElement`
 at its use sites, and the component-LogicalId bypass scan landed. Do not re-plan any of it.
 
+**ALSO SHIPPED (b1-t3, commit `e1ae5d5`; committed WIP but GATE-GREEN at `passed=663`).** The entire
+authored surface and its parse/recognizer path are built and Core-test-covered. A decomposition must
+build ON these, not schedule them:
+- `ComponentRef<T>` (`com.codescenes/Runtime/ComponentRef.cs`) — reference-only, with `T As()` for the
+  object-argument cast — and `NodeHandle.Ref<T>(int ordinal = 0)` (`com.codescenes/Runtime/NodeHandle.cs`)
+  returning it, distinct from `ComponentHandle<T>`.
+- The full `.OnClick` / `.OnEvent` overload set (`com.codescenes/Runtime/ComponentHandle.cs`): the
+  `ComponentRef` / `AssetReference` / `SceneObjectHandle` (GameObject) targets, each with optional
+  `callState`; the `.OnEvent(x => x.eventField, …)` event-field selector (reusing the shipped
+  `.Set(x => x.field)` member-chain parser); and the `dynamic:` method-group forms for
+  `UnityEvent<TArg>` and `UnityEvent<TArg0,TArg1>`.
+- The Editor→Core lowering and the parse/recognizer path for every form
+  (`SceneBuilder.Core/Parsing/BuilderParser.UnityEvents.cs`, `FlatShapeRecognizer.UnityEvents.cs`),
+  green under `RecognizerAgreementTests`, `UnityEventAuthoringParseTests`, `UnityEventAuthoringFormsTests`,
+  `UnityEventAuthoringBindTests`, `UnityEventAuthoringDocGenTests`.
+- SB1201 (arity) / SB1202 (non-public target) for `.OnClick` only
+  (`CodeScenes.Analyzers/UnityEventAnalysis.cs`), green under `ScaffoldAndSeverityTests`.
+
+**ONE b1 defect remains OPEN inside that shipped surface; the remaining work MUST fix it as a Core task,
+RED-first.** A `callState:` argument accepts ANY member name: the recognizer
+(`FlatShapeRecognizer.UnityEvents.cs`) checks only that the argument is a member-access, not that the name
+is one of `Off`/`RuntimeOnly`/`EditorAndRuntime`, and `ReadCallState` (`BuilderParser.UnityEvents.cs`)
+then throws `Unreachable()` — an `InvalidOperationException` (`BuilderParser.cs`), which
+`RecognizerAgreementTests` does not catch (it catches only `ParseException`). Fix: reject an unknown
+callState name AT the recognizer (so recognizer and parser agree it is not a listener shape), make
+`ReadCallState`'s failure a located `ParseException`, and add a `RecognizerAgreementTests` corpus case
+pinning a bogus callState name.
+
+**SB1201 arity for `.OnEvent` IS in scope — build it (the v0 "cannot derive" comment is superseded).**
+`CodeScenes.Analyzers/UnityEventAnalysis.cs` currently gates `.OnEvent` out because "OnEvent's expected
+arity cannot be derived". It can:
+- Static / void form (`h => h.Method(args)`): the SAME within-lambda arity check `.OnClick` already runs
+  (referenced method's parameter count vs args supplied in the lambda body; > 1 static arg illegal) — no
+  event-type derivation needed. The current code simply skips it.
+- Dynamic form (`h => h.SetValue`, a method GROUP under `dynamic: true`): resolve the `x => x.eventField`
+  selector to its symbol via the semantic model, read that field's `UnityEvent<T0..Tn>` generic
+  arguments, and flag SB1201 when NO candidate of the method group's symbol matches `(T0..Tn)`. Only a
+  genuinely-underivable site (selector does not resolve, or a non-generic `UnityEvent` paired with a
+  dynamic method group taking args) stays unflagged and relies on Materialize fail-loud.
+Owner: a single analyzer task extending `UnityEventAnalysis.cs`, pinned by `ScaffoldAndSeverityTests`
+cases for both forms. No new spec is minted for this.
+
 **THE ADAPTER'S SERIALIZED-PATH VOCABULARY — decide this ONCE, in one task, before either adapter file
 exists.** Learned by getting it wrong twice. The invariant "the adapter carries no mode/arg logic"
 (09:219-220) is only enforceable if the adapter never spells a serialized path itself, and the guard that
@@ -129,6 +171,58 @@ live editor run to establish and none is derivable from this spec:
 Both of the first two are the same shape: an ADAPTER task needing a `SceneBuilder.Core/Model/*` addition.
 Hoist all snapshot-model additions into ONE owning task that declares those files; splitting them across
 the adapter tasks that consume them is what forced two separate re-plans.
+
+## REMAINING WORK — measured architectural constraints the build MUST own
+
+Read `docs/m8-measured-defects.md` before decomposing: every entry there was measured against real code
+or a real editor, and its measurements are true even where a named task-id is void or an entry is marked
+RESOLVED (skip the RESOLVED ones — e.g. the `UnityEventCallState` numbers, the gate engine-message flake,
+and the `ValueNode.Primitive` JSON-boundary cast are all CLOSED). The architecture-shaping constraints
+below are the ones that change the decomposition; each is stated as owner + mechanism, not prose, so a
+task owns it and a check fails when a site bypasses it:
+
+- **Reconcile must treat a component `LogicalId` as a resolvable target (the cross-cutting invariant's
+  Reconcile-side mechanism).** The shipped reconciler builds its resolvable-target set from GameObject /
+  PrefabInstance nodes and authored handle names only; a listener `Target` carrying a component
+  `LogicalId` is therefore classified DANGLING, so EVERY listener the milestone produces would report a
+  conflict and emit no patch. The owning component-target-resolution task must add component identities to
+  the reconciler's resolvable-target set AND to the handle table used for the render — not merely dispatch
+  on the new value kind. (`SceneBuilder.Core/Reconcile/Reconciler.cs`,
+  `ComponentReconciler.ClassifySnapshotRef`.)
+- **The scene→code source render needs a real `.OnClick` / `.OnEvent` arm for
+  `ValueNode.UnityEventListeners`.** Today the render path (`SceneBuilder.Core/Reconcile/SourceExpr.cs`
+  `ValueNodeLiteral`, reached via `ComponentReconciler.RenderFieldValue` and the appended-component/object
+  sites in `ComponentPatchApplier.cs` / `SourceEdit.cs`) throws loudly on this kind, naming the required
+  route. The reconcile task must declare those render files in its TOUCHES and route the kind to the
+  authoring call, rather than leaving the throw.
+- **§13 convergence for a NEW component target.** The reconciler's pending-target set is keyed on
+  GameObject `GlobalObjectId`s, so a component's own goid is never Pending and an unmapped new component
+  target falls to DANGLING (permanent conflict) instead of deferring and converging on the guaranteed
+  second Sync. The §13 task must make a new component target reach the pending set. (Note the boundary:
+  a component reached ONLY through a prefab-instance channel — an instance's added components / added
+  GameObjects — has no goid stamped on the snapshot today; the §13 task decides whether that is in scope
+  or an explicitly-stated boundary.)
+- **The incremental snapshot read-cache must invalidate on component-entry change.** The adapter's
+  per-GameObject node cache (`com.codescenes/Editor/ChangeScopedSnapshot.cs`, keyed via
+  `SceneRefResolver.Generation`) is keyed on a generation over MAPPED NODES only; a sync that adds or
+  retargets `Kind=="Component"` entries leaves the key unchanged, so the cache serves a stale listener
+  target. The read task must key the cache on a generation that also moves for component changes (b1-t2
+  shipped `ComponentTargetIndex.Generation`) and declare `SceneRefResolver.cs` + `ChangeScopedSnapshot.cs`
+  in its TOUCHES.
+- **Adapter WRITE mechanism is `SerializedObject` over `m_PersistentCalls.m_Calls`, not the typed
+  `Add*PersistentListener` family (MEASURED).** The typed `UnityEventTools.Add*PersistentListener` family
+  takes typed delegates the adapter would have to synthesize for an arbitrary reflected method, the object
+  overload is generic, and there is NO Add* overload for the dynamic (EventDefined, mode 0) case at all.
+  The realistic mechanism — and the one `PersistentCallFields` is shaped for — is editing
+  `m_PersistentCalls.m_Calls` through `SerializedObject` + `ApplyModifiedPropertiesWithoutUndo`
+  (optionally seeded by the parameterless `AddPersistentListener`), then `SetPersistentListenerState`.
+- **An unsyncable listener surfaces as a WARNING, not a NOTE.** A listener the user wired in the Inspector
+  that is not reaching their code is the same fail-loud (§7/§13) class as `UnrepresentableValue`; its
+  conflict report (`com.codescenes/Editor/ConflictSurfacing.cs`) must read WARNING.
+- **File-size budget.** `SceneBuilder.Core/Reconcile/SourcePatchApplier.cs` sits near the 1000-line budget
+  enforced by `SceneBuilder.Core.Tests/ObjectRefDescentScanTests.cs`. The source-patch listener task must
+  fit within it by SPLITTING the file (a pure partial-class extraction) rather than growing it; do not
+  regress the budget silently.
 
 ### Additions to the contract
 This milestone introduces new types/ops not in `00-foundation.md`. They are flagged here per §3's rule.
@@ -187,9 +281,11 @@ that forwards the event's own runtime argument(s) to the method (multi-arg `Unit
   `Unsupported`, flagged.
 - Custom `[Serializable]` `UnityEvent` subclasses beyond field-typed discovery (handled generically if
   they serialize the standard `m_PersistentCalls` shape; exotic shapes → `Unsupported`).
-- Building the SB1201/SB1202 signature analyzer: it ALREADY ships (see AMENDED banner). M8's obligation
-  is to build the typed method-lambda authoring surface so those diagnostics bind and fire in the IDE and
-  the gate; M8 still fails loud at Materialize when Unity rejects a wire.
+- Building the SB1201/SB1202 signature analyzer from scratch: it ALREADY ships for `.OnClick` (see
+  AMENDED banner). M8's obligation is to build the typed method-lambda authoring surface so those
+  diagnostics bind and fire in the IDE and the gate; M8 still fails loud at Materialize when Unity rejects
+  a wire. **In scope, though:** extending SB1201 arity to `.OnEvent` (both the static/void and the dynamic
+  method-group forms) — see the `e1ae5d5` ALREADY-SHIPPED note; the v0 under-flag is superseded.
 
 ## Core deliverables
 ### Types added/changed (referencing §3)
