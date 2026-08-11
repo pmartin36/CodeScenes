@@ -25,59 +25,44 @@ silently never run). Live log: `SceneBuilderTest/Logs/live-verify-spec36.log`.
 
 Measured during that live pass, NOT caused by 36 and unowned: the demo scene reports a steady
 9 plan ops on every build (its `FitSize`/`SurfaceSnap` move transforms after a build, so the next
-build sees real drift; an isolated probe without spatial components went 11 ops then 0), and
-`[CodeScenes] SurfaceSnap on 'New Game Object' has no Renderer/mesh bounds to snap` fires on every
-DemoScene build against an object that is not in the builder. Neither is in `docs/open-defects.md`
-yet; neither was investigated.
+build sees real drift; an isolated probe without spatial components went 11 ops then 0). Not in
+`docs/open-defects.md` yet, and not investigated.
 
 ## Order
 
-### 0. FIRST — run one 4.8 feature, then decide the deferred backlog from its numbers.
+### 0. Pipeline cost: resolved on 4.8. Harness backlog is PARKED — pull by evidence, don't push.
 
-Background if you want it: `docs/investigation/VERDICT.md`. You do not need it to act. In order:
+Cost is back at baseline on 4.8, so features are no longer gated behind a cost fix. Background:
+`docs/investigation/VERDICT.md`. Read run cost ONLY from `.agent_handoffs/_lessons/token-costs.jsonl`
+(accurate per-role tokens, one row per run) or `token-report.mjs` over the transcripts — never from
+output tokens or the harness `tokens` field, neither of which is spend.
 
-1. **Run one feature through the tdd-pipeline.** Prefer a small spec. Before launching, capture a UTC
-   ISO timestamp (`date -u +%Y-%m-%dT%H:%M:%SZ`) and note the run's `runId`. After it returns, append
-   the accurate token-cost row per the "After every run" step in
-   `~/.claude/skills/tdd-pipeline/SKILL.md` (one row to `.agent_handoffs/_lessons/token-costs.jsonl`).
+**Build a backlog item only when a run shows the pain it fixes** (M8, the largest/messiest spec, is
+the real test). The signals live in `/tdd-learnings` and the token-costs rows:
+- Plan-repair triad (bounded repair loop + halt-class filter + attach findings to the owning task) — if runs halt in plan validation.
+- Task-sizing cap (TOUCHES <= 6, ~100-word deliverables) — if high-TOUCHES tasks thrash.
+- Context diet (split `tasks.md` per task, bound `history.md`, delete accreted prompt sections) — if the token-costs row shows re-injection bloat.
+- `MAX_LOOPS` 3 -> 2, or route a one-line fix straight to the code-writer — if the loop cap keeps binding.
+- Generated value-kind index so `TOUCHES` is derived — if the "file in no TOUCHES" defect class recurs.
 
-2. **Read turns/invocation per role** from that row, or run `token-report.mjs` over the run's
-   transcripts. Near ~32/dispatch: treat step 3 as optional optimisation. Markedly higher (Opus-5 sat
-   near 78): step 3 is the real remaining budget. Judge cost ONLY from that row, never from output
-   tokens or the harness `tokens` field, neither of which is spend.
-
-3. **Then, gated on step 2, work the deferred backlog:**
-   - Plan-repair triad: bounded repair loop + halt-class filter + attach findings to the owning task.
-   - Task-sizing cap at plan time: TOUCHES <= 6, deliverables ~100 words.
-   - Context diet: split `tasks.md` per task, bound `history.md`, delete accreted prompt sections.
-   - `MAX_LOOPS` 3 -> 2; route a one-line fix straight to the code-writer.
-   - Codebase constant: delete the 1000-line file-size budget (also unblocks the next M8 bucket),
-     count-free allowlists, a generated value-kind index so `TOUCHES` is derived, and fix the
-     `ordinalByType` `#1`/`#0` drift at `ReconcilerInstances.Nested.cs:180`.
+Two are not efficiency and stand on their own, do them when they bite: delete the 1000-line
+file-size budget when an M8 bucket needs it; fix the `ordinalByType` `#1`/`#0` drift at
+`ReconcilerInstances.Nested.cs:180` (a shipped bug) anytime.
 
 Edit the harness ONLY with no pipeline run active, and run
 `node ~/.claude/skills/tdd-pipeline-edit/harness/all.mjs` before and after every change to
-`pipeline.workflow.js` — write the failing scenario first.
+`pipeline.workflow.js`; write the failing scenario first.
 
 ### 0b. Then the backlog that accumulated on 2026-08-06/07
 
-1. **Fix the `ComponentDefaultTemplate` probe leaking a console error on every build.** Bug fix via
-   subagent, RED-first, NOT the pipeline and NOT a spec. `Register` harvests defaults by creating a
-   throwaway GameObject and `AddComponent`-ing the type, which fires user `OnValidate` on a bare
-   object: `[CodeScenes] SurfaceSnap on 'New Game Object' has no Renderer/mesh bounds to snap.` fires
-   on EVERY build of any scene containing a `SurfaceSnap`. Fix the CLASS at the probe (suppress
-   narrowly around `Create` + `CollectFields`, restore in a `finally`), never in `SurfaceSnap`, or the
-   trap stays armed for every user MonoBehaviour with a logging `OnValidate`. Regression test belongs
-   in the existing `unity-gate/Assets/GateTests/ComponentDefaultTemplateTests.cs`. Stack:
-   `SceneBuilderTest/Logs/live-verify-spec36.log` ~line 2532.
-2. **Live-verify M8** once it lands — AFTER the log-leak fix, so the console is clean when judging it.
-   Project is `/home/paul/Source/Unity/SceneBuilderTest` (NOT `/home/paul/Unity/...`).
-3. **Document the three pipeline behaviours that keep costing runs**: resume replays cached VERDICTS
+1. **Live-verify M8** once it lands. Project is `/home/paul/Source/Unity/SceneBuilderTest` (NOT
+   `/home/paul/Unity/...`).
+2. **Document the three pipeline behaviours that keep costing runs**: resume replays cached VERDICTS
    (it keys on `(prompt, opts)` and prompts carry only the task id, so no plan edit busts one task's
    cache — it only helps when work was INTERRUPTED); past ~3 hand-fix rounds regenerate the plan
    instead of patching it (measured 0 -> 9 -> 13 findings while patching, 0 on both rerolls); put
    hard-won knowledge in the SPEC, not the plan, because a reroll inherits the spec and bins the plan.
-4. **Run `/tdd-learnings`.** The ledger has five backfilled decomposition classes at counts 3-8 plus
+3. **Run `/tdd-learnings`.** The ledger has five backfilled decomposition classes at counts 3-8 plus
    whatever the halt recorder has added since `02e8069`. Note 63 of 94 entries are already classified
    `pipeline:agent-behavior` — the ledger's own verdict agrees with the investigation.
 
@@ -87,7 +72,7 @@ Edit the harness ONLY with no pipeline run active, and run
 `research.md` citations, iteration numbers and pending-state prose — but only on lines the working
 diff ADDS. Everything already in the tree is invisible to it. One sweep closes that.
 
-**1d. `/tdd-learnings` — MOVED to section 0b item 4**, which carries the current ledger state
+**1d. `/tdd-learnings` — MOVED to section 0b item 3**, which carries the current ledger state
 (five backfilled decomposition classes, plus 63 of 94 entries already classified
 `pipeline:agent-behavior`). Do it there, not here.
 
@@ -100,8 +85,8 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 ### 2. Features, in this order
 
 - **`specs/09` M8 UnityEvents. PART-BUILT: b1 committed, b1-t3 INCOMPLETE, b2+ unbuilt.** Cost is no
-  longer a blocker (4.8 is back at baseline), so it is clear to build on 4.8. Do it after M7 closes and
-  after the log-leak fix (0b#1), so its live-verify console is clean. Do NOT resume-by-id into the live
+  longer a blocker (4.8 is back at baseline), so it is clear to build on 4.8 once M7 is closed out. Do
+  NOT resume-by-id into the live
   plan (`m8-unityevents/`; b1-only and stale, with three superseded plans in
   `.agent_handoffs/_superseded-m8-plan*`/`_stale-*` beside it): treat the spec's ALREADY SHIPPED section
   as done and decompose the remainder (b1-t3's unfinished work plus b2+) fresh. Read the spec's ALREADY
