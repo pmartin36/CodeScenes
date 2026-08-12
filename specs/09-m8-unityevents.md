@@ -112,29 +112,29 @@ build ON these, not schedule them:
 - SB1201 (arity) / SB1202 (non-public target) for `.OnClick` only
   (`CodeScenes.Analyzers/UnityEventAnalysis.cs`), green under `ScaffoldAndSeverityTests`.
 
-**ONE b1 defect remains OPEN inside that shipped surface; the remaining work MUST fix it as a Core task,
-RED-first.** A `callState:` argument accepts ANY member name: the recognizer
-(`FlatShapeRecognizer.UnityEvents.cs`) checks only that the argument is a member-access, not that the name
-is one of `Off`/`RuntimeOnly`/`EditorAndRuntime`, and `ReadCallState` (`BuilderParser.UnityEvents.cs`)
-then throws `Unreachable()` — an `InvalidOperationException` (`BuilderParser.cs`), which
-`RecognizerAgreementTests` does not catch (it catches only `ParseException`). Fix: reject an unknown
-callState name AT the recognizer (so recognizer and parser agree it is not a listener shape), make
-`ReadCallState`'s failure a located `ParseException`, and add a `RecognizerAgreementTests` corpus case
-pinning a bogus callState name.
+**ALSO SHIPPED (b1 completion, commit `f040769`):** the Plan op `SetUnityEvent` plus its Diff and
+Materialize path are BUILT, headless and pure-Core (`SceneBuilder.Core/Plan`, `Diff/Differ.cs`,
+`Materialize/Materializer.cs`). The `SetUnityEvent` op is defined here and consumed downstream by the
+adapter's `PlanExecutor` and by Materialize/Diff. A decomposition builds ON this op, it does not re-plan
+it.
 
-**SB1201 arity for `.OnEvent` IS in scope — build it (the v0 "cannot derive" comment is superseded).**
-`CodeScenes.Analyzers/UnityEventAnalysis.cs` currently gates `.OnEvent` out because "OnEvent's expected
-arity cannot be derived". It can:
-- Static / void form (`h => h.Method(args)`): the SAME within-lambda arity check `.OnClick` already runs
-  (referenced method's parameter count vs args supplied in the lambda body; > 1 static arg illegal) — no
-  event-type derivation needed. The current code simply skips it.
-- Dynamic form (`h => h.SetValue`, a method GROUP under `dynamic: true`): resolve the `x => x.eventField`
-  selector to its symbol via the semantic model, read that field's `UnityEvent<T0..Tn>` generic
-  arguments, and flag SB1201 when NO candidate of the method group's symbol matches `(T0..Tn)`. Only a
+**The `callState:` member-name rejection is SHIPPED in f040769.** An unknown `callState` name is now
+rejected AT the recognizer (`FlatShapeRecognizer.UnityEvents.cs`), so recognizer and parser agree the
+shape is not a listener, and `ReadCallState` (`BuilderParser.UnityEvents.cs`) raises a located
+`ParseException` instead of the `InvalidOperationException` that `RecognizerAgreementTests` would miss (it
+catches only `ParseException`). A `RecognizerAgreementTests` corpus case pins a bogus `callState` name.
+
+**SB1201 arity for `.OnEvent` is SHIPPED in f040769** (`CodeScenes.Analyzers/UnityEventAnalysis.cs`). Both
+forms now flag:
+- Static / void form (`h => h.Method(args)`): the SAME within-lambda arity check `.OnClick` runs
+  (referenced method's parameter count vs args supplied in the lambda body; more than one static arg is
+  illegal), no event-type derivation needed.
+- Dynamic form (`h => h.SetValue`, a method GROUP under `dynamic: true`): the `x => x.eventField` selector
+  resolves to its symbol via the semantic model, that field's `UnityEvent<T0..Tn>` generic arguments are
+  read, and SB1201 fires when NO candidate of the method group's symbol matches `(T0..Tn)`. Only a
   genuinely-underivable site (selector does not resolve, or a non-generic `UnityEvent` paired with a
   dynamic method group taking args) stays unflagged and relies on Materialize fail-loud.
-Owner: a single analyzer task extending `UnityEventAnalysis.cs`, pinned by `ScaffoldAndSeverityTests`
-cases for both forms. No new spec is minted for this.
+`ScaffoldAndSeverityTests` pins cases for both forms.
 
 **THE ADAPTER'S SERIALIZED-PATH VOCABULARY — decide this ONCE, in one task, before either adapter file
 exists.** Learned by getting it wrong twice. The invariant "the adapter carries no mode/arg logic"
@@ -195,6 +195,24 @@ task owns it and a check fails when a site bypasses it:
   sites in `ComponentPatchApplier.cs` / `SourceEdit.cs`) throws loudly on this kind, naming the required
   route. The reconcile task must declare those render files in its TOUCHES and route the kind to the
   authoring call, rather than leaving the throw.
+- **The reconcile listener->source-patch work MUST decompose into at least TWO tasks, never one.** The
+  reverted attempt was ONE oversized task: it bundled the cross-cutting invariant, the render arm, and
+  every delta type, then pruned a symmetric operation set, so the ADD path shipped untested and corrupted
+  source. Split it:
+  - **Task 1, INVARIANT OWNER (the cross-cutting invariant's Reconcile-side mechanism).** Add component
+    identities to the reconciler's `resolvableTargets` set AND to the handle table, so a listener `Target`
+    carrying a component `LogicalId` is Resolvable, not Dangling. Route target-kind resolution (`ObjectRef`
+    vs `AssetRef` from the snapshot target, else a surfaced `Conflict.UnsyncableListener`) through the
+    shipped `ComponentTargetResolution` classifier. ONE owning task, ONE shared mechanism every reconcile
+    consumer calls.
+  - **Task 2 (and a third if needed), PER-DELTA SOURCE RENDER.** The `.OnClick` / `.OnEvent` render arm
+    plus the per-operation source edits. Every file each task edits belongs in its TOUCHES: `SourceExpr.cs`,
+    `ComponentReconciler.cs`, `ComponentPatchApplier.cs`, `SourceEdit.cs`, `Reconciler.cs`, the NEW
+    source-patch partial-class module, the parser span-projection files `BuilderParser.Projections.cs` /
+    `BuilderParser.UnityEvents.cs`, and `SceneBuilder.Core.Tests/AuthoringBindHarness.cs`. Do NOT leave an
+    implicated file out of TOUCHES.
+  - **File-size budget:** land the listener source-patch logic in a NEW partial-class file so
+    `SourcePatchApplier.cs` stays under 1000 lines (`ObjectRefDescentScanTests` budget).
 - **§13 convergence for a NEW component target.** The reconciler's pending-target set is keyed on
   GameObject `GlobalObjectId`s, so a component's own goid is never Pending and an unmapped new component
   target falls to DANGLING (permanent conflict) instead of deferring and converging on the guaranteed
@@ -284,8 +302,8 @@ that forwards the event's own runtime argument(s) to the method (multi-arg `Unit
 - Building the SB1201/SB1202 signature analyzer from scratch: it ALREADY ships for `.OnClick` (see
   AMENDED banner). M8's obligation is to build the typed method-lambda authoring surface so those
   diagnostics bind and fire in the IDE and the gate; M8 still fails loud at Materialize when Unity rejects
-  a wire. **In scope, though:** extending SB1201 arity to `.OnEvent` (both the static/void and the dynamic
-  method-group forms) — see the `e1ae5d5` ALREADY-SHIPPED note; the v0 under-flag is superseded.
+  a wire. **SB1201 arity for `.OnEvent`** (both the static/void and the dynamic method-group forms) is now
+  SHIPPED in f040769, extending the analyzer past the v0 under-flag.
 
 ## Core deliverables
 ### Types added/changed (referencing §3)
@@ -416,6 +434,30 @@ slider.Component<Slider>(s => s.OnEvent(x => x.onValueChanged, hud,
   object's just-created statement in the same pass (owner mapped via M2b's `AddedEntry`; two-pass when
   the listener target is also new), or reported and converged on a second Sync; second Sync of the
   unchanged scene is a no-op; no silent drop.
+
+### Reconcile source-patch: required RED matrix (symmetric operation set, pin the WHOLE set not a subset)
+The reverted attempt pruned this set and shipped the ADD path untested; it corrupted source. Per the
+"symmetric operation set: pin the whole set" rule, the decomposition and the test-writer MUST pin every
+case below, not a chosen subset:
+1. **ADD preserves existing and order:** source `.OnClick(first, o => o.Open())`, snapshot `[first,
+   second]` -> a NEW `.OnClick(second, ...)` statement is inserted, `first` untouched, final order
+   `[first, second]`. Never overwrite an existing listener's span.
+2. **TARGET CHANGE in place:** a listener whose target changes -> the `.OnClick(...)` target ARGUMENT is
+   edited in place; the statement is NOT deleted-and-reappended, and ordering is preserved. A same-position
+   target change MUST be detected as a CHANGE, not remove(old)+add(new) (which would reorder). Key the
+   listener match so this holds.
+3. **METHOD / ARG / CALLSTATE change:** each is an in-place argument edit of the existing statement.
+4. **REMOVE:** a dropped listener deletes the matching `.OnClick(...)` statement; an empty list clears the
+   field.
+5. **MULTIPLE adds in one field:** all inserted, ordered, non-overlapping edits.
+6. **ADD+REMOVE and ADD+CHANGE on the same field:** all edits apply, non-overlapping.
+7. **Non-last-index / reorder:** a listener added at a non-final index, or reordered, preserves the
+   scene's array order in source.
+8. **`.OnEvent(x => x.field, ...)` form:** the full matrix above holds for the generic OnEvent form, not
+   just `.OnClick`.
+9. **Dynamic method-group form** (`h => h.SetValue`, `dynamic: true`): round-trips through reconcile.
+10. **Fail-loud / conflict:** a target resolving to no `LogicalId` and no asset -> surfaced conflict, no
+    patch; an empty `MethodName` -> located fail-loud report (object+field+location).
 
 ## Unity confirmation checklist
 1. Open a scene with a `Button` and a `DoorOpener` component (`Open()` public). Author
