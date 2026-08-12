@@ -269,6 +269,46 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
+        // Builds one componentLogicalId -> (fieldKey -> ORDERED per-listener call SourceSpan list)
+        // entry per parsed component, pre-order (mirrors BuildFieldArgumentSpans/
+        // CollectFieldArgumentSpans) — feed-forward for Reconcile's in-place listener patch/remove,
+        // keyed by array index within its field.
+        private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>> BuildListenerCallSpans(List<NodeBuilder> roots)
+        {
+            var spans = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>>();
+            foreach (var root in roots)
+            {
+                CollectListenerCallSpans(root, spans);
+            }
+
+            return spans;
+        }
+
+        private static void CollectListenerCallSpans(NodeBuilder node, Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>> spans)
+        {
+            foreach (var component in node.Components)
+            {
+                var byField = new Dictionary<string, List<SourceSpan>>();
+                foreach (var (key, span) in component.ListenerCallSpans)
+                {
+                    if (!byField.TryGetValue(key, out var list))
+                    {
+                        list = new List<SourceSpan>();
+                        byField[key] = list;
+                    }
+
+                    list.Add(span);
+                }
+
+                spans[component.LogicalId] = byField.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<SourceSpan>)kv.Value);
+            }
+
+            foreach (var child in node.Children)
+            {
+                CollectListenerCallSpans(child, spans);
+            }
+        }
+
         // ---- Flag presence construction -----------------------------------------------------
 
         // Builds one LogicalId->FlagPresence entry per parsed node, pre-order, keyed by each

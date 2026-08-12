@@ -69,6 +69,7 @@ namespace SceneBuilder.Core.Parsing
             var chainedComponents = BuildChainedComponents(ctx.Roots);
             var flagPresence = BuildFlagPresence(ctx.Roots);
             var fieldArgumentSpans = BuildFieldArgumentSpans(ctx.Roots);
+            var listenerCallSpans = BuildListenerCallSpans(ctx.Roots);
             var handles = BuildHandles(ctx.Roots);
 
             // Invert LogicalId->handle-name into name->LogicalId for ObjectRef resolution.
@@ -114,7 +115,7 @@ namespace SceneBuilder.Core.Parsing
                 .Concat(ctx.FacadeConflicts)
                 .ToList();
 
-            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, Handles = handles, ComponentHandles = componentHandles, Ambiguities = ambiguities, Usings = usings, ChainedComponents = chainedComponents };
+            return new ParseResult { Model = model, IdentityMap = identityMap, Anchors = anchors, NodeAnchors = nodeAnchors, ComponentAnchors = componentAnchors, FlagPresence = flagPresence, FieldArgumentSpans = fieldArgumentSpans, ListenerCallSpans = listenerCallSpans, Handles = handles, ComponentHandles = componentHandles, Ambiguities = ambiguities, Usings = usings, ChainedComponents = chainedComponents };
         }
 
         // ---- Build-method discovery -------------------------------------------------
@@ -808,6 +809,12 @@ namespace SceneBuilder.Core.Parsing
             public SourceSpan AnchorSpan;
             public readonly List<KeyValuePair<string, ValueNode>> Fields = new();
             public readonly List<KeyValuePair<string, SourceSpan>> FieldValueSpans = new();
+
+            // m8: one entry per parsed `.OnClick(...)`/`.OnEvent(...)` call on this component, in
+            // source order — every listener, unlike FieldValueSpans above (which records only the
+            // FIRST listener's span per field key). Feeds ParseResult.ListenerCallSpans, the
+            // per-listener span table Reconcile's in-place patch/remove index against.
+            public readonly List<KeyValuePair<string, SourceSpan>> ListenerCallSpans = new();
 
             // b3-t5: true only for a lone `handle.Component<T>(...)`/`.FitSize(...)`/
             // `.SurfaceSnap(...)` call that is its OWN statement — set by ProcessBuilderChain's

@@ -74,11 +74,18 @@ public class TankRef : SceneBuilder.Authoring.PrefabRef { }
         // The `.Ref<T>()`/`.OnClick(...)` compile-proof stub: a global-namespace target type
         // carrying a public zero-argument `Open()` (the wireable method) so both the positive and
         // negative binding proofs have something to compile against. `UnityEngine.UI.Button` comes
-        // from the always-prepended UnityEngineStubs below.
+        // from the always-prepended UnityEngineStubs below. `Close()`/`SetLevel(int)`/
+        // `SetSpeed(float)`/`SetLabel(string)`/`SetValueAlt(float)` are the wireable targets for the
+        // emitted-source bind proofs of the arg-literal and dynamic method-group render forms.
         internal const string UnityEventStubs = @"
 public class DoorOpener
 {
     public void Open() { }
+    public void Close() { }
+    public void SetLevel(int level) { }
+    public void SetSpeed(float speed) { }
+    public void SetLabel(string label) { }
+    public void SetValueAlt(float value) { }
 }
 ";
 
@@ -97,7 +104,7 @@ namespace UnityEngine
     public class Material : Object { }
     public class Sprite : Object { }
 }
-namespace UnityEngine.UI { public class Button : UnityEngine.MonoBehaviour { } }
+namespace UnityEngine.UI { public class Button : UnityEngine.MonoBehaviour { public UnityEngine.Events.UnityEvent<float> onValueChanged; } }
 namespace UnityEngine.Events
 {
     public class UnityEvent { }

@@ -75,5 +75,13 @@ namespace SceneBuilder.Core.Parsing
         // BuilderParser.cs:102 via BuildChainedComponents/CollectChainedComponents
         // (BuilderParser.Projections.cs).
         public IReadOnlyCollection<string> ChainedComponents { get; init; } = new List<string>();
+
+        // m8: componentLogicalId -> (fieldKey -> ORDERED per-listener call SourceSpan list), one
+        // entry per parsed `.OnClick(...)`/`.OnEvent(...)` call, in source (scene) order — feeds
+        // Reconcile's in-place listener patch/remove (index-matched against the snapshot's own
+        // listener list). Populated by BuilderParser (BuildListenerCallSpans,
+        // BuilderParser.Projections.cs) in ParseCore.
+        public IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>> ListenerCallSpans { get; init; } =
+            new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>>();
     }
 }

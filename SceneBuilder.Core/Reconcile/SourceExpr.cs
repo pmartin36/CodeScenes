@@ -126,7 +126,7 @@ namespace SceneBuilder.Core.Reconcile
         /// member chain; built-ins never hit the reverse lookup; everything else falls back to the
         /// string forms (`Asset(...)` / `Builtin(...)`).
         /// </summary>
-        private static string RenderAssetRef(AssetRef? assetRef, AssetCatalog? catalog)
+        internal static string RenderAssetRef(AssetRef? assetRef, AssetCatalog? catalog)
         {
             if (assetRef is null)
             {

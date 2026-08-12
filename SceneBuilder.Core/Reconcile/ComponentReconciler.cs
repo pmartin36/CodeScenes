@@ -56,7 +56,20 @@ namespace SceneBuilder.Core.Reconcile
             // built ONCE per Reconciler.Reconcile), threaded through to EmitComponentAppend and the
             // introduce branch below. `null` = Index.Empty semantics — keep every field (every
             // hand-built test call that doesn't supply ComponentDefaults stays green unchanged).
-            ComponentDefaultOmission.Index? defaults = null)
+            ComponentDefaultOmission.Index? defaults = null,
+            // m8: componentLogicalId -> the authored `.Ref<T>()` var name, and, per component+field,
+            // the ORDERED per-listener call spans — Reconciler.Reconcile's own trailing params,
+            // threaded straight through. BOTH must be non-null for the UnityEventListeners intercept
+            // below to emit a patch/append/remove delta; either null keeps the report-only
+            // behavior described below (every pre-existing call/test stays green unchanged).
+            IReadOnlyDictionary<string, string>? componentHandles = null,
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>>? listenerCallSpans = null,
+            // The per-TYPE public C# spelling of a serialized UnityEvent field other than
+            // `m_OnClick` (Reconciler.Reconcile builds this ONCE from `actual.MemberSpellings`) — an
+            // `.OnEvent(...)`-form listener with no entry here is UnsyncableListener
+            // (UnresolvedEventMemberName), never guessed. `null` = Empty (every hand-built test call
+            // that doesn't supply MemberSpellings stays green unchanged).
+            MemberSpellingIndex? memberSpellings = null)
         {
             // Canonicalize FitSize-before-SurfaceSnap BEFORE the ADD/REORDER passes so both emit
             // in canonical order and the REORDER pass compares canonical-vs-canonical for the
@@ -226,6 +239,49 @@ namespace SceneBuilder.Core.Reconcile
                 var snapshotComp = snapshotComps[i];
                 foreach (var (fieldKey, snapVal) in snapshotComp.Fields)
                 {
+                    // m8: a listener target names a component LogicalId, never a GameObject one —
+                    // the generic ObjectRef render below (and its Unsupported/dangling handling)
+                    // does not apply. Intercepted before every other check so a listener field
+                    // never reaches them. Equal to source -> no-op (idempotence). Differing, WITH
+                    // source information (componentHandles + listenerCallSpans both supplied) ->
+                    // EmitListenerFieldDelta emits the index-matched patch/append/remove delta
+                    // (ComponentReconciler.Listeners.cs). Differing, with NEITHER supplied -> the
+                    // pre-delta report-only behavior: every Unsyncable listener gets one located,
+                    // recurrence-keyed UnsyncableListener report, never a patch and never the
+                    // generic DanglingReference/UnrepresentableListItem kind.
+                    if (snapVal is ValueNode.UnityEventListeners snapListeners)
+                    {
+                        if (sourceComp.Fields.TryGetValue(fieldKey, out var srcListenerVal)
+                            && Equals(srcListenerVal, snapVal))
+                        {
+                            continue;
+                        }
+
+                        if (componentHandles != null && listenerCallSpans != null)
+                        {
+                            EmitListenerFieldDelta(
+                                sourceComp, snapListeners, fieldKey, memberSpellings,
+                                componentHandles, listenerCallSpans, resolvableTargets, pendingTargets,
+                                assetCatalog, edits, conflicts);
+                            continue;
+                        }
+
+                        for (var listenerIndex = 0; listenerIndex < snapListeners.Listeners.Count; listenerIndex++)
+                        {
+                            var listener = snapListeners.Listeners[listenerIndex];
+                            var resolution = ClassifyListenerTarget(
+                                listener.Target, listener.MethodName, resolvableTargets, pendingTargets);
+                            if (resolution.Kind == ListenerTargetKind.Unsyncable)
+                            {
+                                conflicts.Add(Conflict.UnsyncableListener(
+                                    sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, listenerIndex,
+                                    resolution.Reason!.Value));
+                            }
+                        }
+
+                        continue;
+                    }
+
                     if (snapVal is ValueNode.Unsupported)
                     {
                         // Never overwrite; suppresses a would-be introduce too.
@@ -533,6 +589,49 @@ namespace SceneBuilder.Core.Reconcile
             return anyPending ? (RefResolution.Pending, null) : (RefResolution.Resolvable, null);
         }
 
+        // Reconcile-side per-listener target resolution: reads the target KIND off the already-
+        // Classify-produced snapshot ValueNode and delegates the ObjectRef membership decision to
+        // ClassifySnapshotRef above (no parallel identity resolver).
+        internal enum ListenerTargetKind { ResolvableScene, ResolvableAsset, Pending, Unsyncable }
+
+        internal readonly record struct ListenerTargetResolution(
+            ListenerTargetKind Kind, ValueNode? Resolved, ListenerReportReason? Reason);
+
+        internal static ListenerTargetResolution ClassifyListenerTarget(
+            ValueNode? target, string methodName, ISet<string> resolvableTargets, ISet<string> pendingTargets)
+        {
+            if (string.IsNullOrEmpty(methodName))
+            {
+                return new ListenerTargetResolution(ListenerTargetKind.Unsyncable, null, ListenerReportReason.EmptyMethodName);
+            }
+
+            if (target is null)
+            {
+                return new ListenerTargetResolution(ListenerTargetKind.Unsyncable, null, ListenerReportReason.MissingTarget);
+            }
+
+            if (target is ValueNode.AssetRef)
+            {
+                return new ListenerTargetResolution(ListenerTargetKind.ResolvableAsset, target, null);
+            }
+
+            // Whatever remains is an already-whole reference/marker — an ObjectRef, or the
+            // read-side Unsupported marker (UnityEventListener.ValidateTarget allows no other
+            // kind). Delegated to the shared reconcile-side ref resolver rather than a bespoke
+            // ObjectRef type check: ObjectRefValues.Contains(target) (inside ClassifySnapshotRef)
+            // is false for Unsupported, so it falls straight through to Unsyncable below.
+            var classification = ClassifySnapshotRef(target, resolvableTargets, pendingTargets);
+            return classification.Resolution switch
+            {
+                RefResolution.Resolvable => new ListenerTargetResolution(ListenerTargetKind.ResolvableScene, target, null),
+                // A same-batch new target: no LogicalId and no handle exist for it yet — defer
+                // rather than render (would emit the raw goid as a variable name) or report
+                // (it converges on the guaranteed second Sync once DetectAppends maps it).
+                RefResolution.Pending => new ListenerTargetResolution(ListenerTargetKind.Pending, target, null),
+                _ => new ListenerTargetResolution(ListenerTargetKind.Unsyncable, null, ListenerReportReason.UnresolvedTarget),
+            };
+        }
+
         // Gate for the EmitComponentAppend pre-render branch above — a project AssetRef whose
         // (Guid, FileId) resolves in the catalog must be pre-rendered into FieldExpressions (its typed
         // member chain), same as an ObjectRef. Built-ins never hit the reverse lookup.
@@ -676,6 +775,17 @@ namespace SceneBuilder.Core.Reconcile
             ComponentDefaultOmission.Index? defaults = null)
         {
             var componentLogicalId = ComponentTargetResolution.ComposeLogicalId(ownerEffectiveId, typeFullName, ordinal);
+
+            // A UnityEvent listener list has no `.Set(key, literal)` form (SourceExpr.ValueNodeLiteral
+            // has no listener-literal arm) — it is authored as .OnClick(...)/.OnEvent(...) instead, on
+            // the owner's own component-reference expression, never inline in an append's field set.
+            // Strip it here so the append renders the rest of the component and converges the
+            // listener itself on the mapped-owner listener-delta pass the following Sync (the owner is
+            // mapped in-memory by this append's own addedEntries entry below).
+            if (fields.Any(f => f.Value is ValueNode.UnityEventListeners))
+            {
+                fields = new FieldMap(fields.Where(f => f.Value is not ValueNode.UnityEventListeners));
+            }
 
             fields = ComponentDefaultOmission.OmitDefaults(typeFullName, fields, defaults, componentLogicalId, conflicts);
 

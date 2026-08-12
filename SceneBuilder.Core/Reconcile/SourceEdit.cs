@@ -207,6 +207,44 @@ namespace SceneBuilder.Core.Reconcile
         public string FieldKey { get; init; } = "";
     }
 
+    // m8: an in-place rewrite of ONE listener call in a UnityEvent field (target/method/arg/
+    // callState change), keyed by its own per-listener span so a sibling listener's statement is
+    // never touched. Mirrors PatchComponentField's span-replace shape.
+    public sealed record PatchListenerCall : SourceEdit
+    {
+        // Inherited Anchor = owning component LogicalId (informational/trace).
+        // Span of the ONE listener call being replaced (dot through this call's own closing
+        // paren) — from ParseResult.ListenerCallSpans[compId][fieldKey][index].
+        public SourceSpan CallSpan { get; init; }
+        // Serialized field key ("m_OnClick" or a custom UnityEvent field's serialized path).
+        public string FieldKey { get; init; } = "";
+        // Pre-rendered replacement, operator-inclusive (`.OnClick(...)` / `.OnEvent(...)`).
+        public string NewExpr { get; init; } = "";
+    }
+
+    // m8: a listener present in source but absent from the snapshot at its index — its call
+    // statement is deleted. An emptied field collapses to a bare `.Component<T>()`, the same
+    // collapse RemoveComponentField's applier already performs for `.Set(...)`.
+    public sealed record RemoveListenerCall : SourceEdit
+    {
+        // Inherited Anchor = owning component LogicalId (informational/trace).
+        public SourceSpan CallSpan { get; init; }
+        public string FieldKey { get; init; } = "";
+    }
+
+    // m8: a listener present in the snapshot with no source-side counterpart at its index — a NEW
+    // call is inserted into the component's closure (never a whole-field overwrite of an existing
+    // sibling listener's statement).
+    public sealed record AppendListenerCall : SourceEdit
+    {
+        // Inherited Anchor = owning component LogicalId (applier locates the closure via merged
+        // ComponentAnchors, same as IntroduceComponentField).
+        public string FieldKey { get; init; } = "";
+        // Receiver-less call body (`OnClick(...)` / `OnEvent(...)`); the applier prefixes the
+        // closure's own receiver, mirroring BuildSetCallText's `t.OnClick(...)` construction.
+        public string CallExpr { get; init; } = "";
+    }
+
     // Newly-detected field on an existing component: insert a raw `.Set("m_Path", value)` into its closure.
     public sealed record IntroduceComponentField : SourceEdit
     {

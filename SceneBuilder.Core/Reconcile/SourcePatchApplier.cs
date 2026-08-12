@@ -119,6 +119,15 @@ namespace SceneBuilder.Core.Reconcile
                     case RemoveComponentField removeComponentField:
                         ResolveRemoveComponentField(root, anchors, removeComponentField, allTargets, appliers);
                         break;
+                    case AppendListenerCall appendListenerCall:
+                        ResolveAppendListenerCall(root, anchors, appendListenerCall, allTargets, appliers);
+                        break;
+                    case PatchListenerCall patchListenerCall:
+                        ResolvePatchListenerCall(root, patchListenerCall, allTargets, appliers);
+                        break;
+                    case RemoveListenerCall removeListenerCall:
+                        ResolveRemoveListenerCall(root, removeListenerCall, allTargets, appliers);
+                        break;
                     case AppendInstanceOverride or AppendInstanceAddComponent or AppendInstanceRemoveComponent
                         or AppendInstanceAddChild or AppendInstanceRemoveChild or AppendScopedOn:
                         // Already folded into a combined chained-call append (or a scoped-On

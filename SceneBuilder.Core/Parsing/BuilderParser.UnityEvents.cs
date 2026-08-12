@@ -302,6 +302,10 @@ namespace SceneBuilder.Core.Parsing
         // cb.Fields, so a later listener-wiring form cannot silently bypass the merge rule.
         private static void AppendListener(ComponentBuilder cb, string fieldKey, UnityEventListener listener, SourceSpan callSpan)
         {
+            // Every listener's own span, in source order — unlike FieldValueSpans below, recorded
+            // unconditionally (not just on the field key's first appearance).
+            cb.ListenerCallSpans.Add(new KeyValuePair<string, SourceSpan>(fieldKey, callSpan));
+
             var existingIndex = cb.Fields.FindIndex(kv => kv.Key == fieldKey);
             if (existingIndex >= 0 && cb.Fields[existingIndex].Value is ValueNode.UnityEventListeners existing)
             {

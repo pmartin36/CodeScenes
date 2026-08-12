@@ -35,7 +35,14 @@ namespace SceneBuilder.Core.Reconcile
             // an owner with a chained component never emits an unrepresentable ReorderStatement.
             // `null` (the default, and every hand-built model/snapshot/map test call) means "no
             // source information" and keeps the existing behavior unchanged.
-            IReadOnlyCollection<string>? chainedComponents = null)
+            IReadOnlyCollection<string>? chainedComponents = null,
+            // m8: componentLogicalId -> the authored `.Ref<T>()` var name (feeds a listener
+            // target's rendered token) and, per component+field, the ORDERED per-listener call
+            // spans (feeds in-place patch/remove). `null` = "no source information", same contract
+            // as componentAnchors/fieldArgumentSpans above; every existing caller/test stays green
+            // unchanged.
+            IReadOnlyDictionary<string, string>? componentHandles = null,
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>>? listenerCallSpans = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
@@ -49,6 +56,11 @@ namespace SceneBuilder.Core.Reconcile
             // constraint) and threaded to every emit site that decides what to
             // omit from a newly-authored field set.
             var defaultsIndex = ComponentDefaultOmission.Index.Build(actual.ComponentDefaults);
+
+            // m8: the ONE per-type UnityEvent member-spelling index, built ONCE per Reconcile
+            // (mirrors defaultsIndex above) and threaded to every ReconcileComponents call — the
+            // UnityEventListeners intercept's `.OnEvent(...)`-form lookup.
+            var memberSpellingsIndex = MemberSpellingIndex.Build(actual.MemberSpellings);
 
             var logicalIdToGlobalObjectId = IdentityNodeIndex.LogicalIdToGlobalObjectId(identityMap);
 
@@ -451,6 +463,17 @@ namespace SceneBuilder.Core.Reconcile
                 resolvableTargets.UnionWith(handles.Keys);
             }
 
+            // A UnityEvent listener's Target can name a component LogicalId, never a GameObject
+            // one — pre-M8 no ObjectRef ever targeted a component, so this union only widens
+            // membership for listener targets (ComponentReconciler's UnityEventListeners
+            // intercept), never for any other field. Not goid-gated (mirrors modelByLogicalId.Keys
+            // above): the shape reconcile itself writes a Component identity-map entry with an
+            // empty GlobalObjectId, so IsMappedComponent's non-empty-goid gate would silently drop
+            // it here.
+            resolvableTargets.UnionWith(modelByLogicalId.Values.SelectMany(n => n.Components).Select(c => c.LogicalId));
+            resolvableTargets.UnionWith(
+                identityMap.Entries.Where(e => e.Kind == IdentityNodeIndex.Component).Select(e => e.LogicalId));
+
             // Same-batch create-candidate identities — snapshot nodes present in the scene
             // but with no IdentityMap entry yet (about to be mapped by DetectAppends THIS pass). A
             // ref to one of these is PENDING, not dangling: it resolves on the guaranteed second
@@ -460,6 +483,26 @@ namespace SceneBuilder.Core.Reconcile
             var pendingTargets = new HashSet<string>(
                 snapshotByGoid.Keys.Where(goid => !globalObjectIdToLogicalId.ContainsKey(goid)),
                 StringComparer.Ordinal);
+
+            // A UnityEvent listener can also target a same-batch NEW component (not just a new
+            // GameObject) — its owner's snapshot node carries the component's own stamped goid
+            // before DetectAppends maps it. Union those in too, so that target classifies Pending
+            // (defers to the guaranteed second Sync) instead of Dangling. Excludes an already-
+            // mapped component's goid (globalObjectIdToComponentLogicalId) and an unstamped one
+            // (empty GlobalObjectId — the prefab-instance channel boundary).
+            var globalObjectIdToComponentLogicalId = IdentityNodeIndex.GlobalObjectIdToComponentLogicalId(identityMap);
+            foreach (var snapshotEntry in snapshotByGoid.Values)
+            {
+                foreach (var component in snapshotEntry.Node.Components)
+                {
+                    if (component.GlobalObjectId.Length > 0
+                        && !globalObjectIdToLogicalId.ContainsKey(component.GlobalObjectId)
+                        && !globalObjectIdToComponentLogicalId.ContainsKey(component.GlobalObjectId))
+                    {
+                        pendingTargets.Add(component.GlobalObjectId);
+                    }
+                }
+            }
 
             // Mapped-owner component pass (add/remove/reorder on GameObjects already present in
             // the IdentityMap). Snapshot+map-driven; independent of DetectAppends, which only
@@ -516,7 +559,10 @@ namespace SceneBuilder.Core.Reconcile
                     addedAssets,
                     assetCatalog,
                     chainedComponentSet,
-                    defaultsIndex);
+                    defaultsIndex,
+                    componentHandles,
+                    listenerCallSpans,
+                    memberSpellingsIndex);
             }
 
             DetectAppends(
