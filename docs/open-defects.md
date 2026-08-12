@@ -499,3 +499,16 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   mirror sides. LATENT until listener materialization ships.
   OWNER: unassigned — needs a task that can hold `BuilderParser.Instance.cs` +
   `FlatShapeRecognizer.Instance.cs` (or the listener materializer). FOUND-BY: m8-unityevents.
+
+- SEVERITY high — a `UnityEngine.UI.Slider` authored via the generic `Component<Slider>` path drifts
+  on scene->code round-trip: the live RectTransform materialized for a plain Slider carries
+  anchoredPosition/sizeDelta/anchorMin/anchorMax/pivot values the unauthored source does not, so the
+  first sync over a converged build emits 5 `PatchArgument` edits on those RectTransform members and the
+  scene never reaches a fixed point (5 phantom patches on every sync — fatal to seamless sync for any
+  Slider-bearing scene). Measured by the m8 EditMode test
+  `Item7_SliderOnValueChangedDynamicToHudSetValue_SourceIsOnEventDynamic_RoundTrips`, which fails at
+  `RoundTripProofHarness.cs:273` ("produced 5 patch edit(s); it must be a fixed point"); the dynamic
+  OnEvent listener itself round-trips cleanly (assertScene and the code->scene fixed-point passes all
+  pass), so the drift is purely RectTransform-side, not UnityEvents. Owning territory is spec 13
+  (RectTransform). No listener path touches RectTransform, so this predates the m8 UnityEvents work.
+  OWNER: unassigned (needs a dedicated task). FOUND-BY: m8-unityevents-remaining.

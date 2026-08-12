@@ -262,7 +262,7 @@ namespace SceneBuilder.Core.Reconcile
                             EmitListenerFieldDelta(
                                 sourceComp, snapListeners, fieldKey, memberSpellings,
                                 componentHandles, listenerCallSpans, resolvableTargets, pendingTargets,
-                                assetCatalog, edits, conflicts);
+                                assetCatalog, edits, conflicts, addedAssets);
                             continue;
                         }
 

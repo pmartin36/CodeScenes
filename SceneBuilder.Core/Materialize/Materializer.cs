@@ -309,6 +309,16 @@ namespace SceneBuilder.Core.Materialize
                     EmitFieldOp(logicalId, $"{path}[{i}]", list.Items[i], passB, skipped);
                 }
             }
+            else if (value is ValueNode.UnityEventListeners listeners)
+            {
+                // A component's own listener field (e.g. `m_OnClick`) arriving through
+                // AddComponent.Component.Fields — same-batch new GameObject/component, the normal
+                // authoring shape — takes the dedicated SetUnityEvent op (mirroring Change.SetUnityEvent
+                // below), not the generic SetField the fallback below would otherwise emit; PlanExecutor's
+                // SetField case routes to SerializedFieldBridge.WriteField, which does not know how to
+                // write a UnityEventListeners value.
+                passB.Add(new SetUnityEvent { LogicalId = logicalId, Path = path, Listeners = listeners });
+            }
             else if (value is ValueNode.Unsupported)
             {
                 skipped.Add(new SkippedField { LogicalId = logicalId, Path = path });

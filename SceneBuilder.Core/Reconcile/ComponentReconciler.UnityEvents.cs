@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
@@ -45,7 +46,8 @@ namespace SceneBuilder.Core.Reconcile
             ISet<string> pendingTargets,
             AssetCatalog? assetCatalog,
             List<SourceEdit> edits,
-            List<Conflict> conflicts)
+            List<Conflict> conflicts,
+            List<AssetEntry> addedAssets)
         {
             var src = sourceComp.Fields.TryGetValue(fieldKey, out var srcFieldVal)
                 && srcFieldVal is ValueNode.UnityEventListeners srcListeners
@@ -108,6 +110,22 @@ namespace SceneBuilder.Core.Reconcile
 
                 var callText = RenderListenerCall(listener, fieldKey, memberSpelling, componentHandles, assetCatalog);
 
+                // The generic per-field harvest (ComponentReconciler.cs's CollectAssetEntries call
+                // sites) never sees a listener field — it is intercepted into this method before
+                // reaching them (see the m8 comment at ComponentReconciler.cs's field-value-diff
+                // loop) — so a project-asset target/arg that is ABOUT to reach source (a Patch or
+                // Append below, never a deferred/unsyncable/no-op listener) is harvested here, the
+                // one place that sees every listener actually emitted.
+                if (listener.Target is not null)
+                {
+                    CollectAssetEntries(listener.Target, addedAssets);
+                }
+
+                if (listener.ArgValue is not null)
+                {
+                    CollectAssetEntries(listener.ArgValue, addedAssets);
+                }
+
                 if (i < src.Count)
                 {
                     // In-place CHANGE (target/method/arg/callState) — patched at its OWN span, never
@@ -148,7 +166,7 @@ namespace SceneBuilder.Core.Reconcile
 
             if (fieldKey == OnClickFieldKey && !isDynamic)
             {
-                return $"OnClick({target}, {RenderMethodLambda(listener)})" + RenderCallStateSuffix(listener.CallState);
+                return $"OnClick({target}, {RenderMethodLambda(listener)}{RenderCallStateSuffix(listener.CallState)})";
             }
 
             var spelling = fieldKey == OnClickFieldKey ? OnClickPublicName : memberSpelling;
@@ -156,7 +174,7 @@ namespace SceneBuilder.Core.Reconcile
 
             return isDynamic
                 ? $"OnEvent({selector}, {target}, h => h.{listener.MethodName}, dynamic: true)"
-                : $"OnEvent({selector}, {target}, {RenderMethodLambda(listener)})" + RenderCallStateSuffix(listener.CallState);
+                : $"OnEvent({selector}, {target}, {RenderMethodLambda(listener)}{RenderCallStateSuffix(listener.CallState)})";
         }
 
         // A listener target is always one already-whole reference (UnityEventListener.ValidateTarget
@@ -197,11 +215,26 @@ namespace SceneBuilder.Core.Reconcile
                 ListenerArgMode.Float => $"{listener.MethodName}({SourceExpr.Float((float)((ValueNode.Primitive)listener.ArgValue!).Value!)})",
                 ListenerArgMode.String => $"{listener.MethodName}({SourceExpr.StringLiteral((string)((ValueNode.Primitive)listener.ArgValue!).Value!)})",
                 ListenerArgMode.Bool => $"{listener.MethodName}({((bool)((ValueNode.Primitive)listener.ArgValue!).Value! ? "true" : "false")})",
-                ListenerArgMode.Object => $"{listener.MethodName}({RenderListenerTarget(listener.ArgValue!, EmptyComponentHandles, null)})",
+                ListenerArgMode.Object => $"{listener.MethodName}({RenderTypedObjectArg(listener.ArgValue!)})",
                 _ => throw new InvalidOperationException($"RenderListenerCall: unsupported static ListenerArgMode {listener.ArgMode}."),
             };
 
             return $"t => t.{call}";
+        }
+
+        // An Object-mode static argument renders through the same reference machinery as a
+        // listener TARGET, but a bare reference does not bind to the wired method's typed
+        // parameter (`AssetReference.As<T>()` / `ComponentRef<T>.As()` are the authoring-only
+        // typing scaffolding the parser's own UnwrapTypedRef strips back off on read) — so this
+        // appends it back on render. An AssetRef needs its type spelled out (`.As<Material>()`,
+        // `AssetReference.As<T>` is generic); an ObjectRef's handle is already a `ComponentRef<T>`,
+        // so its `.As()` is parameterless.
+        private static string RenderTypedObjectArg(ValueNode argValue)
+        {
+            var rendered = RenderListenerTarget(argValue, EmptyComponentHandles, null);
+            return argValue is ValueNode.AssetRef(var assetRef)
+                ? rendered + (string.IsNullOrEmpty(assetRef?.TypeHint) ? ".As<object>()" : $".As<{assetRef!.TypeHint}>()")
+                : rendered + ".As()";
         }
 
         // An Object-mode listener argument that targets a component (rather than an asset) has no

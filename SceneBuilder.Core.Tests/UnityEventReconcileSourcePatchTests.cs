@@ -133,6 +133,9 @@ namespace SceneBuilder.Core.Tests
         private static UnityEventListener Dynamic(string targetId, string methodGroup) =>
             new UnityEventListener(new ValueNode.ObjectRef(targetId), methodGroup, ListenerArgMode.Dynamic);
 
+        private static UnityEventListener AssetArg(string targetId, string method, AssetRef arg) =>
+            new UnityEventListener(new ValueNode.ObjectRef(targetId), method, ListenerArgMode.Object, new ValueNode.AssetRef(arg));
+
         // ---- Reconcile-level: classification + render, driven through the top-level entry point --
 
         [Fact]
@@ -392,6 +395,8 @@ namespace SceneBuilder.Core.Tests
         // full compilation can.
 
         private static string EmbedPatchedOnClick(string newExprWithLeadingDot) => $@"using SceneBuilder.Authoring;
+using static SceneBuilder.Authoring.AssetRefs;
+using UnityEngine;
 public class EmittedListenerPatchScene : ISceneDefinition
 {{
     public void Build(SceneRoot scene)
@@ -486,6 +491,25 @@ public class EmittedListenerPatchScene : ISceneDefinition
                 listenerCallSpans: ListenerSpans("m_OnClick", new SourceSpan(0, 10)));
 
             var patch = Assert.Single(result.Patch.Edits.OfType<PatchListenerCall>());
+
+            var errors = AuthoringBindHarness.BindErrors(EmbedPatchedOnClick(patch.NewExpr), AuthoringBindHarness.UnityEventStubs);
+            Assert.Empty(errors);
+        }
+
+        [Fact]
+        public void Reconcile_ObjectModeAssetArg_EmitsAsTypedRender_CompilesAgainstAuthoringSurface()
+        {
+            var asset = new AssetRef { Guid = "matguid", FileId = 0, DisplayPath = "Assets/Foo.mat", TypeHint = "Material" };
+
+            var result = Reconciler.Reconcile(
+                ButtonModel("m_OnClick", Void(DoorLogicalId, "Open")),
+                ButtonSnapshot("m_OnClick", null, AssetArg(DoorLogicalId, "SetMaterial", asset)),
+                Map(),
+                componentHandles: ComponentHandles,
+                listenerCallSpans: ListenerSpans("m_OnClick", new SourceSpan(0, 10)));
+
+            var patch = Assert.Single(result.Patch.Edits.OfType<PatchListenerCall>());
+            Assert.Contains("SetMaterial(Asset(\"Assets/Foo.mat\").As<Material>())", patch.NewExpr);
 
             var errors = AuthoringBindHarness.BindErrors(EmbedPatchedOnClick(patch.NewExpr), AuthoringBindHarness.UnityEventStubs);
             Assert.Empty(errors);

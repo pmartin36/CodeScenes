@@ -253,6 +253,17 @@ namespace SceneBuilder.Grammar
                 return true;
             }
 
+            // An `Asset("path"[, subAsset])`/`Builtin(name[, typeHint])` factory call — the
+            // object-mode arg's non-catalog asset-ref form (item 4's `.As<T>()` render unwraps
+            // to this receiver). Mirrors ValueNodeParser.Parse's own `Asset`/`Builtin` callee-name
+            // check; arg count/shape is that parser's concern, not this recognizer's.
+            if (expr is InvocationExpressionSyntax assetCall
+                && assetCall.Expression is IdentifierNameSyntax assetCallee
+                && (assetCallee.Identifier.Text == "Asset" || assetCallee.Identifier.Text == "Builtin"))
+            {
+                return true;
+            }
+
             if (expr is not MemberAccessExpressionSyntax)
             {
                 return false;

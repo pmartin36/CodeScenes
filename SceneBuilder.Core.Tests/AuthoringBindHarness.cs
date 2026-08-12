@@ -75,8 +75,9 @@ public class TankRef : SceneBuilder.Authoring.PrefabRef { }
         // carrying a public zero-argument `Open()` (the wireable method) so both the positive and
         // negative binding proofs have something to compile against. `UnityEngine.UI.Button` comes
         // from the always-prepended UnityEngineStubs below. `Close()`/`SetLevel(int)`/
-        // `SetSpeed(float)`/`SetLabel(string)`/`SetValueAlt(float)` are the wireable targets for the
-        // emitted-source bind proofs of the arg-literal and dynamic method-group render forms.
+        // `SetSpeed(float)`/`SetLabel(string)`/`SetValueAlt(float)`/`SetMaterial(Material)` are the
+        // wireable targets for the emitted-source bind proofs of the arg-literal, dynamic
+        // method-group, and object/asset-argument render forms.
         internal const string UnityEventStubs = @"
 public class DoorOpener
 {
@@ -86,6 +87,7 @@ public class DoorOpener
     public void SetSpeed(float speed) { }
     public void SetLabel(string label) { }
     public void SetValueAlt(float value) { }
+    public void SetMaterial(UnityEngine.Material material) { }
 }
 ";
 

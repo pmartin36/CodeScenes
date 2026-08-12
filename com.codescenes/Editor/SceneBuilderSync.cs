@@ -219,7 +219,9 @@ namespace SceneBuilder.Editor
                 handles: parse.Handles,
                 facadeCatalog: facadeCatalog,
                 assetCatalog: assetCatalog,
-                chainedComponents: parse.ChainedComponents);
+                chainedComponents: parse.ChainedComponents,
+                componentHandles: parse.ComponentHandles,
+                listenerCallSpans: parse.ListenerCallSpans);
 
             // Built AFTER the reconcile so a report anchored on a LogicalId this sync itself
             // introduced (a handle for a handle-less owner, a brand-new scene node) still resolves:
@@ -426,7 +428,9 @@ namespace SceneBuilder.Editor
                 handles: baselineLoaded.Parse.Handles,
                 facadeCatalog: facadeCatalog,
                 assetCatalog: assetCatalog,
-                chainedComponents: baselineLoaded.Parse.ChainedComponents);
+                chainedComponents: baselineLoaded.Parse.ChainedComponents,
+                componentHandles: baselineLoaded.Parse.ComponentHandles,
+                listenerCallSpans: baselineLoaded.Parse.ListenerCallSpans);
 
             var sceneKeys = new HashSet<FieldKey>(
                 sceneReconcile.Patch.Edits
@@ -468,7 +472,9 @@ namespace SceneBuilder.Editor
                 handles: newLoaded.Parse.Handles,
                 facadeCatalog: facadeCatalog,
                 assetCatalog: assetCatalog,
-                chainedComponents: newLoaded.Parse.ChainedComponents);
+                chainedComponents: newLoaded.Parse.ChainedComponents,
+                componentHandles: newLoaded.Parse.ComponentHandles,
+                listenerCallSpans: newLoaded.Parse.ListenerCallSpans);
 
             // Built AFTER `applicable` (the reconcile whose reports are actually surfaced below) so a
             // report anchored on a LogicalId this sync itself introduced still resolves — see Run's
