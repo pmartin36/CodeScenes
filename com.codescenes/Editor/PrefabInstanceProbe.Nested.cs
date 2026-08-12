@@ -264,7 +264,10 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef));
+                // Prefab-instance channel: same boundary as the AddedComponent read in
+                // PrefabInstanceProbe.Overrides.cs — a UnityEvent on an added-hierarchy component
+                // reads Unsupported, never a resolved listener target.
+                components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef, resolveListenerRef: null));
             }
 
             var children = new GameObjectNode[t.childCount];

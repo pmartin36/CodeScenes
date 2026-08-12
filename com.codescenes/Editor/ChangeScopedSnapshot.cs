@@ -38,7 +38,7 @@ namespace SceneBuilder.Editor
 
             SnapshotNode BuildNode(GameObject go)
             {
-                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve, sceneRef.Resolve);
+                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve, sceneRef.Resolve, sceneRef.ResolveListener);
                 CacheDescendants(go, node, nodeByGoEntityId);
                 return node;
             }
@@ -116,7 +116,7 @@ namespace SceneBuilder.Editor
                 SnapshotNode node;
                 if (changedGo.Contains(entityId) || !priorNodes.TryGetValue(entityId, out var cached))
                 {
-                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve, sceneRef.Resolve);
+                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve, sceneRef.Resolve, sceneRef.ResolveListener);
                 }
                 else
                 {

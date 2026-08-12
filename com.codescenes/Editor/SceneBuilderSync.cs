@@ -204,7 +204,8 @@ namespace SceneBuilder.Editor
             // read (a preAssembledSnapshot, e.g. auto-sync's ChangeScopedSnapshot, carries its own
             // resolver set by the caller).
             var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
-            var snapshot = preAssembledSnapshot ?? SceneSnapshotReader.Read(scene, sceneRef);
+            var snapshot = preAssembledSnapshot
+                ?? SceneSnapshotReader.Read(scene, sceneRef, ObjectReferenceResolver.BuildListenerResolver(map));
 
             var result = Reconciler.Reconcile(
                 desired,

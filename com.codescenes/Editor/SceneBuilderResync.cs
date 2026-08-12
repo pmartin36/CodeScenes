@@ -54,7 +54,7 @@ namespace SceneBuilder.Editor
                 var desired = DesiredModelLoader.Load(source, map, facadeCatalog, assetCatalog).Desired;
 
                 var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
-                var snapshot = SceneSnapshotReader.Read(scene, sceneRef);
+                var snapshot = SceneSnapshotReader.Read(scene, sceneRef, ObjectReferenceResolver.BuildListenerResolver(map));
 
                 var freshSourceHash = CanonicalHash.Of(desired);
                 var freshSnapshotHash = CanonicalHash.Of(snapshot);

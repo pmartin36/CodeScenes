@@ -35,11 +35,17 @@ namespace SceneBuilder.Editor
         {
             var result = new ExecutionResult();
 
-            // Reverse index: GlobalObjectId string -> live GameObject (walk the scene like the reader).
+            // Reverse index: GlobalObjectId string -> live GameObject / every live Component sharing
+            // that id (walk the scene like the reader). A Component's list is plural, not
+            // first-write-wins like the GameObject index: on an UNSAVED scene every object's id
+            // degenerates to the SAME "Null" identifier (see IndexGameObjects), so a component-only
+            // IdentityMap seed (no owner GameObject entry) can only disambiguate its ONE intended
+            // component by ALSO filtering the id's full candidate list by ComponentType below.
             var goidToGameObject = new Dictionary<string, GameObject>();
+            var goidToComponents = new Dictionary<string, List<Component>>();
             foreach (var root in scene.GetRootGameObjects())
             {
-                IndexGameObjects(root, goidToGameObject);
+                IndexGameObjects(root, goidToGameObject, goidToComponents);
             }
 
             // Pre-resolve EXISTING mapped GameObjects by LogicalId so update/parent ops target them.
@@ -65,18 +71,34 @@ namespace SceneBuilder.Editor
                 var ordinal = ordinalByOwnerType.TryGetValue(ordinalKey, out var c) ? c : 0;
                 ordinalByOwnerType[ordinalKey] = ordinal + 1;
 
+                var fallbackType = ComponentTypeResolver.Resolve(entry.ComponentType);
                 if (!result.GameObjectsByLogicalId.TryGetValue(entry.ParentLogicalId, out var ownerGo))
                 {
+                    // The owner GameObject carries no map entry of its own (e.g. a component-only
+                    // IdentityMap seed) -- fall back to the component's OWN GlobalObjectId against the
+                    // SAME reverse index built above, narrowed by ComponentType (see the index's own
+                    // comment for why a bare id match is not enough), rather than leaving a live,
+                    // mapped component unresolved.
+                    if (fallbackType != null
+                        && !string.IsNullOrEmpty(entry.GlobalObjectId)
+                        && goidToComponents.TryGetValue(entry.GlobalObjectId, out var candidates))
+                    {
+                        var typed = candidates.Where(fallbackType.IsInstanceOfType).ToList();
+                        if (ordinal < typed.Count)
+                        {
+                            result.ComponentsByLogicalId[entry.LogicalId] = typed[ordinal];
+                        }
+                    }
+
                     continue;
                 }
 
-                var type = ComponentTypeResolver.Resolve(entry.ComponentType);
-                if (type == null)
+                if (fallbackType == null)
                 {
                     continue;
                 }
 
-                var comps = ownerGo.GetComponents(type);
+                var comps = ownerGo.GetComponents(fallbackType);
                 if (ordinal < comps.Length)
                 {
                     result.ComponentsByLogicalId[entry.LogicalId] = comps[ordinal];
@@ -227,6 +249,19 @@ namespace SceneBuilder.Editor
                         }
 
                         break;
+                    case SetUnityEvent setUnityEvent:
+                        if (result.ComponentsByLogicalId.TryGetValue(setUnityEvent.LogicalId, out var ueComp))
+                        {
+                            if (!serializedByComponent.TryGetValue(setUnityEvent.LogicalId, out var ueSo))
+                            {
+                                ueSo = new SerializedObject(ueComp);
+                                serializedByComponent[setUnityEvent.LogicalId] = ueSo;
+                            }
+
+                            UnityEventWriter.Write(ueSo, setUnityEvent.Path, setUnityEvent.Listeners, result, map, scene);
+                        }
+
+                        break;
                     case SetReference setReference:
                         deferredReferences.Add(setReference);
                         break;
@@ -343,7 +378,8 @@ namespace SceneBuilder.Editor
             return result;
         }
 
-        private static void IndexGameObjects(GameObject go, Dictionary<string, GameObject> index)
+        private static void IndexGameObjects(
+            GameObject go, Dictionary<string, GameObject> index, Dictionary<string, List<Component>> componentIndex)
         {
             // First-write-wins: a scene that has never been saved has no scene GUID, so EVERY object
             // in it degenerates to the same "Null"-identifier GlobalObjectId (Unity can only compute a
@@ -357,10 +393,31 @@ namespace SceneBuilder.Editor
                 index[id] = go;
             }
 
+            // Every component sharing GO's id is appended (not first-write-wins): on a real, saved
+            // scene each component's OWN id already differs and this list is a singleton; on an
+            // unsaved scene the id collapses across the WHOLE scene, so the caller narrows this list
+            // by ComponentType (and ordinal) itself rather than this index guessing which one it meant.
+            foreach (var component in go.GetComponents<Component>())
+            {
+                if (component == null)
+                {
+                    continue;
+                }
+
+                var componentId = GlobalObjectId.GetGlobalObjectIdSlow(component).ToString();
+                if (!componentIndex.TryGetValue(componentId, out var list))
+                {
+                    list = new List<Component>();
+                    componentIndex[componentId] = list;
+                }
+
+                list.Add(component);
+            }
+
             var t = go.transform;
             for (var i = 0; i < t.childCount; i++)
             {
-                IndexGameObjects(t.GetChild(i).gameObject, index);
+                IndexGameObjects(t.GetChild(i).gameObject, index, componentIndex);
             }
         }
 

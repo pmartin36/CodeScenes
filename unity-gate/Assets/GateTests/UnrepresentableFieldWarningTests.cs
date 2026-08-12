@@ -4,18 +4,14 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.Events;
-using UnityEngine.UI;
 using UnityEditor;
-using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using SceneBuilder.Editor;
 
 // spec 33 C7: a field the value model cannot represent surfaces as a located WARNING (not a NOTE)
 // naming the object anchor, the component type, the field, and stating the value stays in the
-// scene and is not synced. The path is general -- it fires for any unrepresentable field, proved
-// here against both a UnityEvent (Button.onClick) and a non-UnityEvent fixture field. Console-only:
-// the builder source is byte-unchanged across the warning path, and the standing report surfaces at
+// scene and is not synced, proved against a non-UnityEvent fixture field. Console-only: the
+// builder source is byte-unchanged across the warning path, and the standing report surfaces at
 // most once per editor session.
 public class UnrepresentableFieldWarningTests
 {
@@ -75,72 +71,6 @@ public class UnrepresentableFieldWarningScene : ISceneDefinition
         }
     }
 
-    // Builds a Canvas/Button/Image scene and syncs it to a fixed point (zero edits), so the
-    // scenario under test starts from a converged builder file.
-    private Button BuildConvergedButtonScene()
-    {
-        File.WriteAllText(_builderPath, Source(
-            "        var canvas = scene.Add(\"Canvas\");\n" +
-            "        canvas.Component<Canvas>();\n" +
-            "        var btn = canvas.Add(\"Button\");\n" +
-            "        btn.Component<Image>();\n" +
-            "        btn.Component<Button>();"));
-        var scene = EditorSceneManager.GetActiveScene();
-        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
-
-        EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
-        var converged = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
-        Assert.AreEqual(0, converged.PatchEdits, "The scene must be converged before the scenario under test.");
-
-        var btnGo = GameObject.Find("Canvas/Button");
-        Assert.IsNotNull(btnGo, "Build did not materialize the Canvas/Button object.");
-        return btnGo.GetComponent<Button>();
-    }
-
-    [Test]
-    public void Sync_AfterWiringAnOnClickInTheInspector_WarnsWithAllFourPartsAndLeavesTheSourceByteUnchanged()
-    {
-        var button = BuildConvergedButtonScene();
-
-        ConflictSurfacing.ResetNotes();
-        var preSyncBytes = File.ReadAllBytes(_builderPath);
-
-        UnityEventTools.AddBoolPersistentListener(button.onClick, new UnityAction<bool>(button.gameObject.SetActive), false);
-        EditorUtility.SetDirty(button);
-        Assert.AreEqual(1, button.onClick.GetPersistentEventCount(),
-            "Non-vacuity premise failed: the listener was not wired.");
-
-        SceneBuilderSync.SyncResult result = null;
-        var logs = CaptureLogs(() => result = EmittedCodeCompiles.SyncAndAssertCompiles(
-            _builderPath, _sidecarPath, EditorSceneManager.GetActiveScene()));
-
-        var note = result.Notes.SingleOrDefault(n => n.Located != null && n.Located.MemberKey == "m_OnClick");
-        Assert.IsNotNull(note,
-            "A field the value model cannot represent must surface a located warning.\n" +
-            string.Join("\n", result.Notes.Select(n => n.LogicalId + ": " + n.Reason)));
-        Assert.IsFalse(string.IsNullOrEmpty(note.Located.LogicalId), "The report must name the object anchor.");
-        Assert.AreEqual("Canvas/Button", note.Located.ScenePath,
-            "The report must carry the live scene hierarchy path.");
-        Assert.AreEqual("UnityEngine.UI.Button", note.Located.ComponentTypeFullName,
-            "The report must name the component type.");
-        Assert.AreEqual("m_OnClick", note.Located.MemberKey, "The report must name the field.");
-
-        var matches = logs.Where(l => l.Message.Contains("'m_OnClick'")).ToArray();
-        Assert.AreEqual(1, matches.Length,
-            "Exactly one console line must name m_OnClick.\nLogs:\n" + string.Join("\n", logs.Select(l => l.Message)));
-        var line = matches[0];
-        StringAssert.Contains("The live value stays in the scene and is NOT synced to code.", line.Message,
-            "The warning must state that the value stays in the scene and is not synced.");
-        Assert.AreEqual(LogType.Warning, line.Type, "The promoted report must log at Warning severity.");
-        StringAssert.StartsWith("[CodeScenes] WARNING on", line.Message,
-            "The promoted report must be labeled WARNING, not NOTE.");
-
-        Assert.AreEqual(0, result.PatchEdits, "The warning path must write no patch edit.");
-        Assert.IsFalse(result.Changed, "The warning path must not change the builder source.");
-        CollectionAssert.AreEqual(preSyncBytes, File.ReadAllBytes(_builderPath),
-            "The builder source must be byte-unchanged across the warning path.");
-    }
-
     // The path is general -- it fires for any unrepresentable field, not only a UnityEvent. Uses a
     // dedicated non-UnityEvent fixture field under a parent, so the LogicalId, the live scene
     // hierarchy path and the object's own name are three distinct strings.
@@ -195,11 +125,24 @@ public class UnrepresentableFieldWarningScene : ISceneDefinition
 
     // A standing report is a fact of the scene+source, deduped once per editor session per
     // (builder path, recurrence key) -- a fix that regressed into logging on every sync would make
-    // auto-sync spam the console on every keystroke for any stock Button in a scene.
+    // auto-sync spam the console on every keystroke for any scene carrying the same unrepresentable
+    // field shape.
     [Test]
     public void Sync_SecondSyncInTheSameSession_SurfacesTheWarningZeroTimes()
     {
-        BuildConvergedButtonScene();
+        File.WriteAllText(_builderPath, Source(
+            "        scene.Add(\"Panel\", panel => panel.Add(\"Fixture\").Component<GateFixtures.LocatedReportFixtureBehaviour>());"));
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        var fixtureGo = GameObject.Find("Panel/Fixture");
+        Assert.IsNotNull(fixtureGo, "Build did not materialize the nested Panel/Fixture object.");
+        var behaviour = fixtureGo.GetComponent<GateFixtures.LocatedReportFixtureBehaviour>();
+        var so = new SerializedObject(behaviour);
+        so.FindProperty("Anchored.m_Hidden").floatValue = 5f;
+        so.ApplyModifiedProperties();
+
+        EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
 
         SceneBuilderSync.SyncResult result = null;
         var logs = CaptureLogs(() => result = EmittedCodeCompiles.SyncAndAssertCompiles(

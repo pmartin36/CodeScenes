@@ -102,8 +102,11 @@ namespace SceneBuilder.Editor
                     {
                         // Read back through the SAME field walk the live read uses, so template and
                         // creation cannot diverge. A freshly-created component's reference fields are all
-                        // null, so a null resolver is the correct, explicit answer here.
-                        var fields = SerializedFieldBridge.CollectFields(new SerializedObject(component), resolveSceneRef: null);
+                        // null, so a null resolver is the correct, explicit answer here — likewise a
+                        // fresh UnityEvent field has no listeners to resolve, so a null listener resolver
+                        // projects the same UnityEventListeners([]) a real resolver would.
+                        var fields = SerializedFieldBridge.CollectFields(
+                            new SerializedObject(component), resolveSceneRef: null, resolveListenerRef: null);
                         TemplatesByTypeName[fullName] = new FieldMap(fields);
                     }
                 }

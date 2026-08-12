@@ -285,7 +285,10 @@ namespace SceneBuilder.Editor
                         ChildPath = RelativePath(go, owner),
                     };
 
-                var componentData = SerializedFieldBridge.ReadComponent(instanceComponent, resolveSceneRef);
+                // Prefab-instance channel: a UnityEvent on an instance-added component reads
+                // Unsupported (an unrepresentable reference field), the same boundary the
+                // component-goid stamp is excluded from on this channel.
+                var componentData = SerializedFieldBridge.ReadComponent(instanceComponent, resolveSceneRef, resolveListenerRef: null);
                 result.Add(new AddedComponent
                 {
                     Target = target,

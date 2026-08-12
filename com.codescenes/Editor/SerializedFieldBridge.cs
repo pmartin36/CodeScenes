@@ -34,14 +34,16 @@ namespace SceneBuilder.Editor
     {
         // ---- Read (component -> ComponentData) ---------------------------------------------
 
-        public static ComponentData ReadComponent(Component component, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        public static ComponentData ReadComponent(
+            Component component, Func<UnityEngine.Object, string?>? resolveSceneRef,
+            Func<UnityEngine.Object?, ValueNode?>? resolveListenerRef = null)
         {
             // Registration only — never filters this read. Ensures ComponentDefaultTemplate has a
             // template for every type reachable from a snapshot, so SceneSnapshotReader.FromRoots can
             // populate SceneSnapshot.ComponentDefaults for it.
             ComponentDefaultTemplate.Register(component.GetType());
 
-            var fields = CollectFields(new SerializedObject(component), resolveSceneRef);
+            var fields = CollectFields(new SerializedObject(component), resolveSceneRef, resolveListenerRef);
 
             return new ComponentData
             {
@@ -92,7 +94,9 @@ namespace SceneBuilder.Editor
         // value changed and the sync answered "Scene already matches code". Serialized state, not
         // inspector-visible state, is what round-trips, so the filtering is by explicit name, via
         // SerializedFieldExclusions, rather than by Unity's inspector-drawing flag.
-        internal static List<KeyValuePair<string, ValueNode>> CollectFields(SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        internal static List<KeyValuePair<string, ValueNode>> CollectFields(
+            SerializedObject so, Func<UnityEngine.Object, string?>? resolveSceneRef,
+            Func<UnityEngine.Object?, ValueNode?>? resolveListenerRef = null)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
@@ -111,7 +115,9 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                var value = ReadProperty(it.Copy(), resolveSceneRef);
+                var value = UnityEventReader.IsUnityEventField(it)
+                    ? UnityEventReader.ReadField(it.Copy(), resolveListenerRef)
+                    : ReadProperty(it.Copy(), resolveSceneRef);
 
                 // Field types M3 cannot represent — object/asset references (mesh, material, physics
                 // material) and LayerMask are M4+ — are SKIPPED, never written. Emitting them would

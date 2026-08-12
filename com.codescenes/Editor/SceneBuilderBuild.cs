@@ -238,7 +238,7 @@ namespace SceneBuilder.Editor
             // pruned — a rebuild from a converged source sees the live reference and emits no
             // redundant SetReference for it.
             var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(remapped);
-            var snapshot = SceneSnapshotReader.Read(scene, sceneRef);
+            var snapshot = SceneSnapshotReader.Read(scene, sceneRef, ObjectReferenceResolver.BuildListenerResolver(remapped));
 
             var plan = Materializer.Materialize(desired, snapshot, remapped);
 
@@ -282,7 +282,8 @@ namespace SceneBuilder.Editor
             // just-merged `map.Assets` would break move-recovery for any authored path the harvest
             // just overwrote the cache's LastKnownPath for (LoweringResolver.RecoverGuidFromCache).
             var statePath = SceneBuilderPaths.StateForSidecar(sidecarPath);
-            var committedSnapshot = SceneSnapshotReader.Read(scene, ObjectReferenceResolver.BuildSceneRefResolver(map));
+            var committedSnapshot = SceneSnapshotReader.Read(
+                scene, ObjectReferenceResolver.BuildSceneRefResolver(map), ObjectReferenceResolver.BuildListenerResolver(map));
             SyncCheckpointWriter.Write(statePath, scenePath, desired, committedSnapshot, map);
 
             // No AssetDatabase.Refresh(): the sidecar lives outside Assets/ (nothing to import), and the

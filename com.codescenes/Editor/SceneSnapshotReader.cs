@@ -29,14 +29,30 @@ namespace SceneBuilder.Editor
         /// <paramref name="resolveSceneRef"/> null to leave scene-object refs Unsupported and pruned.
         /// </summary>
         public static SceneSnapshot Read(Scene scene, Func<UnityEngine.Object, string?>? resolveSceneRef) =>
-            Read(scene, DefaultResolver, resolveSceneRef);
+            Read(scene, resolveSceneRef, resolveListenerRef: null);
 
-        private static SceneSnapshot Read(Scene scene, Func<UnityEngine.Object, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        /// <summary>
+        /// Cold read overload additionally threading a listener-reference resolver (a persistent-call
+        /// target or object-mode argument -&gt; a component/asset <see cref="ValueNode"/>) to every
+        /// UnityEvent field (see <see cref="ObjectReferenceResolver.BuildListenerResolver(SceneBuilder.Core.Identity.IdentityMap)"/>).
+        /// A null resolver leaves every listener target/object-argument unresolved (null), matching
+        /// the 2-argument overload's behavior.
+        /// </summary>
+        public static SceneSnapshot Read(
+            Scene scene,
+            Func<UnityEngine.Object, string?>? resolveSceneRef,
+            Func<UnityEngine.Object?, ValueNode?>? resolveListenerRef) =>
+            Read(scene, DefaultResolver, resolveSceneRef, resolveListenerRef);
+
+        private static SceneSnapshot Read(
+            Scene scene, Func<UnityEngine.Object, string> resolveId,
+            Func<UnityEngine.Object, string?>? resolveSceneRef,
+            Func<UnityEngine.Object?, ValueNode?>? resolveListenerRef)
         {
             var roots = new List<SnapshotNode>();
             foreach (var go in scene.GetRootGameObjects())
             {
-                roots.Add(ReadNode(go, resolveId, resolveSceneRef));
+                roots.Add(ReadNode(go, resolveId, resolveSceneRef, resolveListenerRef));
             }
 
             return FromRoots(roots.ToArray());
@@ -124,7 +140,10 @@ namespace SceneBuilder.Editor
             }
         }
 
-        internal static SnapshotNode ReadNode(GameObject go, Func<UnityEngine.Object, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        internal static SnapshotNode ReadNode(
+            GameObject go, Func<UnityEngine.Object, string> resolveId,
+            Func<UnityEngine.Object, string?>? resolveSceneRef,
+            Func<UnityEngine.Object?, ValueNode?>? resolveListenerRef = null)
         {
             var t = go.transform;
 
@@ -140,11 +159,11 @@ namespace SceneBuilder.Editor
                 children = new SnapshotNode[t.childCount];
                 for (var i = 0; i < t.childCount; i++)
                 {
-                    children[i] = ReadNode(t.GetChild(i).gameObject, resolveId, resolveSceneRef);
+                    children[i] = ReadNode(t.GetChild(i).gameObject, resolveId, resolveSceneRef, resolveListenerRef);
                 }
             }
 
-            return ReadNodeShallow(go, children, resolveId, resolveSceneRef);
+            return ReadNodeShallow(go, children, resolveId, resolveSceneRef, resolveListenerRef);
         }
 
         /// <summary>
@@ -158,7 +177,10 @@ namespace SceneBuilder.Editor
         /// only for a caller with no scene-identity resolver to offer, e.g. a fresh-component template
         /// read).
         /// </summary>
-        internal static SnapshotNode ReadNodeShallow(GameObject go, SnapshotNode[] children, Func<UnityEngine.Object, string> resolveId, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        internal static SnapshotNode ReadNodeShallow(
+            GameObject go, SnapshotNode[] children, Func<UnityEngine.Object, string> resolveId,
+            Func<UnityEngine.Object, string?>? resolveSceneRef,
+            Func<UnityEngine.Object?, ValueNode?>? resolveListenerRef = null)
         {
             var t = go.transform;
 
@@ -179,7 +201,7 @@ namespace SceneBuilder.Editor
                         continue;
                     }
 
-                    components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef) with { GlobalObjectId = resolveId(component) });
+                    components.Add(SerializedFieldBridge.ReadComponent(component, resolveSceneRef, resolveListenerRef) with { GlobalObjectId = resolveId(component) });
                 }
             }
 

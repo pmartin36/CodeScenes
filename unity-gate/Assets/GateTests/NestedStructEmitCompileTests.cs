@@ -272,9 +272,9 @@ public class NestedStructEmitScene : ISceneDefinition
     }
 
     // A settled scene must stay settled even when the touched struct also carries a member with no
-    // compiling emission form (Button.navigation.selectOnUp, an object reference; Button.onClick, a
-    // UnityEvent) -- the comparison that decides "did anything change" must use the same projection
-    // an emission would use, or the field re-patches and re-reports on every sync forever.
+    // compiling emission form (Button.navigation.selectOnUp, an object reference) -- the comparison
+    // that decides "did anything change" must use the same projection an emission would use, or the
+    // field re-patches and re-reports on every sync forever.
     [Test]
     public void SceneToCode_TwoButtonsWithExplicitNavigation_SecondSyncIsFixedPointWithNoConflicts()
     {
@@ -293,11 +293,6 @@ public class NestedStructEmitScene : ISceneDefinition
 
         var first = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(first.Changed, "Sync reported no change despite a live Navigation edit.");
-
-        var onClickNotes = first.Notes.Where(n => n.Kind == ConflictKind.UnrepresentableValue && n.Reason.Contains("m_OnClick")).ToArray();
-        Assert.AreEqual(1, onClickNotes.Length,
-            "Two Button components sharing the same unrepresentable field (m_OnClick) must surface it as ONE note, not one per instance.\n" +
-            string.Join("\n", first.Notes.Select(n => n.LogicalId + ": " + n.Reason)));
 
         var second = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsFalse(second.Changed, "A settled scene must be a fixed point even with an unrepresentable residual member.");

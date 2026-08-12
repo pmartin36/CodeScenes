@@ -219,6 +219,28 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
+        /// Builds the read-side listener-target resolver a UnityEvent field read threads to
+        /// <c>UnityEventReader</c>: stamps the live reference via <see cref="StampListenerReference"/>,
+        /// then classifies it through <see cref="ComponentTargetResolution.Classify"/> /
+        /// <see cref="ComponentTargetResolution.ToValueNode"/> — a component target resolves to that
+        /// COMPONENT's own LogicalId, never its owning GameObject's.
+        /// </summary>
+        public static Func<UnityEngine.Object?, ValueNode?> BuildListenerResolver(IdentityMap map) =>
+            BuildListenerResolver(ComponentTargetIndex.ForMap(map));
+
+        /// <summary>
+        /// The one closure implementation behind <see cref="BuildListenerResolver(IdentityMap)"/>,
+        /// taking an already-built <see cref="ComponentTargetIndex"/> so <see cref="SceneRefResolver.ForMap"/>
+        /// can derive the listener resolver from the SAME index its own generation folds, without
+        /// building it twice.
+        /// </summary>
+        public static Func<UnityEngine.Object?, ValueNode?> BuildListenerResolver(ComponentTargetIndex index) =>
+            obj => ComponentTargetResolution.ToValueNode(
+                ComponentTargetResolution.Classify(
+                    StampListenerReference(obj, o => GlobalObjectId.GetGlobalObjectIdSlow(o).ToString()),
+                    index));
+
+        /// <summary>
         /// Resolves a listener's component/GameObject <c>targetLogicalId</c> back to the live
         /// object it names, with NO type coercion (a listener has no declared field type to coerce
         /// to) -- reuses the shipped <see cref="ResolveTarget"/> ladder rather than a parallel copy.

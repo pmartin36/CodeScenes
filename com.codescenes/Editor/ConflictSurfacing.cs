@@ -169,7 +169,7 @@ namespace SceneBuilder.Editor
                 }
 
                 var located = Locate(note, scenePath);
-                Debug.LogWarning($"[CodeScenes] {StandingLabel(located)} on {On(located)}");
+                Debug.LogWarning($"[CodeScenes] {Severity(located)} on {On(located)}");
                 surfaced.Add(located);
             }
 
@@ -179,10 +179,12 @@ namespace SceneBuilder.Editor
         /// <summary>The console severity label of a surfaced standing report. An
         /// <see cref="ConflictKind.UnrepresentableValue"/> report is a WARNING: a scene edit the user
         /// made is not reaching their code. An <see cref="ConflictKind.UnauthorableField"/> report is a
-        /// WARNING for the mirror reason: a line the user wrote is not reaching their scene. Any other
+        /// WARNING for the mirror reason: a line the user wrote is not reaching their scene. An
+        /// <see cref="ConflictKind.UnsyncableListener"/> report is a WARNING for the same fail-loud
+        /// reason: a UnityEvent listener wired in the scene is not reaching the user's code. Any other
         /// standing condition reads as a NOTE.</summary>
-        private static string StandingLabel(Conflict c) =>
-            c.Kind is ConflictKind.UnrepresentableValue or ConflictKind.UnauthorableField
+        public static string Severity(Conflict c) =>
+            c.Kind is ConflictKind.UnrepresentableValue or ConflictKind.UnauthorableField or ConflictKind.UnsyncableListener
                 ? "WARNING"
                 : "NOTE";
 
