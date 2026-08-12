@@ -200,3 +200,43 @@ on every sync and never reaching a fixed point (and, downstream, masking a fresh
 Slider). It predates M8 (no listener path touches RectTransform), is spec 13 / RectTransform territory,
 and is filed in `docs/open-defects.md`. M8's item-7 round-trip proof was scoped to the listener contract
 for that reason; item-8 proves full no-op idempotence on a Button (no RectTransform).
+
+## 37 - RequireComponent(RectTransform) hosts must not drift a phantom .RectTransform()
+
+A spec-13 follow-on defect surfaced by M8's live-verify. A node authored via generic
+`.Component<Slider>()` (or any `[RequireComponent(typeof(RectTransform))]` host) with no explicit
+`.RectTransform(...)` stayed model-side `Kind="Transform"` while its live transform was a
+`RectTransform`, so the differ's promotion arm injected an unauthored `.RectTransform(defaults)` on the
+first sync over a converged build, breaking the first-sync-no-op invariant. It was not value drift and
+converged on the second sync; the injected call was the whole problem.
+
+Fix removes the Kind mismatch at its source: an adapter predicate answers whether a component `TypeRef`
+carries `[RequireComponent(typeof(RectTransform))]` (reflection, transitive), applied as a stage at
+`DesiredModelLoader.Load` (the one seam both directions load the desired model through), so a
+require-RectTransform host carries `Kind="RectTransform"` and the differ takes the omit-at-default
+matched arm. The spec-13 D6 promotion arm is untouched; it simply stops firing for these hosts.
+Gate `passed=720`. Live-verified: `.Component<Slider>()` build then sync is `PatchEdits==0` with no
+`.RectTransform` injected, and an in-editor `anchoredPosition` edit emits exactly
+`.RectTransform(anchoredPos: (-40f, -30f))` (only the changed channel), second sync a no-op. M8's Item7
+round-trip proof was re-tightened to the strict fixed-point assertion as part of this.
+
+## 38 - the adapter MemberSpellings producer
+
+A real M8 scene->code gap, caught only because M8's live-verify exercised a fresh in-editor listener
+add: a persistent UnityEvent listener wired in the Inspector on any serialized UnityEvent field EXCEPT
+`Button.m_OnClick` was silently dropped (`UnsyncableListener`, "no public C# spelling") instead of
+reconciling to `.OnEvent(x => x.field, ...)`. The decisive variable was the field key. Root cause: the
+adapter snapshot factory `SceneSnapshotReader.FromRoots` never populated `SceneSnapshot.MemberSpellings`
+(no producer existed anywhere in the adapter; the sibling `ComponentDefaults` was populated right beside
+it), so the reconciler could not spell a non-`m_OnClick` event field. A textbook mocked-test blind spot:
+the Core `.OnEvent` tests hand-fed `MemberSpelling[]` into the snapshot and passed green, and one test
+even pinned the drop as correct, while the live adapter fed nothing.
+
+Fix supplies the missing producer: one `MemberSpelling` per UnityEvent field at `FromRoots`, deriving
+the public name through the existing `SerializedMemberMap.TryPublicMemberName`, covering the cold and
+incremental (auto-sync) read paths. No Core change. The primary RED test is EditMode by necessity, since
+a Core test structurally cannot see an adapter-production gap; the mis-pinning Core test was corrected to
+assert the drop only for a genuinely unspellable member. Gate `passed=720`. Live-verified: a fresh
+in-editor listener on a plain `UnityEvent onPlain` field syncs to
+`.OnEvent(x => x.onPlain, target, t => t.Foo())` with zero drop-notes, a dynamic `UnityEvent<float>`
+field syncs with `dynamic: true`, and `Button.m_OnClick` still round-trips.

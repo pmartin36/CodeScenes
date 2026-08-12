@@ -5,19 +5,10 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=713 failed=0 skipped=0)`
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=720 failed=0 skipped=0)`
 (2026-08-12, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
 skip is not a Unity pass — force it). `verify.sh` now discounts one known host engine message
 by exact text (`69a74df`); a crash or any other error still fails.
-
-**NEXT DEFECT: Slider RectTransform scene->code drift (high severity, fatal to seamless sync).** A
-`UnityEngine.UI.Slider` authored via generic `Component<Slider>` materializes a RectTransform whose
-anchoredPosition/sizeDelta/anchorMin/anchorMax/pivot the source never authored, so every sync emits 5
-phantom `PatchArgument` edits and never reaches a fixed point. Measured live during M8 verify; it also
-MASKS a real edit (a fresh listener wired on a Slider is dropped because its add competes with the
-phantom RectTransform append on the same statement). Predates M8, spec 13 / RectTransform territory,
-registered in `docs/open-defects.md`. Owns no task yet: repro + fix scoping in flight (subagent bug-fix
-vs short spec, decided from the concrete mechanism).
 
 **Spec 36 (uniform value descent) SHIPPED and live-verified 2026-08-06** — moved to
 `specs/completed/`. All five passes route container descent through `ValueWalk`, which gained
