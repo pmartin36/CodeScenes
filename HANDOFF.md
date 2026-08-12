@@ -5,16 +5,19 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=679 failed=0 skipped=0)`
-(2026-08-11, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=713 failed=0 skipped=0)`
+(2026-08-12, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
 skip is not a Unity pass — force it). `verify.sh` now discounts one known host engine message
 by exact text (`69a74df`); a crash or any other error still fails.
 
-**M8 (specs/09) is PART-BUILT.** b1 is committed (`30a9613` model layer + `Reconciler.cs` split + four
-foundation deltas; `e1ae5d5` b1-t3 path vocabulary + ComponentRef authoring), but **b1-t3 is
-INCOMPLETE and b2+ (the editor adapter, authoring API and sidecar work) is unbuilt.** The live plan
-(`.agent_handoffs/m8-unityevents/`) covers b1 only and is stale. Full state and how to resume: the M8
-entry under section 2.
+**NEXT DEFECT: Slider RectTransform scene->code drift (high severity, fatal to seamless sync).** A
+`UnityEngine.UI.Slider` authored via generic `Component<Slider>` materializes a RectTransform whose
+anchoredPosition/sizeDelta/anchorMin/anchorMax/pivot the source never authored, so every sync emits 5
+phantom `PatchArgument` edits and never reaches a fixed point. Measured live during M8 verify; it also
+MASKS a real edit (a fresh listener wired on a Slider is dropped because its add competes with the
+phantom RectTransform append on the same statement). Predates M8, spec 13 / RectTransform territory,
+registered in `docs/open-defects.md`. Owns no task yet: repro + fix scoping in flight (subagent bug-fix
+vs short spec, decided from the concrete mechanism).
 
 **Spec 36 (uniform value descent) SHIPPED and live-verified 2026-08-06** — moved to
 `specs/completed/`. All five passes route container descent through `ValueWalk`, which gained
@@ -55,14 +58,12 @@ Edit the harness ONLY with no pipeline run active, and run
 
 ### 0b. Then the backlog that accumulated on 2026-08-06/07
 
-1. **Live-verify M8** once it lands. Project is `/home/paul/Source/Unity/SceneBuilderTest` (NOT
-   `/home/paul/Unity/...`).
-2. **Document the three pipeline behaviours that keep costing runs**: resume replays cached VERDICTS
+1. **Document the three pipeline behaviours that keep costing runs**: resume replays cached VERDICTS
    (it keys on `(prompt, opts)` and prompts carry only the task id, so no plan edit busts one task's
    cache — it only helps when work was INTERRUPTED); past ~3 hand-fix rounds regenerate the plan
    instead of patching it (measured 0 -> 9 -> 13 findings while patching, 0 on both rerolls); put
    hard-won knowledge in the SPEC, not the plan, because a reroll inherits the spec and bins the plan.
-3. **Run `/tdd-learnings`.** The ledger has five backfilled decomposition classes at counts 3-8 plus
+2. **Run `/tdd-learnings`.** The ledger has five backfilled decomposition classes at counts 3-8 plus
    whatever the halt recorder has added since `02e8069`. Note 63 of 94 entries are already classified
    `pipeline:agent-behavior` — the ledger's own verdict agrees with the investigation.
 
@@ -84,17 +85,6 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/09` M8 UnityEvents. PART-BUILT: b1 committed, b1-t3 INCOMPLETE, b2+ unbuilt.** Cost is no
-  longer a blocker (4.8 is back at baseline), so it is clear to build on 4.8 once M7 is closed out. Do
-  NOT resume-by-id into the live
-  plan (`m8-unityevents/`; b1-only and stale, with three superseded plans in
-  `.agent_handoffs/_superseded-m8-plan*`/`_stale-*` beside it): treat the spec's ALREADY SHIPPED section
-  as done and decompose the remainder (b1-t3's unfinished work plus b2+) fresh. Read the spec's ALREADY
-  SHIPPED and serialized-path-vocabulary sections first. Measured defects that cost live editor runs are
-  in `docs/m8-measured-defects.md` (ownership-by-task-id is void; the measurements are not). Model is
-  resolved in the spec: add `ComponentRef<T>` via `node.Ref<T>(ordinal)`, no model change (`ObjectRef`
-  carries a bare LogicalId, IdentityMap has `Kind=="Component"` entries). Expect higher per-task cost
-  than M7 (largest spec; difficulty, not a 4.8 regression).
 - **`specs/10` M9 SerializeReference.** Depends on `ValueWalk` being right: a `ManagedReference`'s
   fields may contain further `ManagedReference`s, nesting arbitrarily. If recursion is wrong anywhere,
   this is where it hurts most.

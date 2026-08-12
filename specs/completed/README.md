@@ -130,7 +130,7 @@ wrong reason. Gate `passed=637 failed=0 skipped=0`. Live-verified in a real edit
 Materialize, a second build applied zero plan ops, and an Inspector edit of `m_Size` synced back as
 `new UnityEngine.Vector3(7f, 8f, 9f)` through the new `Fold`-based renderer.
 
-Still pending in `specs/`: 09 (M8 UnityEvents, reframed to typed method-lambda), 10 (M9
+Still pending in `specs/`: 10 (M9
 SerializeReference), 12 (M11 animation, blocked on Animator research) and 34 (licensing, blocked on
 two spikes). `00-foundation.md` stays in `specs/` as the living base contract. Unowned defects
 measured during builds, with no task claiming a fix, are tracked in `docs/open-defects.md`.
@@ -162,3 +162,41 @@ subscriptions and resynced from disk, a 10x round-trip kept every GlobalObjectId
 byte-identical, and two builds produced identical sidecar+sbstate. The one slice not observable
 headless is OS focus-event *delivery*; the resync/routing logic it triggers was exercised via the
 equivalent `sceneOpened` hook and a direct call to the focus target `ResyncActiveScene()`.
+
+## 09 - M8 UnityEvents / OnClick wiring
+
+Author and round-trip UnityEvent persistent listeners (Button.OnClick and the generic
+`.OnEvent(x => x.field, ...)`) in both directions: target (scene component or asset), invoked method,
+call state, a single typed static argument (int/float/string/bool/object), and the dynamic
+(EventDefined) form that forwards the event's own runtime args. The method reference is a typed
+method-lambda (`x => x.Method(args)`), so the shipped SB1201/SB1202 analyzer and the compiler check the
+signature; a listener target is a component `LogicalId`, not a GameObject one.
+
+Built over several passes. The model layer, the component-target classifier, the projection (measured
+mode/call-state numbers), the serialized-path vocabulary + its scan guard, and the full
+`ComponentRef<T>`/`Ref<T>`/`OnClick`/`OnEvent` authoring surface shipped earlier. The final run
+(after the plan-engine bucket `f040769`) delivered the adapter I/O (`cf3bb2d`:
+`UnityEventReader`/`UnityEventWriter` over Core's projection, SerializedObject on
+`m_PersistentCalls.m_Calls`), the Core reconcile (`08ae86c`: component-target resolution made the
+reconciler treat a component LogicalId as resolvable, plus the listener source-patch with an
+`InsertListenerCall` edit so an added listener never overwrites an existing one), and the bidirectional
+round-trip proof (`836e7c3`). The reconcile work was split into an invariant-owner task and per-delta
+render tasks after an earlier single oversized task escalated; the required RED matrix (add-preserves-
+order, target-change in place, remove, multi-add, `.OnEvent`, dynamic) is pinned so a symmetric
+operation set can't ship a subset.
+
+Gate `passed=713 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`). Live-verified in a real editor
+(`unity-live-verify`, log `SceneBuilderTest/Logs/live-verify-m8-1.log`): all eight confirmation-checklist
+items passed on throwaway fixtures. OnClick wires target/method/RuntimeOnly; retarget, int arg (7),
+object-mode asset target (sidecar `assets[]` gains the GUID), and EditorAndRuntime call state each
+round-trip to the exact source line; removing an entry deletes its statement; a dynamic
+`Slider.onValueChanged -> Hud.SetValue` authored form round-trips; a second Materialize on a converged
+Button+OnClick scene emits zero plan ops.
+
+Live testing also surfaced ONE defect that is deliberately NOT folded in here, per the rule that a
+milestone does not absorb a pre-existing bug found next door: a plain `UnityEngine.UI.Slider` authored
+via generic `Component<Slider>` drifts scene->code, emitting 5 phantom RectTransform PatchArgument edits
+on every sync and never reaching a fixed point (and, downstream, masking a fresh listener add on a
+Slider). It predates M8 (no listener path touches RectTransform), is spec 13 / RectTransform territory,
+and is filed in `docs/open-defects.md`. M8's item-7 round-trip proof was scoped to the listener contract
+for that reason; item-8 proves full no-op idempotence on a Button (no RectTransform).
