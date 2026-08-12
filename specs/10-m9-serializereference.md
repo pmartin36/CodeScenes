@@ -156,6 +156,10 @@ c.SetRef(x => x.strategy, new Composite {
   Reconcile rewrites only the affected field argument.
 - **Nested managed ref**: `Composite{ primary=Aggressive, fallback=Flee }` round-trips; a change to
   `primary.range` patches the nested span; a change of `primary`'s concrete type recurses correctly.
+- **List of managed refs**: a `[SerializeReference]` `List`/array field holding `ManagedReference`
+  elements (a `ValueNode.List` of `ManagedReference`) round-trips element-for-element; a change to one
+  element's field or concrete type patches only that element's construction. This confirms the
+  `ManagedReference` container kind composes with `ValueNode.List` through the shared `ValueWalk` arms.
 - **Diff idempotence**: identical desired/actual managed refs → zero ops.
 - **Missing type → conflict**: snapshot `managedReferenceFullTypename` unresolvable → surfaced
   conflict, no `SourcePatch`, reference not nulled.
@@ -194,6 +198,16 @@ c.SetRef(x => x.strategy, new Composite {
   conceptual risk, but every value pass fails to compile (and the scan guard fails) until it handles the
   new kind. Do NOT restate the recursion rule as per-task prose; the `ValueWalk` arm plus the descent scan
   ARE the mechanism.
+  **A required positional param breaks EVERY caller, so this task's TOUCHES MUST enumerate all of them,
+  production AND test.** Following the M8 precedent, the new `ManagedReference` delegate is a REQUIRED
+  positional parameter on `Fold`/`Descend` (and the sibling primitives), so every existing call site fails
+  to compile until it passes the new argument, and `./verify.sh` cannot reach GREEN while one caller is
+  left un-updated. Before declaring TOUCHES, grep for every caller of the changed signatures and list them
+  all. The known test callers that MUST be in this task's TOUCHES and caller-update deliverable include
+  `SceneBuilder.Core.Tests/UnityEventListenerModelTests.cs` (`ValueWalk.Fold<string>` at `:364`, `:382`,
+  `:398`; `ValueWalk.Descend<int>` at `:417`) and `SceneBuilder.Core.Tests/ValueWalkFoldTests.cs`, plus the
+  production callers (`SourceExpr.cs`, `SerializedFieldBridge.cs`, and any other site the grep finds). A
+  caller left out of TOUCHES is a compile break, not a warning.
 
 - **Object-initializer parse and emit are REUSED, not built.** The `new T { ... }` shape already
   round-trips for `Nested`: `ValueNodeParser.cs:77-78` dispatches `ObjectCreationExpressionSyntax` to
