@@ -103,6 +103,17 @@ namespace SceneBuilder.Core.Diff
             = new ValueNode.UnityEventListeners(System.Array.Empty<UnityEventListener>());
     }
 
+    // Mirrors Plan.SetManagedReference: one op replaces the whole [SerializeReference] instance at
+    // Path — a concrete-type change or ANY nested field change both emit this, never a field-level
+    // patch. ConcreteType == null is a null reference; Fields is the instance's own field values.
+    public sealed record SetManagedReference : ChangeOp
+    {
+        public string ComponentLogicalId { get; init; } = "";
+        public string Path { get; init; } = "";
+        public TypeRef? ConcreteType { get; init; }
+        public FieldMap Fields { get; init; } = FieldMap.Empty;
+    }
+
     public sealed record ReorderComponent : ChangeOp
     {
         public string ComponentLogicalId { get; init; } = "";

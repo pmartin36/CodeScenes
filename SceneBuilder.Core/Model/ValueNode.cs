@@ -24,6 +24,7 @@ namespace SceneBuilder.Core.Model
     [JsonDerivedType(typeof(ValueNode.AssetRef), "AssetRef")]
     [JsonDerivedType(typeof(ValueNode.ObjectRef), "ObjectRef")]
     [JsonDerivedType(typeof(ValueNode.UnityEventListeners), "UnityEventListeners")]
+    [JsonDerivedType(typeof(ValueNode.ManagedReference), "ManagedReference")]
     public abstract record ValueNode
     {
         public sealed record Primitive(
@@ -194,5 +195,11 @@ namespace SceneBuilder.Core.Model
                 return hash.ToHashCode();
             }
         }
+
+        // A [SerializeReference] polymorphic field's live value. ConcreteType == null IS the
+        // reference being null; a non-null ConcreteType with empty Fields is a distinct, legal
+        // instance (a type with no serialized members). Default record equality is correct:
+        // ConcreteType via null-safe TypeRef.Equals, Fields via FieldMap's key-based equality.
+        public sealed record ManagedReference(TypeRef? ConcreteType, FieldMap Fields) : ValueNode;
     }
 }

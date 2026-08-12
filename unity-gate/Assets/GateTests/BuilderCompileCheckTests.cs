@@ -67,6 +67,24 @@ public class CompileCheckRectTransformScene : ISceneDefinition
     }
 }";
 
+    // The `.SetRef(x => x.field, new T{...} | null)` managed-reference authoring form must compile
+    // against the real ComponentHandle<T>.SetRef<TField> runtime signature. Fixture types
+    // (IStrategy/Aggressive/AiBrain) are declared self-contained in the source string so the case
+    // does not depend on a separate fixture asset.
+    private const string SetRefSource = @"
+using SceneBuilder.Authoring;
+public interface IStrategy {}
+public class Aggressive : IStrategy { public float range; }
+public class AiBrain : UnityEngine.MonoBehaviour { [UnityEngine.SerializeReference] public IStrategy strategy; }
+public class CompileCheckSetRefScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Enemy"").Component<AiBrain>(c => c.SetRef(x => x.strategy, new Aggressive { range = 5f }));
+        scene.Add(""Passive"").Component<AiBrain>(c => c.SetRef(x => x.strategy, null));
+    }
+}";
+
     // The `.Ref<T>()`/`.OnClick(...)` void listener-wiring form must compile against the real
     // ComponentRef<T>/NodeHandle.Ref<T>/ComponentHandle<T>.OnClick<TTarget> authoring surface and
     // a real global-namespace DoorOpener.Open() (unity-gate/Assets/Fixtures/DoorOpenerFixture.cs).
@@ -80,6 +98,17 @@ public class CompileCheckOnClickScene : ISceneDefinition
         scene.Add(""QuitButton"").Component<UnityEngine.UI.Button>(b => b.OnClick(opener, o => o.Open()));
     }
 }";
+
+    [Test]
+    public void SetRefSource_CompilesWithNoDiagnostics()
+    {
+        var errors = BuilderCompileCheck.Check(SetRefSource);
+
+        Assert.IsEmpty(
+            errors.Select(e => e.ToString()),
+            "`.SetRef(...)` (new-instance and null forms) must compile against the real "
+                + "ComponentHandle<T>.SetRef<TField> authoring API.");
+    }
 
     [Test]
     public void OnClickSource_CompilesWithNoDiagnostics()

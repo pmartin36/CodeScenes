@@ -68,6 +68,20 @@ namespace SceneBuilder.Core.Plan
             = new ValueNode.UnityEventListeners(System.Array.Empty<UnityEventListener>());
     }
 
+    // Mirrors Change.SetManagedReference (ChangeOp.cs): one op replaces the whole
+    // [SerializeReference] instance at Path.
+    public sealed record SetManagedReference : PlanOp
+    {
+        [JsonPropertyOrder(1)]
+        public string Path { get; init; } = "";
+
+        [JsonPropertyOrder(2)]
+        public TypeRef? ConcreteType { get; init; }
+
+        [JsonPropertyOrder(3)]
+        public FieldMap Fields { get; init; } = FieldMap.Empty;
+    }
+
     public sealed record AddComponent : PlanOp
     {
         [JsonPropertyOrder(1)]

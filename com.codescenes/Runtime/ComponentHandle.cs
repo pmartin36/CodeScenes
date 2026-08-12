@@ -107,5 +107,11 @@ namespace SceneBuilder.Authoring
         public ComponentHandle<T> OnEvent<TArg0, TArg1, TTarget>(
             Func<T, UnityEngine.Events.UnityEvent<TArg0, TArg1>> unityEvent, ComponentRef<TTarget> target,
             Func<TTarget, Action<TArg0, TArg1>> method, bool dynamic) => this;
+
+        /// <summary>Set a <c>[SerializeReference]</c> polymorphic field by typed member selector, e.g.
+        /// <c>c.SetRef(r =&gt; r.strategy, new Aggressive { range = 5f })</c>. The selector fixes
+        /// <typeparamref name="TField"/> to the field's declared interface/abstract/base type; any
+        /// assignable concrete instance, or <c>null</c> to clear the reference, may be passed.</summary>
+        public ComponentHandle<T> SetRef<TField>(Func<T, TField> selector, TField value) => this;
     }
 }

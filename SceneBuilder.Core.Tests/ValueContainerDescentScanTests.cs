@@ -45,6 +45,8 @@ namespace SceneBuilder.Core.Tests
                 "construct the node from one parsed C# initializer; what is walked is the syntax tree, not a ValueNode."),
             new Site("SceneBuilder.Core/Parsing/ValueNodeParser.cs", "ParseList", 1,
                 "construct the node from one parsed C# initializer; what is walked is the syntax tree, not a ValueNode."),
+            new Site("SceneBuilder.Core/Parsing/BuilderParser.SerializeReference.cs", "ParseManagedRefList", 1,
+                "construct the node from one parsed C# initializer; what is walked is the syntax tree, not a ValueNode."),
             new Site("SceneBuilder.Core/Reconcile/ComponentReconciler.cs", "AuthoredTextIsCurrent", 4,
                 "a PAIRED walk comparing two values position-by-position; every ValueWalk primitive takes ONE node, so none expresses it."),
             new Site("SceneBuilder.Core/Reconcile/ComponentReconciler.cs", "ReconcileComponents", 2,
@@ -480,6 +482,149 @@ namespace SceneBuilder.Core.Whatever
             Assert.Contains(relativePath, UnityEventListenersTokenAllowlist);
 
             var violations = UnityEventListenersViolations(
+                new[] { relativePath },
+                _ => "namespace SceneBuilder.Core.Materialize { internal static class Materializer { } }");
+
+            Assert.Empty(violations);
+        }
+
+        // A sibling of the UnityEventListeners guard above, matching `ValueNode.ManagedReference`.
+        // Permitted by filename (any file naming "ManagedRef" or "SerializeReference" — this
+        // feature's own partials) or by the seeded allowlist below, which is grown ONCE for every
+        // production consumer this feature (b1+b2) is known to add and never edited again; an
+        // allowlisted file with zero occurrences is fine, since the allowlist grants permission, not
+        // obligation.
+        private static readonly string[] ManagedReferenceTokenAllowlist =
+        {
+            "SceneBuilder.Core/Model/ValueNode.cs",
+            "SceneBuilder.Core/Model/ValueWalk.cs",
+            "SceneBuilder.Core/Diff/ChangeOp.cs",
+            "SceneBuilder.Core/Diff/Differ.cs",
+            "SceneBuilder.Core/Plan/PlanOp.cs",
+            "SceneBuilder.Core/Plan/PlanOps.cs",
+            "SceneBuilder.Core/Materialize/Materializer.cs",
+            "SceneBuilder.Core/Reconcile/SourceExpr.cs",
+            "SceneBuilder.Core/Reconcile/Reconciler.cs",
+            "SceneBuilder.Core/Reconcile/ComponentReconciler.cs",
+            "SceneBuilder.Core/Reconcile/ComponentPatchApplier.cs",
+            "SceneBuilder.Core/Reconcile/NestedValueEmission.cs",
+            "SceneBuilder.Core/Reconcile/ListValueEmission.cs",
+            "SceneBuilder.Core/Lowering/AssetRefLowering.cs",
+            "SceneBuilder.Core/Model/ObjectRefValues.cs",
+            "SceneBuilder.Core/Parsing/BuilderParser.cs",
+            "SceneBuilder.Core/Parsing/ValueNodeParser.cs",
+            "SceneBuilder.Core/Validation/PlanningValidator.cs",
+            "com.codescenes/Editor/SerializedFieldBridge.cs",
+            "com.codescenes/Editor/PlanExecutor.cs",
+        };
+
+        private static bool IsManagedReferenceTokenPermitted(string relativePath) =>
+            Path.GetFileName(relativePath).Contains("ManagedRef", StringComparison.Ordinal)
+            || Path.GetFileName(relativePath).Contains("SerializeReference", StringComparison.Ordinal)
+            || ManagedReferenceTokenAllowlist.Contains(relativePath);
+
+        private static IEnumerable<Match> ManagedReferenceTokens(string sourceText, string relativePath)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
+            var root = tree.GetRoot();
+
+            foreach (var token in root.DescendantTokens())
+            {
+                if (token.Kind() != SyntaxKind.IdentifierToken || token.Text != "ManagedReference")
+                {
+                    continue;
+                }
+
+                var dot = token.GetPreviousToken();
+                if (dot.Kind() != SyntaxKind.DotToken)
+                {
+                    continue;
+                }
+
+                var qualifier = dot.GetPreviousToken();
+                if (qualifier.Text != "ValueNode")
+                {
+                    continue;
+                }
+
+                var line = token.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+                yield return new Match(relativePath, EnclosingMember(token), line, "ValueNode.ManagedReference");
+            }
+        }
+
+        private static IReadOnlyList<string> ManagedReferenceViolations(
+            IEnumerable<string> relativePaths, Func<string, string> readText)
+        {
+            var violations = new List<string>();
+            foreach (var relativePath in relativePaths)
+            {
+                if (IsManagedReferenceTokenPermitted(relativePath))
+                {
+                    continue;
+                }
+
+                var matches = ManagedReferenceTokens(readText(relativePath), relativePath).ToList();
+                if (matches.Count == 0)
+                {
+                    continue;
+                }
+
+                violations.Add(
+                    $"{relativePath} names ValueNode.ManagedReference at " +
+                    string.Join(", ", matches.Select(m => $"{m.Member}@{m.Line}")) +
+                    " but is neither a *ManagedRef*/*SerializeReference*.cs file nor on the allowlist. " +
+                    "Route this site's container descent through SceneBuilder.Core.Model.ValueWalk, or add the file to the allowlist.");
+            }
+
+            return violations;
+        }
+
+        [Fact]
+        public void Scan_ProductionSource_ManagedReferenceTokenOnlyInPermittedFiles()
+        {
+            var repoRoot = RepoRootLocator.Find();
+            var files = ProductionFiles(repoRoot).ToList();
+            Assert.True(files.Count > 0, "scan found zero production .cs files -- repo root resolution is broken");
+
+            var violations = ManagedReferenceViolations(
+                files, relativePath => File.ReadAllText(Path.Combine(repoRoot, relativePath)));
+
+            Assert.True(violations.Count == 0, string.Join("\n", violations));
+        }
+
+        [Fact]
+        public void Scan_UndeclaredFileNamingManagedReference_FailsNamingFileAndKindAndRemedy()
+        {
+            const string relativePath = "com.codescenes/Editor/SomePass.cs";
+            const string synthetic = @"
+namespace SceneBuilder.Core.Whatever
+{
+    using SceneBuilder.Core.Model;
+
+    internal static class SomePass
+    {
+        private static bool IsManagedRef(ValueNode node) => node is ValueNode.ManagedReference;
+    }
+}
+";
+            var violations = ManagedReferenceViolations(new[] { relativePath }, _ => synthetic);
+
+            Assert.True(violations.Count == 1,
+                $"expected exactly one violation for an undeclared file, found {violations.Count}: {string.Join(" | ", violations)}");
+
+            var message = violations[0];
+            Assert.Contains(relativePath, message);
+            Assert.Contains("ManagedReference", message);
+            Assert.Contains("ValueWalk", message);
+        }
+
+        [Fact]
+        public void Scan_AllowlistedFileWithNoTokens_IsPermitted_ManagedReference()
+        {
+            const string relativePath = "SceneBuilder.Core/Materialize/Materializer.cs";
+            Assert.Contains(relativePath, ManagedReferenceTokenAllowlist);
+
+            var violations = ManagedReferenceViolations(
                 new[] { relativePath },
                 _ => "namespace SceneBuilder.Core.Materialize { internal static class Materializer { } }");
 

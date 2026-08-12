@@ -360,7 +360,10 @@ namespace SceneBuilder.Editor
                 // No live property is derived for a listener slot here: a UnityEvent is written by
                 // its own dedicated plan op, never through the generic field bridge, so the subtree
                 // is left exactly as found.
-                listenerSlot: (_, _, _, _) => default);
+                listenerSlot: (_, _, _, _) => default,
+                // A managed reference is written by its own dedicated plan op, never through the
+                // generic field bridge, so the subtree is left exactly as found.
+                managedReferenceMember: (_, _, _) => default);
 
         // Where a node is written, plus the managed struct Type resolved on the ENCLOSING nested
         // value: the map each of THAT value's own member keys goes through, and nothing deeper. A

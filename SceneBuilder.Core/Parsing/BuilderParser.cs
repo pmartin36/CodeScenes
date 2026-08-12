@@ -493,6 +493,13 @@ namespace SceneBuilder.Core.Parsing
                 case "OnEvent":
                     ParseListenerCall(invocation, cb, ctx, isOnEvent: true);
                     break;
+                case "SetRef":
+                {
+                    var (refKey, refValue, refValueSpan) = ParseSetRefCall(invocation, ctx);
+                    cb.Fields.Add(new KeyValuePair<string, ValueNode>(refKey, refValue));
+                    cb.FieldValueSpans.Add(new KeyValuePair<string, SourceSpan>(refKey, refValueSpan));
+                    break;
+                }
                 default:
                     throw Unreachable();
             }

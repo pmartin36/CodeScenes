@@ -14,6 +14,7 @@ namespace SceneBuilder.Core.Plan
     [JsonDerivedType(typeof(SetStatic), "SetStatic")]
     [JsonDerivedType(typeof(SetField), "SetField")]
     [JsonDerivedType(typeof(SetUnityEvent), "SetUnityEvent")]
+    [JsonDerivedType(typeof(SetManagedReference), "SetManagedReference")]
     [JsonDerivedType(typeof(AddComponent), "AddComponent")]
     [JsonDerivedType(typeof(RemoveComponent), "RemoveComponent")]
     [JsonDerivedType(typeof(ReorderComponent), "ReorderComponent")]

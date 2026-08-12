@@ -366,7 +366,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => "",
                 (nestedNode, members) => "",
                 leaf => throw new Xunit.Sdk.XunitException("leaf delegate ran for a UnityEventListeners node"),
-                (listenersNode, foldedSlots) => { listenersDelegateCalled = true; return ""; });
+                (listenersNode, foldedSlots) => { listenersDelegateCalled = true; return ""; },
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran for a UnityEventListeners node"));
 
             Assert.True(listenersDelegateCalled, "ValueWalk.Fold did not invoke the listeners delegate for a UnityEventListeners node");
         }
@@ -384,7 +385,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => "",
                 (nestedNode, members) => "",
                 leaf => { leafCallCount++; return ""; },
-                (listenersNode, foldedSlots) => "");
+                (listenersNode, foldedSlots) => "",
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.Equal(2, leafCallCount);
         }
@@ -400,7 +402,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => "",
                 (nestedNode, members) => "",
                 leaf => leaf is ValueNode.ObjectRef r ? r.TargetLogicalId! : "",
-                (listenersNode, slots) => { foldedSlots = slots; return ""; });
+                (listenersNode, slots) => { foldedSlots = slots; return ""; },
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.NotNull(foldedSlots);
             Assert.Equal(
@@ -420,7 +423,8 @@ namespace SceneBuilder.Core.Tests
                 enter: (n, ctx) => ctx,
                 item: (listNode, ctx, index) => ctx,
                 member: (nestedNode, ctx, key) => ctx,
-                listenerSlot: (listenersNode, ctx, index, slotName) => { visited.Add((index, slotName)); return ctx; });
+                listenerSlot: (listenersNode, ctx, index, slotName) => { visited.Add((index, slotName)); return ctx; },
+                managedReferenceMember: (managedReferenceNode, ctx, key) => throw new Xunit.Sdk.XunitException("managedReferenceMember delegate ran unexpectedly"));
 
             Assert.Contains((0, "Target"), visited);
             Assert.Contains((1, "ArgValue"), visited);

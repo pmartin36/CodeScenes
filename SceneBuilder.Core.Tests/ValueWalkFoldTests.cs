@@ -66,7 +66,8 @@ namespace SceneBuilder.Core.Tests
                     order.Add("leaf(" + raw + ")");
                     return raw.ToString()!;
                 },
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.Equal(
                 new[] { "leaf(1)", "leaf(2)", "leaf(3)", "nested(Deep)", "list", "nested(Inner)", "nested(Outer)" },
@@ -85,7 +86,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => { capturedItems = items; return ""; },
                 (nestedNode, members) => "",
                 leaf => ((ValueNode.Primitive)leaf).Value!.ToString()!,
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.Equal(new[] { "10", "20", "30" }, capturedItems);
 
@@ -97,7 +99,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => "",
                 (nestedNode, members) => { capturedMembers = members; return ""; },
                 leaf => ((ValueNode.Primitive)leaf).Value!.ToString()!,
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.Equal(new[] { "p", "q", "r" }, capturedMembers!.Select(m => m.Key));
             Assert.Equal(new[] { "1", "2", "3" }, capturedMembers!.Select(m => m.Value));
@@ -116,7 +119,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => { capturedList = listNode; return ""; },
                 (nestedNode, members) => "",
                 leaf => "",
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.Same(listValue, capturedList);
 
@@ -128,7 +132,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => "",
                 (nestedNode, members) => { capturedNested = nestedNode; return ""; },
                 leaf => "",
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.Same(nestedValue, capturedNested);
         }
@@ -145,7 +150,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => { listCalled = true; Assert.Empty(items); return ""; },
                 (nestedNode, members) => "",
                 leaf => { leafCalled = true; return ""; },
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.True(listCalled);
             Assert.False(leafCalled);
@@ -163,7 +169,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => "",
                 (nestedNode, members) => { nestedCalled = true; Assert.Empty(members); return ""; },
                 leaf => { leafCalled = true; return ""; },
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran unexpectedly"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran unexpectedly"));
 
             Assert.True(nestedCalled);
             Assert.False(leafCalled);
@@ -180,7 +187,8 @@ namespace SceneBuilder.Core.Tests
                 (listNode, items) => throw new Xunit.Sdk.XunitException("list delegate ran for a leaf sample"),
                 (nestedNode, members) => throw new Xunit.Sdk.XunitException("nested delegate ran for a leaf sample"),
                 leaf => { leafCalls.Add(leaf); return ""; },
-                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran for a leaf sample"));
+                (listenersNode, slots) => throw new Xunit.Sdk.XunitException("listeners delegate ran for a leaf sample"),
+                (managedReferenceNode, members) => throw new Xunit.Sdk.XunitException("managedReference delegate ran for a leaf sample"));
 
             var onlyCall = Assert.Single(leafCalls);
             Assert.Same(sample, onlyCall);
@@ -196,7 +204,8 @@ namespace SceneBuilder.Core.Tests
                 .Select(t => t.Name)
                 .Where(name => name != nameof(ValueNode.List)
                     && name != nameof(ValueNode.Nested)
-                    && name != nameof(ValueNode.UnityEventListeners))
+                    && name != nameof(ValueNode.UnityEventListeners)
+                    && name != nameof(ValueNode.ManagedReference))
                 .ToHashSet();
             var sampled = LeafKindSamples().Select(args => ((ValueNode)args[0]).GetType().Name).ToHashSet();
 
@@ -217,7 +226,8 @@ namespace SceneBuilder.Core.Tests
                 (node, context) => context,
                 (listNode, context, index) => { indices.Add(index); return context; },
                 (nestedNode, context, memberKey) => context,
-                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"));
+                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"),
+                (managedReferenceNode, context, memberKey) => throw new Xunit.Sdk.XunitException("managedReferenceMember delegate ran unexpectedly"));
 
             Assert.Equal(new[] { 0, 1 }, indices);
         }
@@ -248,7 +258,8 @@ namespace SceneBuilder.Core.Tests
                 },
                 (listNode, context, index) => context,
                 (nestedNode, context, memberKey) => context,
-                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"));
+                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"),
+                (managedReferenceNode, context, memberKey) => throw new Xunit.Sdk.XunitException("managedReferenceMember delegate ran unexpectedly"));
 
             Assert.Equal(1, resolveCount);
             Assert.Equal(new[] { "resolved", "resolved" }, memberContexts);
@@ -278,7 +289,8 @@ namespace SceneBuilder.Core.Tests
                 },
                 (listNode, context, index) => context,
                 (nestedNode, context, memberKey) => context,
-                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"));
+                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"),
+                (managedReferenceNode, context, memberKey) => throw new Xunit.Sdk.XunitException("managedReferenceMember delegate ran unexpectedly"));
 
             Assert.Equal(new[] { "nested(Outer)", "leaf(1)", "nested(Inner)", "leaf(2)" }, order);
         }
@@ -307,7 +319,8 @@ namespace SceneBuilder.Core.Tests
                 },
                 (listNode, context, index) => context,
                 (nestedNode, context, memberKey) => memberKey == "missing" ? null : context,
-                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"));
+                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran unexpectedly"),
+                (managedReferenceNode, context, memberKey) => throw new Xunit.Sdk.XunitException("managedReferenceMember delegate ran unexpectedly"));
 
             Assert.Equal(new[] { "Outer" }, operations);
         }
@@ -324,7 +337,8 @@ namespace SceneBuilder.Core.Tests
                 (node, context) => { enterCount++; return context; },
                 (listNode, context, index) => throw new Xunit.Sdk.XunitException("item delegate ran for a leaf root"),
                 (nestedNode, context, memberKey) => throw new Xunit.Sdk.XunitException("member delegate ran for a leaf root"),
-                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran for a leaf root"));
+                (listenersNode, context, index, slotName) => throw new Xunit.Sdk.XunitException("listenerSlot delegate ran for a leaf root"),
+                (managedReferenceNode, context, memberKey) => throw new Xunit.Sdk.XunitException("managedReferenceMember delegate ran for a leaf root"));
 
             Assert.Equal(1, enterCount);
         }

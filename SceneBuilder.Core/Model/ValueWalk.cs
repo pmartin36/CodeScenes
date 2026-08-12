@@ -138,6 +138,25 @@ namespace SceneBuilder.Core.Model
                     return new ValueNode.UnityEventListeners(rebuilt);
                 }
 
+                case ValueNode.ManagedReference managedReference:
+                {
+                    var kept = new List<KeyValuePair<string, ValueNode>>(managedReference.Fields.Count);
+                    foreach (var (memberKey, memberValue) in managedReference.Fields)
+                    {
+                        var mapped = MapNode(
+                            memberValue, descend(managedReference, context, memberKey), visit, descend, dropEmptiedNested, isRoot: false);
+                        if (mapped is not null)
+                        {
+                            kept.Add(new KeyValuePair<string, ValueNode>(memberKey, mapped));
+                        }
+                    }
+
+                    // Never collapsed by dropEmptiedNested: a null reference (ConcreteType == null,
+                    // empty Fields) and a concrete instance with all-default fields are both
+                    // meaningful values, unlike an emptied ValueNode.Nested member.
+                    return new ValueNode.ManagedReference(managedReference.ConcreteType, new FieldMap(kept));
+                }
+
                 // Every other kind is a leaf: whatever `visit` returned is the result.
                 default:
                     return visited;
@@ -218,6 +237,17 @@ namespace SceneBuilder.Core.Model
 
                     return false;
 
+                case ValueNode.ManagedReference managedReference:
+                    foreach (var (_, memberValue) in managedReference.Fields)
+                    {
+                        if (Any(memberValue, predicate))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+
                 default:
                     return false;
             }
@@ -255,12 +285,19 @@ namespace SceneBuilder.Core.Model
         /// <c>"[i].Target"</c> / <c>"[i].ArgValue"</c> — same bottom-up contract as
         /// <paramref name="list"/> and <paramref name="nested"/>.
         /// </param>
+        /// <param name="managedReference">
+        /// Runs on a <see cref="ValueNode.ManagedReference"/> after every member of
+        /// <see cref="ValueNode.ManagedReference.Fields"/> has been folded, given the original node
+        /// and the folded members in source order — same bottom-up contract as
+        /// <paramref name="nested"/>.
+        /// </param>
         public static T Fold<T>(
             ValueNode node,
             Func<ValueNode.List, IReadOnlyList<T>, T> list,
             Func<ValueNode.Nested, IReadOnlyList<KeyValuePair<string, T>>, T> nested,
             Func<ValueNode, T> leaf,
-            Func<ValueNode.UnityEventListeners, IReadOnlyList<KeyValuePair<string, T>>, T> listeners)
+            Func<ValueNode.UnityEventListeners, IReadOnlyList<KeyValuePair<string, T>>, T> listeners,
+            Func<ValueNode.ManagedReference, IReadOnlyList<KeyValuePair<string, T>>, T> managedReference)
         {
             switch (node)
             {
@@ -269,7 +306,7 @@ namespace SceneBuilder.Core.Model
                     var items = new List<T>(listNode.Items.Count);
                     foreach (var item in listNode.Items)
                     {
-                        items.Add(Fold(item, list, nested, leaf, listeners));
+                        items.Add(Fold(item, list, nested, leaf, listeners, managedReference));
                     }
 
                     return list(listNode, items);
@@ -280,7 +317,7 @@ namespace SceneBuilder.Core.Model
                     var members = new List<KeyValuePair<string, T>>(nestedNode.Fields.Count);
                     foreach (var (memberKey, memberValue) in nestedNode.Fields)
                     {
-                        members.Add(new KeyValuePair<string, T>(memberKey, Fold(memberValue, list, nested, leaf, listeners)));
+                        members.Add(new KeyValuePair<string, T>(memberKey, Fold(memberValue, list, nested, leaf, listeners, managedReference)));
                     }
 
                     return nested(nestedNode, members);
@@ -295,17 +332,29 @@ namespace SceneBuilder.Core.Model
                         if (listener.Target is not null)
                         {
                             slots.Add(new KeyValuePair<string, T>(
-                                "[" + i + "].Target", Fold(listener.Target, list, nested, leaf, listeners)));
+                                "[" + i + "].Target", Fold(listener.Target, list, nested, leaf, listeners, managedReference)));
                         }
 
                         if (listener.ArgValue is not null)
                         {
                             slots.Add(new KeyValuePair<string, T>(
-                                "[" + i + "].ArgValue", Fold(listener.ArgValue, list, nested, leaf, listeners)));
+                                "[" + i + "].ArgValue", Fold(listener.ArgValue, list, nested, leaf, listeners, managedReference)));
                         }
                     }
 
                     return listeners(listenersNode, slots);
+                }
+
+                case ValueNode.ManagedReference managedReferenceNode:
+                {
+                    var members = new List<KeyValuePair<string, T>>(managedReferenceNode.Fields.Count);
+                    foreach (var (memberKey, memberValue) in managedReferenceNode.Fields)
+                    {
+                        members.Add(new KeyValuePair<string, T>(
+                            memberKey, Fold(memberValue, list, nested, leaf, listeners, managedReference)));
+                    }
+
+                    return managedReference(managedReferenceNode, members);
                 }
 
                 // Every other kind is a leaf.
@@ -335,13 +384,19 @@ namespace SceneBuilder.Core.Model
         /// context <paramref name="enter"/> returned for it, the listener's index, and the slot name
         /// (<c>"Target"</c> or <c>"ArgValue"</c>).
         /// </param>
+        /// <param name="managedReferenceMember">
+        /// Supplies a <see cref="ValueNode.ManagedReference"/> member's context, given the node, the
+        /// context <paramref name="enter"/> returned for it, and the member key — same contract as
+        /// <paramref name="member"/>.
+        /// </param>
         public static void Descend<TContext>(
             ValueNode node,
             TContext context,
             Func<ValueNode, TContext, TContext> enter,
             Func<ValueNode.List, TContext, int, TContext> item,
             Func<ValueNode.Nested, TContext, string, TContext> member,
-            Func<ValueNode.UnityEventListeners, TContext, int, string, TContext> listenerSlot)
+            Func<ValueNode.UnityEventListeners, TContext, int, string, TContext> listenerSlot,
+            Func<ValueNode.ManagedReference, TContext, string, TContext> managedReferenceMember)
         {
             var childContext = enter(node, context);
 
@@ -350,7 +405,7 @@ namespace SceneBuilder.Core.Model
                 case ValueNode.List list:
                     for (var i = 0; i < list.Items.Count; i++)
                     {
-                        Descend(list.Items[i], item(list, childContext, i), enter, item, member, listenerSlot);
+                        Descend(list.Items[i], item(list, childContext, i), enter, item, member, listenerSlot, managedReferenceMember);
                     }
 
                     break;
@@ -358,7 +413,7 @@ namespace SceneBuilder.Core.Model
                 case ValueNode.Nested nested:
                     foreach (var (memberKey, memberValue) in nested.Fields)
                     {
-                        Descend(memberValue, member(nested, childContext, memberKey), enter, item, member, listenerSlot);
+                        Descend(memberValue, member(nested, childContext, memberKey), enter, item, member, listenerSlot, managedReferenceMember);
                     }
 
                     break;
@@ -370,14 +425,23 @@ namespace SceneBuilder.Core.Model
                         if (listener.Target is not null)
                         {
                             Descend(
-                                listener.Target, listenerSlot(listeners, childContext, i, "Target"), enter, item, member, listenerSlot);
+                                listener.Target, listenerSlot(listeners, childContext, i, "Target"), enter, item, member, listenerSlot, managedReferenceMember);
                         }
 
                         if (listener.ArgValue is not null)
                         {
                             Descend(
-                                listener.ArgValue, listenerSlot(listeners, childContext, i, "ArgValue"), enter, item, member, listenerSlot);
+                                listener.ArgValue, listenerSlot(listeners, childContext, i, "ArgValue"), enter, item, member, listenerSlot, managedReferenceMember);
                         }
+                    }
+
+                    break;
+
+                case ValueNode.ManagedReference managedReference:
+                    foreach (var (memberKey, memberValue) in managedReference.Fields)
+                    {
+                        Descend(
+                            memberValue, managedReferenceMember(managedReference, childContext, memberKey), enter, item, member, listenerSlot, managedReferenceMember);
                     }
 
                     break;
@@ -430,6 +494,17 @@ namespace SceneBuilder.Core.Model
                             {
                                 yield return entry;
                             }
+                        }
+                    }
+
+                    break;
+
+                case ValueNode.ManagedReference managedReference:
+                    foreach (var (memberKey, memberValue) in managedReference.Fields)
+                    {
+                        foreach (var entry in EnumerateAt(memberValue, path + "." + memberKey))
+                        {
+                            yield return entry;
                         }
                     }
 

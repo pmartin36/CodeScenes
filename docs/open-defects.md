@@ -512,3 +512,12 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   pass), so the drift is purely RectTransform-side, not UnityEvents. Owning territory is spec 13
   (RectTransform). No listener path touches RectTransform, so this predates the m8 UnityEvents work.
   OWNER: unassigned (needs a dedicated task). FOUND-BY: m8-unityevents-remaining.
+
+- SEVERITY low — a `[SerializeReference]` field ABSENT from builder source but non-null in the live
+  scene cannot be synced scene->code: there is no introduce/remove `.SetRef` applier (only
+  `IntroduceComponentField`, which emits `.Set(...)`, the wrong call for a managed ref). The b1-t3
+  reconcile intercept (`SceneBuilder.Core/Reconcile/ComponentReconciler.ManagedRef.cs:45-51`)
+  deliberately declines the absent-from-source case (returns false, falls through to existing generic
+  logic) rather than emit a `.Set(...)` managed ref. Not exercised by the M9 checklist/fixtures
+  (b2-t5 authors the field first, so source always holds it); no M9 deliverable is relaxed. A future
+  `SetRef`-introduce path would close it. OWNER: unassigned. FOUND-BY: m9-serializereference.

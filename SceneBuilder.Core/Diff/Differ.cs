@@ -331,6 +331,22 @@ namespace SceneBuilder.Core.Diff
                             continue;
                         }
 
+                        if (field.Value is ValueNode.ManagedReference desiredManagedReference)
+                        {
+                            if (!known || !desiredManagedReference.Equals(actualValue as ValueNode.ManagedReference))
+                            {
+                                setFieldOps.Add(new SetManagedReference
+                                {
+                                    LogicalId = ownerLogicalId,
+                                    ComponentLogicalId = desiredComponent.LogicalId,
+                                    Path = field.Key,
+                                    ConcreteType = desiredManagedReference.ConcreteType,
+                                    Fields = desiredManagedReference.Fields,
+                                });
+                            }
+                            continue;
+                        }
+
                         if (!known || NestedValueEmission.Emittable(actualValue, fieldDefault) != NestedValueEmission.Emittable(field.Value, fieldDefault))
                         {
                             setFieldOps.Add(new SetField

@@ -261,6 +261,21 @@ namespace SceneBuilder.Core.Reconcile
                 Location = location,
             };
 
+        // A live `[SerializeReference]` value's recorded `managedReferenceFullTypename` resolves to
+        // no loadable C# type (the concrete type was renamed or removed). A STANDING condition of
+        // the scene+source (recurs on every reconcile until the type is restored or the field is
+        // re-authored), so it is recurrence-keyed and routes into ReconcileResult.Notes, not
+        // Conflicts. The source is NOT patched and the reference is NOT nulled — either would
+        // discard the live value with no way to recover it once the type is available again.
+        public static Conflict ManagedReferenceMissingType(
+            string componentLogicalId, string componentTypeFullName, string fieldKey, string fullTypename,
+            SourceSpan? location) =>
+            Conflict.Unrepresentable(
+                componentLogicalId, componentTypeFullName, fieldKey,
+                "The [SerializeReference] field's live type '" + fullTypename + "' resolves to no loadable " +
+                "C# type (renamed or removed). The source was NOT patched and the reference was NOT nulled.",
+                recurrenceKey: $"managed-ref-missing-type:{componentLogicalId}:{fieldKey}", location);
+
         public static Conflict UnanchorableComponentEdit(string componentLogicalId, string editKind) =>
             new()
             {

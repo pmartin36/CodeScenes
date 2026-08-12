@@ -239,6 +239,18 @@ namespace SceneBuilder.Core.Reconcile
                 var snapshotComp = snapshotComps[i];
                 foreach (var (fieldKey, snapVal) in snapshotComp.Fields)
                 {
+                    // A `[SerializeReference]` field authored via `.SetRef(...)` is owned entirely
+                    // by the managed-ref intercept, before EVERY other branch below — including the
+                    // default-reset branch, whose applier has no form for a `.SetRef(...)` statement
+                    // and would throw if a live-null managed ref reached it as an at-default `.Set`
+                    // field (see ComponentReconciler.ManagedRef.cs).
+                    if (TryReconcileManagedRefField(
+                        snapVal, sourceComp, fieldKey, fieldArgumentSpans, resolveOwnerHandle, ownerLogicalId,
+                        assetCatalog, edits, conflicts, addedAssets))
+                    {
+                        continue;
+                    }
+
                     // m8: a listener target names a component LogicalId, never a GameObject one —
                     // the generic ObjectRef render below (and its Unsupported/dangling handling)
                     // does not apply. Intercepted before every other check so a listener field

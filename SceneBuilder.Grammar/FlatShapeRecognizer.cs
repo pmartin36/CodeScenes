@@ -300,7 +300,7 @@ namespace SceneBuilder.Grammar
                 memberAccess.Expression is not IdentifierNameSyntax receiver ||
                 receiver.Identifier.Text != paramName)
             {
-                Report(ctx, expression, SB1003, "Expected a `.Set(...)`, `.OnClick(...)` or `.OnEvent(...)` call in component closure");
+                Report(ctx, expression, SB1003, "Expected a `.Set(...)`, `.OnClick(...)`, `.OnEvent(...)` or `.SetRef(...)` call in component closure");
                 return;
             }
 
@@ -315,8 +315,11 @@ namespace SceneBuilder.Grammar
                 case "OnEvent":
                     CheckListenerCall(invocation, ctx, isOnEvent: true);
                     break;
+                case "SetRef":
+                    CheckSetRefCall(invocation, ctx);
+                    break;
                 default:
-                    Report(ctx, expression, SB1003, "Expected a `.Set(...)`, `.OnClick(...)` or `.OnEvent(...)` call in component closure");
+                    Report(ctx, expression, SB1003, "Expected a `.Set(...)`, `.OnClick(...)`, `.OnEvent(...)` or `.SetRef(...)` call in component closure");
                     break;
             }
         }

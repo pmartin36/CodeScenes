@@ -140,6 +140,15 @@ namespace SceneBuilder.Core.Materialize
                             Listeners = setUnityEvent.Listeners,
                         });
                         break;
+                    case Change.SetManagedReference setManagedReference:
+                        passB.Add(new SetManagedReference
+                        {
+                            LogicalId = setManagedReference.ComponentLogicalId,
+                            Path = setManagedReference.Path,
+                            ConcreteType = setManagedReference.ConcreteType,
+                            Fields = setManagedReference.Fields,
+                        });
+                        break;
                     case Change.RemoveComponent removeComponent:
                         passB.Add(new RemoveComponent { LogicalId = removeComponent.ComponentLogicalId });
                         break;
@@ -318,6 +327,21 @@ namespace SceneBuilder.Core.Materialize
                 // SetField case routes to SerializedFieldBridge.WriteField, which does not know how to
                 // write a UnityEventListeners value.
                 passB.Add(new SetUnityEvent { LogicalId = logicalId, Path = path, Listeners = listeners });
+            }
+            else if (value is ValueNode.ManagedReference managedReference)
+            {
+                // Same reasoning as the UnityEventListeners branch above: a managed-ref field
+                // arriving via AddComponent.Component.Fields takes the dedicated SetManagedReference
+                // op (mirroring Change.SetManagedReference below), not the generic SetField the
+                // fallback would otherwise emit — SerializedFieldBridge.WriteField does not know how
+                // to write a ManagedReference value.
+                passB.Add(new SetManagedReference
+                {
+                    LogicalId = logicalId,
+                    Path = path,
+                    ConcreteType = managedReference.ConcreteType,
+                    Fields = managedReference.Fields,
+                });
             }
             else if (value is ValueNode.Unsupported)
             {

@@ -308,6 +308,26 @@ public class ValidComponentRefOnClickScene : ISceneDefinition
 }
 ");
 
+            // ---- .SetRef(...) managed reference ----------------------------------------------------
+            yield return Case("Valid_SetRefManagedReference", @"
+public class ValidSetRefManagedReferenceScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Enemy"").Component<AiBrain>(c => c.SetRef(x => x.strategy, new Aggressive { range = 5f }));
+    }
+}
+");
+            yield return Case("Valid_SetRefNull", @"
+public class ValidSetRefNullScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Add(""Enemy"").Component<AiBrain>(c => c.SetRef(x => x.strategy, null));
+    }
+}
+");
+
             // ---- COMPLETENESS EXTENSION: one case per body-grammar throw site NOT already above,
             // so acceptance-parity (recognizer flags IFF parser throws) is proven at EVERY throw
             // the dedup removes. Each body wraps the offending statement in a valid Build shell.
@@ -381,6 +401,11 @@ public class ValidComponentRefOnClickScene : ISceneDefinition
             // An unknown callState member name is not one of Off/RuntimeOnly/EditorAndRuntime — no
             // ListenerCallState slot exists for it.
             yield return Body("OnClick_BogusCallState", @"scene.Add(""A"").Component<Button>(b => b.OnClick(other, o => o.Open(), callState: SomeType.Bogus));");
+
+            // .SetRef(...) managed reference -----------------------------------------------------------
+            yield return Body("SetRef_WrongArgCount", @"scene.Add(""A"").Component<AiBrain>(c => c.SetRef(x => x.strategy));");
+            // .SetRef accepts only the `x => x.field` selector key, not the string-key form .Set also allows.
+            yield return Body("SetRef_NonSelectorKey", @"scene.Add(""A"").Component<AiBrain>(c => c.SetRef(""strategy"", new Aggressive { range = 5f }));");
         }
 
         private static object[] Body(string name, string statements) => Case(name, $@"
@@ -437,6 +462,29 @@ public class {name}Scene : ISceneDefinition
             Assert.Equal(expectedMessage, parserException.Message);
             Assert.Equal(expectedLine, parserException.Line);
             Assert.Equal(expectedColumn, parserException.Column);
+        }
+
+        // The Corpus agreement Theory above only proves the two sides AGREE on accept/reject — a
+        // .SetRef(...) call both sides reject would satisfy that theory without .SetRef ever being
+        // accepted. This pins the actual acceptance: a well-formed .SetRef(...) call reports ZERO
+        // shape violations.
+        [Theory]
+        [InlineData("Valid_SetRefManagedReference")]
+        [InlineData("Valid_SetRefNull")]
+        public void Analyze_WellFormedSetRefCall_ReportsZeroViolations(string caseName)
+        {
+            var source = (string)Corpus().Single(c => (string)c[0] == caseName)[1];
+
+            var tree = CSharpSyntaxTree.ParseText(source);
+            var root = tree.GetRoot();
+            var buildMethod = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .Single(m => m.Identifier.Text == "Build");
+            var sceneParamName = buildMethod.ParameterList.Parameters[0].Identifier.Text;
+            var body = buildMethod.Body!;
+
+            var violations = FlatShapeRecognizer.Analyze(body, sceneParamName);
+
+            Assert.Empty(violations);
         }
     }
 }
