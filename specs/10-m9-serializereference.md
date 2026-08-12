@@ -66,7 +66,11 @@ directions, including null, concrete-type change, the instance's own fields, and
 - Add `ValueNode.ManagedReference(concreteType: TypeRef?, fields: Map<string, ValueNode>)`.
 - Add `Plan` op `SetManagedReference(path, concreteType, fields)` (§5 op list).
 - Reuse §3 `TypeRef` for concrete-type identity; reuse `Nested`-style field maps and all `ValueNode`
-  kinds for the instance's fields (recursion is the existing model, not a new type).
+  kinds for the instance's fields. The recursion MODEL is reused, but `ValueNode.ManagedReference` IS a
+  new `ValueWalk` container kind that every value pass must learn, enforced at compile time (a
+  per-container `ValueWalk` arm at each call site) and by the descent-scan guard, the same as
+  `UnityEventListeners` was in M8. Reused model, new container kind: not the drop-in "not a new type"
+  the earlier draft of this note implied.
 
 ### Functions/behaviors (each a testable contract)
 - **Canonical serialization** — a `ManagedReference` serializes deterministically: `concreteType`
@@ -174,6 +178,73 @@ c.SetRef(x => x.strategy, new Composite {
 6. Re-run Materialize with no code change. **Expected:** no plan ops (idempotent).
 7. (Negative) Rename/remove the concrete type's C# class, reopen → save. **Expected:** a located
    conflict is surfaced; source is not silently changed and the field is not nulled.
+
+## Decomposition guidance
+
+- **The cross-cutting invariant is the `ManagedReference` container kind, owned by `ValueWalk`.** It gets
+  ONE owning task that lands FIRST, before any parse/emit/reconcile/adapter task depends on it. That task
+  delivers: `ValueNode.ManagedReference(TypeRef? concreteType, FieldMap fields)` plus its `JsonDerivedType`
+  registration; an arm in ALL FIVE `ValueWalk` primitives (`Map` `ValueWalk.cs:124`, `Any` `:205`, `Fold`
+  `:289`, `Descend` `:366`, `Enumerate` `:415`) plus a slot-recursion helper analogous to the listener slot
+  helper; the `Differ` arm (a concrete-type change or any nested field change emits ONE whole-node
+  `SetManagedReference`, never field-level patches); and registration in
+  `SceneBuilder.Core.Tests/ValueContainerDescentScanTests.cs` (a `ManagedReference` token scanner plus
+  per-file allowlist, mirroring the `UnityEventListeners` treatment at that file's ~:355-448). This is the
+  same container-kind job M8 did for `UnityEventListeners`: well-precedented, touches many files, low
+  conceptual risk, but every value pass fails to compile (and the scan guard fails) until it handles the
+  new kind. Do NOT restate the recursion rule as per-task prose; the `ValueWalk` arm plus the descent scan
+  ARE the mechanism.
+
+- **Object-initializer parse and emit are REUSED, not built.** The `new T { ... }` shape already
+  round-trips for `Nested`: `ValueNodeParser.cs:77-78` dispatches `ObjectCreationExpressionSyntax` to
+  `ParseObjectCreation` `:176-197` -> `ParseNested` `:207-223`, which recurses `Parse` on each
+  `field = value` at `:218`; emit folds `Nested` recursively in `SourceExpr.ValueNodeLiteral` `:72-84`. The
+  only new parse entry is a `SetRef`-only `ParseManagedReference` (a `ManagedReference`-flavored copy of
+  `ParseNested`'s member loop, plus `null -> ManagedReference(concreteType: null, empty)`), invoked from a
+  new `case "SetRef":` in `BuilderParser.cs` (mirror `ParseSetCall` `:513-539`, reuse the `x => x.field`
+  selector at `:505-506`). Syntax alone cannot distinguish `ManagedReference` from `Nested` (both are
+  `new T { ... }`); the `.SetRef` vs `.Set` CALL decides. Emit adds one `SourceExpr` `Fold` arm
+  (`null -> "null"`, non-null -> `"new " + TypeRef.FullName + " { ... }"`). Do not plan a task to build
+  object-initializer parsing from scratch; it exists.
+
+- **Recognizer groundwork lands in BOTH copies.** `.SetRef(...)` must be allowlisted in
+  `SceneBuilder.Grammar/FlatShapeRecognizer.cs` (`ProcessComponentSetCall` `:296-322`, with an arg-shape
+  check mirroring `CheckSetCall` `:324`) AND in its analyzer twin
+  `CodeScenes.Analyzers/FlatShapeAnalysis.cs`, kept in lockstep (`RecognizerAgreementTests` /
+  `RecognizerCompletenessTests` fail otherwise). Until then a `.SetRef(...)` file fails the shape gate
+  (SB1003). This is required groundwork and the analyzer twin is easy to miss; put both files in the owning
+  task's TOUCHES.
+
+- **Reconcile granularity (a note that removes a false requirement).** A field-only change AND a
+  concrete-type change BOTH rewrite the WHOLE `new T{...}` value expression at the field's value span (the
+  shipped `PatchComponentField` path, `ComponentPatchApplier.cs:155-183`, fed by the whole-value-span
+  rewrite at `ComponentReconciler.cs:374-402`). There is no member-level sub-span patch today and M9 does
+  not need one; do not plan finer-grained patching than the shipped whole-value-span rewrite. The
+  "rewrites only the affected field argument" wording in the field-edit contracts above (Reconcile ->
+  SourcePatch, and the field-edit test) means that whole value span re-rendered from the projected model,
+  not a member-level sub-span edit inside the closure.
+
+- **Primary risk, its own task with an EditMode test: references INSIDE a managed instance's fields.** The
+  spec puts asset/object refs inside `fields` in scope (`new Aggressive { target = player }`), but
+  `SceneBuilder.Core/Reconcile/NestedValueEmission.cs:229-236` (`IsRepresentable`) DELIBERATELY EXCLUDES
+  `AssetRef`/`ObjectRef`/`Unsupported`/empty-list from nested initializers, and top-level object-ref
+  lowering plus handle pre-rendering (`ComponentPatchApplier.cs:130-140`) operate at top-level field-key
+  granularity. So a `ManagedReference` field holding an object/asset ref cannot reuse the `Nested`
+  representability path as-is: this task must make object-ref/asset-ref resolution and handle pre-rendering
+  DESCEND into `ManagedReference.fields`. This is the milestone's genuine depth and gets its own EditMode
+  test (author `SetRef(x => x.strategy, new Aggressive { target = someHandle })`, Materialize, confirm the
+  live reference resolves; edit the nested target in Unity, confirm it round-trips), separate from the
+  plain-value round-trip tests.
+
+- **Adapter task (Unity-boundary, EditMode-gated).** `SetManagedReference` execution in `PlanExecutor`
+  (instantiate the concrete type -> `managedReferenceValue = instance` -> fill child fields;
+  `concreteType == null` -> clear), following the `SetField`/`SetReference` precedent, with the EditMode
+  coverage the Unity-facing rule requires.
+
+Keep each task's TOUCHES complete (an owned-defect file goes in TOUCHES, or the task is split), and
+enumerate the RED cases literally: the Core test plan above already does, and the
+nested-ref-holding-an-object-ref case stays its own EditMode case, separate from the plain-value
+round-trips.
 
 ## Dependencies
 - **M3** (components + serialized fields; `ComponentData.Fields`, `ValueNode.Nested`, `TypeRef`).
