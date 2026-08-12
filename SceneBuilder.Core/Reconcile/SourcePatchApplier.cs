@@ -273,10 +273,15 @@ namespace SceneBuilder.Core.Reconcile
                         .Where(a => a != null)
                         .ToList();
 
+                    // NormalizeWhitespace so the introduced call's `name: value, name: value` spacing
+                    // matches every other named-argument emitter in this file (RenderRectTransformCall,
+                    // StatementText, InsertTransformArgument) — a byte-identical fixed point requires an
+                    // introduced call to render exactly like a fresh-authored one.
                     var argList = SyntaxFactory.ArgumentList(
                         SyntaxFactory.SeparatedList(ordered.Select(a =>
                             SyntaxFactory.Argument(SyntaxFactory.ParseExpression(a!.NewExpr))
-                                .WithNameColon(SyntaxFactory.NameColon(SyntaxFactory.IdentifierName(a.ArgName))))));
+                                .WithNameColon(SyntaxFactory.NameColon(a!.ArgName)))))
+                        .NormalizeWhitespace();
 
                     chain = SyntaxFactory.InvocationExpression(
                         SyntaxFactory.MemberAccessExpression(

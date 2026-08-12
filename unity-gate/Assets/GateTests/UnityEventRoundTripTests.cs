@@ -245,20 +245,12 @@ public class UnityEventRoundTripTests
             });
     }
 
-    // ---- Item 7: a dynamic OnEvent listener round-trips through convergence --------------------------
-    //
-    // Uses ProveCodeToScene (not ProveCodeToSceneFixedPoint): the Slider fixture's RectTransform
-    // carries a pre-existing, listener-unrelated drift against the generic Component<T> defaults, so
-    // its FIRST sync is not itself a fixed point. ProveCodeToScene's convergence check only requires
-    // the SECOND sync to be zero-edit (stabilizing after that first correction), which is the
-    // contract this listener round-trip actually needs to prove: the live persistent call is correct
-    // and the dynamic OnEvent form survives sync, not that the whole scene (RectTransform included) is
-    // byte-stable on the very first pass.
+    // ---- Item 7: a dynamic OnEvent listener round-trips to a first-sync fixed point --------------
 
     [Test]
     public void Item7_SliderOnValueChangedDynamicToHudSetValue_SourceIsOnEventDynamic_RoundTrips()
     {
-        var result = RoundTripProofHarness.ProveCodeToScene(
+        var result = RoundTripProofHarness.ProveCodeToSceneFixedPoint(
             usings: "",
             body:
                 "        var hud = scene.Add(\"HudHost\").Component<Hud>(_ => { }).Ref<Hud>();\n" +
@@ -272,6 +264,12 @@ public class UnityEventRoundTripTests
                 Assert.AreEqual(hud, call.FindPropertyRelative("m_Target").objectReferenceValue);
                 Assert.AreEqual("SetValue", call.FindPropertyRelative("m_MethodName").stringValue);
                 Assert.AreEqual((int)PersistentListenerMode.EventDefined, call.FindPropertyRelative("m_Mode").intValue);
+            },
+            assertConverged: ctx =>
+            {
+                Assert.AreEqual(
+                    0, ctx.Sync.PatchEdits,
+                    "The first sync over a converged dynamic-listener Slider must apply zero patch edits.");
             });
 
         StringAssert.Contains(

@@ -163,6 +163,13 @@ namespace SceneBuilder.Editor
                 desired = InstanceOverrideRehydrator.Rehydrate(desired, existingMap);
             }
 
+            // spec 37: promote a node hosting a [RequireComponent(typeof(RectTransform))] component
+            // to Kind=="RectTransform" (RectTransformFields defaults) so the differ's matched
+            // omit-at-default arm runs for it instead of the D6 promotion arm. Runs last: it touches
+            // only TransformData.Kind and the five rect fields, independent of the asset/enum/override
+            // stages above. Wired ONCE here so both directions inherit it by default.
+            desired = RectTransformPromotion.Promote(desired, RequireComponentPredicate.RequiresRectTransform);
+
             return new Loaded(desired, parse, spans, assetResolver.Harvested, bootstrapConflicts);
         }
     }

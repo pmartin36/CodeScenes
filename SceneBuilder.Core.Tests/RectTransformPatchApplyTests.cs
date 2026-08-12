@@ -237,7 +237,7 @@ public class ClosureChildScene : ISceneDefinition
 
             // Correct: the introduced call lands on the CHILD's own chain, inside the closure.
             Assert.Contains(
-                "p.Add(\"Label\").RectTransform(anchoredPos:(9f, 9f))",
+                "p.Add(\"Label\").RectTransform(anchoredPos: (9f, 9f))",
                 result);
 
             // The introduced call must not land on the outer Panel chain.
