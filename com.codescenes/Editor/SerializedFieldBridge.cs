@@ -105,6 +105,13 @@ namespace SceneBuilder.Editor
             // never had the field.
             var ownerType = so.targetObject == null ? null : so.targetObject.GetType();
 
+            // Every serialized UnityEvent field's public C# spelling, gathered alongside the field
+            // read so ComponentDefaultTemplate.RegisterMemberSpellings sees the exact same set of
+            // fields the live read does. A field whose serialized member has no compiling public
+            // spelling (TryPublicMemberName false) is left out — SceneSnapshot.MemberSpellings then
+            // carries no entry for it, and the reconciler's existing UnsyncableListener path fires.
+            List<(string SerializedPath, string PublicName)>? spellings = null;
+
             var it = so.GetIterator();
             var enterChildren = true;
             while (it.Next(enterChildren))
@@ -115,9 +122,16 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                var value = UnityEventReader.IsUnityEventField(it)
+                var isUnityEventField = UnityEventReader.IsUnityEventField(it);
+                var value = isUnityEventField
                     ? UnityEventReader.ReadField(it.Copy(), resolveListenerRef)
                     : ReadProperty(it.Copy(), resolveSceneRef);
+
+                if (isUnityEventField && ownerType != null
+                    && SerializedMemberMap.TryPublicMemberName(ownerType, it.propertyPath, out var publicName))
+                {
+                    (spellings ??= new List<(string, string)>()).Add((it.propertyPath, publicName));
+                }
 
                 // Field types M3 cannot represent — object/asset references (mesh, material, physics
                 // material) and LayerMask are M4+ — are SKIPPED, never written. Emitting them would
@@ -132,6 +146,12 @@ namespace SceneBuilder.Editor
                 }
 
                 fields.Add(new KeyValuePair<string, ValueNode>(it.propertyPath, value));
+            }
+
+            if (ownerType?.FullName is { } ownerTypeFullName && spellings is { Count: > 0 })
+            {
+                spellings.Sort((a, b) => string.CompareOrdinal(a.SerializedPath, b.SerializedPath));
+                ComponentDefaultTemplate.RegisterMemberSpellings(ownerTypeFullName, spellings);
             }
 
             return fields;

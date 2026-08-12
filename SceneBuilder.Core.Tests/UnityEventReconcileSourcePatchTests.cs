@@ -559,12 +559,21 @@ public class EmittedListenerPatchScene : ISceneDefinition
         [Fact]
         public void Reconcile_OnEventFieldMissingMemberSpelling_ReportsUnresolvedEventMemberName_NoPatch()
         {
+            // A sibling spellable entry (m_OnValueChanged) is present in the index, proving the
+            // lookup ran; the wired field (m_PrivateEvent) has no entry of its own, so it is the
+            // ONLY thing that should surface UnsyncableListener.
+            const string UnspellableFieldKey = "m_PrivateEvent";
+            var spellings = new[]
+            {
+                new MemberSpelling { Type = new TypeRef(ButtonTypeFullName), SerializedPath = OnValueChangedFieldKey, PublicName = "onValueChanged" },
+            };
+
             var result = Reconciler.Reconcile(
-                ButtonModel(OnValueChangedFieldKey, Void(DoorLogicalId, "Open")),
-                ButtonSnapshot(OnValueChangedFieldKey, null, Void(DoorLogicalId, "Close")),
+                ButtonModel(UnspellableFieldKey, Void(DoorLogicalId, "Open")),
+                ButtonSnapshot(UnspellableFieldKey, spellings, Void(DoorLogicalId, "Close")),
                 Map(),
                 componentHandles: ComponentHandles,
-                listenerCallSpans: ListenerSpans(OnValueChangedFieldKey, new SourceSpan(0, 10)));
+                listenerCallSpans: ListenerSpans(UnspellableFieldKey, new SourceSpan(0, 10)));
 
             var note = Assert.Single(result.Notes);
             Assert.Equal(ConflictKind.UnsyncableListener, note.Kind);

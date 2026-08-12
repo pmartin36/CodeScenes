@@ -87,11 +87,26 @@ namespace SceneBuilder.Editor
             CollectComponentTypeNames(roots, typeNames);
 
             var defaults = new List<ComponentData>(typeNames.Count);
+            var memberSpellings = new List<MemberSpelling>();
             foreach (var typeName in typeNames)
             {
                 if (ComponentDefaultTemplate.TryGet(typeName, out var fields))
                 {
                     defaults.Add(new ComponentData { Type = new TypeRef(typeName), Fields = fields });
+                }
+
+                if (ComponentDefaultTemplate.TryGetMemberSpellings(typeName, out var pairs))
+                {
+                    var type = new TypeRef(typeName);
+                    foreach (var pair in pairs)
+                    {
+                        memberSpellings.Add(new MemberSpelling
+                        {
+                            Type = type,
+                            SerializedPath = pair.SerializedPath,
+                            PublicName = pair.PublicName,
+                        });
+                    }
                 }
             }
 
@@ -100,6 +115,7 @@ namespace SceneBuilder.Editor
                 SchemaVersion = 1,
                 Roots = roots,
                 ComponentDefaults = defaults.ToArray(),
+                MemberSpellings = memberSpellings.ToArray(),
                 FieldExclusions = SerializedFieldExclusions.Policy.Instance,
             };
         }

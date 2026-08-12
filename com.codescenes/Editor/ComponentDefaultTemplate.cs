@@ -45,6 +45,13 @@ namespace SceneBuilder.Editor
         // whose construction failed.
         private static readonly Dictionary<string, FieldMap> TemplatesByTypeName = new();
 
+        // The per-domain UnityEvent member-spelling registry TryGetMemberSpellings answers from,
+        // keyed by Type.FullName. First-wins per type: a type's set of spellable UnityEvent fields is
+        // a fixed fact of its declaration, so the first component of that type read in this domain
+        // settles it. Populated by SerializedFieldBridge.CollectFields, drained by
+        // SceneSnapshotReader.FromRoots into SceneSnapshot.MemberSpellings.
+        private static readonly Dictionary<string, IReadOnlyList<(string SerializedPath, string PublicName)>> MemberSpellingsByTypeName = new();
+
         /// <summary>
         /// THE component-creation primitive: <c>AddComponent</c> plus the <see cref="EditorCreationDefaults"/>
         /// overlay. Returns null when the type cannot be added standalone. Never registers Undo.
@@ -137,5 +144,31 @@ namespace SceneBuilder.Editor
         /// </summary>
         internal static bool TryGet(string typeFullName, out FieldMap fields) =>
             TemplatesByTypeName.TryGetValue(typeFullName, out fields!);
+
+        /// <summary>
+        /// Records <paramref name="typeFullName"/>'s serialized-UnityEvent-field public spellings,
+        /// first-wins. Called by <see cref="SerializedFieldBridge.CollectFields"/> for every component
+        /// read (real or throwaway-template); ignored when <paramref name="spellings"/> is empty, so a
+        /// type with no UnityEvent fields never occupies an entry.
+        /// </summary>
+        internal static void RegisterMemberSpellings(
+            string typeFullName, IReadOnlyList<(string SerializedPath, string PublicName)> spellings)
+        {
+            if (spellings.Count == 0 || MemberSpellingsByTypeName.ContainsKey(typeFullName))
+            {
+                return;
+            }
+
+            MemberSpellingsByTypeName[typeFullName] = spellings;
+        }
+
+        /// <summary>
+        /// The registry <see cref="SceneSnapshotReader.FromRoots"/> drains into
+        /// <see cref="SceneSnapshot.MemberSpellings"/>. Absent for a type with no spellable serialized
+        /// UnityEvent field.
+        /// </summary>
+        internal static bool TryGetMemberSpellings(
+            string typeFullName, out IReadOnlyList<(string SerializedPath, string PublicName)> spellings) =>
+            MemberSpellingsByTypeName.TryGetValue(typeFullName, out spellings!);
     }
 }

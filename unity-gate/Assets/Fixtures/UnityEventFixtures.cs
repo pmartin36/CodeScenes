@@ -69,6 +69,13 @@ public class MyEvent : UnityEvent<int>
 {
 }
 
+// A serialized UnityEvent field with no compiling public spelling: private, and not named by the
+// "m_" convention, so no public field or property can back it.
+public class HiddenEventHost : MonoBehaviour
+{
+    [SerializeField] private UnityEvent hiddenEvent;
+}
+
 // A listener host carrying every non-Button serialized UnityEvent shape: the plain form, the
 // single-generic form, the two-generic form, and a user subclass of a generic form.
 public class Pinger : MonoBehaviour

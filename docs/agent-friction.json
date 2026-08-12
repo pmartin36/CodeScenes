@@ -2,17 +2,17 @@
   "entries": {
     "Assertion failed on expression: '!gAlreadyClosing'": {
       "class": "ENVIRONMENT",
-      "count": 4,
+      "count": 6,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-11",
+      "last_seen": "2026-08-12",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "Assertion failed on expression: '!gAlreadyClosing'"
     },
     "Assertion failed on expression: 'm_PodArrays.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 3,
+      "count": 5,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-11",
+      "last_seen": "2026-08-12",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
       "verbatim": "Assertion failed on expression: 'm_PodArrays.empty()'"
     },
@@ -66,9 +66,9 @@
     },
     "ExecuteCommandByName: Parameter validation failed: Required parameter 'asset' is missing or empty": {
       "class": "TOOLING",
-      "count": 1,
+      "count": 2,
       "first_seen": "2026-08-06",
-      "last_seen": "2026-08-06",
+      "last_seen": "2026-08-12",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-spec36.log",
       "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'asset' is missing or empty"
     },
@@ -87,6 +87,14 @@
       "last_seen": "2026-08-06",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-spec36.log",
       "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'file' is missing or empty"
+    },
+    "ExecuteCommandByName: Parameter validation failed: Required parameter 'path' is missing or empty": {
+      "class": "TOOLING",
+      "count": 1,
+      "first_seen": "2026-08-12",
+      "last_seen": "2026-08-12",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-m8-1.log",
+      "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'path' is missing or empty"
     },
     "[SceneBuilder] Sync wrote DemoScene.cs: emitted builder source DOES NOT COMPILE (<n> error(s)). | line 784: CS0542: 'Materials': member names cannot be the same as their enclosing type": {
       "class": "PRODUCT",
@@ -116,10 +124,20 @@
       "head": "e80cdd42235e5bcb",
       "size": 167575
     },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-fitsize-1.log": {
+      "bytes": 103303,
+      "head": "e7d434c018958e01",
+      "size": 103303
+    },
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-m7-1.log": {
       "bytes": 389325,
       "head": "ce7cc52b6926621b",
       "size": 389325
+    },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-m8-1.log": {
+      "bytes": 394953,
+      "head": "47771ca6183f8f4f",
+      "size": 394953
     },
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec36.log": {
       "bytes": 297980,
