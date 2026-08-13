@@ -131,7 +131,7 @@ Materialize, a second build applied zero plan ops, and an Inspector edit of `m_S
 `new UnityEngine.Vector3(7f, 8f, 9f)` through the new `Fold`-based renderer.
 
 Still pending in `specs/`: 10 (M9
-SerializeReference), 12 (M11 animation, blocked on Animator research) and 34 (licensing, blocked on
+SerializeReference) and 34 (licensing, blocked on
 two spikes). `00-foundation.md` stays in `specs/` as the living base contract. Unowned defects
 measured during builds, with no task claiming a fix, are tracked in `docs/open-defects.md`.
 

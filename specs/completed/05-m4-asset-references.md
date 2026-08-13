@@ -59,7 +59,7 @@ directions: code sets asset-ref fields in the scene; scene edits to asset-ref fi
 - Scene-to-scene object references (GameObject/Component handles) — that is **M5**.
 - Prefab **instances** in the scene and their overrides — **M6 / M10**.
 - Creating or editing the asset's own contents (materials, meshes) — M4 only references existing
-  assets; it never authors them. (Generated clips are M11.)
+  assets; it never authors them.
 - `[SerializeReference]` managed references — **M9**.
 - Nested asset creation or importing new files.
 

@@ -43,5 +43,4 @@ contents, never overwrite-from-fresh, or fileIDs churn). Everything below reuses
 - Builds directly on `specs/39-prefab-authoring.md` (flat authoring + the shared target seam + prefab
   identity), `specs/completed/07-m6-prefab-instances.md` (instancing), and
   `specs/completed/11-m10-prefab-overrides.md` (instance overrides).
-- Overlaps the general "author an asset, not a scene" concern also present in
-  [advanced-animation.md](advanced-animation.md).
+- Touches the general "author an asset, not a scene" concern.
