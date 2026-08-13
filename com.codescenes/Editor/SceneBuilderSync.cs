@@ -158,11 +158,16 @@ namespace SceneBuilder.Editor
         /// emits a patch that applies byte-identically (PatchEdits &gt; 0, EditsApplied == 0), so both
         /// the manual and auto-sync paths inherit the guard by default.
         /// </summary>
-        public static SyncResult Run(
+        /// <summary>
+        /// The target-parameterized core the 4-arg <see cref="Run(string, string, Scene, SceneBuilder.Core.Model.SceneSnapshot?)"/>
+        /// delegates to: identical sync behavior, with the editor-boundary read point routed through
+        /// <paramref name="target"/> instead of a scene it reads itself.
+        /// </summary>
+        internal static SyncResult SyncCore(
+            IBuildSyncTarget target,
             string builderPath,
             string sidecarPath,
-            Scene scene,
-            SceneBuilder.Core.Model.SceneSnapshot? preAssembledSnapshot)
+            SceneBuilder.Core.Model.SceneSnapshot? preAssembled)
         {
             var source = File.ReadAllText(builderPath);
             var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
@@ -204,8 +209,8 @@ namespace SceneBuilder.Editor
             // read (a preAssembledSnapshot, e.g. auto-sync's ChangeScopedSnapshot, carries its own
             // resolver set by the caller).
             var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
-            var snapshot = preAssembledSnapshot
-                ?? SceneSnapshotReader.Read(scene, sceneRef, ObjectReferenceResolver.BuildListenerResolver(map));
+            var snapshot = preAssembled
+                ?? target.ReadSnapshot(sceneRef, ObjectReferenceResolver.BuildListenerResolver(map));
 
             var result = Reconciler.Reconcile(
                 desired,
@@ -344,6 +349,16 @@ namespace SceneBuilder.Editor
                 CompileErrors = compileErrors,
                 Notes = surfacedNotes.ToArray(),
             };
+        }
+
+        public static SyncResult Run(
+            string builderPath,
+            string sidecarPath,
+            Scene scene,
+            SceneBuilder.Core.Model.SceneSnapshot? preAssembledSnapshot)
+        {
+            using var target = new SceneBuildSyncTarget(scene, scene.path);
+            return SyncCore(target, builderPath, sidecarPath, preAssembledSnapshot);
         }
 
         private static IReadOnlyDictionary<string, SourceSpan> MergeAnchors(

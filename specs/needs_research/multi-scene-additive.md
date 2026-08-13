@@ -1,6 +1,6 @@
 # needs_research — Multi-scene / additive scenes
 
-**Status:** research stub, not a build milestone. v1 (M0–M11) targets a SINGLE scene per builder file.
+**Status:** research stub, not a build milestone. v1 (M0–M10) targets a SINGLE scene per builder file.
 
 ## Problem
 Unity projects routinely load multiple scenes additively (`LoadSceneMode.Additive`) — e.g. a manager

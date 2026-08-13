@@ -564,3 +564,18 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   object-ref (and likely asset-ref) member when rendering a `ManagedReference`/`Nested` initializer,
   the same omit-at-default rule the top-level field path uses. OWNER: unassigned. FOUND-BY:
   m9-serializereference (live-verify).
+
+- SEVERITY low (spec self-inconsistency) — specs/39-prefab-authoring.md:188-200 (Authoring API
+  example: root.Name(...)/root.Component<>() called directly on the PrefabRoot param and
+  root.Add=child) contradicts the same spec's normative parser statement at 39:204-209 + 39:216-220
+  ("statement grammar is unchanged; recognition is the only parse change"). The richer example needs
+  new grammar the decomposition forbids. b1-t2 follows the normative grammar-unchanged text; the
+  Name/Component-on-root sugar is NOT delivered. Reconcile the spec (drop the sugar from the example,
+  or spec a new grammar milestone). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).
+
+- SEVERITY low (mirror drift) — SceneBuilder.Grammar/FlatShapeRecognizer.Discovery.cs:22-23
+  (TryFindBuildMethod) hard-codes "ISceneDefinition" and was NOT widened for IPrefabDefinition when
+  BuilderParser.FindBuildMethod (SceneBuilder.Core/Parsing/BuilderParser.cs:129-131) was. Build-time
+  parsing is unaffected; the CodeScenes analyzer's IDE diagnostics recognize a prefab builder only via
+  its single-Build-method fallback (:38-50), so a prefab file with multiple Build methods gets no
+  in-IDE recognition. Out of spec-39 (no analyzer scope). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).

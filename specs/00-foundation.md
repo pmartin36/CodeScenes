@@ -1,6 +1,6 @@
 # CodeScenes — Foundation Spec (the contract)
 
-This is the authoritative contract. Every milestone spec (M0–M11, plus M1b/M2b/M2c/M-UI) binds to the
+This is the authoritative contract. Every milestone spec (M0–M10, plus M1b/M2b/M2c/M-UI) binds to the
 types, identity model, seam, and conventions defined here. Milestone specs MUST use these type names verbatim and
 MUST NOT invent parallel concepts; if a milestone needs a new type, it names it and flags it at the
 top of its doc as an addition to this contract.
@@ -365,10 +365,6 @@ agents into reporting a failed gate as green. Never report a gate as passed on a
 - **M10 Prefab-instance override round-trip** — represent `m_Modification.m_Modifications` (per-property
   overrides, added/removed components & GameObjects) keyed on `(targetPrefabId, targetObjectId)`; both
   directions. Builds on M6's whole-prefab support.
-- **M11 Animation — common easing patterns (v0)** — generate simple `AnimationClip` assets from a
-  declarative set of common easing curves (linear, ease-in/out quad/cubic, bounce, elastic, etc.)
-  applied to named properties; reference them from `Animator`/`Animation`. Advanced animation content
-  is explicitly deferred to `needs_research`.
 - **M-Auto Seamless automatic sync (the product, not a toggle)** — sync is on by default, with no
   buttons, no toggles and no panel: code→scene fires from the plugin's own **debounced file watcher** on
   the builder under `<ProjectRoot>/SceneBuilders/` (Unity does not watch outside `Assets/`); scene→code
@@ -379,13 +375,13 @@ agents into reporting a failed gate as green. Never report a gate as passed on a
   always-on continuous per-keystroke sync stays parked in `needs_research`.
 
 ### Folders
-- `specs/*.md` — the active contract (this file) + milestone specs **M0, M1, M1b, M2, M2b, M2c, M3–M11, M-UI, M-Auto**.
+- `specs/*.md` — the active contract (this file) + milestone specs **M0, M1, M1b, M2, M2b, M2c, M3–M10, M-UI, M-Auto**.
 - `specs/completed/` — a milestone moves here once its Core tests are green in CI **and** the user's
   Unity confirmation checklist passes.
 - `specs/needs_research/` — open problems not yet spec-ready, each a research stub (not a build
   milestone) until promoted: **advanced animation content** (arbitrary curves, tangents, animation
   events, retargeting), **animation FSM / AnimatorController state machines** (phased: a simple v0
-  set — states, transitions, parameters, conditions — promotable to a milestone after M11, then an
+  set — states, transitions, parameters, conditions — promotable to a milestone later, then an
   advanced v1 set — layers, sub-state machines, blend trees), **multi/additive scenes**, **headless
   CI generation**, **live per-keystroke sync**, **UI Toolkit (UIElements) support** (disjoint from the
   GameObject/`GlobalObjectId` model — UXML/USS text round-trip + no serialized event surface; uGUI is the
@@ -415,7 +411,6 @@ the authoritative index so the additions stay coherent. Each is defined in the o
 | `ValueNode.UnityEventListeners` (+`UnityEventListener`), op `SetUnityEvent` | persistent-listener model | M8 |
 | `ValueNode.ManagedReference`, op `SetManagedReference` | `[SerializeReference]` polymorphic value | M9 |
 | `PropertyOverride`/`OverrideTarget`/`AddedComponent` + 4 override collections on `PrefabInstanceNode` | prefab override round-trip | M10 |
-| `AnimationClipSpec`/`AnimationTrack`/`EasingKind`/`GeneratedClipRef` | easing-clip generation | M11 |
 | `InstantiatePrefab` PlanOp | instantiate a prefab asset into the scene | M6 |
 | `IdentityMap.IsManaged(goid)→bool` | single guard so Materialize never destroys unmapped user objects (§5) | M1b |
 | `AppendStatement`/`RemoveStatement`; `ReconcileResult.AddedEntries`/`RemovedLogicalIds` | structural sync-back (create/delete objects) | M2b |

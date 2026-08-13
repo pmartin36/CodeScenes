@@ -172,7 +172,12 @@ namespace SceneBuilder.Editor
         /// resolvable type/asset/identity problem — returns a <see cref="BuildResult"/> whose
         /// <see cref="BuildResult.Diagnostics"/> carries every error found, scene left untouched.
         /// </summary>
-        public static BuildResult Run(string builderPath, string scenePath, string sidecarPath, Scene scene)
+        /// <summary>
+        /// The target-parameterized core <see cref="Run"/> delegates to: identical build behavior,
+        /// with the editor-boundary read/execute/persist points routed through <paramref name="target"/>
+        /// instead of a scene it opens itself.
+        /// </summary>
+        internal static BuildResult RunCore(IBuildSyncTarget target, string builderPath, string sidecarPath)
         {
             var source = File.ReadAllText(builderPath);
 
@@ -232,23 +237,21 @@ namespace SceneBuilder.Editor
             var priorSidecar = existingMap ?? new IdentityMap();
             var remapped = IdentityRemapper.Remap(parse.Model, priorSidecar);
 
-            // Read the PASSED scene as `actual` — never NewScene / wipe. Threaded with the same
-            // scene-object identity resolver Sync uses (SceneBuilderSync.cs:206-207) so an assigned
-            // in-scene reference resolves to a LogicalId instead of reading Unsupported and being
-            // pruned — a rebuild from a converged source sees the live reference and emits no
+            // Read the hierarchy this target governs as `actual` — never NewScene / wipe. Threaded
+            // with the same scene-object identity resolver Sync uses (SceneBuilderSync.cs:206-207) so
+            // an assigned in-scene reference resolves to a LogicalId instead of reading Unsupported and
+            // being pruned — a rebuild from a converged source sees the live reference and emits no
             // redundant SetReference for it.
             var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(remapped);
-            var snapshot = SceneSnapshotReader.Read(scene, sceneRef, ObjectReferenceResolver.BuildListenerResolver(remapped));
+            var snapshot = target.ReadSnapshot(sceneRef, ObjectReferenceResolver.BuildListenerResolver(remapped));
 
             var plan = Materializer.Materialize(desired, snapshot, remapped);
 
             PlanExecutor.ExecutionResult execution;
-            using (SuppressionScope.SuppressScene())
+            using (target.BeginWrite())
             {
-                execution = PlanExecutor.Execute(plan, remapped, scene);
-
-                EditorSceneManager.MarkSceneDirty(scene);
-                EditorSceneManager.SaveScene(scene, scenePath);
+                execution = target.Execute(plan, remapped);
+                target.Persist();
             }
 
             // Persist the CURRENT code structure only (drop destroyed orphans), carrying the
@@ -258,7 +261,7 @@ namespace SceneBuilder.Editor
             var currentStructure = new IdentityMap
             {
                 SchemaVersion = parse.IdentityMap.SchemaVersion,
-                Scene = scenePath,
+                Scene = target.TargetPath,
                 // §M4: ensure every referenced GUID has an Assets[] entry with its CURRENT path so the
                 // cache stays a valid move-recovery source and future syncs re-derive correctly. A
                 // re-referenced GUID refreshes its LastKnownPath (e.g. after a move).
@@ -276,18 +279,18 @@ namespace SceneBuilder.Editor
             // the file watcher driving code->scene would fire on it for nothing.
             SceneBuilderPaths.WriteIfChanged(sidecarPath, IdentityMapJson.Serialize(map));
 
-            // Checkpoint the artifacts this Build just committed: the scene changed (re-read the
+            // Checkpoint the artifacts this Build just committed: the hierarchy changed (re-read the
             // snapshot post-save); the source did not, so `desired` (already resolved above, against
             // the PRE-harvest asset cache) is reused rather than re-derived — re-deriving against the
             // just-merged `map.Assets` would break move-recovery for any authored path the harvest
             // just overwrote the cache's LastKnownPath for (LoweringResolver.RecoverGuidFromCache).
             var statePath = SceneBuilderPaths.StateForSidecar(sidecarPath);
-            var committedSnapshot = SceneSnapshotReader.Read(
-                scene, ObjectReferenceResolver.BuildSceneRefResolver(map), ObjectReferenceResolver.BuildListenerResolver(map));
-            SyncCheckpointWriter.Write(statePath, scenePath, desired, committedSnapshot, map);
+            var committedSnapshot = target.ReadSnapshot(
+                ObjectReferenceResolver.BuildSceneRefResolver(map), ObjectReferenceResolver.BuildListenerResolver(map));
+            SyncCheckpointWriter.Write(statePath, target.TargetPath, desired, committedSnapshot, map);
 
             // No AssetDatabase.Refresh(): the sidecar lives outside Assets/ (nothing to import), and the
-            // scene was already registered with the AssetDatabase by EditorSceneManager.SaveScene above.
+            // target was already registered with the AssetDatabase by target.Persist() above.
             // A Refresh here would cost a domain reload for no gain.
 
             // spec 35 D2: a located report the plan carries (an authored field the adapter never treats as
@@ -299,7 +302,7 @@ namespace SceneBuilder.Editor
                 plan.Conflicts, builderPath, new SceneHierarchyPath(map, Array.Empty<IdentityMapEntry>()));
 
             Debug.Log($"[SceneBuilder] Built in place: {execution.GameObjectsByLogicalId.Count} object(s), " +
-                      $"{plan.Ops.Length} plan op(s) into {scenePath}. Sidecar: {sidecarPath}");
+                      $"{plan.Ops.Length} plan op(s) into {target.TargetPath}. Sidecar: {sidecarPath}");
 
             LastBuilderPath = builderPath;
             LastSidecarPath = sidecarPath;
@@ -312,6 +315,12 @@ namespace SceneBuilder.Editor
                 Flags = plan.Diagnostics,
                 Notes = surfacedNotes.ToArray(),
             };
+        }
+
+        public static BuildResult Run(string builderPath, string scenePath, string sidecarPath, Scene scene)
+        {
+            using var target = new SceneBuildSyncTarget(scene, scenePath);
+            return RunCore(target, builderPath, sidecarPath);
         }
 
         private static IdentityMap WithGlobalObjectIds(

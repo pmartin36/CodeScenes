@@ -76,10 +76,6 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/12` M11 animation.** NOT buildable as written — its only playback path is the legacy
-  `UnityEngine.Animation` component, which Paul rejected. Needs the parked AnimatorController work
-  promoted out of `needs_research` and a spec rewrite BEFORE any pipeline run.
-
 - **`specs/34` M-Licensing.** Activation, seats and the 14-day trial, for the Gumroad build only.
   Not sequenced against the above — it gates shipping, not any other milestone. Two open items block
   a pipeline run: whether `ECDsa` P-256 verification works on the target editor across all three

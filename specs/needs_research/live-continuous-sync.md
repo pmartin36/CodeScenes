@@ -1,6 +1,6 @@
 # needs_research — Live / continuous (per-keystroke) sync
 
-**Status:** research stub, not a build milestone. v1 (M0–M11) syncs on an explicit **reconcile
+**Status:** research stub, not a build milestone. v1 (M0–M10) syncs on an explicit **reconcile
 gesture** (build, or capture-scene-to-code), not continuously.
 
 ## Problem

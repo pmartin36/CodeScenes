@@ -37,8 +37,8 @@ for built-in meshes only, never materials.
   (spec 07) with root and nested overrides (specs 11/24/25/27). Defining a new prefab asset from code
   does not exist (`specs/needs_research/prefab-authoring.md` is a research stub). Repeated structures
   are authored inline, or toggled with `.Active(bool)` (`com.codescenes/Runtime/NodeHandle.cs:70`).
-- **No skeletal animation.** `specs/12-m11-animation-easing.md` is blocked on Animator research, so
-  nothing CodeScenes authors drives an animated rig.
+- **No skeletal animation.** CodeScenes authors scene and prefab structure, not animation content, so
+  nothing it authors drives an animated rig.
 - **Flat statement list.** The builder is parsed from source text, not executed. A scene of many
   repeated tiles becomes many repeated statements, so large tiled layouts read poorly on camera.
 - **One active scene at a time.** Concurrent sync of several open, dirty scenes is deferred

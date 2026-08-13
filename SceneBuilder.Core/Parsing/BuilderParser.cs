@@ -126,9 +126,10 @@ namespace SceneBuilder.Core.Parsing
 
             foreach (var cls in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
             {
-                var implementsSceneDefinition = cls.BaseList?.Types
-                    .Any(t => t.Type is IdentifierNameSyntax id && id.Identifier.Text == "ISceneDefinition") == true;
-                if (!implementsSceneDefinition)
+                var implementsBuilderInterface = cls.BaseList?.Types
+                    .Any(t => t.Type is IdentifierNameSyntax id &&
+                        (id.Identifier.Text == "ISceneDefinition" || id.Identifier.Text == "IPrefabDefinition")) == true;
+                if (!implementsBuilderInterface)
                 {
                     continue;
                 }

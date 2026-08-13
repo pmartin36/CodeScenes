@@ -10,7 +10,7 @@ recur. `TOOLING` is Unity's Pipeline CLI. `ENVIRONMENT` is the editor/host.
 | Count | Class | First | Last | Message |
 |---|---|---|---|---|
 | 7 | ENVIRONMENT | 2026-07-31 | 2026-08-12 | Assertion failed on expression: '!gAlreadyClosing' |
-| 6 | ENVIRONMENT | 2026-07-31 | 2026-08-12 | Assertion failed on expression: 'm_PodArrays.empty()' |
+| 7 | ENVIRONMENT | 2026-07-31 | 2026-08-13 | Assertion failed on expression: 'm_PodArrays.empty()' |
 | 4 | TOOLING | 2026-07-31 | 2026-07-31 | Command 'get_component_properties' failed: 'type' is required when 'target' is a GameObject. |
 | 3 | ENVIRONMENT | 2026-07-31 | 2026-08-11 | Assertion failed on expression: 'm_RendererNodes.empty()' |
 | 3 | PRODUCT | 2026-07-31 | 2026-07-31 | [SceneBuilder] Sync wrote LiveVerifyConsole.cs: emitted builder source DOES NOT COMPILE (1 error(s)). \| line 23: CS0841: Cannot use local variable 'button' before it is declared |
