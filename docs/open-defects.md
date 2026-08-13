@@ -552,3 +552,15 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   task without touching the emit path, so it is re-homed here (repo-tracked) to survive the run.
   Closing it needs the List node to carry a shared element type, or `EmittedTypeToken` to gain a
   `ManagedReference` arm. OWNER: unassigned. FOUND-BY: m9-serializereference.
+
+- SEVERITY low (cosmetic) — a `[SerializeReference]` managed instance's null object-ref fields are
+  rendered EXPLICITLY on sync as `target = NodeHandle.None.As<UnityEngine.GameObject>()` even when the
+  author never wrote the field. The reconciler's whole-value-span rewrite re-renders the entire
+  `new T { ... }` initializer including a null/default object-ref member, so a clean
+  `new Aggressive { range = 5f }` becomes `new Aggressive { range = 5f, target =
+  NodeHandle.None.As<UnityEngine.GameObject>() }` after the first sync. MEASURED during M9 live-verify
+  to be a STABLE FIXED POINT (re-build converges then 0 ops, re-sync 0 patch edits, source byte-stable
+  thereafter), so it is unauthored verbosity, not round-trip churn. Fix direction: omit a null/default
+  object-ref (and likely asset-ref) member when rendering a `ManagedReference`/`Nested` initializer,
+  the same omit-at-default rule the top-level field path uses. OWNER: unassigned. FOUND-BY:
+  m9-serializereference (live-verify).

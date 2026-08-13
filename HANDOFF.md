@@ -5,7 +5,7 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=720 failed=0 skipped=0)`
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=744 failed=0 skipped=0)`
 (2026-08-12, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
 skip is not a Unity pass — force it). `verify.sh` now discounts one known host engine message
 by exact text (`69a74df`); a crash or any other error still fails.
@@ -76,9 +76,6 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/10` M9 SerializeReference.** Depends on `ValueWalk` being right: a `ManagedReference`'s
-  fields may contain further `ManagedReference`s, nesting arbitrarily. If recursion is wrong anywhere,
-  this is where it hurts most.
 - **`specs/12` M11 animation.** NOT buildable as written — its only playback path is the legacy
   `UnityEngine.Animation` component, which Paul rejected. Needs the parked AnimatorController work
   promoted out of `needs_research` and a spec rewrite BEFORE any pipeline run.

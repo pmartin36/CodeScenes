@@ -240,3 +240,35 @@ assert the drop only for a genuinely unspellable member. Gate `passed=720`. Live
 in-editor listener on a plain `UnityEvent onPlain` field syncs to
 `.OnEvent(x => x.onPlain, target, t => t.Foo())` with zero drop-notes, a dynamic `UnityEvent<float>`
 field syncs with `dynamic: true`, and `Button.m_OnClick` still round-trips.
+
+## 10 - M9 SerializeReference polymorphism
+
+Author and round-trip `[SerializeReference]` managed-reference fields (interface/abstract/base-typed
+fields holding a concrete instance) in both directions: null, concrete-type change, the instance's own
+serialized fields, and nested managed references at arbitrary depth. Authoring is
+`SetRef(x => x.field, new Concrete { ... })` (and `null`); the `new T { ... }` object-initializer
+round-trip was already shipped for `ValueNode.Nested`, so M9 reused it rather than rebuilding it (an
+object-initializer spike established this before the run and reshaped the decomposition around the real
+risks).
+
+The model layer added `ValueNode.ManagedReference(TypeRef? concreteType, FieldMap fields)` as a new
+`ValueWalk` container kind (all five walk primitives plus the descent-scan guard, the
+`UnityEventListeners`-sized job), the `SetManagedReference` plan op, and the `Differ` whole-node arm (a
+type change replaces the instance, never a field-level patch). Parse added a `SetRef`-only
+`ParseManagedReference` and the `.SetRef` recognizer allowlisting in both `FlatShapeRecognizer` and its
+analyzer twin. The genuine-depth work was object/asset refs INSIDE a managed instance's fields:
+`NestedValueEmission` excluded those kinds, so resolution and handle pre-rendering had to descend into
+`ManagedReference.fields`. Built in two buckets (`e453cb9` Core, `5b7d9b5` adapter).
+
+Gate `passed=744 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`). Live-verified across all eight
+confirmation items (`SceneBuilderTest/Logs/live-verify-m9-1.log`): a `new Aggressive { range = 5f }`
+materializes to a live `Aggressive` managed reference; an in-scene `range` edit round-trips to `9f`
+with the type unchanged; switching to `Flee` rewrites the whole construction with no stale
+`Aggressive` fields; None syncs to `SetRef(..., null)`; a nested `Composite` round-trips a nested
+`primary.range` edit; a converged scene is idempotent both directions; an object ref inside the
+instance (`new Aggressive { target = doorA }`) resolves live and round-trips to `doorB` on reassign;
+and a manufactured missing type surfaces a located conflict with source untouched and the field not
+nulled. Two low follow-ups are filed in `docs/open-defects.md`, both non-blocking: a list of managed
+refs needs a shared element type token, and a null object-ref member inside a managed instance renders
+explicitly (`target = NodeHandle.None.As<...>()`) rather than being omitted at default. The latter is a
+verified fixed point (cosmetic verbosity, not churn).
