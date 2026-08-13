@@ -261,6 +261,23 @@ namespace SceneBuilder.Core.Reconcile
                 Location = location,
             };
 
+        // A nested prefab-instance node's live name diverged from its source. A `PrefabInstanceNode`
+        // has no independent authoring representation for "name" -- its statement is always
+        // `Instance(<path>)` / `Instance(Prefabs.X)`, whose first argument is the source path, not a
+        // name. Rewriting that argument as a name would repoint the reference at a nonexistent asset,
+        // so the rename is surfaced here instead and NO edit is emitted (Reconciler.cs `case SetName`).
+        public static Conflict UnrepresentableInstanceRename(string logicalId, string? globalObjectId, SourceSpan? location) =>
+            new()
+            {
+                Kind = ConflictKind.UnrepresentableInstanceRename,
+                LogicalId = logicalId,
+                GlobalObjectId = globalObjectId,
+                Reason = $"Cannot rename prefab instance '{logicalId}': its `.Instance(...)` statement's first " +
+                    "argument is the source path, not a name, so a nested instance has no independent authoring " +
+                    "representation for its name. The live rename was NOT written back to source.",
+                Location = location,
+            };
+
         // A live `[SerializeReference]` value's recorded `managedReferenceFullTypename` resolves to
         // no loadable C# type (the concrete type was renamed or removed). A STANDING condition of
         // the scene+source (recurs on every reconcile until the type is restored or the field is

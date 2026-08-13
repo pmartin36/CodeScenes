@@ -89,6 +89,14 @@ namespace SceneBuilder.Authoring
         /// </summary>
         public InstanceHandle Instance(string assetPath) => new InstanceHandle();
 
+        /// <summary>
+        /// Instantiate a prefab instance nested under this GameObject from a generated typed ref
+        /// (e.g. <c>Prefabs.Gun</c>). Returns a typed handle so nested targets can be addressed via a
+        /// compiler-checked selector (<c>.On(t =&gt; t.Turret.Barrel, ...)</c>) and overrides authored at
+        /// existing-vocabulary depth (the instance root and its direct children).
+        /// </summary>
+        public InstanceHandle<TRef> Instance<TRef>(TRef prefab) where TRef : PrefabRef => new InstanceHandle<TRef>();
+
         /// <summary>Attach a component of type <typeparamref name="T"/> with no field overrides.</summary>
         public NodeHandle Component<T>() => this;
 

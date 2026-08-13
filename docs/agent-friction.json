@@ -2,15 +2,15 @@
   "entries": {
     "Assertion failed on expression: '!gAlreadyClosing'": {
       "class": "ENVIRONMENT",
-      "count": 7,
+      "count": 8,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-12",
+      "last_seen": "2026-08-13",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "Assertion failed on expression: '!gAlreadyClosing'"
     },
     "Assertion failed on expression: 'm_PodArrays.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 7,
+      "count": 8,
       "first_seen": "2026-07-31",
       "last_seen": "2026-08-13",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
@@ -148,6 +148,11 @@
       "bytes": 320025,
       "head": "fea02c60a8a4ec8c",
       "size": 320025
+    },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-prefab39-2.log": {
+      "bytes": 271344,
+      "head": "970753bb22eee257",
+      "size": 271344
     },
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec36.log": {
       "bytes": 297980,

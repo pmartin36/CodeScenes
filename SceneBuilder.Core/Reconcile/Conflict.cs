@@ -61,6 +61,13 @@ namespace SceneBuilder.Core.Reconcile
         // which requires the component anchor, the component type full name, the event field key,
         // the listener's index and a ListenerReportReason.
         UnsyncableListener,
+
+        // A nested prefab-instance node's live name diverged from its source. A `PrefabInstanceNode`
+        // has no independent authoring representation for "name" -- it is always emitted as
+        // `Instance(<path>)` / `Instance(Prefabs.X)`, and that statement's first argument IS the
+        // path, not a name. Rewriting it as though it were a name would corrupt the reference. Never
+        // silently applied; the builder statement is left untouched.
+        UnrepresentableInstanceRename,
     }
 
     // Why one persistent listener is left alone in BOTH directions. Required (no default) at

@@ -294,6 +294,17 @@ namespace SceneBuilder.Core.Reconcile
                 switch (op)
                 {
                     case SetName:
+                        // A PrefabInstanceNode's statement is `Instance(<path>)` / `Instance(Prefabs.X)`
+                        // -- arg[0] is the source path, not a name -- so rewriting it as a name would
+                        // corrupt the reference. Surface a Conflict instead and emit no edit.
+                        if (modelByLogicalId.TryGetValue(op.LogicalId, out var renamedModel)
+                            && renamedModel is PrefabInstanceNode)
+                        {
+                            conflicts.Add(ConflictDetector.UnrepresentableInstanceRename(
+                                op.LogicalId, goid, anchors?.GetValueOrDefault(op.LogicalId)));
+                            break;
+                        }
+
                         edits.Add(new PatchArgument
                         {
                             Anchor = op.LogicalId,
