@@ -46,6 +46,28 @@ namespace SceneBuilder.Editor
         /// <summary>Absolute path of the sync checkpoint for <paramref name="builderName"/>.</summary>
         public static string State(string builderName) => Path.Combine(BuildersDirectory, builderName + StateSuffix);
 
+        /// <summary>Folder, directly under the project root, holding prefab builder sources + sidecars — mirrors <see cref="BuildersFolderName"/> for prefabs.</summary>
+        public const string PrefabBuildersFolderName = "Prefabs";
+
+        /// <summary>Absolute path of the prefab builders folder. May not exist yet — see <see cref="EnsurePrefabBuildersDirectory"/>.</summary>
+        public static string PrefabBuildersDirectory => Path.Combine(ProjectRoot, PrefabBuildersFolderName);
+
+        /// <summary>Absolute path of the prefab builder source for <paramref name="builderName"/>.</summary>
+        public static string PrefabBuilder(string builderName) => Path.Combine(PrefabBuildersDirectory, builderName + ".cs");
+
+        /// <summary>Absolute path of the identity sidecar for prefab builder <paramref name="builderName"/>.</summary>
+        public static string PrefabSidecar(string builderName) => Path.Combine(PrefabBuildersDirectory, builderName + SidecarSuffix);
+
+        /// <summary>
+        /// Creates the prefab builders folder if missing and returns it. Idempotent, and safe to call
+        /// before every read/write so a fresh project never fails for want of the directory.
+        /// </summary>
+        public static string EnsurePrefabBuildersDirectory()
+        {
+            Directory.CreateDirectory(PrefabBuildersDirectory);
+            return PrefabBuildersDirectory;
+        }
+
         /// <summary>
         /// Absolute path of the sync checkpoint co-located with the sidecar at <paramref name="sidecarPath"/>
         /// (i.e. <c>&lt;name&gt;.sbstate.json</c> next to <c>&lt;name&gt;.sbmap.json</c>), derived from the

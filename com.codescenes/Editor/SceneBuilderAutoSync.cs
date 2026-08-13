@@ -21,7 +21,7 @@ namespace SceneBuilder.Editor
     /// wall-clock or async event timing.
     /// </summary>
     [InitializeOnLoad]
-    public static class SceneBuilderAutoSync
+    public static partial class SceneBuilderAutoSync
     {
         static SceneBuilderAutoSync()
         {
@@ -81,10 +81,20 @@ namespace SceneBuilder.Editor
         private static bool _sourceDeadlineArmed;
         private static double _sourceDeadline;
 
+        private static readonly HashSet<string> _pendingPrefabSourcePaths = new();
+        private static bool _prefabSourceDeadlineArmed;
+        private static double _prefabSourceDeadline;
+
+        // Keyed on BuilderName to dedupe — PrefabBuilderRoute is a struct with no Equals, so not a HashSet.
+        private static readonly Dictionary<string, PrefabBuilderRoute> _pendingPrefabAssetRoutes = new();
+        private static bool _prefabAssetDeadlineArmed;
+        private static double _prefabAssetDeadline;
+
         private static readonly object _watcherLock = new();
         private static readonly HashSet<string> _watcherPendingPaths = new();
         private static bool _watcherRouteSetDirty;
         private static FileSystemWatcher? _watcher;
+        private static FileSystemWatcher? _prefabWatcher;
 
         // Session-local O(changed) snapshot assembler(s), one per builder — a shared instance would
         // leak one builder's incremental node/id cache into another's assemble (research.md). Wiped
@@ -198,22 +208,44 @@ namespace SceneBuilder.Editor
             watcher.Deleted += OnWatcherEvent;
             watcher.EnableRaisingEvents = true;
             _watcher = watcher;
+
+            var prefabDir = SceneBuilderPaths.EnsurePrefabBuildersDirectory();
+            var prefabWatcher = new FileSystemWatcher(prefabDir, "*.cs")
+            {
+                IncludeSubdirectories = false,
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime
+            };
+            prefabWatcher.Changed += OnWatcherEvent;
+            prefabWatcher.Created += OnWatcherEvent;
+            prefabWatcher.Renamed += OnWatcherEvent;
+            prefabWatcher.Deleted += OnWatcherEvent;
+            prefabWatcher.EnableRaisingEvents = true;
+            _prefabWatcher = prefabWatcher;
         }
 
         private static void StopWatcher()
         {
-            if (_watcher == null)
+            if (_watcher != null)
             {
-                return;
+                _watcher.EnableRaisingEvents = false;
+                _watcher.Changed -= OnWatcherEvent;
+                _watcher.Created -= OnWatcherEvent;
+                _watcher.Renamed -= OnWatcherEvent;
+                _watcher.Deleted -= OnWatcherEvent;
+                _watcher.Dispose();
+                _watcher = null;
             }
 
-            _watcher.EnableRaisingEvents = false;
-            _watcher.Changed -= OnWatcherEvent;
-            _watcher.Created -= OnWatcherEvent;
-            _watcher.Renamed -= OnWatcherEvent;
-            _watcher.Deleted -= OnWatcherEvent;
-            _watcher.Dispose();
-            _watcher = null;
+            if (_prefabWatcher != null)
+            {
+                _prefabWatcher.EnableRaisingEvents = false;
+                _prefabWatcher.Changed -= OnWatcherEvent;
+                _prefabWatcher.Created -= OnWatcherEvent;
+                _prefabWatcher.Renamed -= OnWatcherEvent;
+                _prefabWatcher.Deleted -= OnWatcherEvent;
+                _prefabWatcher.Dispose();
+                _prefabWatcher = null;
+            }
 
             lock (_watcherLock)
             {
@@ -297,7 +329,7 @@ namespace SceneBuilder.Editor
 
             if (ids != null)
             {
-                NotifySceneChanged(ids);
+                RouteEditorChange(ids);
             }
         }
 
@@ -336,18 +368,26 @@ namespace SceneBuilder.Editor
             }
 
             var fullPath = Path.GetFullPath(path);
-            if (File.Exists(fullPath))
+            if (DropsAsOwnWrite(fullPath))
             {
-                var hash = SuppressionScope.ComputeContentHash(File.ReadAllText(fullPath));
-                if (SuppressionScope.IsOwnWrite(fullPath, hash))
-                {
-                    return;
-                }
+                return;
             }
 
             _pendingSourcePaths.Add(fullPath);
             _sourceDeadlineArmed = true;
             _sourceDeadline = Clock() + SettleSeconds;
+        }
+
+        /// <summary>True iff <paramref name="fullPath"/> is on disk and its content hash matches a write we made ourselves (<see cref="SuppressionScope"/>'s own-write registry via <see cref="SceneBuilderPaths.WriteIfChanged"/>) — the loop-break shared by every source-change lane.</summary>
+        private static bool DropsAsOwnWrite(string fullPath)
+        {
+            if (!File.Exists(fullPath))
+            {
+                return false;
+            }
+
+            var hash = SuppressionScope.ComputeContentHash(File.ReadAllText(fullPath));
+            return SuppressionScope.IsOwnWrite(fullPath, hash);
         }
 
         internal static void PumpOnce() => PumpOnce(Clock());
@@ -393,6 +433,28 @@ namespace SceneBuilder.Editor
                 _sourceDeadlineArmed = false;
                 InvokeExecutor(CodeToSceneExecutor, paths);
             }
+
+            // Two independent prefab lanes — a separate direction pair, deliberately never folded
+            // into the scene<->code conflict combine above.
+            var prefabSourceDue = _prefabSourceDeadlineArmed && now >= _prefabSourceDeadline;
+            if (prefabSourceDue)
+            {
+                PrefabCodeToAssetCycleCount++;
+                var paths = new List<string>(_pendingPrefabSourcePaths);
+                _pendingPrefabSourcePaths.Clear();
+                _prefabSourceDeadlineArmed = false;
+                RunPrefabCycle(() => ExecutePrefabCodeToAsset(paths));
+            }
+
+            var prefabAssetDue = _prefabAssetDeadlineArmed && now >= _prefabAssetDeadline;
+            if (prefabAssetDue)
+            {
+                PrefabAssetToCodeCycleCount++;
+                var routes = new List<PrefabBuilderRoute>(_pendingPrefabAssetRoutes.Values);
+                _pendingPrefabAssetRoutes.Clear();
+                _prefabAssetDeadlineArmed = false;
+                RunPrefabCycle(() => ExecutePrefabAssetToCode(routes));
+            }
         }
 
         private static void DrainWatcherPaths()
@@ -426,7 +488,14 @@ namespace SceneBuilder.Editor
 
             foreach (var path in drained)
             {
-                NotifySourceChanged(path);
+                if (SceneBuilderRouter.TryRoutePrefabBuilderFile(path, out _))
+                {
+                    NotifyPrefabSourceChanged(path);
+                }
+                else
+                {
+                    NotifySourceChanged(path);
+                }
             }
         }
 
@@ -736,6 +805,8 @@ namespace SceneBuilder.Editor
             SceneToCodeExecutor = ExecuteSceneToCode;
             CodeToSceneExecutor = ExecuteCodeToScene;
             ConflictExecutor = ExecuteBothChanged;
+            InPrefabModeProbe = DefaultInPrefabMode;
+            ActivePrefabRouteProbe = DefaultActivePrefabRoute;
         }
 
         /// <summary>Test hygiene: full disarm + state reset, then re-arm to the default (auto-on) state the tests expect.</summary>
@@ -751,6 +822,10 @@ namespace SceneBuilder.Editor
             CodeToSceneExecutor = null;
             ConflictExecutor = null;
             ConflictCycleCount = 0;
+            PrefabCodeToAssetCycleCount = 0;
+            PrefabAssetToCodeCycleCount = 0;
+            InPrefabModeProbe = DefaultInPrefabMode;
+            ActivePrefabRouteProbe = DefaultActivePrefabRoute;
             _baselines.Clear();
             _snapshotAssemblers.Clear();
             SceneBuilderBuild.LastBuilderPath = null;
@@ -763,6 +838,14 @@ namespace SceneBuilder.Editor
             _pendingSourcePaths.Clear();
             _sourceDeadlineArmed = false;
             _sourceDeadline = 0;
+
+            _pendingPrefabSourcePaths.Clear();
+            _prefabSourceDeadlineArmed = false;
+            _prefabSourceDeadline = 0;
+
+            _pendingPrefabAssetRoutes.Clear();
+            _prefabAssetDeadlineArmed = false;
+            _prefabAssetDeadline = 0;
 
             Arm();
         }

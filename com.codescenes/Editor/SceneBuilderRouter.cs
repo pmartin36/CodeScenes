@@ -36,6 +36,29 @@ namespace SceneBuilder.Editor
     }
 
     /// <summary>
+    /// One discovered prefab builder: its name (from its <c>.cs</c> file stem, under
+    /// <see cref="SceneBuilderPaths.PrefabBuildersDirectory"/>) plus the on-disk
+    /// builder/sidecar/prefab paths it routes to. Mirrors <see cref="BuilderRoute"/> for the prefab
+    /// side (kept as a separate struct, not a generalization of BuilderRoute, so a prefab builder can
+    /// never be mistaken for a scene builder by <see cref="TryRouteScene"/>).
+    /// </summary>
+    public readonly struct PrefabBuilderRoute
+    {
+        public string BuilderName { get; }
+        public string BuilderPath { get; }
+        public string SidecarPath { get; }
+        public string PrefabPath { get; }
+
+        public PrefabBuilderRoute(string builderName, string builderPath, string sidecarPath, string prefabPath)
+        {
+            BuilderName = builderName;
+            BuilderPath = builderPath;
+            SidecarPath = sidecarPath;
+            PrefabPath = prefabPath;
+        }
+    }
+
+    /// <summary>
     /// Discovers every builder source under <see cref="SceneBuilderPaths.BuildersDirectory"/> and
     /// resolves each one's scene, so code-&gt;scene / scene-&gt;code can route a changed file or
     /// scene to the SPECIFIC builder that owns it, instead of a single hardcoded builder/scene pair.
@@ -50,6 +73,7 @@ namespace SceneBuilder.Editor
     public static class SceneBuilderRouter
     {
         private static IReadOnlyList<BuilderRoute>? _cache;
+        private static IReadOnlyList<PrefabBuilderRoute>? _prefabCache;
 
         /// <summary>
         /// One <see cref="BuilderRoute"/> per <c>.cs</c> directly under
@@ -170,12 +194,102 @@ namespace SceneBuilder.Editor
         public static void Invalidate()
         {
             _cache = null;
+            _prefabCache = null;
         }
 
         /// <summary>Clears the cached routing table — tests that mutate the on-disk builders folder between cases must call this.</summary>
         internal static void ResetForTests()
         {
             Invalidate();
+        }
+
+        /// <summary>
+        /// One <see cref="PrefabBuilderRoute"/> per <c>.cs</c> directly under
+        /// <see cref="SceneBuilderPaths.PrefabBuildersDirectory"/>, deterministically ordered by
+        /// <see cref="PrefabBuilderRoute.BuilderName"/> (Ordinal). Cached per-domain; cleared by
+        /// <see cref="ResetForTests"/>.
+        /// </summary>
+        public static IReadOnlyList<PrefabBuilderRoute> DiscoverPrefabs()
+        {
+            if (_prefabCache != null)
+            {
+                return _prefabCache;
+            }
+
+            var routes = new List<PrefabBuilderRoute>();
+
+            if (Directory.Exists(SceneBuilderPaths.PrefabBuildersDirectory))
+            {
+                foreach (var file in Directory.GetFiles(SceneBuilderPaths.PrefabBuildersDirectory, "*.cs"))
+                {
+                    var name = Path.GetFileNameWithoutExtension(file);
+                    var builderPath = SceneBuilderPaths.PrefabBuilder(name);
+                    var sidecarPath = SceneBuilderPaths.PrefabSidecar(name);
+                    var prefabPath = ResolvePrefabPath(name, sidecarPath);
+
+                    routes.Add(new PrefabBuilderRoute(name, builderPath, sidecarPath, prefabPath));
+                }
+            }
+
+            routes.Sort((a, b) => string.CompareOrdinal(a.BuilderName, b.BuilderName));
+
+            _prefabCache = routes;
+            return _prefabCache;
+        }
+
+        /// <summary>
+        /// The sidecar's own <see cref="SceneBuilder.Core.Identity.IdentityMap.Scene"/> (the generalized
+        /// target-path slot) when the sidecar exists and records a non-empty target, else the
+        /// deterministic default <c>Assets/SceneBuilder/&lt;name&gt;.prefab</c>.
+        /// </summary>
+        private static string ResolvePrefabPath(string name, string sidecarPath)
+        {
+            if (File.Exists(sidecarPath))
+            {
+                var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+                if (!string.IsNullOrEmpty(map.Scene))
+                {
+                    return map.Scene;
+                }
+            }
+
+            return "Assets/SceneBuilder/" + name + ".prefab";
+        }
+
+        /// <summary>Code-&gt;prefab lookup: does <paramref name="changedFullPath"/> match a known prefab builder's source file?</summary>
+        public static bool TryRoutePrefabBuilderFile(string changedFullPath, out PrefabBuilderRoute route)
+        {
+            var target = Path.GetFullPath(changedFullPath);
+
+            foreach (var candidate in DiscoverPrefabs())
+            {
+                if (string.Equals(Path.GetFullPath(candidate.BuilderPath), target, StringComparison.Ordinal))
+                {
+                    route = candidate;
+                    return true;
+                }
+            }
+
+            route = default;
+            return false;
+        }
+
+        /// <summary>Prefab-&gt;code lookup: does <paramref name="prefabAssetPath"/> match a known prefab builder's target?</summary>
+        public static bool TryRoutePrefabAsset(string prefabAssetPath, out PrefabBuilderRoute route)
+        {
+            var target = Path.GetFullPath(prefabAssetPath);
+
+            foreach (var candidate in DiscoverPrefabs())
+            {
+                if (string.Equals(Path.GetFullPath(candidate.PrefabPath), target, StringComparison.Ordinal))
+                {
+                    route = candidate;
+                    return true;
+                }
+            }
+
+            route = default;
+            return false;
         }
     }
 }

@@ -11,6 +11,7 @@ using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Parsing;
 using SceneBuilder.Core.Plan;
 using SceneBuilder.Core.Reconcile;
+using SceneBuilder.Core.Serialization;
 using SceneBuilder.Core.Validation;
 
 namespace SceneBuilder.Editor
@@ -249,7 +250,53 @@ namespace SceneBuilder.Editor
             }
 
             using var target = new PrefabBuildSyncTarget(prefabAssetPath);
-            return SceneBuilderBuild.RunCore(target, builderPath, sidecarPath);
+            var result = SceneBuilderBuild.RunCore(target, builderPath, sidecarPath);
+
+            if (result.Diagnostics.Count == 0 && AssetDatabase.LoadAssetAtPath<GameObject>(prefabAssetPath) != null)
+            {
+                SelfRegister(prefabAssetPath, sidecarPath);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Folds the prefab's OWN <see cref="AssetEntry"/> ({ Guid, LastKnownPath, TypeHint="Prefab" })
+        /// into the sidecar's <see cref="IdentityMap.Assets"/>, so a builder-authored prefab carries the
+        /// same self-describing cache entry an in-scene reference to it would harvest — without a scene
+        /// ever referencing it. Idempotent: an unchanged second build merges to the same entry
+        /// (<see cref="AssetCacheMerge.Result.ChangedCount"/> == 0) and skips the write.
+        /// </summary>
+        private static void SelfRegister(string prefabAssetPath, string sidecarPath)
+        {
+            var map = IdentityMapJson.Deserialize(File.ReadAllText(sidecarPath));
+            var selfEntry = new AssetEntry
+            {
+                Guid = AssetDatabase.AssetPathToGUID(prefabAssetPath),
+                LastKnownPath = prefabAssetPath,
+                TypeHint = "Prefab",
+            };
+
+            var merge = AssetCacheMerge.Merge(map.Assets, new[] { selfEntry });
+            if (merge.ChangedCount == 0)
+            {
+                return;
+            }
+
+            var updated = map with { Assets = merge.Merged };
+            SceneBuilderPaths.WriteIfChanged(sidecarPath, IdentityMapJson.Serialize(updated));
+        }
+
+        /// <summary>
+        /// Prefab reconcile (prefab-&gt;code): routes this target through the existing
+        /// target-generic <see cref="SceneBuilderSync.SyncCore"/> reconcile core, so an edit made to
+        /// the loaded prefab contents (a field, add, remove, rename, reparent, or reorder) patches
+        /// <paramref name="builderPath"/> through the shared structural-matching identity model.
+        /// </summary>
+        internal static SceneBuilderSync.SyncResult Sync(string builderPath, string prefabAssetPath, string sidecarPath)
+        {
+            using var target = new PrefabBuildSyncTarget(prefabAssetPath);
+            return SceneBuilderSync.SyncCore(target, builderPath, sidecarPath, preAssembled: null);
         }
 
         // Verbatim copy of PrefabSingleRootValidator's offset -> line/col conversion so the two
