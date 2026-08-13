@@ -112,6 +112,12 @@ namespace SceneBuilder.Editor
             // carries no entry for it, and the reconciler's existing UnsyncableListener path fires.
             List<(string SerializedPath, string PublicName)>? spellings = null;
 
+            // Computed ONCE per component, ahead of the field loop: the propertyPath of every
+            // managed-ref occurrence that is either a sibling-shared instance or a cycle's
+            // back-edge is a report-only Unsupported marker, not a forked/non-terminating read
+            // (spec 10 §7).
+            var unsupportedManagedRefPaths = ManagedReferenceReader.ComputeUnsupportedManagedRefPaths(so);
+
             var it = so.GetIterator();
             var enterChildren = true;
             while (it.Next(enterChildren))
@@ -125,7 +131,7 @@ namespace SceneBuilder.Editor
                 var isUnityEventField = UnityEventReader.IsUnityEventField(it);
                 var value = isUnityEventField
                     ? UnityEventReader.ReadField(it.Copy(), resolveListenerRef)
-                    : ReadProperty(it.Copy(), resolveSceneRef);
+                    : ReadProperty(it.Copy(), resolveSceneRef, unsupportedManagedRefPaths);
 
                 if (isUnityEventField && ownerType != null
                     && SerializedMemberMap.TryPublicMemberName(ownerType, it.propertyPath, out var publicName))
@@ -167,14 +173,25 @@ namespace SceneBuilder.Editor
         // well, so routing this through it would start reporting a whole struct as unrepresentable
         // because one member is, dropping the entire field from source where NestedValueEmission.Project
         // excludes that one member and round-trips the rest.
+        //
+        // A top-level managed-ref marker (missing-type or shared/cycle) is exempt: both are handled
+        // downstream by ComponentReconciler's managed-ref intercept (conflict, or report-only skip),
+        // never emitted as a raw source token, so dropping them here would silently vanish the
+        // fail-loud missing-type conflict and the sharing-marker deliverable. A marker nested INSIDE
+        // a ManagedReference's own Fields already survives — this switch recurses only into List.
         private static bool ContainsUnsupported(ValueNode value) => value switch
         {
-            ValueNode.Unsupported => true,
+            // Fully qualified: UnityEditor's OWN ManagedReferenceMissingType (an inspector helper
+            // type) collides on bare name with this Core marker.
+            ValueNode.Unsupported u => !(u.RawToken.StartsWith(SceneBuilder.Core.Reconcile.ManagedReferenceMissingType.Marker, StringComparison.Ordinal)
+                || u.RawToken.StartsWith(ManagedReferenceReader.SharedMarker, StringComparison.Ordinal)),
             ValueNode.List list => list.Items.Any(ContainsUnsupported),
             _ => false,
         };
 
-        private static ValueNode ReadProperty(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        private static ValueNode ReadProperty(
+            SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef,
+            ISet<string> unsupportedManagedRefPaths)
         {
             switch (p.propertyType)
             {
@@ -216,7 +233,7 @@ namespace SceneBuilder.Editor
                     return new ValueNode.Color(new CoreColor(c.r, c.g, c.b, c.a));
                 }
                 case SerializedPropertyType.Generic:
-                    return p.isArray ? ReadList(p, resolveSceneRef) : ReadNested(p, resolveSceneRef);
+                    return p.isArray ? ReadList(p, resolveSceneRef, unsupportedManagedRefPaths) : ReadNested(p, resolveSceneRef, unsupportedManagedRefPaths);
                 case SerializedPropertyType.ObjectReference:
                     // M4: an object-reference field pointing at a project asset becomes a
                     // ValueNode.AssetRef (populated), a null asset field becomes AssetRef(null) (None).
@@ -225,6 +242,11 @@ namespace SceneBuilder.Editor
                     // becomes ObjectRef(null). Replaces the old blanket "object refs are unsupported"
                     // skip for asset-pointing refs.
                     return AssetReferenceResolver.ReadObjectReference(p, resolveSceneRef);
+                case SerializedPropertyType.ManagedReference:
+                    // A [SerializeReference] polymorphic field (spec 10): null / missing-type /
+                    // shared-instance-or-cycle / resolved-concrete-instance, all owned by the
+                    // dedicated reader so this dispatch never falls to the bare Unsupported default.
+                    return ManagedReferenceReader.ReadField(p, resolveSceneRef, unsupportedManagedRefPaths);
                 default:
                     return new ValueNode.Unsupported(p.propertyType.ToString());
             }
@@ -268,18 +290,22 @@ namespace SceneBuilder.Editor
             return ValueNode.Primitive.Int(p.intValue);
         }
 
-        private static ValueNode ReadList(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        private static ValueNode ReadList(
+            SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef,
+            ISet<string> unsupportedManagedRefPaths)
         {
             var items = new List<ValueNode>(p.arraySize);
             for (var i = 0; i < p.arraySize; i++)
             {
-                items.Add(ReadProperty(p.GetArrayElementAtIndex(i).Copy(), resolveSceneRef));
+                items.Add(ReadProperty(p.GetArrayElementAtIndex(i).Copy(), resolveSceneRef, unsupportedManagedRefPaths));
             }
 
             return new ValueNode.List(items);
         }
 
-        private static ValueNode ReadNested(SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef)
+        private static ValueNode ReadNested(
+            SerializedProperty p, Func<UnityEngine.Object, string?>? resolveSceneRef,
+            ISet<string> unsupportedManagedRefPaths)
         {
             // The struct/class Type resolves FIRST -- every child key below is mapped through it, so
             // the map must be in hand before the child walk starts.
@@ -293,6 +319,20 @@ namespace SceneBuilder.Editor
                 return new ValueNode.Unsupported(p.type);
             }
 
+            var fields = ReadManagedInstanceFields(p, type, resolveSceneRef, unsupportedManagedRefPaths);
+
+            var typeName = type.FullName!.Replace('+', '.');
+            return new ValueNode.Nested(typeName, new FieldMap(fields));
+        }
+
+        // The child-walk shared by ReadNested (declared struct/class type) and
+        // ManagedReferenceReader.ReadField (a [SerializeReference] instance's CONCRETE type) — the
+        // only difference between the two callers is which Type maps the children, so nested managed
+        // refs and lists compose through the SAME walk with no duplicated traversal logic.
+        internal static List<KeyValuePair<string, ValueNode>> ReadManagedInstanceFields(
+            SerializedProperty p, Type type, Func<UnityEngine.Object, string?>? resolveSceneRef,
+            ISet<string> unsupportedManagedRefPaths)
+        {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var it = p.Copy();
             var end = p.GetEndProperty();
@@ -318,14 +358,13 @@ namespace SceneBuilder.Editor
                 var hasPublicName = SerializedMemberMap.TryPublicMemberName(type, it.name, out var publicName);
                 var key = hasPublicName ? publicName : it.name;
                 var value = hasPublicName
-                    ? ReadProperty(it.Copy(), resolveSceneRef)
+                    ? ReadProperty(it.Copy(), resolveSceneRef, unsupportedManagedRefPaths)
                     : new ValueNode.Unsupported($"no public member for '{it.name}'");
 
                 fields.Add(new KeyValuePair<string, ValueNode>(key, value));
             }
 
-            var typeName = type.FullName!.Replace('+', '.');
-            return new ValueNode.Nested(typeName, new FieldMap(fields));
+            return fields;
         }
 
         // ---- Write (ValueNode -> SerializedProperty) ---------------------------------------

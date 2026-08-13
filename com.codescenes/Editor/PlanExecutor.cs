@@ -262,6 +262,22 @@ namespace SceneBuilder.Editor
                         }
 
                         break;
+                    case SetManagedReference setManagedReference:
+                        if (result.ComponentsByLogicalId.TryGetValue(setManagedReference.LogicalId, out var mrComp))
+                        {
+                            if (!serializedByComponent.TryGetValue(setManagedReference.LogicalId, out var mrSo))
+                            {
+                                mrSo = new SerializedObject(mrComp);
+                                serializedByComponent[setManagedReference.LogicalId] = mrSo;
+                            }
+
+                            ManagedReferenceWriter.Write(
+                                mrSo, setManagedReference.Path, setManagedReference.ConcreteType,
+                                setManagedReference.Fields, mrComp, setManagedReference.LogicalId,
+                                result, map, scene);
+                        }
+
+                        break;
                     case SetReference setReference:
                         deferredReferences.Add(setReference);
                         break;

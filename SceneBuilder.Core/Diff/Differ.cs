@@ -333,7 +333,8 @@ namespace SceneBuilder.Core.Diff
 
                         if (field.Value is ValueNode.ManagedReference desiredManagedReference)
                         {
-                            if (!known || !desiredManagedReference.Equals(actualValue as ValueNode.ManagedReference))
+                            var completedDesired = ManagedReferenceFieldCompletion.Complete(desiredManagedReference, actualValue as ValueNode.ManagedReference);
+                            if (!known || !completedDesired.Equals(actualValue as ValueNode.ManagedReference))
                             {
                                 setFieldOps.Add(new SetManagedReference
                                 {

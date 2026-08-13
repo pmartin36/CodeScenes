@@ -35,6 +35,15 @@ namespace SceneBuilder.Core.Tests
                 "lowers ONE already-descended ref; the descent is ObjectRefValues.Substitute"),
             new("SceneBuilder.Core/Materialize/Materializer.cs", "EmitFieldOp", 1,
                 "matches a bare ObjectRef to emit SetReference"),
+            new("com.codescenes/Editor/ManagedReferenceWriter.cs", "WriteInstance", 1,
+                "matches a bare ObjectRef already selected from the instance's own FieldMap to route it " +
+                "through ObjectReferenceResolver.WriteReference; not a container descent"),
+            new("SceneBuilder.Core/Reconcile/ManagedReferenceEmission.cs", "RenderMember", 1,
+                "matches a bare ObjectRef already selected from the instance's own FieldMap to render its " +
+                "token via ComponentReconciler.RenderObjectRefToken; not a container descent"),
+            new("SceneBuilder.Core/Reconcile/ManagedReferenceFieldCompletion.cs", "IsUnwrittenMemberDefault", 1,
+                "matches a bare ObjectRef already selected from the instance's own FieldMap to test " +
+                "whether it sits at the construction default (None); not a container descent"),
             new("SceneBuilder.Core/Materialize/Materializer.cs", "IsReferenceList", 2,
                 "classifies each list item's kind for one-level per-index lowering, the depth the write boundary supports, not a descent"),
             new("SceneBuilder.Core/Model/ValueNode.cs", "ValueNode", 1,

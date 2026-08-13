@@ -693,6 +693,17 @@ namespace SceneBuilder.Core.Reconcile
             string ownerNodeLogicalId,
             AssetCatalog? assetCatalog = null)
         {
+            // A [SerializeReference] instance renders through its own formatter: a DIRECT
+            // ObjectRef/AssetRef child is a real C# field assignment inside `new T { ... }` (not a
+            // `.Set(...)` call argument), so the bare handle/asset token needs a `.As<T>()` cast to
+            // the field's own declared type or the emitted initializer fails to compile — see
+            // ManagedReferenceEmission for the one place that resolves and applies it.
+            if (value is ValueNode.ManagedReference managedReference)
+            {
+                return ManagedReferenceEmission.Render(
+                    managedReference, resolveOwnerHandle, edits, ownerNodeLogicalId, assetCatalog);
+            }
+
             if (ObjectRefValues.Contains(value))
             {
                 // The per-ref render function: replaces every ObjectRef reached in `value` at any
@@ -702,30 +713,8 @@ namespace SceneBuilder.Core.Reconcile
                 // ObjectRef arm — a substituted list renders as `new[] { door, other }`, a
                 // substituted bare ref renders as `door`.
                 var substituted = ObjectRefValues.Substitute(value, (ValueNode.ObjectRef objectRef) =>
-                {
-                    var targetLogicalId = objectRef.TargetLogicalId;
-                    if (targetLogicalId == null)
-                    {
-                        return new ValueNode.Unsupported("NodeHandle.None");
-                    }
-
-                    // Checked BEFORE resolveOwnerHandle is consulted: resolveOwnerHandle is
-                    // side-effecting (it can register a handle introduction), and a self-target
-                    // needs no handle at all — consulting it first would introduce one that is
-                    // never used.
-                    if (SelfReferenceEmission.IsSelf(targetLogicalId, ownerNodeLogicalId))
-                    {
-                        return new ValueNode.Unsupported(SelfReferenceEmission.AuthoredExpression);
-                    }
-
-                    var (handle, introduce) = resolveOwnerHandle(targetLogicalId);
-                    if (introduce && handle != null)
-                    {
-                        edits.Add(new IntroduceHandle { Anchor = targetLogicalId, Handle = handle });
-                    }
-
-                    return new ValueNode.Unsupported(handle ?? targetLogicalId);
-                });
+                    new ValueNode.Unsupported(
+                        RenderObjectRefToken(objectRef.TargetLogicalId, resolveOwnerHandle, edits, ownerNodeLogicalId)));
 
                 return SourceExpr.ValueNodeLiteral(substituted, assetCatalog);
             }
@@ -736,6 +725,38 @@ namespace SceneBuilder.Core.Reconcile
             return SpatialComponentSource.IsSpatial(typeFullName)
                 ? SpatialComponentSource.RenderFieldValue(value)
                 : SourceExpr.ValueNodeLiteral(value, assetCatalog);
+        }
+
+        // The one place an ObjectRef resolves to its rendered bare token (a NodeHandle variable
+        // name, `NodeHandle.None`, or the self-target expression) — shared by the generic
+        // substitution above and ManagedReferenceEmission's per-member render, so a handle
+        // introduction is registered exactly once per ref regardless of caller.
+        internal static string RenderObjectRefToken(
+            string? targetLogicalId,
+            System.Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<SourceEdit> edits,
+            string ownerNodeLogicalId)
+        {
+            if (targetLogicalId == null)
+            {
+                return "NodeHandle.None";
+            }
+
+            // Checked BEFORE resolveOwnerHandle is consulted: resolveOwnerHandle is side-effecting
+            // (it can register a handle introduction), and a self-target needs no handle at all —
+            // consulting it first would introduce one that is never used.
+            if (SelfReferenceEmission.IsSelf(targetLogicalId, ownerNodeLogicalId))
+            {
+                return SelfReferenceEmission.AuthoredExpression;
+            }
+
+            var (handle, introduce) = resolveOwnerHandle(targetLogicalId);
+            if (introduce && handle != null)
+            {
+                edits.Add(new IntroduceHandle { Anchor = targetLogicalId, Handle = handle });
+            }
+
+            return handle ?? targetLogicalId;
         }
 
         // §13 one-pass attach reuses this for the just-appended owner: same

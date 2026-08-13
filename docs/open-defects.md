@@ -521,3 +521,34 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   logic) rather than emit a `.Set(...)` managed ref. Not exercised by the M9 checklist/fixtures
   (b2-t5 authors the field first, so source always holds it); no M9 deliverable is relaxed. A future
   `SetRef`-introduce path would close it. OWNER: unassigned. FOUND-BY: m9-serializereference.
+
+- SEVERITY low — a scene/asset reference held inside a PLAIN `[Serializable]` nested struct that is
+  itself a field of a managed instance (e.g. `new Aggressive { data = new Payload { target = handle } }`)
+  resolves in NEITHER direction. code->scene: `ManagedReferenceWriter` delegates a plain-`Nested` child
+  to `SerializedFieldBridge.WriteField` -> `WriteProperty`/`EnterNode`, whose `ObjectRef`/`AssetRef`
+  handling is a deliberate no-op (SerializedFieldBridge.cs:494-502). scene->code (emit): the plain-nested
+  member falls to `SourceExpr.ValueNodeLiteral` -> `NestedValueEmission.IsRepresentable`, which excludes
+  `ObjectRef`/`AssetRef` (NestedValueEmission.cs:229-236). b2-t4's fix resolves refs that are DIRECT
+  fields of a managed instance and refs inside nested MANAGED refs (recursively) via
+  `ManagedReferenceEmission`/`ManagedReferenceWriter`; the fix's own justification does not read
+  identically for a plain-[Serializable]-struct child (a different write/emit mechanism), so it is not a
+  half-applied sibling. Spec 10 lists "nested" as an in-scope managed-instance field kind, so this is a
+  real latent gap; NOT exercised by M9 fixtures (Aggressive/Flee/Composite hold only leaves, refs, and
+  nested managed refs), no M9 deliverable relaxed. Closing it needs the shared write descent
+  (`WriteProperty`) and emit descent (`IsRepresentable`) to carry ref-resolution context.
+  OWNER: unassigned. FOUND-BY: m9-serializereference.
+
+- SEVERITY low — `SourceExpr.ValueNodeLiteral` emit of a `ValueNode.List` of `ManagedReference`
+  renders `new object[] { new Aggressive{…}, new Flee{…} }` (`ListValueEmission.EmittedTypeToken` has
+  no `ManagedReference` arm -> null -> `object[]` prefix); the List node carries no shared
+  base-interface type, so Core cannot name the correct element type from the model alone. This
+  round-trips at the model level (reparse yields an equal `List` of `ManagedReference`), but
+  `new object[]{…}` will NOT compile if emitted into real authoring against a typed
+  `[SerializeReference] List<IStrategy>` / `IStrategy[]` field (CLAUDE.md: emitted C# must compile).
+  NOT exercised by spec 10's numbered Unity checklist (items 1-7 all target the single `strategy`
+  field; none authors or emits a managed-ref LIST), so no M9 deliverable is relaxed — b2-t5's EditMode
+  round-trip deliverable is met without it. Was recorded OWNER b2-t5 in the gitignored
+  `.agent_handoffs/m9-serializereference/tasks.md` DEFECTS register; b2-t5 closed GREEN as a test-only
+  task without touching the emit path, so it is re-homed here (repo-tracked) to survive the run.
+  Closing it needs the List node to carry a shared element type, or `EmittedTypeToken` to gain a
+  `ManagedReference` arm. OWNER: unassigned. FOUND-BY: m9-serializereference.

@@ -69,7 +69,10 @@ namespace SceneBuilder.Core.Parsing
 
             // A genuine leaf (incl. `new Vector3(...)`'s constructor-arg form) — delegated to the
             // existing, total ValueNodeParser.Parse; `.SetRef` never constructs its own leaf tokens.
-            return ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts);
+            // UnwrapTypedRef strips a member's own `.As<T>()`/`.As()` emission cast first (the same
+            // authoring-only typing scaffold UnityEvent static args use), recovering the underlying
+            // handle/asset-factory expression the ordinary leaf parse already knows how to read.
+            return ValueNodeParser.Parse(UnwrapTypedRef(expr), ctx.AssetCatalog, ctx.FacadeConflicts);
         }
 
         // A ManagedReference-flavored copy of ValueNodeParser.ParseNested's member loop: the

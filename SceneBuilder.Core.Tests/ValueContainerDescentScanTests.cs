@@ -55,6 +55,8 @@ namespace SceneBuilder.Core.Tests
                 "one top-level kind test, routing a Nested field to NestedValueEmission.Project; no descent."),
             new Site("SceneBuilder.Core/Reconcile/ComponentReconciler.Defaults.cs", "OmitDefaults", 1,
                 "one top-level kind test, routing a Nested field to NestedValueEmission.Project; no descent."),
+            new Site("SceneBuilder.Core/Reconcile/ManagedReferenceFieldCompletion.cs", "IsUnwrittenMemberDefault", 1,
+                "one top-level kind+emptiness test on a bare member already selected from the instance's own FieldMap; no descent into items."),
             new Site("SceneBuilder.Core/Reconcile/ListValueEmission.cs", "ArrayPrefix", 1,
                 "a parameter TYPE, not a match: the emitter is handed the List node whose prefix it names."),
             new Site("SceneBuilder.Core/Reconcile/ListValueEmission.cs", "EmittedTypeToken", 2,

@@ -42,7 +42,7 @@ namespace SceneBuilder.Core.Reconcile
                 return true;
             }
 
-            if (snapVal is not ValueNode.ManagedReference || !sourceComp.Fields.TryGetValue(fieldKey, out var srcVal))
+            if (snapVal is not ValueNode.ManagedReference snapManagedRef || !sourceComp.Fields.TryGetValue(fieldKey, out var srcVal))
             {
                 // Not a managed-ref field, or a managed ref newly present in the snapshot but ABSENT
                 // from source — there is no introduce/remove `.SetRef` applier, so this case falls
@@ -50,7 +50,15 @@ namespace SceneBuilder.Core.Reconcile
                 return false;
             }
 
-            if (Equals(srcVal, snapVal))
+            // The author's `.SetRef {...}` initializer names only the members it wrote; the live
+            // snapshot always carries EVERY serialized member. Completing srcVal against snapVal
+            // before comparing is what lets a partially-authored value converge instead of re-patching
+            // on every sync (mirrors the SAME completion Differ's code->scene comparison applies).
+            var comparableSrc = srcVal is ValueNode.ManagedReference srcManagedRef
+                ? ManagedReferenceFieldCompletion.Complete(srcManagedRef, snapManagedRef)
+                : srcVal;
+
+            if (Equals(comparableSrc, snapVal))
             {
                 // Idempotence: managed refs render deterministically, so equal values need no
                 // AuthoredTextIsCurrent check the generic branch performs for other field kinds.
@@ -85,30 +93,32 @@ namespace SceneBuilder.Core.Reconcile
             // information — no-op, matching the generic patch branch's own legacy contract.
             return true;
         }
+    }
 
-        // The reserved signal a live `[SerializeReference]` value whose `managedReferenceFullTypename`
-        // resolves to no loadable C# type is carried through: ridden on the existing
-        // `ValueNode.Unsupported` container (no new `ValueNode` inhabitant needed), distinguished
-        // from every other Unsupported payload (e.g. a sharing/cycle marker, which keeps the
-        // report-only skip policy) by the reserved prefix.
-        public static class ManagedReferenceMissingType
+    // The reserved signal a live `[SerializeReference]` value whose `managedReferenceFullTypename`
+    // resolves to no loadable C# type is carried through: ridden on the existing
+    // `ValueNode.Unsupported` container (no new `ValueNode` inhabitant needed), distinguished
+    // from every other Unsupported payload (e.g. a sharing/cycle marker, which keeps the
+    // report-only skip policy) by the reserved prefix. A top-level public class (not nested in
+    // `ComponentReconciler`, which is internal) so the Editor adapter's read path can wrap/unwrap
+    // the same marker across the assembly boundary.
+    public static class ManagedReferenceMissingType
+    {
+        public const string Marker = "__csManagedRefMissingType:";
+
+        public static ValueNode Wrap(string fullTypename) => new ValueNode.Unsupported(Marker + fullTypename);
+
+        public static bool TryUnwrap(ValueNode node, out string fullTypename)
         {
-            public const string Marker = "__csManagedRefMissingType:";
-
-            public static ValueNode Wrap(string fullTypename) => new ValueNode.Unsupported(Marker + fullTypename);
-
-            public static bool TryUnwrap(ValueNode node, out string fullTypename)
+            if (node is ValueNode.Unsupported unsupported
+                && unsupported.RawToken.StartsWith(Marker, StringComparison.Ordinal))
             {
-                if (node is ValueNode.Unsupported unsupported
-                    && unsupported.RawToken.StartsWith(Marker, StringComparison.Ordinal))
-                {
-                    fullTypename = unsupported.RawToken.Substring(Marker.Length);
-                    return true;
-                }
-
-                fullTypename = "";
-                return false;
+                fullTypename = unsupported.RawToken.Substring(Marker.Length);
+                return true;
             }
+
+            fullTypename = "";
+            return false;
         }
     }
 }
