@@ -272,3 +272,34 @@ nulled. Two low follow-ups are filed in `docs/open-defects.md`, both non-blockin
 refs needs a shared element type token, and a null object-ref member inside a managed instance renders
 explicitly (`target = NodeHandle.None.As<...>()`) rather than being omitted at default. The latter is a
 verified fixed point (cosmetic verbosity, not churn).
+
+## 39 - Flat prefab authoring
+
+Define and save a reusable prefab ASSET from a code builder (the inverse of M6, which only instances an
+existing prefab): one builder `.cs` per prefab under a `Prefabs/` folder, round-tripped and seamless.
+Scope is FLAT (single-root hierarchy of GameObjects/components/transforms/asset-refs); nested prefabs and
+variant chains are deferred to `specs/needs_research/nested-prefabs-and-variants.md`.
+
+The centerpiece is a shared build/sync core, not a fork: the milestone refactored the scene
+`SceneBuilderBuild.Run`/`SceneBuilderSync.Run` to a single build/sync TARGET seam and added a prefab
+target as a second implementation, so scene and prefab share the whole parse -> materialize -> diff ->
+reconcile -> source-patch -> sidecar pipeline and differ only in a handful of editor-boundary hooks (read
+roots, execute-into-target, persist, identity-stamp, edit-trigger, routing). The load-bearing invariant,
+grounded in two spikes: regeneration edits the LOADED CONTENTS in place (`LoadPrefabContents` -> mutate
+-> `SaveAsPrefabAsset` -> `UnloadPrefabContents`), never overwrite-from-fresh, or Unity re-mints the
+fileIDs of unchanged objects and breaks edit reconciliation. Identity anchors on `GlobalObjectId` (which
+resolves off-scene for asset internals); editor prefab edits ride the existing `ObjectChangeEvents`
+channel and code-side `.cs` edits ride the existing file-watcher, both under the one persisted master
+auto toggle.
+
+Built in two buckets (`d0e2a1e` shared seam + code->prefab, `278aa4b` sync-back + routing +
+self-registration + seamless auto-sync). Gate `passed=773 failed=0 skipped=0`. Live-verified across all
+seven confirmation checks: a code builder produces a real `.prefab` with the authored hierarchy; a
+Prefab-Mode field edit auto-syncs back to the `.cs`; a `.cs` edit that changes a field AND adds a child
+regenerates edit-in-place with the unchanged children's fileIDs byte-identical (the make-or-break
+proof); a second build is idempotent; the code-defined prefab instances as a Connected instance and
+auto-registers into the `Prefabs.X` facade; seamless auto-sync fires both directions with no button; and
+scene build/sync still work through the refactored shared seam (non-regression). One prose-vs-code note:
+the shipped identity stamp uses `GlobalObjectId idType=2` (the object is stamped while in the
+prefab-contents preview scene), not the `idType=1` the spec text stated; it is fully functional and
+round-trips.
