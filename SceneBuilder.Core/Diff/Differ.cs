@@ -130,7 +130,7 @@ namespace SceneBuilder.Core.Diff
                 }
                 else if (node is PrefabInstanceNode instanceNode)
                 {
-                    EmitCreateInstance(instanceNode, parentLogicalId, i, ops);
+                    EmitCreateInstance(instanceNode, parentLogicalId, i, ops, conflicts);
                 }
                 else
                 {
@@ -425,9 +425,12 @@ namespace SceneBuilder.Core.Diff
         }
 
         // Unmatched PrefabInstanceNode ⇒ instantiate-not-create. No SetName/SetTag/SetLayer/
-        // SetActive/SetStatic and no EmitComponentEdits — v1 instances carry no authored Components,
-        // so the only emitted edit beyond the instantiate itself is the root transform.
-        private static void EmitCreateInstance(PrefabInstanceNode node, string? parentLogicalId, int siblingIndex, List<ChangeOp> ops)
+        // SetActive/SetStatic and no EmitComponentEdits — v1 instances carry no authored Components
+        // of their own; the instantiate brings the base prefab's components along. Any authored
+        // override layer (Overrides/AddedComponents/RemovedComponents/child instances) IS emitted,
+        // via the same InstanceOverrideDiff the matched path uses, diffed against an empty snapshot
+        // so every authored entry becomes an apply op.
+        private static void EmitCreateInstance(PrefabInstanceNode node, string? parentLogicalId, int siblingIndex, List<ChangeOp> ops, List<Conflict> conflicts)
         {
             ops.Add(new AddInstance
             {
@@ -438,6 +441,8 @@ namespace SceneBuilder.Core.Diff
             });
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
             RectTransformDiff.EmitCreate(node.LogicalId, node.Transform, ops);
+
+            InstanceOverrideDiff.Emit(node, new SnapshotNode(), ops, conflicts);
         }
 
         private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, ExcludedFieldGate fieldGate, List<ChangeOp> ops)

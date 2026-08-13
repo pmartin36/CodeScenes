@@ -78,19 +78,19 @@ namespace SceneBuilder.Editor
             return instance with
             {
                 Overrides = instance.Overrides
-                    .Select(o => o with { Target = StampTarget(o.Target, instance.LogicalId, liveRoot, conflicts) })
+                    .Select(o => o with { Target = StampTarget(o.Target, instance.LogicalId, liveRoot, conflicts, isRemoval: false) })
                     .ToArray(),
                 AddedComponents = instance.AddedComponents
-                    .Select(a => a with { Target = StampTarget(a.Target, instance.LogicalId, liveRoot, conflicts) })
+                    .Select(a => a with { Target = StampTarget(a.Target, instance.LogicalId, liveRoot, conflicts, isRemoval: false) })
                     .ToArray(),
                 RemovedComponents = instance.RemovedComponents
-                    .Select(t => StampTarget(t, instance.LogicalId, liveRoot, conflicts))
+                    .Select(t => StampTarget(t, instance.LogicalId, liveRoot, conflicts, isRemoval: true))
                     .ToArray(),
                 RemovedGameObjects = instance.RemovedGameObjects
-                    .Select(t => StampTarget(t, instance.LogicalId, liveRoot, conflicts))
+                    .Select(t => StampTarget(t, instance.LogicalId, liveRoot, conflicts, isRemoval: true))
                     .ToArray(),
                 AddedGameObjects = instance.AddedGameObjects
-                    .Select(a => a with { Parent = StampTarget(a.Parent, instance.LogicalId, liveRoot, conflicts) })
+                    .Select(a => a with { Parent = StampTarget(a.Parent, instance.LogicalId, liveRoot, conflicts, isRemoval: false) })
                     .ToArray(),
             };
         }
@@ -109,8 +109,14 @@ namespace SceneBuilder.Editor
             return GlobalObjectId.GlobalObjectIdentifierToObjectSlow(goid) as GameObject;
         }
 
+        // isRemoval: RemovedComponents/RemovedGameObjects targets name what should be GONE from the
+        // live scene — an authored removal applied on the instance's very first (CREATE) build
+        // already deletes the sub-object by the time a LATER build resolves it here, so a miss is
+        // the removal's own converged state, never a located conflict. Every other target kind
+        // (Override/AddedComponent/AddedGameObject.Parent) names somewhere new state must ATTACH, so a
+        // miss there stays a genuine UnresolvedNestedSelector.
         private static OverrideTarget StampTarget(
-            OverrideTarget target, string instanceLogicalId, GameObject liveRoot, List<Conflict> conflicts)
+            OverrideTarget target, string instanceLogicalId, GameObject liveRoot, List<Conflict> conflicts, bool isRemoval)
         {
             if (target.ChildPath == "" || target.SubKey != UnresolvedSubKey)
             {
@@ -121,13 +127,17 @@ namespace SceneBuilder.Editor
             var sub = PrefabInstanceProbe.ResolveSubObjectByChildPath(liveRoot, target.ChildPath);
             if (sub == null)
             {
-                conflicts.Add(new Conflict
+                if (!isRemoval)
                 {
-                    Kind = ConflictKind.UnresolvedNestedSelector,
-                    LogicalId = instanceLogicalId,
-                    Reason = $"No live sub-object at '{target.ChildPath}' under prefab instance '{instanceLogicalId}'.",
-                    Location = null,
-                });
+                    conflicts.Add(new Conflict
+                    {
+                        Kind = ConflictKind.UnresolvedNestedSelector,
+                        LogicalId = instanceLogicalId,
+                        Reason = $"No live sub-object at '{target.ChildPath}' under prefab instance '{instanceLogicalId}'.",
+                        Location = null,
+                    });
+                }
+
                 return target;
             }
 

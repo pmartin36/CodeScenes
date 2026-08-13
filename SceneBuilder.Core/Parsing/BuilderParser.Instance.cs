@@ -129,6 +129,48 @@ namespace SceneBuilder.Core.Parsing
             }
         }
 
+        // A variant's root-level `.Override`/`.AddComponent`/`.RemoveComponent`/`.On`
+        // verbs, authored directly on the Build param — routes onto ctx.VariantRootNode (the
+        // pre-seeded base-prefab instance, see ParseCore) via the SAME per-verb lowering
+        // ProcessInstanceChain uses below. Unlike ProcessInstanceChain's post-`Instance` skip,
+        // every call here IS a verb (there is no leading `Instance` call to skip past) — the
+        // variant root is already the base instance, never a fresh node.
+        private static void ProcessVariantRootChain(List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls, ParserContext ctx)
+        {
+            var node = ctx.VariantRootNode!;
+
+            // The variant root has no `Instance(...)` call to anchor to (its instantiation is
+            // implicit — see ParseCore) — so the FIRST root-level verb statement encountered
+            // becomes the anchor instead, mirroring ProcessInstanceChain's own first-call anchor
+            // below. Only the FIRST statement sets it; a later separate `root.<Verb>(...)` statement
+            // stays un-anchored (reconcile introduces it as its own new statement instead).
+            if (node.AnchorSpan == default)
+            {
+                node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
+            }
+
+            foreach (var call in calls)
+            {
+                switch (call.Method)
+                {
+                    case "Override":
+                        ApplyOverride(node, call.Args, ctx);
+                        break;
+                    case "AddComponent":
+                        ApplyAddComponent(node, call.Invocation, call.Args, ctx);
+                        break;
+                    case "RemoveComponent":
+                        ApplyRemoveComponent(node, call.Invocation);
+                        break;
+                    case "On":
+                        ApplyScopedOn(node, call.Args, ctx);
+                        break;
+                    default:
+                        throw Unreachable();
+                }
+            }
+        }
+
         // Mirrors BuildPlainNode's base-field copy, but emits a PrefabInstanceNode: Components
         // stays empty (v1 — whole-instance only, no per-component authoring) and SourcePrefab
         // carries the unresolved DisplayPath (GUID lowering is b2-t3's job, not parse's).

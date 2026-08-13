@@ -294,9 +294,10 @@ public class NestedPrefabRoundTripScene : IPrefabDefinition
     [Test]
     public void Build_AuthoredOverrideOnNestedInstance_MaterializesOntoReloadedAsset()
     {
-        // A brand-new instance's creation emits no override-apply ops of its own (Differ.EmitCreateInstance),
-        // so the override must be authored on a SECOND build against an already-materialized instance
-        // to exercise the override-apply path at all.
+        // Builds the instance first, unadorned, then authors the override on a SECOND build against
+        // the already-materialized instance, so this exercises the MATCHED-path override-apply
+        // (InstanceOverrideDiff.Emit on an already-mapped PrefabInstanceNode), independent of whatever
+        // the create/unmatched path does with a root-level override authored on the very first build.
         File.WriteAllText(_builderPath, Source(
             $"        root.Add(\"NRT_A\", w => {{ w.Instance(\"{BPrefabPath}\"); }});"));
         var setup = PrefabBuildSyncTarget.Build(_builderPath, APrefabPath, _sidecarPath);

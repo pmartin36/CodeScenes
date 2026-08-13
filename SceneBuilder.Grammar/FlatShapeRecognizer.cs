@@ -23,9 +23,9 @@ namespace SceneBuilder.Grammar
 
         private static readonly string[] TransformPositionalArgs = { "pos", "rot", "scale" };
 
-        public static IReadOnlyList<ShapeViolation> Analyze(BlockSyntax buildBody, string sceneParamName)
+        public static IReadOnlyList<ShapeViolation> Analyze(BlockSyntax buildBody, string sceneParamName, bool isVariant = false)
         {
-            var ctx = new RecognizerContext(sceneParamName);
+            var ctx = new RecognizerContext(sceneParamName, isVariant);
 
             foreach (var statement in buildBody.Statements)
             {
@@ -91,6 +91,15 @@ namespace SceneBuilder.Grammar
             if (calls[0].Method == "Add")
             {
                 ProcessAddChain(receiver, calls, handleName, ctx);
+                return;
+            }
+
+            // A variant's root-level `.Override`/`.AddComponent`/`.RemoveComponent`/`.On` verbs,
+            // authored directly on the Build param — mirrors BuilderParser.cs's variant arm.
+            if (ctx.IsVariant && receiver.Identifier.Text == ctx.SceneParamName &&
+                calls[0].Method is "Override" or "AddComponent" or "RemoveComponent" or "On")
+            {
+                ProcessVariantRootChain(calls, ctx);
                 return;
             }
 
@@ -512,12 +521,14 @@ namespace SceneBuilder.Grammar
 
         private sealed class RecognizerContext
         {
-            public RecognizerContext(string sceneParamName)
+            public RecognizerContext(string sceneParamName, bool isVariant = false)
             {
                 SceneParamName = sceneParamName;
+                IsVariant = isVariant;
             }
 
             public string SceneParamName { get; }
+            public bool IsVariant { get; }
             public HashSet<string> Scope { get; } = new();
             public List<ShapeViolation> Violations { get; } = new();
         }

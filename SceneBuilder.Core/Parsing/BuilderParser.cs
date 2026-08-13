@@ -35,16 +35,52 @@ namespace SceneBuilder.Core.Parsing
             var tree = CSharpSyntaxTree.ParseText(source);
             var root = (CompilationUnitSyntax)tree.GetRoot();
 
-            var (buildMethod, sceneParamName) = FindBuildMethod(root);
+            var (buildMethod, sceneParamName, isVariant, variantBaseExpression, variantClassName) = FindBuildMethod(root);
             var body = buildMethod.Body;
             if (body == null)
             {
                 throw Fail(buildMethod, "Build method must have a block body");
             }
 
-            RecognizeOrThrow(tree, body, sceneParamName);
+            RecognizeOrThrow(tree, body, sceneParamName, isVariant);
 
-            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap), facadeCatalog, assetCatalog);
+            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap), facadeCatalog, assetCatalog, isVariant);
+
+            // A variant's single root IS the base prefab instance — pre-seeded BEFORE the
+            // statement walk so root-level `.Override`/`.AddComponent`/`.RemoveComponent`/`.On`
+            // verbs (routed by ProcessBuilderChain's variant arm) land on it, reusing the same
+            // lowering a nested Instance uses. A catalog miss (or no catalog) is a located
+            // Conflict, never a throw, never a silent drop — the overrides still land.
+            NodeBuilder? variantRootNode = null;
+            if (isVariant)
+            {
+                var basePropertyName = variantBaseExpression?.Name.Identifier.Text ?? "";
+                // The persisted root name must match the variant's own prefab filename stem
+                // (== the variant class name), not the base facade property name: SaveAsPrefabAsset
+                // forces the saved root to the filename stem regardless, so naming it anything else
+                // creates a permanent desired-vs-live mismatch that a build rejects (see
+                // PrefabBuildSyncTarget's single-root-name check).
+                variantRootNode = new NodeBuilder { Name = variantClassName ?? basePropertyName, IsInstance = true };
+
+                if (facadeCatalog != null && variantBaseExpression != null && facadeCatalog.TryGetGuid(basePropertyName, out var guid))
+                {
+                    variantRootNode.SourcePrefabGuid = guid;
+                }
+                else if (variantBaseExpression != null)
+                {
+                    var argSpan = new SourceSpan(variantBaseExpression.Span.Start, variantBaseExpression.Span.Length);
+                    ctx.FacadeConflicts.Add(new Conflict
+                    {
+                        Kind = ConflictKind.UnknownFacadeReference,
+                        Reason = $"Unknown facade reference 'Prefabs.{basePropertyName}'.",
+                        Location = argSpan,
+                    });
+                }
+
+                variantRootNode.LogicalId = ctx.Resolver.Resolve(null, null, null, variantRootNode.Name, 0);
+                ctx.Roots.Add(variantRootNode);
+                ctx.VariantRootNode = variantRootNode;
+            }
 
             foreach (var statement in body.Statements)
             {
@@ -60,9 +96,21 @@ namespace SceneBuilder.Core.Parsing
             {
                 SchemaVersion = 1,
                 Roots = ctx.Roots.Select(BuildNode).ToArray(),
+                VariantBase = isVariant ? new AssetRef { Guid = variantRootNode!.SourcePrefabGuid ?? "" } : null,
             };
 
             var identityMap = BuildIdentityMap(ctx.Roots, existingMap);
+
+            // Merge-only: the base prefab's AssetEntry joins whatever existingMap.Assets already
+            // carried, never replacing it.
+            if (isVariant && variantRootNode != null && !string.IsNullOrEmpty(variantRootNode.SourcePrefabGuid) &&
+                !identityMap.Assets.Any(a => a.Guid == variantRootNode.SourcePrefabGuid))
+            {
+                identityMap = identityMap with
+                {
+                    Assets = identityMap.Assets.Append(new AssetEntry { Guid = variantRootNode.SourcePrefabGuid }).ToArray(),
+                };
+            }
             var anchors = BuildAnchors(ctx.Roots);
             var nodeAnchors = BuildNodeAnchors(ctx.Roots);
             var componentAnchors = BuildComponentAnchors(ctx.Roots);
@@ -120,16 +168,19 @@ namespace SceneBuilder.Core.Parsing
 
         // ---- Build-method discovery -------------------------------------------------
 
-        private static (MethodDeclarationSyntax Method, string SceneParamName) FindBuildMethod(CompilationUnitSyntax root)
+        private static (MethodDeclarationSyntax Method, string SceneParamName, bool IsVariant, MemberAccessExpressionSyntax? VariantBaseExpression, string? VariantClassName) FindBuildMethod(CompilationUnitSyntax root)
         {
             MethodDeclarationSyntax? candidate = null;
+            ClassDeclarationSyntax? matchedClass = null;
+            var isVariant = false;
 
             foreach (var cls in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
             {
-                var implementsBuilderInterface = cls.BaseList?.Types
-                    .Any(t => t.Type is IdentifierNameSyntax id &&
-                        (id.Identifier.Text == "ISceneDefinition" || id.Identifier.Text == "IPrefabDefinition")) == true;
-                if (!implementsBuilderInterface)
+                var matchedInterface = cls.BaseList?.Types
+                    .Select(t => t.Type)
+                    .OfType<IdentifierNameSyntax>()
+                    .FirstOrDefault(id => id.Identifier.Text is "ISceneDefinition" or "IPrefabDefinition" or "IPrefabVariantDefinition");
+                if (matchedInterface == null)
                 {
                     continue;
                 }
@@ -139,6 +190,8 @@ namespace SceneBuilder.Core.Parsing
                 if (method != null)
                 {
                     candidate = method;
+                    matchedClass = cls;
+                    isVariant = matchedInterface.Identifier.Text == "IPrefabVariantDefinition";
                     break;
                 }
             }
@@ -169,7 +222,17 @@ namespace SceneBuilder.Core.Parsing
                 throw Fail(candidate, "Build method must declare a scene-root parameter");
             }
 
-            return (candidate, param.Identifier.Text);
+            MemberAccessExpressionSyntax? variantBaseExpression = null;
+            if (isVariant && matchedClass != null)
+            {
+                var baseProperty = matchedClass.Members.OfType<PropertyDeclarationSyntax>()
+                    .FirstOrDefault(pd => pd.Identifier.Text == "Base");
+                variantBaseExpression = baseProperty?.ExpressionBody?.Expression as MemberAccessExpressionSyntax;
+            }
+
+            var variantClassName = isVariant ? matchedClass?.Identifier.Text : null;
+
+            return (candidate, param.Identifier.Text, isVariant, variantBaseExpression, variantClassName);
         }
 
         // ---- Statement walk -----------------------------------------------------------
@@ -225,6 +288,17 @@ namespace SceneBuilder.Core.Parsing
             if (calls[0].Method == "Add")
             {
                 ProcessAddChain(receiver, calls, handleName, ctx);
+                return;
+            }
+
+            // A variant's root-level override verbs (`root.Override(...)`/`.AddComponent<T>()`/
+            // `.RemoveComponent<T>()`/`.On(...)`), authored directly on the Build param — routes
+            // onto the pre-seeded VariantRootNode via ProcessVariantRootChain (the same per-verb
+            // lowering ProcessInstanceChain uses), never a fresh node.
+            if (ctx.IsVariant && receiver.Identifier.Text == ctx.SceneParamName &&
+                calls[0].Method is "Override" or "AddComponent" or "RemoveComponent" or "On")
+            {
+                ProcessVariantRootChain(calls, ctx);
                 return;
             }
 
@@ -836,12 +910,13 @@ namespace SceneBuilder.Core.Parsing
 
         private sealed class ParserContext
         {
-            public ParserContext(string sceneParamName, LogicalIdResolver resolver, FacadeCatalog? facadeCatalog = null, AssetCatalog? assetCatalog = null)
+            public ParserContext(string sceneParamName, LogicalIdResolver resolver, FacadeCatalog? facadeCatalog = null, AssetCatalog? assetCatalog = null, bool isVariant = false)
             {
                 SceneParamName = sceneParamName;
                 Resolver = resolver;
                 FacadeCatalog = facadeCatalog;
                 AssetCatalog = assetCatalog;
+                IsVariant = isVariant;
             }
 
             public string SceneParamName { get; }
@@ -858,6 +933,8 @@ namespace SceneBuilder.Core.Parsing
 
             public List<NodeBuilder> Roots { get; } = new();
             public List<Conflict> FacadeConflicts { get; } = new();
+            public bool IsVariant { get; }
+            public NodeBuilder? VariantRootNode { get; set; }
         }
     }
 }

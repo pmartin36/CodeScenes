@@ -574,8 +574,9 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   or spec a new grammar milestone). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).
 
 - SEVERITY low (mirror drift) — SceneBuilder.Grammar/FlatShapeRecognizer.Discovery.cs:22-23
-  (TryFindBuildMethod) hard-codes "ISceneDefinition" and was NOT widened for IPrefabDefinition when
+  (TryFindBuildMethod) hard-codes "ISceneDefinition" and was NOT widened for IPrefabDefinition (nor, since nested-prefabs-and-variants b1-t1 widened FindBuildMethod for IPrefabVariantDefinition, for variants) when
   BuilderParser.FindBuildMethod (SceneBuilder.Core/Parsing/BuilderParser.cs:129-131) was. Build-time
   parsing is unaffected; the CodeScenes analyzer's IDE diagnostics recognize a prefab builder only via
   its single-Build-method fallback (:38-50), so a prefab file with multiple Build methods gets no
   in-IDE recognition. Out of spec-39 (no analyzer scope). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).
+

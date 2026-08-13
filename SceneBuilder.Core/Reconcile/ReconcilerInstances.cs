@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using SceneBuilder.Core.Diff;
 using SceneBuilder.Core.Identity;
@@ -236,9 +237,37 @@ namespace SceneBuilder.Core.Reconcile
                 var key = (snapshotOverride.Target, snapshotOverride.PropertyPath);
                 snapshotKeys.Add(key);
 
-                if (staleKeys.Contains(key) || modelByKey.ContainsKey(key))
+                if (staleKeys.Contains(key))
                 {
                     continue;
+                }
+
+                if (modelByKey.TryGetValue(key, out var modelOverride))
+                {
+                    // Same key already authored — converged UNLESS the live value has since moved
+                    // (a variant/instance override edited in place): drop the stale `.Set(...)` and
+                    // fall through to re-append it below with the live value, the same drop-then-append
+                    // fold AppendChainedCalls already does for any other same-anchor drop+append pair.
+                    if (OverrideValueConverged(modelOverride, snapshotOverride))
+                    {
+                        continue;
+                    }
+
+                    var staleChildPath = modelOverride.Target.ChildPath;
+                    edits.Add(string.IsNullOrEmpty(staleChildPath)
+                        ? new DropInstanceCall
+                        {
+                            Anchor = instanceLogicalId,
+                            Kind = InstanceCallKind.Override,
+                            PropertyPath = modelOverride.PropertyPath,
+                        }
+                        : new DropScopedOnCall
+                        {
+                            Anchor = instanceLogicalId,
+                            SelectorMatchKey = staleChildPath,
+                            Kind = InstanceCallKind.Override,
+                            PropertyPath = modelOverride.PropertyPath,
+                        });
                 }
 
                 var setSpec = BuildOverrideSetSpec(snapshotOverride, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, assetCatalog);
@@ -294,6 +323,52 @@ namespace SceneBuilder.Core.Reconcile
                         PropertyPath = modelOverride.PropertyPath,
                     });
             }
+        }
+
+        // The snapshot side's Value is always a Kind=String primitive (OverrideMapper.ToOverrides
+        // wraps Unity's raw PropertyModification.value string verbatim, unconditionally); the model
+        // side's authored Value is typed (Float/Int/Bool/...). A plain ValueNode `==` between the two
+        // is a representation mismatch, not a real difference (e.g. Float(4f) vs String("4")), and
+        // reports every converged override as changed. Stringify the model side into the SAME encoding
+        // Unity's mod.value uses (int/enum invariant, bool "1"/"0", float invariant, string raw —
+        // mirrors PrefabInstanceProbe.Overrides.cs's StringifyDefault) before comparing. A value kind
+        // this stringifier does not cover (composite/asset/object-ref forms, which set
+        // ObjectReference instead of Value) falls back to the direct comparison unchanged.
+        private static bool OverrideValueConverged(PropertyOverride modelOverride, PropertyOverride snapshotOverride)
+        {
+            if (snapshotOverride.ObjectReference != modelOverride.ObjectReference)
+            {
+                return false;
+            }
+
+            if (snapshotOverride.Value is ValueNode.Primitive { Kind: PrimitiveKind.String } snapshotPrimitive
+                && TryStringifyPrimitiveForModCompare(modelOverride.Value, out var modelAsModString))
+            {
+                return (string?)snapshotPrimitive.Value == modelAsModString;
+            }
+
+            return snapshotOverride.Value == modelOverride.Value;
+        }
+
+        private static bool TryStringifyPrimitiveForModCompare(ValueNode value, out string? stringified)
+        {
+            if (value is ValueNode.Primitive primitive)
+            {
+                stringified = primitive.Kind switch
+                {
+                    PrimitiveKind.Bool => (bool)primitive.Value! ? "1" : "0",
+                    PrimitiveKind.Int => Convert.ToInt64(primitive.Value).ToString(CultureInfo.InvariantCulture),
+                    PrimitiveKind.Long => Convert.ToInt64(primitive.Value).ToString(CultureInfo.InvariantCulture),
+                    PrimitiveKind.Float => Convert.ToSingle(primitive.Value).ToString(CultureInfo.InvariantCulture),
+                    PrimitiveKind.Double => Convert.ToDouble(primitive.Value).ToString(CultureInfo.InvariantCulture),
+                    PrimitiveKind.String => (string?)primitive.Value,
+                    _ => null,
+                };
+                return stringified != null;
+            }
+
+            stringified = null;
+            return false;
         }
 
         private static void ReconcileAddedComponents(

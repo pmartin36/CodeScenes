@@ -101,7 +101,21 @@ namespace SceneBuilder.Core.Reconcile
             foreach (var (anchor, callTexts) in callTextsByAnchor)
             {
                 dropsByAnchor.TryGetValue(anchor, out var anchorDrops);
-                AppendChainedCalls(root, anchors, anchor, callTexts, anchorDrops, allTargets, appliers);
+
+                // A virgin variant root has no existing `.Override`/`.AddComponent`/
+                // `.RemoveComponent` call to chain onto — its anchor stays the SourceSpan default
+                // (BuilderParser.Instance.cs's ProcessVariantRootChain only sets it once a root-level
+                // verb statement is actually parsed). Every other anchor (a matched instance's own
+                // `Instance(...)` call, or a variant root that already carries an authored verb) is a
+                // real invocation, so it keeps chaining onto it exactly as before.
+                if (anchors.TryGetValue(anchor, out var span) && span == default)
+                {
+                    AppendRootVerbStatement(root, anchor, callTexts, allTargets, appliers);
+                }
+                else
+                {
+                    AppendChainedCalls(root, anchors, anchor, callTexts, anchorDrops, allTargets, appliers);
+                }
 
                 if (anchorDrops != null)
                 {
@@ -113,6 +127,35 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             return consumed;
+        }
+
+        /// <summary>
+        /// Introduces every queued call as ONE brand-new top-level statement on the Build method's
+        /// scene/root param — the anchor-less counterpart to <see cref="AppendChainedCalls"/>, for a
+        /// receiver with no existing invocation to splice onto (a variant root authoring its first-ever
+        /// override/add/remove-component call). Reuses the general statement-placement path
+        /// (StatementPlacement.cs) that every appended statement goes through: with no `Add`/`Instance`
+        /// peers under this receiver and no local declaration to seat after, it lands at the end of the
+        /// Build method's body.
+        /// </summary>
+        private static void AppendRootVerbStatement(
+            CompilationUnitSyntax root,
+            string anchor,
+            IReadOnlyList<string> callTexts,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var (buildMethod, sceneParamName) = FindBuildMethod(root);
+            var body = buildMethod.Body ?? throw Fail(buildMethod, $"Build method has no body to append anchor '{anchor}' into.");
+            var indent = BodyIndent(root);
+
+            var statementText = sceneParamName + string.Concat(callTexts.Select(callText => "." + callText)) + ";";
+            var newStmt = SyntaxFactory.ParseStatement(statementText)
+                .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
+                .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
+
+            allTargets.Add(body);
+            appliers.Add(currentRoot => PlaceNewStatement(currentRoot, body, newStmt, sceneParamName, PeerKind.Child, 0));
         }
 
         /// <summary>

@@ -10,9 +10,9 @@ namespace SceneBuilder.Core.Parsing
     // .agent_handoffs/codescenes-analyzers/b1-t2/research.md.
     public static partial class BuilderParser
     {
-        private static void RecognizeOrThrow(SyntaxTree tree, BlockSyntax body, string sceneParamName)
+        private static void RecognizeOrThrow(SyntaxTree tree, BlockSyntax body, string sceneParamName, bool isVariant = false)
         {
-            var violations = SceneBuilder.Grammar.FlatShapeRecognizer.Analyze(body, sceneParamName);
+            var violations = SceneBuilder.Grammar.FlatShapeRecognizer.Analyze(body, sceneParamName, isVariant);
             if (violations.Count > 0)
             {
                 throw FailFromViolation(tree, violations[0]);

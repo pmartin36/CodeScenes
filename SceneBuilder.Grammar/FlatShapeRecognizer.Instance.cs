@@ -70,6 +70,35 @@ namespace SceneBuilder.Grammar
             }
         }
 
+        // A variant's root-level `.Override`/`.AddComponent`/`.RemoveComponent`/`.On`
+        // verbs, authored directly on the Build param — reuses the SAME per-verb shape checks
+        // ProcessInstanceChain's post-`Instance` dispatch uses below. Every call here IS a verb
+        // (there is no leading `Instance` call to skip past).
+        private static void ProcessVariantRootChain(List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls, RecognizerContext ctx)
+        {
+            foreach (var call in calls)
+            {
+                switch (call.Method)
+                {
+                    case "Override":
+                        ApplyOverride(call.Args, ctx);
+                        break;
+                    case "AddComponent":
+                        ApplyAddComponent(call.Invocation, call.Args, ctx);
+                        break;
+                    case "RemoveComponent":
+                        ApplyRemoveComponent(call.Invocation, ctx);
+                        break;
+                    case "On":
+                        ApplyScopedOn(call.Args, ctx);
+                        break;
+                    default:
+                        Report(ctx, call.Invocation, SB1001, $"Unsupported builder call '.{call.Method}(...)' on the variant root (expected .Override/.AddComponent/.RemoveComponent/.On)");
+                        break;
+                }
+            }
+        }
+
         // b4-t1: the typed façade form `Instance(Prefabs.Tank)` — shape-only (the recognizer is
         // ns2.0 and cannot reference Core/FacadeCatalog for the semantic catalog lookup; that
         // lives solely in BuilderParser.Instance.cs).

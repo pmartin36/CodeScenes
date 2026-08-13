@@ -206,12 +206,42 @@ namespace SceneBuilder.Editor
                 .Select(t => NormalizeTargetType(t, usings).Target)
                 .ToArray();
 
+            var removedGameObjects = pin.RemovedGameObjects
+                .Select(t => ResolveRemovedGameObjectSubKey(t, pin.SourcePrefab.Guid))
+                .ToArray();
+
             return pin with
             {
                 Overrides = overrides,
                 AddedComponents = addedComponents,
                 RemovedComponents = removedComponents,
+                RemovedGameObjects = removedGameObjects,
             };
+        }
+
+        // A RemovedGameObjects target parses with ChildPath resolved (against the facade manifest —
+        // BuilderParser.Instance.cs's ApplyRemoveChild) but SubKey left at its default. The diff key is
+        // (SubKey, ComponentType), never ChildPath (rename stability, ReconcilerInstances.cs), so a
+        // target whose SubKey never resolves can never converge with the live snapshot's own
+        // SubKey-keyed read (PrefabInstanceProbe.Nested.cs's ReadRemovedGameObjects) — every later
+        // build re-diffs it as a spurious revert of an already-authored removal. The removed
+        // GameObject itself is gone from the live scene by the time a later build runs, so (unlike
+        // RemovedComponents/Overrides/AddedComponents, whose owning sub-object stays live and is
+        // resolved generically by NestedOverrideBootstrap) there is no live object left to resolve
+        // SubKey against. Resolves it the same way the live read does: the GlobalObjectId of the base
+        // prefab ASSET's own sub-object at this ChildPath (an asset-loaded object resolves a
+        // GlobalObjectId exactly like a live one, so the two sides agree).
+        private static OverrideTarget ResolveRemovedGameObjectSubKey(OverrideTarget target, string sourcePrefabGuid)
+        {
+            if (string.IsNullOrEmpty(target.ChildPath) || string.IsNullOrEmpty(sourcePrefabGuid))
+            {
+                return target;
+            }
+
+            var assetPath = AssetDatabase.GUIDToAssetPath(sourcePrefabGuid);
+            var baseRoot = string.IsNullOrEmpty(assetPath) ? null : AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
+            var sub = baseRoot == null ? null : PrefabInstanceProbe.ResolveSubObjectByChildPath(baseRoot, target.ChildPath);
+            return sub == null ? target : target with { SubKey = PrefabInstanceProbe.SubKeyOf(sub) };
         }
 
         // Resolves an OverrideTarget's short ComponentType to its usings-resolved FullName. A target
