@@ -303,3 +303,32 @@ scene build/sync still work through the refactored shared seam (non-regression).
 the shipped identity stamp uses `GlobalObjectId idType=2` (the object is stamped while in the
 prefab-contents preview scene), not the `idType=1` the spec text stated; it is fully functional and
 round-trips.
+
+## 40 - Nested prefabs and variants
+
+The depth layer on flat prefab authoring (spec 39): author, from code, NESTED prefabs (a code-defined
+prefab that instances another prefab inside itself) and prefab VARIANT chains (a code-defined prefab
+whose base is another prefab, carrying an override layer), round-tripped and seamless. Nesting via a
+typed `NodeHandle.Instance<TRef>` verb on `PrefabRoot`; variants via a new `IPrefabVariantDefinition` /
+`VariantRoot` that names a base and carries override-only authoring. A variant's base may be ANY real
+`.prefab`, human-made or code-defined (measured: no API difference). v1 override depth is
+existing-vocabulary only (the base's or nested instance's own hierarchy); deep layer-qualified
+addressing is deferred.
+
+Built entirely on reuse: the shared build/sync target seam from spec 39 (no fork) and the
+provenance-agnostic M10 + spec-24 override machinery (base-vs-override disentanglement is inherited, not
+rebuilt). Two spike-measured invariants are owned with checks: the nested child must be a connected
+instance at save time (instantiate-then-parent, never build inline) or the nesting flattens, and
+nested-instance identity is read from persisted state. Nested materialize runs `InstantiatePrefab` into
+the prefab-contents preview scene; variant materialize is `InstantiatePrefab(base)` ->
+`RecordPrefabInstancePropertyModifications` -> `SaveAsPrefabAsset(Variant)`. Built in two buckets
+(`2b40b5d` nested, `ed219b0` variant).
+
+Gate `passed=795 failed=0 skipped=0`. Live-verified across all confirmation checks
+(`SceneBuilderTest/Logs/live-verify-spec40-1.log`): a code builder produces a prefab holding a genuine
+connected nested instance; a nested override authored at existing-vocab depth round-trips (Prefab-Mode
+edit auto-syncs back); an edit-in-place regeneration that adds a child keeps the nested instance's
+fileID byte-identical (the make-or-break proof); a variant of a code base AND of a human base each
+produce a real `Variant` asset whose override persists and whose base changes inherit through; a variant
+edit auto-syncs back; both directions fire automatically under the master toggle; and flat-prefab plus
+scene build/sync still work through the shared seam (non-regression, scene build idempotent).
