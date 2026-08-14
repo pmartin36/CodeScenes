@@ -353,3 +353,21 @@ by the gate's EditMode layer, which now runs `AddedChildReferenceRoundTripTests`
 added-child reference round-trip, plus the headless `SnapshotEmitClassificationTests`/
 `AddedChildFieldExpressionsTests`. No separate live-verify session: the fix is Core-only with no new
 watcher/trigger behavior, so the EditMode gate test is the live-editor check.
+
+## 42 - Auto-sync incremental identity
+
+Two reproduced performance defects with one root cause: auto-sync's O(changed) identity guarantee was
+O(scene) per keystroke. Every debounced cycle cold-reassembled the whole scene at its tail
+(`SceneBuilderAutoSync.CaptureBaseline` -> `AssembleCold`, discarding the incremental cache), and the
+scene-reference resolver resolved each target's `GlobalObjectId` uncached, bypassing the counted
+`GlobalObjectIdCache` seam the perf gate asserts on.
+
+Fix (adapter, one bucket `0c4feff`): one counted identity seam threaded to node identity, reference fields
+and listener targets alike (Task A), and a baseline-reuse lifecycle so a converged cycle reuses its
+incremental snapshot instead of cold-reassembling, cold-reading only on a generation bump or cold session
+(Task B). The perf gate `AutoIdentityTests` was extended to N reference-holding objects with a target-move
+byte-equality proof of the invalidation policy, so neither defect can return without failing it. Gate
+`passed=803 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`). Live-verified in a real editor
+(`Logs/live-verify-spec42.log`): idle pump ticks hold `GlobalObjectIdCache.ResolutionCount` at 0 (no cold
+reassemble), a value edit costs a bounded non-accumulating delta, and scene references round-trip through
+the cache-threaded resolver with no dangling reports.

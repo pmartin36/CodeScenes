@@ -3,38 +3,6 @@
 Measured defects with no owning task. Each entry: severity, the concrete observation, and the
 feature whose run found it. Entries are removed only when the fix ships with a regression test.
 
-- SEVERITY med — every debounced auto-sync cycle already performs a FULL cold scene assemble, so the
-  O(changed) incremental cache never survives more than one cycle.
-  `SceneBuilderAutoSync.CaptureBaseline` (`com.codescenes/Editor/SceneBuilderAutoSync.cs:628`) calls
-  `assembler.AssembleCold` on the SAME per-builder assembler instance returned by `GetAssembler`, and it
-  is called at the tail of every cycle body: `ExecuteSceneToCode:502`, `ExecuteCodeToScene:583`,
-  `ExecuteBothChanged:698`. `AssembleCold` (`ChangeScopedSnapshot.cs:30-31, :37, :48`) does
-  `Ids.Clear()`, `Ids.WarmBatch(CollectAllGameObjects(scene))` (a whole-scene `GetGlobalObjectIdsSlow`
-  batch) and a `SceneSnapshotReader.ReadNode` over every root — a full `SerializedObject` read of every
-  component in the scene — then replaces `_nodeByGoEntityId` wholesale. So the incremental assemble at
-  `:495` is always served by a cache the immediately-preceding cold assemble built, and the per-keystroke
-  cost is a full-scene walk regardless. Derived by construction from the call chain, not timed. CLAUDE.md
-  rates a full-scene walk per keystroke fatal rather than a tradeoff. Not fixable inside b2-t1: the
-  baseline is a whole-scene converged snapshot read under the POST-sync sidecar, so reusing the
-  pre-sync incremental result is a contract change to `_baselines`, not a localized edit.
-  OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
-- SEVERITY med — the scene-ref resolver bypasses `GlobalObjectIdCache` and calls
-  `GlobalObjectId.GetGlobalObjectIdSlow` uncached, once per assigned scene-reference FIELD, on every read.
-  `ObjectReferenceResolver.BuildSceneRefResolver`'s returned closure
-  (`com.codescenes/Editor/ObjectReferenceResolver.cs:185`) resolves the target's goid on every invocation;
-  it is invoked from `AssetReferenceResolver.ReadObjectReferenceValue`
-  (`com.codescenes/Editor/AssetReferenceResolver.cs:484`) for every non-asset object reference, on both the
-  cold and incremental read paths. `ChangeScopedSnapshot.Ids` (the `GlobalObjectIdCache` that exists
-  precisely to make this O(changed)) is threaded to node identity only — never to the ref resolver — so
-  these calls are neither cached nor counted. Consequence: the repo's O(changed) perf gate
-  (`AutoIdentityTests.Identity_SingleFieldEdit_ResolutionCountProportionalToChangeSet`, asserting
-  `css.Ids.ResolutionCount == 1`) is structurally blind to them; a scene of N objects each holding a
-  reference field costs N uncached slow resolves per cold assemble on top of the counted ones. Derived by
-  construction, not timed. Fixing it means threading the cache into the resolver plus deciding its
-  invalidation for a moved/reparented target, which no planned task's DELIVERABLE holds.
-  OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
 - SEVERITY low — `ReconcileResult.Skipped` is logged once per skipped field on EVERY sync:
   `com.codescenes/Editor/SceneBuilderSync.cs:237` does `Debug.LogWarning` per entry, and
   `SceneBuilderAutoSync.cs:497` calls `SceneBuilderSync.Run` on every debounced change. A scene
@@ -280,3 +248,12 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   parsing is unaffected; the CodeScenes analyzer's IDE diagnostics recognize a prefab builder only via
   its single-Build-method fallback (:38-50), so a prefab file with multiple Build methods gets no
   in-IDE recognition. Out of spec-39 (no analyzer scope). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).
+
+- SEVERITY low — a benign code->scene build skip is logged at ERROR severity. When the pump routes a
+  code->scene cycle while the target scene is not open, `SceneBuilderAutoSync.ExecuteCodeToScene`
+  (`com.codescenes/Editor/SceneBuilderAutoSync.cs`, the skip-guard around `:671`) emits
+  `[CodeScenes] <builder>: scene ... is not open — code->scene build skipped` at Error level, so a
+  non-error condition surfaces as a red console Error. Observed once during spec-42 live-verify (a
+  fixture builder written before its scene was opened); fires once, not per-keystroke. Pre-existing;
+  unrelated to `0c4feff`. Fix: log the skip at Info/Warning, not Error. OWNER: unassigned. FOUND-BY:
+  spec-42 live-verify.
