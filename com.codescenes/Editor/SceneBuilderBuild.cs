@@ -251,7 +251,16 @@ namespace SceneBuilder.Editor
             using (target.BeginWrite())
             {
                 execution = target.Execute(plan, remapped);
-                target.Persist();
+
+                // Persist only when the plan actually mutated the hierarchy. A converged 0-op build
+                // changed nothing, so re-saving would just bump the asset's mtime and dirty it in
+                // version control on every keystroke under auto-sync. Identity stamping does not run
+                // here (it writes the sidecar after this scope, off the post-save GlobalObjectIds),
+                // and the first build always carries create ops, so it still saves.
+                if (plan.Ops.Length > 0)
+                {
+                    target.Persist();
+                }
             }
 
             // Persist the CURRENT code structure only (drop destroyed orphans), carrying the

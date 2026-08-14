@@ -114,17 +114,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   forgetting to opt in" is false for these three, and the compile class of bug CLAUDE.md calls a bug
   outright can land there unseen. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
 
-- SEVERITY med — every build marks the scene dirty and saves it, whether or not the plan did
-  anything. `com.codescenes/Editor/SceneBuilderBuild.cs:241-242` calls
-  `EditorSceneManager.MarkSceneDirty(scene)` then `EditorSceneManager.SaveScene(scene, scenePath)`
-  inside the suppression scope, with no check on `plan.Ops.Length`, so a converged build that
-  reports `0 plan op(s)` still re-saves the scene asset. Auto-sync builds on every debounced change,
-  so a scene that already matches its code is rewritten on a keystroke that changed nothing. Found
-  while specifying spec 35 D2, whose earlier draft wrongly blamed the phantom plan op for this; the
-  op suppression does not touch it. Not measured for user-visible impact — whether the written bytes
-  actually differ, and what it costs in editor I/O and version-control noise, is unknown and worth
-  measuring before designing a fix. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
 - SEVERITY med: an authored prefab-INSTANCE override on an adapter-excluded serialized path never
   converges. It is the same permanent non-convergence trap spec 35 D2 closes for ordinary component
   fields, on a different authoring surface, and D2's fix does not reach it.
