@@ -83,6 +83,15 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
   The backend half lives in the site repo (`CodeScenesSite/specs/01-licensing-backend.md`) and is
   already partly stood up.
 
+- **`specs/43` reference forward-declaration (CS0841).** BLOCKED on a product decision, not effort. A
+  reference from an earlier-declared object to a later-declared root emits non-compiling builder source
+  (reproduced live; entry stays in `docs/open-defects.md`). The fix needs a NEW public authoring verb —
+  a deferred field-set on an already-authored component (candidate `opener.Set<Linker>("target", door)`),
+  because the current vocabulary can only re-add the component, not reconfigure it as a standalone
+  statement. Full escalation finding is in the spec's STATUS block. To resume: decide the verb shape,
+  amend the spec's In-scope/Deliverables/Decomposition, re-run the pipeline fresh with `{ spec }` (the
+  cached ESCALATED verdict means resume-by-id will not work).
+
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 
 ## Resuming an interrupted pipeline run
