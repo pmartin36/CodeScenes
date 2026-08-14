@@ -124,29 +124,35 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   (`Conflict.RecurrenceKey` -> `ConflictSurfacing.SurfaceNotes`) exists precisely to surface a
   standing condition once per editor session; `Skipped` has no such de-duplication. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
 
-- SEVERITY med — a newly-appended ROOT GameObject's declaration is always seated AFTER every
-  existing root statement, regardless of its live scene sibling index, so a later field-value patch
-  that introduces a reference TO it from an EARLIER existing statement emits a forward reference and
-  the written source fails to compile. `Reconciler.DetectAppends`
-  (`SceneBuilder.Core/Reconcile/ReconcilerAppends.cs:126-138`) seats a root-level append at
-  `nextIndexByParentKey` defaulting to `expected.Roots.Length` (after every already-authored root),
-  never at the live root sibling index the append's own doc comment claims to use (`:61-62`, "the
-  array position IS the scene sibling index" — true only for the recursion order, not the seat
-  index). Measured on the current tree: a converged `Opener` (`opener.Component<DoorOpener>()`,
-  field unauthored) plus a hand-created root `Door` wired as `Opener`'s live target — reordering
-  `Door` to live sibling index 0 via `Transform.SetSiblingIndex(0)` before syncing made no
-  difference to its emitted position. `SceneBuilderSync.Run` -> `BuilderCompileCheck.CheckAndReport`
-  (`com.codescenes/Editor/BuilderCompileCheck.cs:286`) reports `CS0841: Cannot use local variable
-  'door' before it is declared` against `opener.Component<DoorOpener>(c => c.Set("target", door));`
-  preceding `var door = scene.Add("Door");`. A CHILD append does not hit this (seated immediately
-  after its parent's own declaration via `StatementPlacement.PlacementIndex`,
-  `SceneBuilder.Core/Reconcile/StatementPlacement.cs:224-229`), which is why the b2-t2 gate test
-  parents its hand-created reference target under the referencing object instead of at scene root.
-  Fixing it means either seating a root append at its live sibling index among ALL roots (not just
-  `expected.Roots.Length`) or deferring the field-introducing patch until the target's declaration
-  precedes it in text — a Reconciler/StatementPlacement contract change, not a localized patch.
+- SEVERITY med — a scene reference from an EARLIER-declared object to a LATER-declared root emits a
+  forward reference and the written builder source fails to compile (CS0841). REPRODUCED LIVE (two manual
+  syncs, auto off): a converged `Opener` (`var opener = scene.Add("Opener"); opener.Component<Linker>();`,
+  Linker.target unauthored); create a new ROOT `Door` at end-of-roots (Opener@0, Door@1) and wire
+  `Opener.Linker.target = Door`. Sync 1 appends `scene.Add("Door");` after Opener and silently omits the
+  pending target. Sync 2 (Door mapped) emits `opener.Component<Linker>(c => c.Set("target", door));` on
+  line 9 BEFORE `var door = scene.Add("Door");` on line 10 -> `SceneBuilderSync.Run(...).CompileErrors` =
+  `CS0841`, raised at `com.codescenes/Editor/BuilderCompileCheck.cs:286`.
+  REFUTED PREMISE (this entry previously blamed a mis-seated append): the append is seated at its live
+  sibling index via `AppendStatement.NewSiblingIndex = siblingIndex` (`SceneBuilder.Core/Reconcile/
+  ReconcilerAppends.cs:203`); the `expected.Roots.Length` value (`:129-138`) feeds only
+  `LogicalIdResolver.Synthesize` (`:179`), never the seat. Measured: sync 1 seated Door at index 1
+  correctly, and reordering Door to sibling 0 DID move its declaration to the top and compiled
+  (PatchEdits=4, 0 errors). So "seat at live sibling index" is a no-op.
+  REAL CAUSE: the reference-introducing patch is folded IN PLACE into the anchor's existing statement.
+  `ComponentReconciler` emits `IntroduceComponentField` (`ComponentReconciler.cs:468`/`:519`) applied by
+  `ComponentPatchApplier.ResolveIntroduceComponentField` as an in-place rewrite of the anchor's existing
+  `.Component<T>(...)` call (`ComponentPatchApplier.cs:233`), never routing through `StatementPlacement`
+  or checking that a referenced handle is declared earlier. When the referrer's sibling index precedes
+  the target's (a normal layout), the target's `var` is legitimately later and the patch forward-refs it.
+  `StatementPlacement.MinIndexAfterReceiverDeclaration` compounds it: its floor is receiver-only, ignoring
+  handles used as ARGUMENTS.
+  FIX DIRECTION: defer the reference assignment into a SEPARATE statement seated after the target's
+  declaration (a new deferred-field-assignment emission shape), or generalize the placement floor to the
+  max declaration index over ALL handles a statement names, not just the receiver. A scene reorder is NOT
+  a fix (the target belongs at its later sibling). Reconciler/StatementPlacement contract change, so it
+  wants its own spec + RED test (headless two-pass Core sim asserting the applied source compiles, plus an
+  EditMode two-sync gate test whose reference target is a scene ROOT, not a child of the referrer).
   OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
 - SEVERITY low — spec 35 D3's "Reachable sequence, every step an ordinary UI action with auto-sync
   armed" (`specs/35-reference-writes-and-cache-invalidation.md:104-113`) never says how its step-1
   precondition arises — a scene object that a MAPPED object references but the IdentityMap does not
