@@ -332,3 +332,24 @@ fileID byte-identical (the make-or-break proof); a variant of a code base AND of
 produce a real `Variant` asset whose override persists and whose base changes inherit through; a variant
 edit auto-syncs back; both directions fire automatically under the master toggle; and flat-prefab plus
 scene build/sync still work through the shared seam (non-regression, scene build idempotent).
+
+## 41 - Snapshot-emit classification
+
+Three reproduced defects sharing one root cause: a snapshot value that reaches source emission without
+routing through the shared classification (`SnapshotFieldEmission`/`ClassifySnapshotRef`) is emitted
+wrong. A bare `ValueNode.Unsupported` landed as a raw token at three sites (CS0103); `BuildOverrideSetSpec`
+rendered a dangling `ObjectRef` as a phantom identifier (CS0103); an added-child component `ObjectRef`
+field threw `NotSupportedException` and crashed `SourcePatchApplier.Apply`. All three were reproduced by
+an out-of-tree probe over the public `Reconciler.Reconcile`/`SourcePatchApplier.Apply` before the spec
+was written (repro-first: the RED shapes seeded the pipeline, and a fourth candidate defect from the same
+register was refuted this way and re-scoped instead).
+
+Fix (pure Core, built in one bucket, `d5f5cb6`): a bare `Unsupported` classifies as unemittable and every
+snapshot-emit site (`BuildOverrideSetSpec` included) routes through the one classification and omits-and-
+reports rather than writing a raw token or phantom identifier; and a new `FieldExpressions` channel on
+`AppendInstanceAddChild`, threaded from `ReconcileAddedGameObjects`, renders an added-child reference field
+as a real handle instead of crashing. Gate `passed=796 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`). Verified
+by the gate's EditMode layer, which now runs `AddedChildReferenceRoundTripTests` exercising the live
+added-child reference round-trip, plus the headless `SnapshotEmitClassificationTests`/
+`AddedChildFieldExpressionsTests`. No separate live-verify session: the fix is Core-only with no new
+watcher/trigger behavior, so the EditMode gate test is the live-editor check.

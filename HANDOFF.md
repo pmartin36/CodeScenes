@@ -5,7 +5,7 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=795 failed=0 skipped=0)`
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=796 failed=0 skipped=0)`
 (2026-08-12, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
 skip is not a Unity pass — force it). `verify.sh` now discounts one known host engine message
 by exact text (`69a74df`); a crash or any other error still fails.
