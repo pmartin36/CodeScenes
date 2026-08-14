@@ -109,7 +109,7 @@ namespace SceneBuilder.Core.Diff
                     // All in-place (pass-B) — never re-instantiates.
                     if (node is PrefabInstanceNode instanceNode)
                     {
-                        InstanceOverrideDiff.Emit(instanceNode, entry.Node, ops, conflicts);
+                        InstanceOverrideDiff.Emit(instanceNode, entry.Node, ops, conflicts, fieldGate);
                     }
 
                     // OpaqueOverrides is READ-ONLY (M10) — never diffed into an op, only
@@ -130,7 +130,7 @@ namespace SceneBuilder.Core.Diff
                 }
                 else if (node is PrefabInstanceNode instanceNode)
                 {
-                    EmitCreateInstance(instanceNode, parentLogicalId, i, ops, conflicts);
+                    EmitCreateInstance(instanceNode, parentLogicalId, i, ops, conflicts, fieldGate);
                 }
                 else
                 {
@@ -430,7 +430,7 @@ namespace SceneBuilder.Core.Diff
         // override layer (Overrides/AddedComponents/RemovedComponents/child instances) IS emitted,
         // via the same InstanceOverrideDiff the matched path uses, diffed against an empty snapshot
         // so every authored entry becomes an apply op.
-        private static void EmitCreateInstance(PrefabInstanceNode node, string? parentLogicalId, int siblingIndex, List<ChangeOp> ops, List<Conflict> conflicts)
+        private static void EmitCreateInstance(PrefabInstanceNode node, string? parentLogicalId, int siblingIndex, List<ChangeOp> ops, List<Conflict> conflicts, ExcludedFieldGate fieldGate)
         {
             ops.Add(new AddInstance
             {
@@ -442,7 +442,7 @@ namespace SceneBuilder.Core.Diff
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
             RectTransformDiff.EmitCreate(node.LogicalId, node.Transform, ops);
 
-            InstanceOverrideDiff.Emit(node, new SnapshotNode(), ops, conflicts);
+            InstanceOverrideDiff.Emit(node, new SnapshotNode(), ops, conflicts, fieldGate);
         }
 
         private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, ExcludedFieldGate fieldGate, List<ChangeOp> ops)

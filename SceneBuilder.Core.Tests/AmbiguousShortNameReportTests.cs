@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Reconcile;
 using Xunit;
 
@@ -126,6 +127,7 @@ namespace SceneBuilder.Core.Tests
             if (t == typeof(ConflictKind)) return ConflictKind.AmbiguousAnchor;
             if (t == typeof(ListenerReportReason)) return ListenerReportReason.EmptyMethodName;
             if (t == typeof(LocatedReport)) return new LocatedReport("x", "x", "x", "detail");
+            if (t == typeof(OverrideTarget)) return new OverrideTarget { ComponentType = "x" };
             throw new NotSupportedException($"extend the argument synthesizer for {t}");
         }
     }

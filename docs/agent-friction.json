@@ -2,17 +2,17 @@
   "entries": {
     "Assertion failed on expression: '!gAlreadyClosing'": {
       "class": "ENVIRONMENT",
-      "count": 9,
+      "count": 10,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-13",
+      "last_seen": "2026-08-14",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "Assertion failed on expression: '!gAlreadyClosing'"
     },
     "Assertion failed on expression: 'm_PodArrays.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 9,
+      "count": 10,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-13",
+      "last_seen": "2026-08-14",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
       "verbatim": "Assertion failed on expression: 'm_PodArrays.empty()'"
     },
@@ -66,17 +66,17 @@
     },
     "ExecuteCommandByName: Parameter validation failed: Required parameter 'asset' is missing or empty": {
       "class": "TOOLING",
-      "count": 2,
+      "count": 3,
       "first_seen": "2026-08-06",
-      "last_seen": "2026-08-12",
+      "last_seen": "2026-08-14",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-spec36.log",
       "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'asset' is missing or empty"
     },
     "ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty": {
       "class": "TOOLING",
-      "count": 1,
+      "count": 2,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-07-31",
+      "last_seen": "2026-08-14",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "ExecuteCommandByName: Parameter validation failed: Required parameter 'field' is missing or empty"
     },
@@ -163,6 +163,11 @@
       "bytes": 853944,
       "head": "09830b71e54760b7",
       "size": 853944
+    },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec42.log": {
+      "bytes": 276678,
+      "head": "022f4053b6cede84",
+      "size": 277525
     }
   }
 }

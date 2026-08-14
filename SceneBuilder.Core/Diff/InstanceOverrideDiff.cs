@@ -14,15 +14,15 @@ namespace SceneBuilder.Core.Diff
     // dropped, surfaced instead as a Conflict).
     internal static class InstanceOverrideDiff
     {
-        public static void Emit(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops, List<Conflict> conflicts)
+        public static void Emit(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops, List<Conflict> conflicts, ExcludedFieldGate fieldGate)
         {
             var staleKeys = new HashSet<(OverrideTarget Target, string PropertyPath)>();
             DetectStaleOverrides(desired, snapshot, conflicts, staleKeys);
 
-            EmitOverrides(desired, snapshot, ops, staleKeys);
-            EmitAddedComponents(desired, snapshot, ops);
+            EmitOverrides(desired, snapshot, ops, staleKeys, fieldGate);
+            EmitAddedComponents(desired, snapshot, ops, fieldGate);
             EmitRemovedComponents(desired, snapshot, ops);
-            EmitAddedGameObjects(desired, snapshot, ops);
+            EmitAddedGameObjects(desired, snapshot, ops, fieldGate);
             EmitRemovedGameObjects(desired, snapshot, ops);
         }
 
@@ -64,7 +64,7 @@ namespace SceneBuilder.Core.Diff
 
         private static void EmitOverrides(
             PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops,
-            HashSet<(OverrideTarget Target, string PropertyPath)> staleKeys)
+            HashSet<(OverrideTarget Target, string PropertyPath)> staleKeys, ExcludedFieldGate fieldGate)
         {
             var logicalId = desired.LogicalId;
 
@@ -81,6 +81,11 @@ namespace SceneBuilder.Core.Diff
                 desiredKeys.Add(key);
 
                 if (staleKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                if (!fieldGate.AdmitOverride(logicalId, desiredOverride.Target, desiredOverride.PropertyPath))
                 {
                     continue;
                 }
@@ -117,7 +122,7 @@ namespace SceneBuilder.Core.Diff
             }
         }
 
-        private static void EmitAddedComponents(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops)
+        private static void EmitAddedComponents(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops, ExcludedFieldGate fieldGate)
         {
             var logicalId = desired.LogicalId;
 
@@ -139,7 +144,7 @@ namespace SceneBuilder.Core.Diff
                     {
                         LogicalId = logicalId,
                         Target = desiredComponent.Target,
-                        Component = desiredComponent.Component,
+                        Component = fieldGate.Admit(desiredComponent.Component),
                     });
                 }
             }
@@ -187,7 +192,7 @@ namespace SceneBuilder.Core.Diff
 
         // b3-t2: mirrors EmitAddedComponents. Key is (Parent, Node child's Name); a GO Parent's
         // ComponentType is "" so this is effectively (Parent.SubKey, Name) per research.
-        private static void EmitAddedGameObjects(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops)
+        private static void EmitAddedGameObjects(PrefabInstanceNode desired, SnapshotNode snapshot, List<ChangeOp> ops, ExcludedFieldGate fieldGate)
         {
             var logicalId = desired.LogicalId;
 
@@ -209,7 +214,7 @@ namespace SceneBuilder.Core.Diff
                     {
                         LogicalId = logicalId,
                         Target = desiredAdded.Parent,
-                        Node = desiredAdded.Node,
+                        Node = fieldGate.Admit(desiredAdded.Node),
                     });
                 }
             }

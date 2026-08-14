@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
@@ -206,6 +207,19 @@ namespace SceneBuilder.Core.Reconcile
                 ConflictKind.UnauthorableField,
                 new LocatedReport(componentLogicalId, componentTypeFullName, fieldKey, LineHasNoEffect),
                 recurrenceKey: $"unauthorable-field:{componentLogicalId}:{fieldKey}",
+                location: null);
+
+        // THE construction of an excluded prefab-instance override report: same kind and copy as
+        // UnauthorableField (reused, not duplicated), but keyed on the full OverrideTarget so two
+        // excluded overrides on one instance sharing a fieldKey root but differing in component
+        // type or sub-object compose DISTINCT recurrence keys instead of colliding.
+        public static Conflict UnauthorableOverride(
+            string instanceLogicalId, OverrideTarget target, string fieldKey) =>
+            FromReport(
+                ConflictKind.UnauthorableField,
+                new LocatedReport(instanceLogicalId, target.ComponentType, fieldKey, LineHasNoEffect),
+                recurrenceKey: $"unauthorable-override:{instanceLogicalId}:{target.ComponentType}:" +
+                    $"{target.SubKey.TargetPrefabId}:{target.SubKey.TargetObjectId}:{fieldKey}",
                 location: null);
 
         // THE one sentence stating what happened to a listener that could not be synced.

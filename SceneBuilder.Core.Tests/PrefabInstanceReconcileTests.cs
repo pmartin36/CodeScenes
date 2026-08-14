@@ -817,7 +817,11 @@ public class InstanceMoveScene : ISceneDefinition
 
             var result = Reconciler.Reconcile(model, snapshot, map);
 
-            Assert.Contains(result.Conflicts, c => c.Kind == ConflictKind.StaleOverride && c.LogicalId == "instance-1");
+            // A StaleOverride report is a STANDING condition (spec 44 Invariant #2): it carries a
+            // stable RecurrenceKey, so Reconciler's RecurrenceKey split routes it into Notes (the
+            // once-per-session channel), not the per-pass Conflicts array.
+            Assert.Contains(result.Notes, c => c.Kind == ConflictKind.StaleOverride && c.LogicalId == "instance-1");
+            Assert.DoesNotContain(result.Conflicts, c => c.Kind == ConflictKind.StaleOverride);
             Assert.Empty(result.Patch.Edits.OfType<AppendInstanceOverride>());
             Assert.Empty(result.Patch.Edits.OfType<DropInstanceCall>());
         }

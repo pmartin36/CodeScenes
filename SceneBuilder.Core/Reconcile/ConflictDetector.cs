@@ -233,11 +233,13 @@ namespace SceneBuilder.Core.Reconcile
             {
                 Kind = ConflictKind.StaleOverride,
                 LogicalId = instanceLogicalId,
-                Reason = $"Stale override '{instanceLogicalId} > {target.ComponentType} > {propertyPath}': " +
+                Located = new LocatedReport(instanceLogicalId ?? "", target.ComponentType, propertyPath,
                     $"the source prefab's default changed (recorded '{recordedBase}', now '{currentBase}') and the " +
                     "instance value now equals the new default. Not silently kept or dropped — confirm whether to " +
-                    "keep the override or accept the new default.",
+                    "keep the override or accept the new default."),
                 Location = location,
+                RecurrenceKey = $"stale-override:{instanceLogicalId}:{target.ComponentType}:" +
+                    $"{target.SubKey.TargetPrefabId}:{target.SubKey.TargetObjectId}:{propertyPath}",
             };
 
         // A prefab-instance root's RectTransform layout has

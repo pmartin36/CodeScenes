@@ -10,8 +10,9 @@ namespace SceneBuilder.Core.Diff
     // the DESIRED model (the same model that owns every componentLogicalId a build op can carry).
     // AddInstanceComponent/AddInstanceChild carry a ComponentData inline and are checked against it
     // directly, since their fields never lower into separate SetField ops. SetInstanceOverride's
-    // Target names a nested prefab member, not a model component, so it cannot be attributed here —
-    // a known gap, not coverage.
+    // Target names a nested prefab member, not a model component; its ComponentType full name is
+    // composed into a TypeRef and checked directly against that, the same bridge the emit-side gate
+    // uses (ExcludedFieldGate.AdmitOverride).
     public static class ExcludedFieldAudit
     {
         public static IReadOnlyList<string> EmittedExclusions(
@@ -42,6 +43,9 @@ namespace SceneBuilder.Core.Diff
                         break;
                     case Plan.AddInstanceChild addInstanceChild:
                         CheckNode(addInstanceChild.Node, policy, offenders);
+                        break;
+                    case Plan.SetInstanceOverride setInstanceOverride:
+                        CheckOverride(setInstanceOverride.LogicalId, setInstanceOverride.Target, setInstanceOverride.PropertyPath, policy, offenders);
                         break;
                 }
             }
@@ -88,6 +92,16 @@ namespace SceneBuilder.Core.Diff
                 {
                     offenders.Add($"{component.LogicalId} > {component.Type.FullName} > {field.Key}");
                 }
+            }
+        }
+
+        private static void CheckOverride(
+            string instanceLogicalId, OverrideTarget target, string propertyPath,
+            IFieldExclusionPolicy policy, List<string> offenders)
+        {
+            if (policy.IsExcluded(new TypeRef(target.ComponentType), ExcludedFieldGate.Root(propertyPath)))
+            {
+                offenders.Add($"{instanceLogicalId} > {target.ComponentType} > {propertyPath}");
             }
         }
 

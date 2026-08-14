@@ -181,10 +181,13 @@ namespace SceneBuilder.Editor
         /// made is not reaching their code. An <see cref="ConflictKind.UnauthorableField"/> report is a
         /// WARNING for the mirror reason: a line the user wrote is not reaching their scene. An
         /// <see cref="ConflictKind.UnsyncableListener"/> report is a WARNING for the same fail-loud
-        /// reason: a UnityEvent listener wired in the scene is not reaching the user's code. Any other
+        /// reason: a UnityEvent listener wired in the scene is not reaching the user's code. A
+        /// <see cref="ConflictKind.StaleOverride"/> report is a WARNING for the same reason: the
+        /// override's standing state is ambiguous and neither side silently wins. Any other
         /// standing condition reads as a NOTE.</summary>
         public static string Severity(Conflict c) =>
-            c.Kind is ConflictKind.UnrepresentableValue or ConflictKind.UnauthorableField or ConflictKind.UnsyncableListener
+            c.Kind is ConflictKind.UnrepresentableValue or ConflictKind.UnauthorableField
+                or ConflictKind.UnsyncableListener or ConflictKind.StaleOverride
                 ? "WARNING"
                 : "NOTE";
 
