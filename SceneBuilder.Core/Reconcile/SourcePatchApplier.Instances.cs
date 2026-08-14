@@ -240,8 +240,22 @@ namespace SceneBuilder.Core.Reconcile
                 calls.Add("cfg." + RenderRectTransformCall(rect));
             }
 
-            var components = ComponentReconciler.ExcludeTransform(edit.Node.Components);
-            calls.AddRange(components.Select(c => $"cfg.Component<{c.Type.FullName}>{RenderComponentClosureArgs(c.Fields, edit.FieldExpressions)}"));
+            // Index loop (not ExcludeTransform + Select) so each non-transform component pulls its
+            // OWN slice of edit.FieldExpressions by its Node.Components index — a shared map across
+            // components would let a same-named field on two components collide (see
+            // AppendInstanceAddChild.FieldExpressions doc).
+            var nodeComponents = edit.Node.Components;
+            var perComponent = edit.FieldExpressions;
+            for (var i = 0; i < nodeComponents.Length; i++)
+            {
+                var component = nodeComponents[i];
+                if (ComponentReconciler.IsTransform(component))
+                {
+                    continue;
+                }
+
+                calls.Add($"cfg.Component<{component.Type.FullName}>{RenderComponentClosureArgs(component.Fields, perComponent?[i])}");
+            }
 
             if (calls.Count == 0)
             {

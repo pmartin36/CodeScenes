@@ -185,9 +185,12 @@ namespace SceneBuilder.Core.Reconcile
         // unconditionally true: an added child has no field-value-diff pass, so this call is the
         // ONLY report for a dangling/unemittable field here. Scope stays node.Components only —
         // nested node.Children components are not rendered by RenderAddChildClosure and stay out of
-        // scope. Returns the filtered node plus the merged pre-rendered handle map (mirroring
-        // AppendInstanceAddComponent.FieldExpressions), null when no field needed one.
-        private static (GameObjectNode Node, Dictionary<string, string>? FieldExpressions) ProjectAddedChildNode(
+        // scope. Returns the filtered node plus a per-component pre-rendered handle list, aligned
+        // 1:1 with the returned node's Components (a null slot = that component needed no
+        // pre-rendered field; the whole list null = no component did). Per-component, NOT merged
+        // into one flat map — a flat map would let two components with a same-named field (e.g. two
+        // scripts each with `target`) collide and silently render the wrong handle.
+        private static (GameObjectNode Node, IReadOnlyList<IReadOnlyDictionary<string, string>?>? FieldExpressions) ProjectAddedChildNode(
             GameObjectNode node,
             ComponentDefaultOmission.Index? defaults,
             string instanceLogicalId,
@@ -204,7 +207,7 @@ namespace SceneBuilder.Core.Reconcile
                 return (node, null);
             }
 
-            Dictionary<string, string>? mergedExpressions = null;
+            IReadOnlyDictionary<string, string>?[]? perComponent = null;
             var keys = ComponentReconciler.ComputeComponentKeys(node.Components);
             var filtered = new ComponentData[node.Components.Length];
             for (var i = 0; i < node.Components.Length; i++)
@@ -229,15 +232,12 @@ namespace SceneBuilder.Core.Reconcile
 
                 if (componentExpressions != null)
                 {
-                    mergedExpressions ??= new Dictionary<string, string>();
-                    foreach (var (key, expr) in componentExpressions)
-                    {
-                        mergedExpressions[key] = expr;
-                    }
+                    perComponent ??= new IReadOnlyDictionary<string, string>?[node.Components.Length];
+                    perComponent[i] = componentExpressions;
                 }
             }
 
-            return (node with { Components = filtered }, mergedExpressions);
+            return (node with { Components = filtered }, perComponent);
         }
 
         // Scene->code diff for RemovedGameObjects: mirrors ReconcileRemovedComponents exactly

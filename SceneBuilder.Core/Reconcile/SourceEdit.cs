@@ -373,11 +373,16 @@ namespace SceneBuilder.Core.Reconcile
         public string Name { get; init; } = ""; // AddedGameObject.Node.Name.
         public GameObjectNode Node { get; init; } = new(); // Payload; components rendered into cfg closure.
 
-        // Pre-rendered handle expressions for Node's component fields, keyed by field key —
-        // mirrors AppendInstanceAddComponent.FieldExpressions. Consulted by the apply-time
+        // Pre-rendered handle expressions for Node's component fields, ONE slice PER COMPONENT,
+        // aligned 1:1 by index with Node.Components (a null entry = that component has no
+        // pre-rendered field; the whole list null = no component does). Unlike the single-component
+        // siblings this otherwise mirrors (AppendInstanceAddComponent.FieldExpressions), AddChild is
+        // multi-component (Node.Components renders N `cfg.Component<T>(...)` calls), so a single
+        // flat field-keyed map shared across components would let two components with a same-named
+        // field (e.g. two scripts each with `target`) collide. Consulted by the apply-time
         // component-closure renderer before ValueNodeLiteral, so an ObjectRef/catalogued-AssetRef
         // field on an added child's component renders a real handle instead of throwing.
-        public IReadOnlyDictionary<string, string>? FieldExpressions { get; init; }
+        public IReadOnlyList<IReadOnlyDictionary<string, string>?>? FieldExpressions { get; init; }
 
         // Driven-masked, X/Y-held UI layout to render as a
         // chained `cfg.RectTransform(...)` call INSIDE the AddChild closure, mirroring

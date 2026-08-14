@@ -40,6 +40,18 @@ public class HandledInstanceWithDoorScene : ISceneDefinition
 }
 ";
 
+        private const string HandledInstanceWithTwoDoorsFixture = @"
+public class HandledInstanceWithTwoDoorsScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var enemy = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        var doorA = scene.Add(""DoorA"");
+        var doorB = scene.Add(""DoorB"");
+    }
+}
+";
+
         private static AppendInstanceAddChild BuildAddChildEdit(
             string anchor, ValueNode targetValue, IReadOnlyDictionary<string, string>? fieldExpressions) =>
             new()
@@ -63,7 +75,11 @@ public class HandledInstanceWithDoorScene : ISceneDefinition
                         },
                     },
                 },
-                FieldExpressions = fieldExpressions,
+                // Single-component fixture: wrap the caller's flat map as the one-element
+                // per-component slice AppendInstanceAddChild.FieldExpressions now expects.
+                FieldExpressions = fieldExpressions == null
+                    ? null
+                    : new IReadOnlyDictionary<string, string>?[] { fieldExpressions },
             };
 
         // Defect 3 (crash-to-handle): an AppendInstanceAddChild whose component carries an ObjectRef
@@ -142,7 +158,7 @@ public class HandledInstanceWithDoorScene : ISceneDefinition
 
             var append = Assert.Single(result.Patch.Edits.OfType<AppendInstanceAddChild>());
             Assert.NotNull(append.FieldExpressions);
-            Assert.Equal("door", append.FieldExpressions!["target"]);
+            Assert.Equal("door", append.FieldExpressions![0]!["target"]);
 
             var component = Assert.Single(append.Node.Components);
             Assert.Equal(new ValueNode.ObjectRef(doorLogicalId), component.Fields["target"]);
@@ -209,6 +225,83 @@ public class HandledInstanceWithDoorScene : ISceneDefinition
             var component = Assert.Single(append.Node.Components);
             Assert.False(component.Fields.TryGetValue("target", out _));
             Assert.Empty(result.Conflicts);
+        }
+
+        // Collision guard: an added child with TWO components that both carry a same-named
+        // resolvable ObjectRef field ("target") must render each component's OWN handle. A shared
+        // per-field-key map across components would let the second component's handle overwrite
+        // the first's, so both closures would render the second component's target.
+        [Fact]
+        public void Reconcile_AddedChildWithTwoComponentsSameFieldName_RendersDistinctHandlesPerComponent()
+        {
+            var parsed = BuilderParser.Parse(HandledInstanceWithTwoDoorsFixture);
+            var instanceLogicalId = parsed.Model.Roots.OfType<PrefabInstanceNode>().Single().LogicalId;
+            var doorALogicalId = parsed.Model.Roots.Single(r => r.Name == "DoorA").LogicalId;
+            var doorBLogicalId = parsed.Model.Roots.Single(r => r.Name == "DoorB").LogicalId;
+
+            var added = new AddedGameObject
+            {
+                Parent = new OverrideTarget { ChildPath = "" },
+                Node = new GameObjectNode
+                {
+                    Name = "MuzzleFlash",
+                    Components = new[]
+                    {
+                        new ComponentData
+                        {
+                            Type = new TypeRef(DoorOpenerType),
+                            Fields = new FieldMap(new[]
+                            {
+                                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef(doorALogicalId)),
+                            }),
+                        },
+                        new ComponentData
+                        {
+                            Type = new TypeRef(DoorOpenerType),
+                            Fields = new FieldMap(new[]
+                            {
+                                new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef(doorBLogicalId)),
+                            }),
+                        },
+                    },
+                },
+            };
+
+            var snapshotInstance = new SnapshotNode
+            {
+                GlobalObjectId = "goid-enemy",
+                Name = "Enemy",
+                SourcePrefabGuid = PrefabGuid,
+                AddedGameObjects = new[] { added },
+            };
+            var doorASnapshot = new SnapshotNode { GlobalObjectId = "goid-doorA", Name = "DoorA" };
+            var doorBSnapshot = new SnapshotNode { GlobalObjectId = "goid-doorB", Name = "DoorB" };
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[] { snapshotInstance, doorASnapshot, doorBSnapshot },
+            };
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry
+                    {
+                        LogicalId = instanceLogicalId, GlobalObjectId = "goid-enemy", Kind = "PrefabInstance",
+                        SourcePrefabGuid = PrefabGuid,
+                    },
+                    new IdentityMapEntry { LogicalId = doorALogicalId, GlobalObjectId = "goid-doorA", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = doorBLogicalId, GlobalObjectId = "goid-doorB", Kind = "GameObject" },
+                },
+            };
+
+            var result = Reconciler.Reconcile(parsed.Model, snapshot, map, parsed.Anchors, handles: parsed.Handles);
+
+            var rendered = SourcePatchApplier.Apply(HandledInstanceWithTwoDoorsFixture, result.Patch, parsed.Anchors);
+
+            Assert.Contains("c.Set(\"target\", doorA)", rendered);
+            Assert.Contains("c.Set(\"target\", doorB)", rendered);
         }
     }
 }

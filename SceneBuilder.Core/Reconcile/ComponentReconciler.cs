@@ -948,8 +948,10 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
+        internal static bool IsTransform(ComponentData component) => component.Type.FullName == "UnityEngine.Transform";
+
         internal static ComponentData[] ExcludeTransform(ComponentData[] components) =>
-            components.Where(c => c.Type.FullName != "UnityEngine.Transform").ToArray();
+            components.Where(c => !IsTransform(c)).ToArray();
 
         // The ordinal-within-type rule: each component's key pairs its type with the count of
         // same-type components before it in the array, not its array index. Mirrors
