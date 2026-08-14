@@ -82,45 +82,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   forgetting to opt in" is false for these three, and the compile class of bug CLAUDE.md calls a bug
   outright can land there unseen. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
 
-- SEVERITY med: an authored prefab-INSTANCE override on an adapter-excluded serialized path never
-  converges. It is the same permanent non-convergence trap spec 35 D2 closes for ordinary component
-  fields, on a different authoring surface, and D2's fix does not reach it.
-  `com.codescenes/Editor/PrefabInstanceProbe.Overrides.cs:91` drops a `PropertyModification` whose
-  path `SerializedFieldExclusions.IsExcluded` rejects, so the snapshot's `Overrides` never carries
-  it, while `SceneBuilder.Core/Diff/InstanceOverrideDiff.cs:88-100` emits a `SetInstanceOverride`
-  for any desired override with no snapshot counterpart. So `.Override(...).Set("m_Size", ...)` on a
-  `SpriteRenderer` inside an instance (or `"m_SortingLayer"` on a renderer) emits an op on every
-  build, forever, with no report. The sibling sites `InstanceOverrideDiff.cs:138`
-  (`AddInstanceComponent`) and `:208` (`AddInstanceChild`) carry whole `ComponentData` payloads and
-  have the same exposure. `SceneBuilder.Core/Diff/ExcludedFieldGate.cs` (spec 35 D2) is threaded
-  only through `Differ.EmitComponentEdits`; `InstanceOverrideDiff.Emit` is called separately from
-  `Differ.WalkDesired:112` and receives no gate. `ExcludedFieldAudit` already scans
-  `AddInstanceComponent`/`AddInstanceChild`, so the backstop would flag these ops, but it cannot
-  attribute a `SetInstanceOverride` (its `Target` names a nested prefab member, not a model
-  component). Not reproduced in a live editor; derived by reading both call sites. Spec 35:98-103
-  scopes D2 to the matched field loop and the `AddComponent` branch, so this does NOT relax
-  b1-t1's DELIVERABLE. OWNER: unassigned. FOUND-BY: excluded-field-one-way-report.
-
-- SEVERITY med: a stale prefab-instance override detected on the code->scene BUILD is suppressed
-  with no report, while the same detection on the scene->code sync is surfaced. Derived by reading
-  the chain, not reproduced in a live editor: `SceneBuilder.Core/Diff/Differ.cs:112` calls
-  `InstanceOverrideDiff.Emit`, which calls `DetectStaleOverrides`
-  (`SceneBuilder.Core/Diff/InstanceOverrideDiff.cs:20,35-63`); the stale key is excluded from the
-  Set/Revert emission AND a `ConflictDetector.StaleOverride` conflict
-  (`SceneBuilder.Core/Reconcile/ConflictDetector.cs:229-241`, plain object-initializer construction,
-  so its `RecurrenceKey` is null) is appended to `ChangeSet.Conflicts` and copied into
-  `Plan.Conflicts` (`SceneBuilder.Core/Materialize/Materializer.cs:235`; proven by
-  `SceneBuilder.Core.Tests/PrefabInstanceConflictTests.cs:203`). `SceneBuilderBuild.Run` dropped
-  `plan.Conflicts` entirely before spec 35 D2, and D2 routes it to
-  `ConflictSurfacing.SurfaceNotes`, which skips a null `RecurrenceKey`
-  (`com.codescenes/Editor/ConflictSurfacing.cs:161-164`) — so the build still tells the author
-  nothing while silently declining to apply their override. The sync direction does surface it
-  (`SceneBuilder.Core/Reconcile/ReconcilerInstances.cs:194` -> `ReconcileResult.Conflicts` ->
-  `ConflictSurfacing.SurfaceConflicts`, `com.codescenes/Editor/SceneBuilderSync.cs:231`). A fix has
-  to decide the recurrence key first: auto-sync builds on every debounced change, so surfacing a
-  keyless per-pass conflict on the build path would log on every keystroke. OWNER: unassigned.
-  FOUND-BY: excluded-field-one-way-report.
-
 - SEVERITY low — two hand-rolled `ValueNode` container descents remain in production because no
   `ValueWalk` primitive expresses their shape. `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:750,766`
   (`AuthoredTextIsCurrent`, 4 tokens) is a PAIRED walk comparing two values position by position and

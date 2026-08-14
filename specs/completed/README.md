@@ -371,3 +371,24 @@ byte-equality proof of the invalidation policy, so neither defect can return wit
 (`Logs/live-verify-spec42.log`): idle pump ticks hold `GlobalObjectIdCache.ResolutionCount` at 0 (no cold
 reassemble), a value edit costs a bounded non-accumulating delta, and scene references round-trip through
 the cache-threaded resolver with no dangling reports.
+
+## 44 - Instance-override build convergence and reporting
+
+Two reproduced defects, both the code->scene BUILD path silently declining a prefab-instance override that
+the sync path would surface. An authored override on an adapter-excluded serialized path
+(`SpriteRenderer.m_Size`, `m_SortingLayer`) emitted a `SetInstanceOverride` op on every build forever with
+no report, because `ExcludedFieldGate` (spec 35 D2) reached `Differ.EmitComponentEdits` but not
+`InstanceOverrideDiff.Emit`. And a stale override detected on the build was suppressed with a
+null-`RecurrenceKey` conflict that `SurfaceNotes` drops, while the sync path surfaced the same decline.
+
+Fix (adapter + Core, one bucket `da380f0`): `ExcludedFieldGate` threaded into every instance-override emit
+surface (`SetInstanceOverride`/`AddInstanceComponent`/`AddInstanceChild`), with `ExcludedFieldAudit`
+extended to attribute `SetInstanceOverride` (Task A, owns the bypass check); and a stable per-target
+recurrence key on `StaleOverride` and the excluded-override report, routed both directions through the
+keyed once-per-session `SurfaceNotes` channel at WARNING severity (Task B). Gate
+`passed=807 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`). The gate's EditMode layer is the live-editor check
+here (as with spec 41): the new behavior is deterministic build-path diff emission plus console reporting,
+with no new watcher/pump/reload behavior that batchmode is blind to, and the shipped EditMode tests drive
+real prefab instances in a live scene - asserting an excluded-path override converges (second build zero
+ops) with a located WARNING surfaced once naming instance + component type + path, and the stale override
+surfaced on the build and not re-logged in-session.
