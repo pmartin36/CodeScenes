@@ -126,6 +126,16 @@ namespace SceneBuilder.Core.Reconcile
                     continue;
                 }
 
+                // A component ALSO present in source (but with no managed Component entry yet) is
+                // authored by the (4) FIELD-VALUE DIFF pass below, which rewrites its EXISTING
+                // `.Component<T>()` construct in place. Appending a statement here too authors the
+                // SAME component a second time (the double-emit defect) — the diff pass owns it, so
+                // only a component ABSENT from source needs a new append statement here.
+                if (sourceKeySet.Contains(key))
+                {
+                    continue;
+                }
+
                 var harvestSink = sourceKeySet.Contains(key) ? null : addedAssets;
 
                 if (!ownerHandleResolved)

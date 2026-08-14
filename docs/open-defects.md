@@ -3,21 +3,6 @@
 Measured defects with no owning task. Each entry: severity, the concrete observation, and the
 feature whose run found it. Entries are removed only when the fix ships with a regression test.
 
-- SEVERITY med — a component authored in SOURCE but carrying no `Kind = "Component"` IdentityMap
-  entry is emitted TWICE: the mapped-owner ADD pass
-  (`SceneBuilder.Core/Reconcile/ComponentReconciler.cs:108-151`) emits an
-  `AppendComponentStatement` while the field-value diff pass (`:219-423`) emits an
-  `IntroduceComponentField` for the same component, so the applied source authors the component
-  twice and the next Build adds a second live component. Measured with a plain `int` field (so it
-  is unrelated to references and fully pre-existing): edits
-  `AppendComponentStatement, IntroduceComponentField`, emitted source
-  `opener.Component<Game.DoorOpener>(c => c.Set("speed", 7));` followed by
-  `opener.Component<Game.DoorOpener>(c => { c.Set("speed", 7); });`.
-  `ComponentReconciler.cs:84-88` shows the overlap is known and guarded for the ASSET harvest only
-  ("edit emission is unaffected"). Reachability in a live editor was not confirmed; the window is a
-  scene->code sync that runs before the code->scene build that would register the entry. No task in
-  this plan touches this pass. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
 - SEVERITY med — every debounced auto-sync cycle already performs a FULL cold scene assemble, so the
   O(changed) incremental cache never survives more than one cycle.
   `SceneBuilderAutoSync.CaptureBaseline` (`com.codescenes/Editor/SceneBuilderAutoSync.cs:628`) calls
