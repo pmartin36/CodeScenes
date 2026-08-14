@@ -343,60 +343,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   GateFixtures. Fix is one prose edit. Relaxes no DELIVERABLE clause. OWNER: unassigned.
   FOUND-BY: m8-unityevents.
 
-- SEVERITY high — the Unity EditMode layer of `./verify.sh` fails one arbitrary, unrelated test on
-  every full run, because Unity emits an engine-level `[Error]` log that the Test Framework attributes
-  to whatever test is executing. MEASURED 5/5 full-gate runs: `645 total, 644 passed, 1 failed`, the
-  failure always `SetUp : Unhandled log message: '[Error] Unrecognized thread niceness after calling
-  setpriority. Target niceness is -6 and actual niceness is 6'` raised inside a fixture's
-  `EditorSceneManager.NewScene`
-  (`UnrepresentableFieldWarningTests.Sync_AfterWiringAnOnClickInTheInspector_...` in 4 runs,
-  `UnqualifiedTypeNameTests.Build_AmbiguousShortName_ThrowsLocatedError` in 1; each fixture passes in
-  isolation). The message appears exactly once per editor session. Root cause measured: `ulimit -e`
-  (RLIMIT_NICE) is 0 for this user, so no process may lower its nice value (`nice -n -5 true` ->
-  "cannot set niceness: Permission denied") and a user session cannot raise the hard limit
-  (`systemd-run --user --property=LimitNICE=30` still reports 0); Unity's job system calls
-  `setpriority(-6)` once per session when restoring worker-thread priority after an asset-import
-  pause. Re-running the identical gate command at nice 0 reproduces it, so the invoking shell's nice
-  value is not the cause. Consequence: `./verify.sh` cannot reach `GATE PASS` on this machine, so
-  nothing can ship through the gate until it is handled; the handling has to be an explicit, narrow
-  exemption for this one engine message (the repo's rule that a skip is not a pass rules out
-  `LogAssert.ignoreFailingMessages`). Full evidence:
-  `.agent_handoffs/m8-unityevents/b1-t2/gate-output.log`. RECONFIRMED at b1-t2 iteration 2 (run 6 of
-  6): same `645 total, 644 passed, 1 failed`, same fixture, `REALEXIT=1`; and the same fixture run
-  ALONE in its own editor session (`-testFilter UnrepresentableFieldWarningTests`) is `3 total, 3
-  passed, 0 failed` with ZERO occurrences of the niceness message in that session's log, so the test
-  content is healthy and only the full-suite session emits the message. OWNER: unassigned.
-  FOUND-BY: m8-unityevents.
-- SEVERITY med — every consumer of `ValueNode.Primitive.Value` throws on a Primitive that has crossed a
-  JSON boundary. `Value` is `object?`, and System.Text.Json materializes it as a boxed
-  `System.Text.Json.JsonElement`, which `SceneBuilder.Core/Model/ValueNode.cs:53-70` normalizes for
-  equality/hashing and nowhere else. MEASURED with a scratch console against the built
-  `SceneBuilder.Core.dll`: round-tripping a `ValueNode.UnityEventListeners` holding one Int-mode
-  listener through `CanonicalJson.Serialize`/`Deserialize` yields
-  `ArgValue.Value.GetType() == System.Text.Json.JsonElement`; then
-  `SceneBuilder.Core/Model/UnityEventProjection.cs:106-109` throws `InvalidCastException: Unable to cast
-  object of type 'System.Text.Json.JsonElement' to type 'System.Int32'`, and the pre-existing
-  `com.codescenes/Editor/SerializedFieldBridge.cs:458-473` (`Convert.ToInt32(prim.Value)` etc.) throws
-  `InvalidCastException: ... to type 'System.IConvertible'`. Not reachable in the shipped product today:
-  no `PlanJson.Deserialize` / `SceneModelSerializer.Deserialize` / `CanonicalJson.Deserialize` call site
-  exists under `com.codescenes/`, so plan ops are executed as the in-process objects the Materializer
-  built. It goes live the moment any pass executes a plan or model read back from disk. The fix belongs
-  in one place — a `Primitive` accessor that normalizes by `Kind`, reusing the switch `ValueNode.cs:60-69`
-  already has privately — not per call site. OWNER: unassigned. FOUND-BY: m8-unityevents.
-
-- SEVERITY high (CORRECTION to the RLIMIT_NICE entry above, which says the gate fails on EVERY full run
-  and "cannot reach GATE PASS on this machine") — MEASURED at b1-t3 validation, two full `./verify.sh`
-  runs back to back on the same unchanged tree: run 1 `658 total, 657 passed, 1 failed`, `REALEXIT=1`,
-  same charged test and same niceness message; run 2 `658 total, 658 passed, 0 failed`, `REALEXIT=0`,
-  `GATE PASS: Core + Unity EditMode green (passed=658 failed=0 skipped=0)`. b1-t0 validation was also
-  clean (`637/637`, exit 0). The engine `[Error]` is emitted once per editor session at a
-  nondeterministic point and fails the gate only when it lands inside a `[SetUp]`, so the defect is
-  intermittent (~half of full runs), not deterministic, and a green gate run IS obtainable. The
-  mitigation (a narrow, named exemption in `verify.sh`'s EditMode verdict) is still needed and still
-  unowned; only its justification changes. Evidence:
-  `.agent_handoffs/m8-unityevents/b1-t3/gate-output.log` (both runs, complete). OWNER: unassigned.
-  FOUND-BY: m8-unityevents.
-
 - SEVERITY low — the ordinal-within-type component-key rule (spec 09:31, "Type.FullName +
   ordinal-within-type") is hand-written SIX times, three of them character-identical. MEASURED at
   m8-unityevents b1-t2 validation (`rg -n 'ordinalByType'`, current tree):
@@ -499,19 +445,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   mirror sides. LATENT until listener materialization ships.
   OWNER: unassigned — needs a task that can hold `BuilderParser.Instance.cs` +
   `FlatShapeRecognizer.Instance.cs` (or the listener materializer). FOUND-BY: m8-unityevents.
-
-- SEVERITY high — a `UnityEngine.UI.Slider` authored via the generic `Component<Slider>` path drifts
-  on scene->code round-trip: the live RectTransform materialized for a plain Slider carries
-  anchoredPosition/sizeDelta/anchorMin/anchorMax/pivot values the unauthored source does not, so the
-  first sync over a converged build emits 5 `PatchArgument` edits on those RectTransform members and the
-  scene never reaches a fixed point (5 phantom patches on every sync — fatal to seamless sync for any
-  Slider-bearing scene). Measured by the m8 EditMode test
-  `Item7_SliderOnValueChangedDynamicToHudSetValue_SourceIsOnEventDynamic_RoundTrips`, which fails at
-  `RoundTripProofHarness.cs:273` ("produced 5 patch edit(s); it must be a fixed point"); the dynamic
-  OnEvent listener itself round-trips cleanly (assertScene and the code->scene fixed-point passes all
-  pass), so the drift is purely RectTransform-side, not UnityEvents. Owning territory is spec 13
-  (RectTransform). No listener path touches RectTransform, so this predates the m8 UnityEvents work.
-  OWNER: unassigned (needs a dedicated task). FOUND-BY: m8-unityevents-remaining.
 
 - SEVERITY low — a `[SerializeReference]` field ABSENT from builder source but non-null in the live
   scene cannot be synced scene->code: there is no introduce/remove `.SetRef` applier (only
