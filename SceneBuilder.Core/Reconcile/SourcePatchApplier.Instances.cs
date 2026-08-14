@@ -241,7 +241,7 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             var components = ComponentReconciler.ExcludeTransform(edit.Node.Components);
-            calls.AddRange(components.Select(c => $"cfg.Component<{c.Type.FullName}>{RenderComponentClosureArgs(c.Fields, null)}"));
+            calls.AddRange(components.Select(c => $"cfg.Component<{c.Type.FullName}>{RenderComponentClosureArgs(c.Fields, edit.FieldExpressions)}"));
 
             if (calls.Count == 0)
             {

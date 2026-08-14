@@ -575,6 +575,15 @@ namespace SceneBuilder.Core.Reconcile
                 return (RefResolution.Unemittable, null);
             }
 
+            // A bare (non-list) Unsupported with no compiling emission form: a naked scene-read
+            // sentinel that can only bind to an in-scope symbol the generated builder never
+            // declares. Checked before the ObjectRef scan below since it is not an ObjectRef at all.
+            if (snapVal is ValueNode.Unsupported bareUnsupported
+                && ListValueEmission.IsUnemittableUnsupported(bareUnsupported))
+            {
+                return (RefResolution.Unemittable, null);
+            }
+
             if (!ObjectRefValues.Contains(snapVal))
             {
                 return (RefResolution.NotObjectRef, null);

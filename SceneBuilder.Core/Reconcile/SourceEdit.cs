@@ -373,6 +373,12 @@ namespace SceneBuilder.Core.Reconcile
         public string Name { get; init; } = ""; // AddedGameObject.Node.Name.
         public GameObjectNode Node { get; init; } = new(); // Payload; components rendered into cfg closure.
 
+        // Pre-rendered handle expressions for Node's component fields, keyed by field key —
+        // mirrors AppendInstanceAddComponent.FieldExpressions. Consulted by the apply-time
+        // component-closure renderer before ValueNodeLiteral, so an ObjectRef/catalogued-AssetRef
+        // field on an added child's component renders a real handle instead of throwing.
+        public IReadOnlyDictionary<string, string>? FieldExpressions { get; init; }
+
         // Driven-masked, X/Y-held UI layout to render as a
         // chained `cfg.RectTransform(...)` call INSIDE the AddChild closure, mirroring
         // AppendStatement.RectTransform verbatim in shape and doc intent. null => emit no call

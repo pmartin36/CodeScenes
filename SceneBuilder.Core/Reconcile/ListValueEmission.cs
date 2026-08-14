@@ -1,5 +1,8 @@
 using System;
 using System.Linq;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
@@ -75,6 +78,44 @@ namespace SceneBuilder.Core.Reconcile
         internal static bool HasUnemittableItem(ValueNode value) =>
             ValueWalk.Any(value, n => n is ValueNode.List list
                 && list.Items.Any(item => ValueWalk.Any(item, x => x is ValueNode.Unsupported)));
+
+        // The bare-Unsupported sibling of HasUnemittableItem above: true when a NON-list Unsupported
+        // has no compiling C# expression form (a naked scene-read sentinel like "ObjectReference")
+        // and must be omitted from emission rather than written verbatim; false for a legitimate
+        // verbatim-round-tripping escape-hatch token (e.g. "Mathf.PI", "SomeWeirdExpr()"). A plain
+        // syntactic parse is not enough: a bare identifier like "ObjectReference" or "Integer" parses
+        // clean as an IdentifierNameSyntax with zero diagnostics, but can only ever bind to an
+        // in-scope symbol the generated builder never declares, so it is CS0103 at compile time even
+        // though it is syntactically valid. Every scene-read Unsupported sentinel that reaches an
+        // emit site is such a naked name; every legitimate round-trip escape hatch is a constructed
+        // expression (a call, a member access, or a literal), never a lone identifier.
+        internal static bool IsUnemittableUnsupported(ValueNode.Unsupported node)
+        {
+            var rawToken = node.RawToken;
+            if (string.IsNullOrWhiteSpace(rawToken))
+            {
+                return true;
+            }
+
+            var expression = SyntaxFactory.ParseExpression(rawToken);
+
+            if (expression.FullSpan.Length != rawToken.Length)
+            {
+                return true;
+            }
+
+            if (expression.ContainsSkippedText || expression.DescendantTokens().Any(t => t.IsMissing))
+            {
+                return true;
+            }
+
+            if (expression.GetDiagnostics().Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return true;
+            }
+
+            return expression is IdentifierNameSyntax;
+        }
 
         // The ordinal token naming an item's rendered C# type; null = a raw token this formatter
         // cannot name at all, which forces the explicit `object[]` form so the compiler is never asked

@@ -196,10 +196,10 @@ namespace SceneBuilder.Core.Reconcile
 
             var prefabGuid = snapshot.SourcePrefabGuid;
 
-            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, assetCatalog);
+            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, resolvableTargets, pendingTargets, assetCatalog);
             ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, conflicts, resolvableTargets, pendingTargets, assetCatalog, defaults);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
-            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts, defaults);
+            ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts, resolvableTargets, pendingTargets, resolveOwnerHandle, addedAssets, assetCatalog, defaults);
             ReconcileRemovedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
         }
 
@@ -220,6 +220,11 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<Conflict> conflicts,
             List<AssetEntry> addedAssets,
+            // Scene-derived liveness sets built ONCE by Reconciler.Reconcile — threaded here so
+            // BuildOverrideSetSpec's ObjectRef fields get the same Unemittable/Dangling/Pending/
+            // Resolvable classification the plain-component append path already runs.
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
             AssetCatalog? assetCatalog = null)
         {
             var modelByKey = new Dictionary<(OverrideTarget Target, string PropertyPath), PropertyOverride>();
@@ -270,7 +275,16 @@ namespace SceneBuilder.Core.Reconcile
                         });
                 }
 
-                var setSpec = BuildOverrideSetSpec(snapshotOverride, instanceLogicalId, resolveOwnerHandle, edits, addedAssets, assetCatalog);
+                var setSpec = BuildOverrideSetSpec(
+                    snapshotOverride, instanceLogicalId, resolveOwnerHandle, edits, addedAssets,
+                    resolvableTargets, pendingTargets, conflicts, assetCatalog);
+                if (setSpec is null)
+                {
+                    // The stale-drop above (if any) already emitted its Drop; an omitted re-add
+                    // correctly removes-and-reports rather than leaving a phantom value behind.
+                    continue;
+                }
+
                 var childPath = snapshotOverride.Target.ChildPath;
 
                 if (string.IsNullOrEmpty(childPath))
@@ -507,16 +521,45 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
-        private static OverrideSetSpec BuildOverrideSetSpec(
+        // Brings the override snapshot-emit site onto the same Unemittable/Dangling/Pending gate the
+        // two append sites already apply (via SnapshotFieldEmission.EmitFieldSet): an Unemittable
+        // value is omitted and reports UnrepresentableListItem; a Dangling ObjectRef target is
+        // omitted and reports DanglingReference naming the target; a Pending target is omitted
+        // silently (converges on the guaranteed second sync); Resolvable/NotObjectRef renders as
+        // before. Null return means "omit this set" — the caller drops it from the emitted batch.
+        private static OverrideSetSpec? BuildOverrideSetSpec(
             PropertyOverride snapshotOverride,
             string instanceLogicalId,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             List<SourceEdit> edits,
             List<AssetEntry> addedAssets,
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
+            List<Conflict> conflicts,
             AssetCatalog? assetCatalog = null)
         {
             var renderedValue = snapshotOverride.ObjectReference ?? snapshotOverride.Value;
             var typeFullName = snapshotOverride.Target.ComponentType;
+            var componentLogicalId = $"{instanceLogicalId}/{typeFullName}";
+
+            var classification = ComponentReconciler.ClassifySnapshotRef(renderedValue, resolvableTargets, pendingTargets);
+
+            if (classification.Resolution == ComponentReconciler.RefResolution.Unemittable)
+            {
+                conflicts.Add(ConflictDetector.UnrepresentableListItem(componentLogicalId, typeFullName, snapshotOverride.PropertyPath, null));
+                return null;
+            }
+
+            if (classification.Resolution == ComponentReconciler.RefResolution.Dangling)
+            {
+                conflicts.Add(ConflictDetector.DanglingReference(componentLogicalId, snapshotOverride.PropertyPath, classification.DanglingTarget, null));
+                return null;
+            }
+
+            if (classification.Resolution == ComponentReconciler.RefResolution.Pending)
+            {
+                return null;
+            }
 
             ComponentReconciler.CollectAssetEntries(renderedValue, addedAssets);
 

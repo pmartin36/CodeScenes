@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
@@ -90,6 +91,15 @@ namespace SceneBuilder.Core.Reconcile
             string? prefabGuid,
             List<SourceEdit> edits,
             List<Conflict> conflicts,
+            // Scene-derived liveness sets + owner-handle resolver + asset bookkeeping, threaded here
+            // so a snapshot-only added child's own component fields get the SAME Unemittable/Dangling/
+            // Pending/Resolvable classification the plain-component and added-component append paths
+            // already run (ProjectAddedChildNode -> SnapshotFieldEmission.EmitFieldSet).
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            List<AssetEntry> addedAssets,
+            AssetCatalog? assetCatalog,
             // A snapshot-only added child's components carry
             // every serialized field the same as any other emission site; filtered here the same way
             // before the AppendInstanceAddChild.Node is built.
@@ -134,13 +144,18 @@ namespace SceneBuilder.Core.Reconcile
                     globalObjectId: null,
                     conflicts);
 
+                var (projectedNode, childExprs) = ProjectAddedChildNode(
+                    snapshotAdded.Node, defaults, instanceLogicalId, resolvableTargets, pendingTargets,
+                    resolveOwnerHandle, assetCatalog, addedAssets, edits, conflicts);
+
                 edits.Add(new AppendInstanceAddChild
                 {
                     Anchor = instanceLogicalId,
                     ParentPath = snapshotAdded.Parent.ChildPath,
                     ParentSelectorExpr = parentSelectorExpr,
                     Name = snapshotAdded.Node.Name,
-                    Node = OmitDefaultsFromNode(snapshotAdded.Node, defaults, instanceLogicalId, conflicts),
+                    Node = projectedNode,
+                    FieldExpressions = childExprs,
                     RectTransform = rectTransformPayload,
                 });
             }
@@ -162,18 +177,34 @@ namespace SceneBuilder.Core.Reconcile
             }
         }
 
-        // Applies ComponentDefaultOmission the same way every other emission site does,
-        // to a snapshot-only added child's own components before it is carried into an
-        // AppendInstanceAddChild edit (one of the four
-        // emission sites, not covered by ComponentReconciler.EmitComponentAppend).
-        private static GameObjectNode OmitDefaultsFromNode(
-            GameObjectNode node, ComponentDefaultOmission.Index? defaults, string instanceLogicalId, List<Conflict> conflicts)
+        // Applies ComponentDefaultOmission the same way every other emission site does, then routes
+        // each component's remaining fields through the SAME classified choke point
+        // BuildAddInstanceComponent uses (SnapshotFieldEmission.EmitFieldSet) before a snapshot-only
+        // added child is carried into an AppendInstanceAddChild edit — one of the four emission
+        // sites, not covered by ComponentReconciler.EmitComponentAppend. reportUnresolvable is
+        // unconditionally true: an added child has no field-value-diff pass, so this call is the
+        // ONLY report for a dangling/unemittable field here. Scope stays node.Components only —
+        // nested node.Children components are not rendered by RenderAddChildClosure and stay out of
+        // scope. Returns the filtered node plus the merged pre-rendered handle map (mirroring
+        // AppendInstanceAddComponent.FieldExpressions), null when no field needed one.
+        private static (GameObjectNode Node, Dictionary<string, string>? FieldExpressions) ProjectAddedChildNode(
+            GameObjectNode node,
+            ComponentDefaultOmission.Index? defaults,
+            string instanceLogicalId,
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            AssetCatalog? assetCatalog,
+            List<AssetEntry> addedAssets,
+            List<SourceEdit> edits,
+            List<Conflict> conflicts)
         {
             if (node.Components.Length == 0)
             {
-                return node;
+                return (node, null);
             }
 
+            Dictionary<string, string>? mergedExpressions = null;
             var keys = ComponentReconciler.ComputeComponentKeys(node.Components);
             var filtered = new ComponentData[node.Components.Length];
             for (var i = 0; i < node.Components.Length; i++)
@@ -181,13 +212,32 @@ namespace SceneBuilder.Core.Reconcile
                 var component = node.Components[i];
                 var componentLogicalId = ComponentTargetResolution.ComposeLogicalId(
                     instanceLogicalId, keys[i].TypeFullName, keys[i].Ordinal);
-                filtered[i] = component with
+                var typeFullName = component.Type.FullName;
+                var fields = ComponentDefaultOmission.OmitDefaults(typeFullName, component.Fields, defaults, componentLogicalId, conflicts);
+
+                var (emittedFields, componentExpressions) = SnapshotFieldEmission.EmitFieldSet(
+                    fields, typeFullName, componentLogicalId, instanceLogicalId,
+                    resolvableTargets, pendingTargets, resolveOwnerHandle,
+                    reportUnresolvable: true, assetCatalog, edits, conflicts);
+
+                foreach (var (_, value) in emittedFields)
                 {
-                    Fields = ComponentDefaultOmission.OmitDefaults(component.Type.FullName, component.Fields, defaults, componentLogicalId, conflicts),
-                };
+                    ComponentReconciler.CollectAssetEntries(value, addedAssets);
+                }
+
+                filtered[i] = component with { Fields = emittedFields };
+
+                if (componentExpressions != null)
+                {
+                    mergedExpressions ??= new Dictionary<string, string>();
+                    foreach (var (key, expr) in componentExpressions)
+                    {
+                        mergedExpressions[key] = expr;
+                    }
+                }
             }
 
-            return node with { Components = filtered };
+            return (node with { Components = filtered }, mergedExpressions);
         }
 
         // Scene->code diff for RemovedGameObjects: mirrors ReconcileRemovedComponents exactly
