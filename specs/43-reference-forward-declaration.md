@@ -1,5 +1,26 @@
 # Spec 43 — reference forward-declaration and the placement floor
 
+> **STATUS: BLOCKED on an authoring-vocabulary decision (2026-08-14).** A first pipeline run built
+> b1-t1 (the generalized max-declaration-index placement floor) GREEN, then b1-t2's research proved
+> the spec-compliant fix cannot be built in the current vocabulary and escalated. The floor is
+> necessary but inert alone (the in-place `IntroduceComponentField` fold never reaches
+> `StatementPlacement`). The remaining shape — a standalone statement that configures an
+> ALREADY-authored component with the deferred reference field, without re-adding it, round-tripping
+> through `BuilderParser` — has no verb: `Component<T>()` returns a `NodeHandle` you cannot recapture,
+> `.Set` exists only inside the configure closure, `ComponentRef<T>` is reference-only, and every
+> statement-level `.Component<T>` is a distinct component under ordinal identity (so a second
+> `.Component<Linker>(c => c.Set("target", door))` after `door` authors a DUPLICATE). Verified at
+> `NodeHandle.cs:101,108`, `ComponentHandle.cs`, `ComponentRef.cs`, `BuilderParser.cs:487-510,762-769`.
+> Generalizing the floor and RELOCATING the component past the target is also dead: it reorders
+> components against the sibling-ordinal rule and re-churns every sync. So the fix REQUIRES a new
+> public authoring verb (Runtime + `BuilderParser` recognition + DocGen + EditMode), which makes this
+> a feature, not a localized defect fix. To resume: decide the verb shape (candidate:
+> `opener.Set<Linker>("target", door)` as a deferred field-set on component #0, seated after the
+> target's `var`), amend the In-scope/Deliverables/Decomposition below to add the verb + its
+> round-trip, then re-run the pipeline fresh (an ESCALATED verdict is cached, so relaunch with
+> `{ spec }`, not resume-by-id). The reproduced `CS0841` entry stays in `docs/open-defects.md` until
+> this ships with its regression test.
+
 One defect, reproduced live over two manual syncs with auto off: a scene reference from an
 EARLIER-declared object to a LATER-declared root emits a forward reference, and the written builder
 source fails to compile with `CS0841`. This is the root-append variant left OUT OF SCOPE by spec 41

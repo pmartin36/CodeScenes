@@ -198,7 +198,9 @@ Hoist the two cross-cutting mechanisms; do not restate them per task.
   `SceneBuilder.Core/Model/IFieldExclusionPolicy.cs`,
   `com.codescenes/Editor/SerializedFieldExclusions.cs` (the policy's full-name entry point),
   `SceneBuilder.Core.Tests/**` (the bypass check and the headless convergence sim),
-  `unity-gate/Assets/GateTests/**` (the live excluded-override convergence test).
+  `unity-gate/Assets/GateTests/**` (the live excluded-override CONVERGENCE test — this asserts the
+  second build emits zero ops ONLY; the D1 warning's surfacing is Task B's deliverable, since
+  surfacing requires the recurrence key Task B lands).
 - **Task B — report a declined override on both directions once per session (Invariant #2).** Assign
   the stable recurrence key on `StaleOverride` and the excluded-override report; route both directions
   through the keyed `SurfaceNotes` channel; add the WARNING severity. Depends on Task A (it reports the
@@ -206,8 +208,18 @@ Hoist the two cross-cutting mechanisms; do not restate them per task.
   `SceneBuilder.Core/Reconcile/ConflictDetector.cs`, `SceneBuilder.Core/Reconcile/Conflict.cs` (if the
   excluded-override report gets a dedicated factory), `com.codescenes/Editor/ConflictSurfacing.cs`
   (Severity), `com.codescenes/Editor/SceneBuilderSync.cs` (route the keyed report through the Notes
-  channel), `SceneBuilder.Core.Tests/**` (the recurrence-key composition test),
-  `unity-gate/Assets/GateTests/**` (the build-path surfacing test).
+  channel), `SceneBuilder.Core.Tests/**` (the recurrence-key composition test, in a NEW file e.g.
+  `InstanceOverrideRecurrenceKeyTests.cs` — do NOT grow `PrefabInstanceReconcileTests.cs`, at 984/1000
+  lines under the gate's file-size budget),
+  `unity-gate/Assets/GateTests/**` (the EditMode surfacing tests). **Task B OWNS the EditMode surfacing
+  assertion for EVERY declined-override case — the D1 excluded-override (confirmation checklist #1), the
+  added-component/child excluded field (checklist #2), AND the D2 stale override (checklist #3).** For
+  each: author it in a live scene, build twice, and assert a located WARNING naming the instance, the
+  component type and the path is surfaced exactly once (and, for D2, is NOT re-logged on the second
+  build in the same session). All three belong to Task B, not Task A, because a surfaced warning
+  requires the recurrence key Task B lands — Task A's live test asserts convergence alone. This closes
+  the gap where the D1/added-payload surfacing assertion (test plan "D1 convergence (EditMode,
+  required)", checklist #1/#2) was owned by neither task.
 
 Keep each task's TOUCHES complete: a task that omits a file it edits mis-scopes the gate.
 
