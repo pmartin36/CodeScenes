@@ -126,7 +126,7 @@ Functions/behaviors (each a testable contract):
 
 ## Authoring API added
 Two additions (mirroring the asset-ref authoring surface):
-- **`ComponentHandle<T>.Set<TValue>(Func<T,TValue> selector, NodeHandle target)`** — a new overload
+- **`ComponentHandle<T>.Set<TValue>(Func<T,TValue> selector, SceneObjectHandle target)`** — a new overload
   beside the existing `Set(selector, TValue)` / `Set(selector, AssetReference)`. Passing a handle
   (a `NodeHandle` local) binds here unambiguously (a `NodeHandle` is neither the field's value type nor
   an `AssetReference`).

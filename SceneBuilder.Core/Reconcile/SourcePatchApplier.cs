@@ -586,8 +586,8 @@ namespace SceneBuilder.Core.Reconcile
             // statement would silently reorder whichever real scene-graph sibling happens to sit
             // next to it. No-op rather than throw: a PatchException here would
             // abort the whole patch over one unrepresentable cosmetic reorder, dropping the user's
-            // real edits along with it. ComponentReconciler's REORDER-pass gate
-            // (ComponentReconciler.cs:390) keeps this unreached whenever ParseResult.ChainedComponents
+            // real edits along with it. ComponentReconciler.ReconcileComponents' REORDER-pass gate
+            // keeps this unreached whenever ParseResult.ChainedComponents
             // is threaded; this is the structural backstop for a caller that does not thread it.
             if (IsChainedNonStatementCall(invocation))
             {

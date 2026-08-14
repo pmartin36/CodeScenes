@@ -71,7 +71,7 @@ namespace SceneBuilder.Core.Tests
         [Fact]
         public void Reconcile_RectSubRoundingDrift_ProducesNoArgumentPatch()
         {
-            // Anti-loop rule (mirrors `rot:`, Reconciler.cs:792-807): a sub-0.0001 drift renders to
+            // Anti-loop rule (mirrors `rot:`, Reconciler.MaskDriven): a sub-0.0001 drift renders to
             // the SAME canonical literal, so emitting it would be a perpetual self-rewrite.
             var model = Rect(anchoredPos: new Vec2(10, 20));
             var snapshot = Rect(anchoredPos: new Vec2(10.00001f, 20));

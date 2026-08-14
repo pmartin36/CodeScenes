@@ -2,9 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Xunit;
 
 namespace SceneBuilder.Core.Tests
@@ -81,87 +78,20 @@ namespace SceneBuilder.Core.Tests
         // descends the containers it is named for.
         private const string ValueWalkRelativePath = "SceneBuilder.Core/Model/ValueWalk.cs";
 
+        private static readonly HashSet<string> ContainerIdentifiers = new() { "List", "Nested" };
+
         // Every production `.cs` file under ScanRoots, relative to repoRoot, excluding obj/bin
         // output and SceneBuilder.Core/Model/ValueWalk.cs itself (by relative path, not bare
         // filename — a second file sharing that name elsewhere must not inherit the exemption).
-        private static IEnumerable<string> ProductionFiles(string repoRoot)
-        {
-            foreach (var scanRoot in ScanRoots)
-            {
-                var rootPath = Path.Combine(repoRoot, scanRoot);
-                if (!Directory.Exists(rootPath))
-                {
-                    continue;
-                }
-
-                foreach (var file in Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories))
-                {
-                    var relative = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
-                    if (relative.Contains("/obj/") || relative.Contains("/bin/"))
-                    {
-                        continue;
-                    }
-
-                    if (relative == ValueWalkRelativePath)
-                    {
-                        continue;
-                    }
-
-                    yield return relative;
-                }
-            }
-        }
+        private static IEnumerable<string> ProductionFiles(string repoRoot) =>
+            SourceScanPlumbing.ProductionFiles(repoRoot, ScanRoots, rel => rel == ValueWalkRelativePath);
 
         // Every `ValueNode.List` / `ValueNode.Nested` qualified-identifier TOKEN in `sourceText`, in
         // ANY syntactic position, with its enclosing member and line. A syntax-only parse: comment
         // and XML-doc trivia carry no tokens, so prose mentioning either name can never match.
-        private static IEnumerable<Match> ContainerTokens(string sourceText, string relativePath)
-        {
-            var tree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
-            var root = tree.GetRoot();
-
-            foreach (var token in root.DescendantTokens())
-            {
-                if (token.Kind() != SyntaxKind.IdentifierToken
-                    || (token.Text != "List" && token.Text != "Nested"))
-                {
-                    continue;
-                }
-
-                var dot = token.GetPreviousToken();
-                if (dot.Kind() != SyntaxKind.DotToken)
-                {
-                    continue;
-                }
-
-                var qualifier = dot.GetPreviousToken();
-                if (qualifier.Text != "ValueNode")
-                {
-                    continue;
-                }
-
-                var pattern = "ValueNode." + token.Text;
-                var line = token.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-                yield return new Match(relativePath, EnclosingMember(token), line, pattern);
-            }
-        }
-
-        private static string EnclosingMember(SyntaxToken token)
-        {
-            for (var node = token.Parent; node != null; node = node.Parent)
-            {
-                switch (node)
-                {
-                    case MethodDeclarationSyntax m: return m.Identifier.Text;
-                    case LocalFunctionStatementSyntax l: return l.Identifier.Text;
-                    case ConstructorDeclarationSyntax c: return c.Identifier.Text;
-                    case PropertyDeclarationSyntax p: return p.Identifier.Text;
-                    case TypeDeclarationSyntax t: return t.Identifier.Text;
-                }
-            }
-
-            return "<top-level>";
-        }
+        private static IEnumerable<Match> ContainerTokens(string sourceText, string relativePath) =>
+            SourceScanPlumbing.QualifiedTokens(sourceText, relativePath, "ValueNode", ContainerIdentifiers)
+                .Select(t => new Match(relativePath, t.Member, t.Line, "ValueNode." + t.Identifier));
 
         // One message per (file, member) whose actual token count differs from its declared count,
         // scoped to the files `matches` actually covers -- a declared site whose file was never
@@ -379,37 +309,14 @@ namespace SceneBuilder.Core.Lowering
             Path.GetFileName(relativePath).Contains("UnityEvent", StringComparison.Ordinal)
             || UnityEventListenersTokenAllowlist.Contains(relativePath);
 
+        private static readonly HashSet<string> UnityEventListenersIdentifiers = new() { "UnityEventListeners" };
+
         // A sibling of ContainerTokens matching the third container kind: the same syntax-only
         // qualifier-dot-identifier shape, kept as its own scanner so a newly permitted file's
         // tokens never perturb the count-keyed List/Nested inventory above.
-        private static IEnumerable<Match> UnityEventListenersTokens(string sourceText, string relativePath)
-        {
-            var tree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
-            var root = tree.GetRoot();
-
-            foreach (var token in root.DescendantTokens())
-            {
-                if (token.Kind() != SyntaxKind.IdentifierToken || token.Text != "UnityEventListeners")
-                {
-                    continue;
-                }
-
-                var dot = token.GetPreviousToken();
-                if (dot.Kind() != SyntaxKind.DotToken)
-                {
-                    continue;
-                }
-
-                var qualifier = dot.GetPreviousToken();
-                if (qualifier.Text != "ValueNode")
-                {
-                    continue;
-                }
-
-                var line = token.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-                yield return new Match(relativePath, EnclosingMember(token), line, "ValueNode.UnityEventListeners");
-            }
-        }
+        private static IEnumerable<Match> UnityEventListenersTokens(string sourceText, string relativePath) =>
+            SourceScanPlumbing.QualifiedTokens(sourceText, relativePath, "ValueNode", UnityEventListenersIdentifiers)
+                .Select(t => new Match(relativePath, t.Member, t.Line, "ValueNode.UnityEventListeners"));
 
         private static IReadOnlyList<string> UnityEventListenersViolations(
             IEnumerable<string> relativePaths, Func<string, string> readText)
@@ -525,34 +432,11 @@ namespace SceneBuilder.Core.Whatever
             || Path.GetFileName(relativePath).Contains("SerializeReference", StringComparison.Ordinal)
             || ManagedReferenceTokenAllowlist.Contains(relativePath);
 
-        private static IEnumerable<Match> ManagedReferenceTokens(string sourceText, string relativePath)
-        {
-            var tree = CSharpSyntaxTree.ParseText(sourceText, path: relativePath);
-            var root = tree.GetRoot();
+        private static readonly HashSet<string> ManagedReferenceIdentifiers = new() { "ManagedReference" };
 
-            foreach (var token in root.DescendantTokens())
-            {
-                if (token.Kind() != SyntaxKind.IdentifierToken || token.Text != "ManagedReference")
-                {
-                    continue;
-                }
-
-                var dot = token.GetPreviousToken();
-                if (dot.Kind() != SyntaxKind.DotToken)
-                {
-                    continue;
-                }
-
-                var qualifier = dot.GetPreviousToken();
-                if (qualifier.Text != "ValueNode")
-                {
-                    continue;
-                }
-
-                var line = token.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-                yield return new Match(relativePath, EnclosingMember(token), line, "ValueNode.ManagedReference");
-            }
-        }
+        private static IEnumerable<Match> ManagedReferenceTokens(string sourceText, string relativePath) =>
+            SourceScanPlumbing.QualifiedTokens(sourceText, relativePath, "ValueNode", ManagedReferenceIdentifiers)
+                .Select(t => new Match(relativePath, t.Member, t.Line, "ValueNode.ManagedReference"));
 
         private static IReadOnlyList<string> ManagedReferenceViolations(
             IEnumerable<string> relativePaths, Func<string, string> readText)

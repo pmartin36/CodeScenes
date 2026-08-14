@@ -163,7 +163,7 @@ namespace SceneBuilder.Core.Reconcile
             string instanceLogicalId,
             IReadOnlyDictionary<string, SourceSpan>? anchors,
             // Guid->FacadeEntry reverse lookup for a below-root override's
-            // typed `.On(sel => sel.A.B, ...)` selector. Threaded here from Reconciler.cs (already
+            // typed `.On(sel => sel.A.B, ...)` selector. Threaded here from Reconciler.Reconcile (already
             // in scope at the call) so nested emit prefers the typed form, falling back to the
             // string selector on a miss/absent catalog.
             FacadeCatalog? facadeCatalog,

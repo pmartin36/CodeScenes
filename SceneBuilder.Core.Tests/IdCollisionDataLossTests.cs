@@ -11,7 +11,7 @@ namespace SceneBuilder.Core.Tests
     // from colliding explicit `.Id(...)` values. Parse now DETECTS the collision (b1-t3:
     // ConflictKind.DuplicateLogicalId), but detection alone does not prevent the loss: two
     // `scene.Add("Enemy").Id("Enemy-2");` statements still parse to two roots sharing one
-    // LogicalId; `Reconciler.FlattenModel` (Reconciler.cs:952-959) is last-write-wins, so only one
+    // LogicalId; `Reconciler.FlattenModel` is last-write-wins, so only one
     // survives reconcile's view of the model and the second real scene object is silently
     // re-created. This test stays GREEN for the whole milestone: the fix is PREVENTION (heal
     // before reconcile via IdCollisionHealer) — FlattenModel itself is deliberately never changed.

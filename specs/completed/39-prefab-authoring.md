@@ -190,11 +190,11 @@ public class Car : IPrefabDefinition
 {
     public void Build(PrefabRoot root)
     {
-        root.Name("Car");
-        root.Component<Rigidbody>(rb => rb.Set(r => r.mass, 1200f));
-        var body = root.Add("Body");
+        var car = root.Add("Car");
+        car.Component<Rigidbody>(rb => rb.Set(r => r.mass, 1200f));
+        var body = car.Add("Body");
         body.Component<MeshRenderer>(mr => mr.Set(x => x.sharedMaterial, Assets.Material.CarPaint));
-        root.Add("FrontLeftWheel").Transform(pos: (-1, 0, 1.5f));
+        car.Add("FrontLeftWheel").Transform(pos: (-1, 0, 1.5f));
     }
 }
 ```

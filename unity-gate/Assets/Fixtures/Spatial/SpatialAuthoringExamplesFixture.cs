@@ -7,9 +7,9 @@ using static SceneBuilder.Authoring.AssetRefs;
 // aspect-locked overload, the explicit tuple `size:` overload, the target-override /
 // depth-axis SurfaceSnap forms, and a prefab-instance SurfaceSnap target — are exercised by the
 // Unity compile, not just NodeHandle.cs alone.
-// Lives in its own asmdef (referencing SceneBuilder.Authoring) rather than GateFixtures, which is
-// deliberately reference-free (BuilderProjectInjectorTests.ReferencesAuthoring_ReadsTheRealEditorAssemblyGraph
-// asserts GateFixtures reports no Authoring reference).
+// Lives in its own asmdef referencing SceneBuilder.Authoring (GateFixtures.asmdef also references
+// SceneBuilder.Authoring now, so it is no longer the Authoring-reference negative case — see
+// BuilderProjectInjectorTests.ReferencesAuthoring_ReadsTheRealEditorAssemblyGraph).
 public class SpatialAuthoringExamplesFixture : ISceneDefinition
 {
     public void Build(SceneRoot scene)

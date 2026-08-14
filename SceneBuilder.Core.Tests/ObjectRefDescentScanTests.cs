@@ -1,11 +1,6 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Xunit;
 
 namespace SceneBuilder.Core.Tests
@@ -68,105 +63,24 @@ namespace SceneBuilder.Core.Tests
 
         private static readonly string[] ScanRoots = { "SceneBuilder.Core", "com.codescenes" };
 
-        private static string RepoRoot([CallerFilePath] string here = "")
-        {
-            var dir = Path.GetDirectoryName(here);
-            while (dir != null && !File.Exists(Path.Combine(dir, "SceneBuilder.sln")))
-            {
-                dir = Path.GetDirectoryName(dir);
-            }
+        private static readonly HashSet<string> ObjectRefIdentifiers = new() { "ObjectRef" };
 
-            if (dir == null)
-            {
-                throw new InvalidOperationException(
-                    $"ObjectRefDescentScanTests.RepoRoot: no SceneBuilder.sln found walking up from '{here}'");
-            }
-
-            return dir;
-        }
-
-        private static IEnumerable<string> ProductionFiles(string repoRoot)
-        {
-            foreach (var scanRoot in ScanRoots)
-            {
-                var rootPath = Path.Combine(repoRoot, scanRoot);
-                if (!Directory.Exists(rootPath))
-                {
-                    continue;
-                }
-
-                foreach (var file in Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories))
-                {
-                    var relative = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
-                    if (relative.Contains("/obj/") || relative.Contains("/bin/"))
-                    {
-                        continue;
-                    }
-
-                    // The owner is exempt by name: its own body legitimately mentions the kind it
-                    // is named for.
-                    if (Path.GetFileName(file) == "ObjectRefValues.cs")
-                    {
-                        continue;
-                    }
-
-                    yield return relative;
-                }
-            }
-        }
+        // The owner is exempt by name: its own body legitimately mentions the kind it is named for.
+        private static IEnumerable<string> ProductionFiles(string repoRoot) =>
+            SourceScanPlumbing.ProductionFiles(
+                repoRoot, ScanRoots, rel => Path.GetFileName(rel) == "ObjectRefValues.cs");
 
         // Every raw `ValueNode.ObjectRef` TOKEN in `sourceText`, with its enclosing member. A
         // syntax-only parse: comment/XML-doc prose carries no tokens at all, so trivia can never
         // satisfy this regardless of what English words it contains.
-        private static IEnumerable<(string Member, int Line)> RawObjectRefTokens(string sourceText, string path)
-        {
-            var tree = CSharpSyntaxTree.ParseText(sourceText, path: path);
-            var root = tree.GetRoot();
-
-            foreach (var token in root.DescendantTokens())
-            {
-                if (token.Kind() != SyntaxKind.IdentifierToken || token.Text != "ObjectRef")
-                {
-                    continue;
-                }
-
-                var dot = token.GetPreviousToken();
-                if (dot.Kind() != SyntaxKind.DotToken)
-                {
-                    continue;
-                }
-
-                var qualifier = dot.GetPreviousToken();
-                if (qualifier.Text != "ValueNode")
-                {
-                    continue;
-                }
-
-                yield return (EnclosingMember(token), token.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
-            }
-        }
-
-        private static string EnclosingMember(SyntaxToken token)
-        {
-            for (var node = token.Parent; node != null; node = node.Parent)
-            {
-                switch (node)
-                {
-                    case MethodDeclarationSyntax m: return m.Identifier.Text;
-                    case LocalFunctionStatementSyntax l: return l.Identifier.Text;
-                    case ConstructorDeclarationSyntax c: return c.Identifier.Text;
-                    case PropertyDeclarationSyntax p: return p.Identifier.Text;
-                    case TypeDeclarationSyntax t: return t.Identifier.Text;
-                }
-            }
-
-            return "<top-level>";
-        }
+        private static IEnumerable<(string Member, int Line)> RawObjectRefTokens(string sourceText, string path) =>
+            SourceScanPlumbing.QualifiedTokens(sourceText, path, "ValueNode", ObjectRefIdentifiers)
+                .Select(t => (t.Member, t.Line));
 
         [Fact]
         public void Scan_ProductionSource_MatchesDeclaredInventory_NoUndeclaredBypass()
         {
-            var repoRoot = RepoRoot();
+            var repoRoot = RepoRootLocator.Find();
             Assert.True(
                 File.Exists(Path.Combine(repoRoot, "SceneBuilder.sln")),
                 $"resolved repo root '{repoRoot}' has no SceneBuilder.sln next to it");
@@ -245,7 +159,7 @@ namespace SceneBuilder.Core.Lowering
         [Fact]
         public void ProductionSource_StaysUnderFileSizeBudget()
         {
-            var repoRoot = RepoRoot();
+            var repoRoot = RepoRootLocator.Find();
             var over = new List<string>();
             foreach (var relativePath in ProductionFiles(repoRoot))
             {

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -14,28 +13,11 @@ namespace SceneBuilder.Core.Tests
     // emitted handle token and the parameter it is assigned to -- only a full compilation can.
     internal static class AuthoringBindHarness
     {
-        private static string RepoRoot([CallerFilePath] string here = "")
-        {
-            var dir = Path.GetDirectoryName(here);
-            while (dir != null && !File.Exists(Path.Combine(dir, "SceneBuilder.sln")))
-            {
-                dir = Path.GetDirectoryName(dir);
-            }
-
-            if (dir == null)
-            {
-                throw new InvalidOperationException(
-                    $"AuthoringBindHarness.RepoRoot: no SceneBuilder.sln found walking up from '{here}'");
-            }
-
-            return dir;
-        }
-
         // Full paths of every com.codescenes/Runtime/*.cs source -- the one Runtime directory walk,
         // shared by every reader of the authoring surface.
         internal static string[] RuntimeSourceFiles()
         {
-            var runtimeDir = Path.Combine(RepoRoot(), "com.codescenes", "Runtime");
+            var runtimeDir = Path.Combine(RepoRootLocator.Find(), "com.codescenes", "Runtime");
             return Directory.EnumerateFiles(runtimeDir, "*.cs").ToArray();
         }
 

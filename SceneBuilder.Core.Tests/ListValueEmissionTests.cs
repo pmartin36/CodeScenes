@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
@@ -497,7 +496,7 @@ public class S : ISceneDefinition
         [Fact]
         public void ArrayLiteralPrefix_HasOneProductionSite()
         {
-            var repoRoot = RepoRoot();
+            var repoRoot = RepoRootLocator.Find();
             var offenders = new List<string>();
 
             foreach (var scanRoot in new[] { "SceneBuilder.Core", "com.codescenes" })
@@ -525,23 +524,6 @@ public class S : ISceneDefinition
             }
 
             Assert.Equal(new[] { "SceneBuilder.Core/Reconcile/ListValueEmission.cs" }, offenders.OrderBy(o => o, StringComparer.Ordinal));
-        }
-
-        private static string RepoRoot([CallerFilePath] string here = "")
-        {
-            var dir = Path.GetDirectoryName(here);
-            while (dir != null && !File.Exists(Path.Combine(dir, "SceneBuilder.sln")))
-            {
-                dir = Path.GetDirectoryName(dir);
-            }
-
-            if (dir == null)
-            {
-                throw new InvalidOperationException(
-                    $"ListValueEmissionTests.RepoRoot: no SceneBuilder.sln found walking up from '{here}'");
-            }
-
-            return dir;
         }
     }
 }

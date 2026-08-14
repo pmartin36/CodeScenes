@@ -146,19 +146,22 @@ namespace SceneBuilder.Core.Tests
         }
 
         // Conflict.Unrepresentable is the only public door for an UnrepresentableValue report;
-        // FromReport is the private mechanism it (and AmbiguousTypeName) shares internally, so a
-        // fourth site cannot build the kind another way -- it fails to compile.
+        // FromReport is the private mechanism every located factory shares internally, so a new
+        // site cannot build a located kind another way -- it fails to compile.
         [Fact]
         public void Conflict_HasNoPublicGenericDoorForAGuardedKind()
         {
             Assert.Null(typeof(Conflict).GetMethod("FromReport", BindingFlags.Public | BindingFlags.Static));
         }
 
-        // Reflection sweep over every ConflictDetector factory that can produce a Conflict, so a
-        // fourth UnrepresentableValue-producing factory cannot slip past this check by having an
-        // unusual signature: it either routes through the located channel or fails here.
+        // Reflection sweep over every ConflictDetector factory that can produce a Conflict, so any
+        // factory producing a located kind cannot slip past this check by having an unusual
+        // signature: it either routes through the located channel or fails here. The located-kind
+        // set is DERIVED from Conflict.RequiresLocatedReport rather than pinned to
+        // UnrepresentableValue, so a future ConflictDetector factory producing UnauthorableField or
+        // UnsyncableListener is swept automatically.
         [Fact]
-        public void ConflictDetector_EveryFactoryProducingTheKind_GoesThroughTheLocatedChannel()
+        public void ConflictDetector_EveryFactoryProducingALocatedKind_GoesThroughTheLocatedChannel()
         {
             var factories = typeof(ConflictDetector)
                 .GetMethods(BindingFlags.Public | BindingFlags.Static)
@@ -172,7 +175,7 @@ namespace SceneBuilder.Core.Tests
                 var args = factory.GetParameters().Select(p => SynthesizeArg(p.ParameterType)).ToArray();
                 var conflict = (Conflict)factory.Invoke(null, args)!;
 
-                if (conflict.Kind != ConflictKind.UnrepresentableValue)
+                if (!Conflict.RequiresLocatedReport(conflict.Kind))
                 {
                     continue;
                 }

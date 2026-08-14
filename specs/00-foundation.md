@@ -205,11 +205,12 @@ longer referenced persists as a harmless fossil by design.
 1. Parse builder file (Roslyn) → `SceneModel` (desired).
 2. Read live scene → `SceneSnapshot` (actual) via adapter.
 3. `Diff(desired, actual)` keyed on LogicalId↔GlobalObjectId (via IdentityMap) → `ChangeSet`.
-4. Lower `ChangeSet` → **`Plan`**: ordered ops —
+4. Lower `ChangeSet` → **`Plan`**: ordered ops. The vocabulary includes
    `CreateObject, DestroyObject, SetParent, ReorderChild, SetName/Tag/Layer/Active/Static,
     AddComponent, RemoveComponent, ReorderComponent, SetField(path,value),
-    SetAssetRef(path,guid,fileId)`. (`SetReference(path,target)` for cross-object refs is **forthcoming**
-    — M5-pending, not yet emitted.) The `Plan` also carries **`Skipped : SkippedField[]`** — fields the
+    SetAssetRef(path,guid,fileId), SetReference(path,target)` (cross-object refs, emitted since M5),
+    `InstantiatePrefab`, and the prefab-instance override ops. This list is illustrative;
+    `SceneBuilder.Core/Plan/PlanOp.cs` is the authoritative registry. The `Plan` also carries **`Skipped : SkippedField[]`** — fields the
     plan deliberately does NOT write (see §7), surfaced for preview rather than emitted destructively.
 5. Adapter executes the Plan **in place** (reconcile-into-existing — NEVER wipe-and-recreate; this
    preserves GlobalObjectId identity). New objects get their GlobalObjectId recorded to the map on save.

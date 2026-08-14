@@ -19,9 +19,9 @@ public class AutoSceneToCodeTests
 {
     // Scene must save under Assets (EditorSceneManager.SaveScene is project-relative). The builder
     // + sidecar live under the real <ProjectRoot>/SceneBuilders/ dir (SceneBuilderPaths.Builder/Sidecar)
-    // so SceneBuilderRouter.Discover() — TypeCache-backed — can route this builder via the compiled
-    // AutoSceneToCodeScene fixture (unity-gate/Assets/Fixtures/AutoSceneToCodeScene.cs); a temp-dir
-    // seed is invisible to TypeCache and would silently no-op ExecuteSceneToCode post-rewire.
+    // so SceneBuilderRouter.Discover() — a plain Directory.GetFiles("*.cs") scan of that dir — can
+    // route this builder; a temp-dir seed lives outside BuildersDirectory and would silently no-op
+    // ExecuteSceneToCode post-rewire.
     private const string ScenePath = "Assets/GateTests/__AutoSceneToCodeTemp.unity";
     private const string BuilderName = "AutoSceneToCodeScene";
 

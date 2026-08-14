@@ -297,7 +297,7 @@ public NodeHandle FitSize(Vector3 size);
 public NodeHandle SurfaceSnap(bool up = false, bool down = false,
                           bool left = false, bool right = false,
                           bool forward = false, bool back = false,
-                          NodeHandle target = null);
+                          SceneObjectHandle target = null);
 ```
 
 Rules (enforced by the parser, §"Core deliverables"): FitSize takes **exactly one** of

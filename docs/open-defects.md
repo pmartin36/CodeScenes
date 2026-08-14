@@ -115,21 +115,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   invalidation for a moved/reparented target, which no planned task's DELIVERABLE holds.
   OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
 
-- SEVERITY low — `SceneBuilder.Core.Tests/SpatialComponentTests.cs` is 1083 lines, over the
-  1000-line file-size budget this plan states (measured: `wc -l`; it is the only file in the tree
-  over the limit, next highest is `unity-gate/Assets/GateTests/RoundTripSpatialTests.cs` at 979 and
-  `SceneBuilder.Core/Reconcile/SourcePatchApplier.cs` at 941). Consequence for this run: b1-t1's
-  budget assertion (deliverable 5) is scoped to production source (`SceneBuilder.Core/**`,
-  `com.codescenes/**`) and does NOT cover test files, because a repo-wide assertion would be red on
-  landing. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
-- SEVERITY low — `specs/00-foundation.md:210-212` lists the Plan op vocabulary and states
-  "(`SetReference(path,target)` for cross-object refs is **forthcoming** — M5-pending, not yet
-  emitted.)". Measured false: `SceneBuilder.Core/Materialize/Materializer.cs:289` emits
-  `SetReference` and has since M5, and the same list omits `InstantiatePrefab` and the ten
-  instance-override ops registered at `SceneBuilder.Core/Plan/PlanOp.cs:21-31`. A reader treating
-  §5 step 4 as the op registry gets a wrong answer. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
 - SEVERITY low — `ReconcileResult.Skipped` is logged once per skipped field on EVERY sync:
   `com.codescenes/Editor/SceneBuilderSync.cs:237` does `Debug.LogWarning` per entry, and
   `SceneBuilderAutoSync.cs:497` calls `SceneBuilderSync.Run` on every debounced change. A scene
@@ -161,21 +146,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   `expected.Roots.Length`) or deferring the field-introducing patch until the target's declaration
   precedes it in text — a Reconciler/StatementPlacement contract change, not a localized patch.
   OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
-- SEVERITY low — four gate fixture headers and one test header state that
-  `SceneBuilderRouter.Discover()` is TypeCache-backed and routes only "a REAL compiled type":
-  `unity-gate/Assets/Fixtures/AutoSceneToCodeScene.cs`, `AutoCodeToSceneScene.cs`,
-  `AutoIntegrationScene.cs`, `AutoConflictScene.cs`, and `unity-gate/Assets/GateTests/AutoSceneToCodeTests.cs:22-24`
-  ("a temp-dir seed is invisible to TypeCache and would silently no-op ExecuteSceneToCode"). Measured
-  false: `com.codescenes/Editor/SceneBuilderRouter.cs:61-92` is a plain
-  `Directory.GetFiles(SceneBuilderPaths.BuildersDirectory, "*.cs")` scan, its own class doc at `:43-49`
-  says builders "are never compiled, so a Unity type index cannot see them — the `.cs` file IS the unit",
-  and `unity-gate/Assets/GateTests/MultiSceneRoutingTests.cs:127-145`
-  (`MultiScene_Discover_EnumeratesOutOfAssetsBuilders`) pins discovery of a builder with NO compiled
-  counterpart anywhere in the domain. Consequence: a test author following the comment adds an
-  unnecessary compiled `ISceneDefinition` fixture under `Assets/`, which costs a domain reload on the
-  gate and implies a constraint the product does not have. Comments only; no observable behavior
-  changes. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
 
 - SEVERITY low — spec 35 D3's "Reachable sequence, every step an ordinary UI action with auto-sync
   armed" (`specs/35-reference-writes-and-cache-invalidation.md:104-113`) never says how its step-1
@@ -217,18 +187,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   differs. Consequence: `EmittedCodeCompiles.cs:20-22`'s "a future test cannot silently skip it by
   forgetting to opt in" is false for these three, and the compile class of bug CLAUDE.md calls a bug
   outright can land there unseen. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
-
-- SEVERITY low - two archived spec listings document a signature the tree no longer has after this
-  feature's D4 widening. `specs/completed/19-spatial-authoring-components.md:300` prints
-  `NodeHandle target = null);` for `SurfaceSnap`, and
-  `specs/completed/06-m5-cross-object-references.md:129` prints
-  ``**`ComponentHandle<T>.Set<TValue>(Func<T,TValue> selector, NodeHandle target)`**``. Both
-  parameters are `SceneObjectHandle` on the current tree (`com.codescenes/Runtime/NodeHandle.cs:67`,
-  `com.codescenes/Runtime/ComponentHandle.cs:34`). Re-measured by tdd-validator during b3-t1
-  iteration 2 (`sed -n '298,302p'` / `sed -n '127,131p'`): both lines still print `NodeHandle`.
-  Dead prose in an archive; nothing observable changes. Raised as a b3-t1 finding by
-  `scope/bucket-b3.md` and NOT fixed by the routed iteration, which addressed the guard-completeness
-  finding only; `specs/completed/` is in no task's TOUCHES in this plan. OWNER: unassigned. FOUND-BY: reference-writes-and-cache-invalidation.
 
 - SEVERITY med — every build marks the scene dirty and saves it, whether or not the plan did
   anything. `com.codescenes/Editor/SceneBuilderBuild.cs:241-242` calls
@@ -280,32 +238,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   keyless per-pass conflict on the build path would log on every keystroke. OWNER: unassigned.
   FOUND-BY: excluded-field-one-way-report.
 
-- SEVERITY low — the repo-root walk `private static string RepoRoot([CallerFilePath] string here = "")`
-  (walk upward to the directory containing `SceneBuilder.sln`) is duplicated across the Core test
-  suite. Measured copies: `SceneBuilder.Core.Tests/ObjectRefDescentScanTests.cs:54`,
-  `SceneBuilder.Core.Tests/ListValueEmissionTests.cs:530`,
-  `SceneBuilder.Core.Tests/AuthoringBindHarness.cs:17`. Feature `uniform-value-descent` b1-t1 added a
-  fourth site as the intended single owner, `SceneBuilder.Core.Tests/RepoRootLocator.cs:12`, and its
-  task block scopes migrating the pre-existing copies OUT, so the tree now holds four copies of the
-  same walk. New call sites (b1-t2, b4-t2) use the helper; the three old ones do not. Migration is a
-  mechanical, behavior-free edit: none of the three files appears in b1-t1's pinned baseline
-  (`SceneBuilder.Core.Tests/PinnedTestBaseline.json`), so the pin does not block it. Does not relax
-  any DELIVERABLE clause. OWNER: unassigned. FOUND-BY: uniform-value-descent.
-
-- SEVERITY low — the Roslyn source-scan plumbing is duplicated across the two guard tests in the Core
-  test suite. `SceneBuilder.Core.Tests/ValueContainerDescentScanTests.cs` reproduces three members
-  already present in `SceneBuilder.Core.Tests/ObjectRefDescentScanTests.cs`: `EnclosingMember`
-  (`ObjectRefDescentScanTests.cs:132-147` vs `ValueContainerDescentScanTests.cs:145-160`, byte
-  identical), `ProductionFiles` (`:71-99` vs `:83-109`, identical but for the exempt relative path)
-  and the `DescendantTokens` -> `IdentifierToken` -> previous `DotToken` -> `ValueNode` qualifier
-  extraction skeleton (`:104-130` vs `:114-143`, identical but for the matched identifier set).
-  Measured on the current tree at validation of `uniform-value-descent` b4-t2. Both members are
-  private to their class and `ObjectRefDescentScanTests.cs` is not in b4-t2's declared TOUCHES, so no
-  task in that feature could extract the shared helper without an undeclared write. Fix is one new
-  internal helper file in `SceneBuilder.Core.Tests/` plus a mechanical edit to both scan tests; it
-  changes no assertion. Does not relax any DELIVERABLE clause. OWNER: unassigned.
-  FOUND-BY: uniform-value-descent.
-
 - SEVERITY low — two hand-rolled `ValueNode` container descents remain in production because no
   `ValueWalk` primitive expresses their shape. `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:750,766`
   (`AuthoredTextIsCurrent`, 4 tokens) is a PAIRED walk comparing two values position by position and
@@ -318,30 +250,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   declared entry with a reason, so this relaxes no DELIVERABLE clause. Retiring them needs a paired
   `Any` and a union-producing `Map` on `ValueWalk`, a behavior-affecting design change.
   OWNER: unassigned. FOUND-BY: uniform-value-descent.
-
-- SEVERITY low — DANGLING artifact reference inside this register. The repo-root-walk entry above
-  cites `SceneBuilder.Core.Tests/PinnedTestBaseline.json` as an existing file ("none of the three
-  files appears in b1-t1's pinned baseline (`...PinnedTestBaseline.json`), so the pin does not block
-  it"). Measured at validation of `uniform-value-descent` b4-t3: that JSON, plus
-  `PinnedTestBaselineTests.cs` and `PinnedBaselineCompletenessTests.cs`, were deleted by b4-t3 (the
-  feature-scoped pin's planned retirement), and `docs/open-defects.md` is outside b4-t3's declared
-  TOUCHES, so that task could not edit it. The claim the parenthetical supports (the repo-root-walk
-  migration is unblocked) remains true and is now unconditional; only the citation points at a file
-  that no longer exists. Fix is one prose edit, naturally folded into whoever clears the repo-root
-  duplication entry. Does not relax any DELIVERABLE clause. OWNER: unassigned.
-  FOUND-BY: uniform-value-descent.
-
-- SEVERITY low — STALE comment misdirecting future fixture authors.
-  `unity-gate/Assets/Fixtures/Spatial/SpatialAuthoringExamplesFixture.cs:10-12` states that
-  GateFixtures is "deliberately reference-free (BuilderProjectInjectorTests.
-  ReferencesAuthoring_ReadsTheRealEditorAssemblyGraph asserts GateFixtures reports no Authoring
-  reference)". Both halves are false today, measured at validation of m8-unityevents b1-t0:
-  `unity-gate/Assets/Fixtures/GateFixtures.asmdef:4-6` lists `SceneBuilder.Authoring`, and
-  `unity-gate/Assets/GateTests/BuilderProjectInjectorTests.cs:293-294` records that GateFixtures "no
-  longer serves as the negative case" (the negative case is now `SceneBuilder.Authoring` itself). A
-  fixture author reading it would wrongly conclude a fixture needing Authoring cannot live in
-  GateFixtures. Fix is one prose edit. Relaxes no DELIVERABLE clause. OWNER: unassigned.
-  FOUND-BY: m8-unityevents.
 
 - SEVERITY low — the ordinal-within-type component-key rule (spec 09:31, "Type.FullName +
   ordinal-within-type") is hand-written SIX times, three of them character-identical. MEASURED at
@@ -382,53 +290,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   `TryParseLogicalId`) and a "does this id name a component" predicate. Fix: add those two members
   beside `ComposeLogicalId`/`TryParseLogicalId`/`OwnerOfLogicalId`, migrate all three sites, and
   shrink the allowlist to the owner alone. OWNER: unassigned. FOUND-BY: m8-unityevents.
-
-- SEVERITY low — two stale line-numbered prose pointers into `Reconciler.cs` in the Core test
-  suite. MEASURED at m8-unityevents b1-t1 validation, and re-measured against `HEAD` to confirm
-  they are PRE-EXISTING (not caused by b1-t1's `DetectRemovals` extraction, which only widened the
-  gap): (1) `SceneBuilder.Core.Tests/IdCollisionDataLossTests.cs:14` says "`Reconciler.FlattenModel`
-  (Reconciler.cs:952-959)"; at `HEAD` `FlattenModel` was at `Reconciler.cs:939-946` and today it is
-  at `:825-832`, with the file 852 lines, so the cited range is past EOF. (2)
-  `SceneBuilder.Core.Tests/RectTransformReconcileTests.cs:74` says "Anti-loop rule (mirrors `rot:`,
-  Reconciler.cs:792-807)"; at `HEAD` `:792-807` was the middle of `DetectRemovals` and the `rot:`
-  anti-loop comment was at `:862`, today it is `Reconciler.MaskDriven` and the `rot:` comment is at
-  `:745-760`. Comment text only; both tests pass. This is the third and fourth instance of the same
-  rot in one file. Fix: use a type-qualified `Reconciler.<Method>` pointer with no line range, the
-  form that survived the move at `SceneBuilder.Core/Diff/Differ.cs:94`,
-  `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:10` and
-  `SceneBuilder.Core.Tests/ChainedComponentEditTests.cs:603`. No m8 task touches either file.
-  OWNER: unassigned. FOUND-BY: m8-unityevents.
-
-- SEVERITY low — two stale prose pointers into a sibling file, in production Core. MEASURED at
-  m8-unityevents b1-t1 validation and re-measured against `HEAD` to confirm both are PRE-EXISTING
-  (not caused by b1-t1's `DetectRemovals` extraction): (1)
-  `SceneBuilder.Core/Reconcile/ReconcilerInstances.cs:165` says "Threaded here from Reconciler.cs";
-  the actual caller is `SceneBuilder.Core/Reconcile/ReconcilerAppends.cs:72`, and the appends split
-  predates this task (`Reconciler.cs:11-12` is unchanged at `HEAD`). (2)
-  `SceneBuilder.Core/Reconcile/SourcePatchApplier.cs:576` says "(ComponentReconciler.cs:390) keeps
-  this unreached whenever ParseResult.ChainedComponents"; at `HEAD`, `ComponentReconciler.cs:390` is
-  the same dangling-reference-conflict `continue;` it is today, not the REORDER-pass gate the
-  sentence describes. Comment text only. Fix: use a type-qualified pointer with no line range, the
-  form that survived the move at `SceneBuilder.Core/Diff/Differ.cs:94` and
-  `SceneBuilder.Core/Reconcile/ComponentReconciler.cs:10`. No m8 task touches either site's owning
-  logic. OWNER: unassigned. FOUND-BY: m8-unityevents.
-
-- SEVERITY low — `SceneBuilder.Core.Tests/UnrepresentableLocatedDataTests.cs` re-lists the
-  located-kind set instead of deriving it from `Conflict.RequiresLocatedReport`. MEASURED at
-  m8-unityevents b1-t2 validation, current tree: (1) `:148-150` says "`FromReport` is the private
-  mechanism it (and AmbiguousTypeName) shares internally"; `FromReport` (`Conflict.cs:140`) is now
-  shared by all FOUR located factories (`Conflict.cs:159`, `:171`, `:196`, `:212`). (2) `:175`
-  filters the `ConflictDetector` reflection sweep with
-  `conflict.Kind != ConflictKind.UnrepresentableValue`, so a future `ConflictDetector` factory
-  producing `UnauthorableField` or `UnsyncableListener` is skipped silently. LATENT today, not a
-  live hole: `ConflictDetector` sets only `AmbiguousAnchor` directly (`:89`) and builds every
-  located report through `Conflict.Unrepresentable` (`:281,297,312,325`), so the filter is
-  currently equivalent to `!RequiresLocatedReport`; the broader guard
-  `AmbiguousShortNameReportTests.Conflict_EveryPublicFactoryProducingALocatedKind_CarriesTheLocatedData`
-  (`:93-118`) already derives its set from the rule and covers all four kinds. Fix: apply the same
-  move here, derive from `Conflict.RequiresLocatedReport` rather than enumerate. The file is in no
-  m8 task's TOUCHES, so no task in that run could hold it. OWNER: unassigned. FOUND-BY:
-  m8-unityevents.
 
 - SEVERITY low — b1-t2's widening of the component-closure sub-grammar also opened a SECOND, untested
   surface: the prefab-instance `.AddComponent<T>(c => ...)` closure. MEASURED at b1-t2 validation on the
@@ -498,18 +359,9 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   the same omit-at-default rule the top-level field path uses. OWNER: unassigned. FOUND-BY:
   m9-serializereference (live-verify).
 
-- SEVERITY low (spec self-inconsistency) — specs/39-prefab-authoring.md:188-200 (Authoring API
-  example: root.Name(...)/root.Component<>() called directly on the PrefabRoot param and
-  root.Add=child) contradicts the same spec's normative parser statement at 39:204-209 + 39:216-220
-  ("statement grammar is unchanged; recognition is the only parse change"). The richer example needs
-  new grammar the decomposition forbids. b1-t2 follows the normative grammar-unchanged text; the
-  Name/Component-on-root sugar is NOT delivered. Reconcile the spec (drop the sugar from the example,
-  or spec a new grammar milestone). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).
-
 - SEVERITY low (mirror drift) — SceneBuilder.Grammar/FlatShapeRecognizer.Discovery.cs:22-23
   (TryFindBuildMethod) hard-codes "ISceneDefinition" and was NOT widened for IPrefabDefinition (nor, since nested-prefabs-and-variants b1-t1 widened FindBuildMethod for IPrefabVariantDefinition, for variants) when
   BuilderParser.FindBuildMethod (SceneBuilder.Core/Parsing/BuilderParser.cs:129-131) was. Build-time
   parsing is unaffected; the CodeScenes analyzer's IDE diagnostics recognize a prefab builder only via
   its single-Build-method fallback (:38-50), so a prefab file with multiple Build methods gets no
   in-IDE recognition. Out of spec-39 (no analyzer scope). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).
-
