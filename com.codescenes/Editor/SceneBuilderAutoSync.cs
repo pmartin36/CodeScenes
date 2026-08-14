@@ -101,6 +101,15 @@ namespace SceneBuilder.Editor
         // on reload (a cold re-assemble rewarms). Reset alongside the rest of the pump's state for tests.
         private static readonly Dictionary<string, ChangeScopedSnapshot> _snapshotAssemblers = new();
 
+        /// <summary>
+        /// Test seam mirroring <see cref="BaselineSnapshotFor"/>: the cached per-builder assembler
+        /// (its surviving node cache + counted <see cref="ChangeScopedSnapshot.Ids"/>), or null if no
+        /// cycle has assembled for this builder yet this session. <see cref="GetAssembler"/> itself
+        /// stays private/lazily-creating.
+        /// </summary>
+        internal static ChangeScopedSnapshot? AssemblerFor(string builderName) =>
+            _snapshotAssemblers.TryGetValue(builderName, out var assembler) ? assembler : null;
+
         private static ChangeScopedSnapshot GetAssembler(string builderName)
         {
             if (!_snapshotAssemblers.TryGetValue(builderName, out var assembler))
@@ -595,7 +604,9 @@ namespace SceneBuilder.Editor
             // Establish/refresh the b6-t1 conflict-aware baseline at this converged tail (scope-
             // validator finding, bucket-b6.md #1) — without this, a real session's baseline stays
             // null forever and every dual-trigger cycle silently degrades to the clobbering fallback.
-            CaptureBaseline(scene);
+            // Threads the change set so the tail reassembles incrementally under the assembler's
+            // surviving node cache (O(change-set)) instead of a whole-scene cold re-read (O(N)).
+            CaptureBaseline(scene, ids);
         }
 
         /// <summary>
@@ -692,9 +703,22 @@ namespace SceneBuilder.Editor
         /// cycle (<see cref="ExecuteBothChanged"/>) attributes both sides' field edits against (b6-t1,
         /// research.md Refinement 2). Called at the tail of a converged single-direction cycle and
         /// directly by tests to pin a deterministic baseline before making both-side edits. A no-op
-        /// (baseline left null) when no builder has been built this session yet.
+        /// (baseline left null) when no builder has been built this session yet. Cold tail: equivalent
+        /// to <see cref="CaptureBaseline(Scene, IReadOnlyCollection{EntityId})"/> with a null change set.
         /// </summary>
-        internal static void CaptureBaseline(Scene scene)
+        internal static void CaptureBaseline(Scene scene) => CaptureBaseline(scene, null);
+
+        /// <summary>
+        /// <paramref name="changedIds"/> null: assembles the baseline cold (whole-scene re-read) — the
+        /// code-&gt;scene and both-changed tails, which just mutated/rebuilt the scene and have no cheap
+        /// change set to reuse. <paramref name="changedIds"/> non-null: reassembles under the per-builder
+        /// assembler's surviving node cache via <see cref="ChangeScopedSnapshot.AssembleIncremental"/>,
+        /// which itself degrades to a cold read on a generation change or a cold session — the
+        /// scene-&gt;code tail, keeping the baseline capture O(change-set) rather than O(scene). Content
+        /// is unaffected by which path runs: an incremental capture under a matching generation is
+        /// byte-equal to a cold capture of the same scene state.
+        /// </summary>
+        internal static void CaptureBaseline(Scene scene, IReadOnlyCollection<EntityId>? changedIds)
         {
             if (!SceneBuilderRouter.TryRouteScene(scene, out var route))
             {
@@ -722,7 +746,11 @@ namespace SceneBuilder.Editor
                 sceneRef = SceneRefResolver.ForMap(map);
             }
 
-            _baselines[route.BuilderName] = (File.ReadAllText(route.BuilderPath), assembler.AssembleCold(scene, sceneRef));
+            var snapshot = changedIds == null
+                ? assembler.AssembleCold(scene, sceneRef)
+                : assembler.AssembleIncremental(scene, changedIds, sceneRef);
+
+            _baselines[route.BuilderName] = (File.ReadAllText(route.BuilderPath), snapshot);
         }
 
         /// <summary>

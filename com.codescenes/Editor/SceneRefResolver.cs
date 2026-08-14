@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Model;
 
@@ -10,7 +11,11 @@ namespace SceneBuilder.Editor
     /// was derived from. A <see cref="ChangeScopedSnapshot"/> node cache is keyed on <see cref="Generation"/>
     /// so it can never serve a node computed under a stale map. The private constructor and the two static
     /// factories below are the only construction sites in existence — a generation can never be hand-supplied
-    /// or omitted.
+    /// or omitted. Carries INGREDIENTS, not built closures: <see cref="Bind"/> is the only way to obtain
+    /// ref/listener resolvers, and it demands a <see cref="GlobalObjectIdCache"/> — there is no cache-free
+    /// resolver reachable from this type, so the per-keystroke assemble path (the only path that ever
+    /// holds a <see cref="SceneRefResolver"/>, never a bare <see cref="IdentityMap"/>) cannot bypass the
+    /// counted seam even by accident.
     /// </summary>
     public sealed class SceneRefResolver
     {
@@ -19,22 +24,16 @@ namespace SceneBuilder.Editor
         /// never served to a <see cref="ForMap"/> assemble.</summary>
         public static readonly SceneRefResolver None = new SceneRefResolver(null, null, "none");
 
-        public Func<UnityEngine.Object, string?>? Resolve { get; }
-
-        /// <summary>The listener-target resolver a UnityEvent field read threads to <c>UnityEventReader</c>.
-        /// Bundled with <see cref="Resolve"/> on the same private constructor — REQUIRED, never
-        /// independently supplied — so no caller on this seam can wire scene-object refs without also
-        /// wiring listener targets.</summary>
-        public Func<UnityEngine.Object?, ValueNode?>? ResolveListener { get; }
+        private readonly IReadOnlyDictionary<string, string>? _goidToLogicalId;
+        private readonly ComponentTargetIndex? _cti;
 
         public string Generation { get; }
 
         private SceneRefResolver(
-            Func<UnityEngine.Object, string?>? resolve, Func<UnityEngine.Object?, ValueNode?>? resolveListener,
-            string generation)
+            IReadOnlyDictionary<string, string>? goidToLogicalId, ComponentTargetIndex? cti, string generation)
         {
-            Resolve = resolve;
-            ResolveListener = resolveListener;
+            _goidToLogicalId = goidToLogicalId;
+            _cti = cti;
             Generation = generation;
         }
 
@@ -42,9 +41,27 @@ namespace SceneBuilder.Editor
         {
             var cti = ComponentTargetIndex.ForMap(map);
             return new SceneRefResolver(
-                ObjectReferenceResolver.BuildFromIndex(IdentityNodeIndex.GlobalObjectIdToLogicalId(map)),
-                ObjectReferenceResolver.BuildListenerResolver(cti),
-                "map:" + cti.Generation);
+                IdentityNodeIndex.GlobalObjectIdToLogicalId(map), cti, "map:" + cti.Generation);
+        }
+
+        /// <summary>
+        /// The ONLY way to obtain ref/listener resolvers: binds this instance's stored ingredients to
+        /// <paramref name="ids"/>'s counted resolve, so every scene-object slow-resolve on the ref/listener
+        /// seam is a <see cref="GlobalObjectIdCache.Resolve"/> call — the same counted cache node identity
+        /// already uses. Returns <c>(null, null)</c> for <see cref="None"/> (preserving current null
+        /// behavior — scene refs read Unsupported).
+        /// </summary>
+        public (Func<UnityEngine.Object, string?>? Resolve, Func<UnityEngine.Object?, ValueNode?>? ResolveListener) Bind(
+            GlobalObjectIdCache ids)
+        {
+            if (_goidToLogicalId == null)
+            {
+                return (null, null);
+            }
+
+            return (
+                ObjectReferenceResolver.BuildFromIndex(_goidToLogicalId, ids.Resolve),
+                ObjectReferenceResolver.BuildListenerResolver(_cti!, ids.Resolve));
         }
     }
 }

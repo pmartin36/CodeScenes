@@ -172,15 +172,26 @@ namespace SceneBuilder.Editor
         /// GameObject/Component (e.g. an in-memory, non-scene object) → null.
         /// </summary>
         public static Func<UnityEngine.Object, string?> BuildSceneRefResolver(IdentityMap map)
-            => BuildFromIndex(IdentityNodeIndex.GlobalObjectIdToLogicalId(map));
+            => BuildFromIndex(IdentityNodeIndex.GlobalObjectIdToLogicalId(map), SlowResolve);
+
+        /// <summary>
+        /// The shared cache-free slow-resolve default for the cold whole-file paths (Build/Sync/Resync
+        /// menus + test oracles), which are not per-keystroke. The per-keystroke assemble path never
+        /// reaches this: it obtains its resolvers only through <see cref="SceneRefResolver.Bind"/>,
+        /// which threads a <see cref="GlobalObjectIdCache"/>'s counted resolve instead.
+        /// </summary>
+        private static readonly Func<UnityEngine.Object, string> SlowResolve =
+            o => GlobalObjectId.GetGlobalObjectIdSlow(o).ToString();
 
         /// <summary>
         /// The one closure implementation behind <see cref="BuildSceneRefResolver"/>, taking an
-        /// already-built goid-&gt;LogicalId projection so <see cref="SceneRefResolver.ForMap"/> can
+        /// already-built goid-&gt;LogicalId projection so <see cref="SceneRefResolver.Bind"/> can
         /// derive the resolve delegate and its generation from the SAME projection without building
-        /// it twice.
+        /// it twice. <paramref name="resolveGoid"/> is REQUIRED so a caller on the per-keystroke sync
+        /// path passes a cache rather than silently paying <see cref="GlobalObjectId.GetGlobalObjectIdSlow"/>.
         /// </summary>
-        internal static Func<UnityEngine.Object, string?> BuildFromIndex(IReadOnlyDictionary<string, string> goidToLogicalId)
+        internal static Func<UnityEngine.Object, string?> BuildFromIndex(
+            IReadOnlyDictionary<string, string> goidToLogicalId, Func<UnityEngine.Object, string> resolveGoid)
         {
             return obj =>
             {
@@ -190,7 +201,7 @@ namespace SceneBuilder.Editor
                     return null;
                 }
 
-                var goid = GlobalObjectId.GetGlobalObjectIdSlow(go).ToString();
+                var goid = resolveGoid(go);
                 return goidToLogicalId.TryGetValue(goid, out var logicalId) ? logicalId : goid;
             };
         }
@@ -226,18 +237,20 @@ namespace SceneBuilder.Editor
         /// COMPONENT's own LogicalId, never its owning GameObject's.
         /// </summary>
         public static Func<UnityEngine.Object?, ValueNode?> BuildListenerResolver(IdentityMap map) =>
-            BuildListenerResolver(ComponentTargetIndex.ForMap(map));
+            BuildListenerResolver(ComponentTargetIndex.ForMap(map), SlowResolve);
 
         /// <summary>
         /// The one closure implementation behind <see cref="BuildListenerResolver(IdentityMap)"/>,
-        /// taking an already-built <see cref="ComponentTargetIndex"/> so <see cref="SceneRefResolver.ForMap"/>
+        /// taking an already-built <see cref="ComponentTargetIndex"/> so <see cref="SceneRefResolver.Bind"/>
         /// can derive the listener resolver from the SAME index its own generation folds, without
-        /// building it twice.
+        /// building it twice. <paramref name="resolveGoid"/> is REQUIRED for the same reason as
+        /// <see cref="BuildFromIndex"/>.
         /// </summary>
-        public static Func<UnityEngine.Object?, ValueNode?> BuildListenerResolver(ComponentTargetIndex index) =>
+        public static Func<UnityEngine.Object?, ValueNode?> BuildListenerResolver(
+            ComponentTargetIndex index, Func<UnityEngine.Object, string> resolveGoid) =>
             obj => ComponentTargetResolution.ToValueNode(
                 ComponentTargetResolution.Classify(
-                    StampListenerReference(obj, o => GlobalObjectId.GetGlobalObjectIdSlow(o).ToString()),
+                    StampListenerReference(obj, resolveGoid),
                     index));
 
         /// <summary>

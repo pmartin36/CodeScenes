@@ -1,7 +1,9 @@
 using NUnit.Framework;
 using UnityEditor;
+using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.UI;
 using SceneBuilder.Editor;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Serialization;
@@ -205,7 +207,7 @@ public class AutoIdentityTests
         // Bystander (NOT Opener/Door) is the changed id, so the cache is exercised across the map
         // change without the changed-id path forcing a re-read of Opener's own node by itself.
         var incremental = css.AssembleIncremental(scene, new[] { bystanderGo.GetEntityId() }, sceneRefWithDoor);
-        var freshCold = SceneSnapshotReader.Read(scene, sceneRefWithDoor.Resolve);
+        var freshCold = SceneSnapshotReader.Read(scene, ObjectReferenceResolver.BuildSceneRefResolver(mapWithDoor));
 
         Assert.AreEqual(
             CanonicalJson.Serialize(freshCold),
@@ -302,9 +304,10 @@ public class AutoIdentityTests
 
         css.AssembleCold(scene, SceneRefResolver.None);
 
-        var emptyMapResolver = SceneRefResolver.ForMap(new IdentityMap());
+        var emptyMap = new IdentityMap();
+        var emptyMapResolver = SceneRefResolver.ForMap(emptyMap);
         var incremental = css.AssembleIncremental(scene, new[] { bystanderGo.GetEntityId() }, emptyMapResolver);
-        var freshCold = SceneSnapshotReader.Read(scene, emptyMapResolver.Resolve);
+        var freshCold = SceneSnapshotReader.Read(scene, ObjectReferenceResolver.BuildSceneRefResolver(emptyMap));
 
         Assert.AreEqual(
             CanonicalJson.Serialize(freshCold),
@@ -313,5 +316,160 @@ public class AutoIdentityTests
             "byte-equal to a fresh cold read under the empty-map resolver — None and an empty map answer " +
             "scene-ref reads differently (Unsupported vs. raw GlobalObjectId), so serving a None-built " +
             "cache to a ForMap(empty) assemble is the same defect in a second dress.");
+    }
+
+    // A reference-field slow-resolve of its TARGET must route through the same counted
+    // GlobalObjectIdCache as node identity, not a bare, uncached GetGlobalObjectIdSlow. Invalidating
+    // only the target's cache entry between two otherwise-identical incremental assembles of its
+    // (unchanged) referrer must cost exactly one extra resolve; a resolver that bypasses the cache
+    // shows the same count either way.
+    [Test]
+    public void Identity_ReferenceFieldResolve_RoutesThroughIdsCache_CountedMissOnInvalidate()
+    {
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var openerGo = new GameObject("Opener");
+        var doorGo = new GameObject("Door");
+        var doorOpener = openerGo.AddComponent<DoorOpener>();
+        doorOpener.target = doorGo;
+        SaveActiveScene();
+
+        var scene = EditorSceneManager.GetActiveScene();
+        var css = new ChangeScopedSnapshot();
+        var map = new IdentityMap
+        {
+            Entries = new[]
+            {
+                new IdentityMapEntry
+                {
+                    LogicalId = "Opener", Kind = "GameObject",
+                    GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(openerGo).ToString(),
+                },
+                new IdentityMapEntry
+                {
+                    LogicalId = "Door", Kind = "GameObject",
+                    GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(doorGo).ToString(),
+                },
+            },
+        };
+        var sceneRef = SceneRefResolver.ForMap(map);
+        css.AssembleCold(scene, sceneRef);
+        css.Ids.ResetCount();
+
+        // Opener (the referrer) re-read with Door (the reference target) already warmed.
+        css.AssembleIncremental(scene, new[] { openerGo.GetEntityId() }, sceneRef);
+        var warmedCount = css.Ids.ResolutionCount;
+
+        css.Ids.Invalidate(doorGo.GetEntityId());
+        css.Ids.ResetCount();
+        css.AssembleIncremental(scene, new[] { openerGo.GetEntityId() }, sceneRef);
+        var invalidatedCount = css.Ids.ResolutionCount;
+
+        Assert.AreEqual(warmedCount + 1, invalidatedCount,
+            "Invalidating only the reference TARGET's Ids cache entry must cost exactly one extra " +
+            "resolve on the next incremental assemble of its referrer — proof the reference-field " +
+            "resolve routes through the counted GlobalObjectIdCache seam.");
+    }
+
+    // Mirrors the reference-field routing-delta proof above for a UnityEvent listener target: the
+    // listener's persistent-call target resolve must also route through Ids, not the listener
+    // closure's own bare slow-resolve.
+    [Test]
+    public void Identity_ListenerTargetResolve_RoutesThroughIdsCache_CountedMissOnInvalidate()
+    {
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var buttonHostGo = new GameObject("ButtonHost");
+        var openerGo = new GameObject("Opener");
+        var button = buttonHostGo.AddComponent<Button>();
+        var doorOpener = openerGo.AddComponent<DoorOpener>();
+        UnityEventTools.AddVoidPersistentListener(button.onClick, doorOpener.Open);
+        SaveActiveScene();
+
+        var scene = EditorSceneManager.GetActiveScene();
+        var css = new ChangeScopedSnapshot();
+        var map = new IdentityMap
+        {
+            Entries = new[]
+            {
+                new IdentityMapEntry
+                {
+                    LogicalId = "ButtonHost", Kind = "GameObject",
+                    GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(buttonHostGo).ToString(),
+                },
+                new IdentityMapEntry
+                {
+                    LogicalId = "Opener/DoorOpener#0", Kind = "Component",
+                    ComponentType = "DoorOpener", ParentLogicalId = "Opener",
+                    GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(doorOpener).ToString(),
+                },
+            },
+        };
+        var sceneRef = SceneRefResolver.ForMap(map);
+        css.AssembleCold(scene, sceneRef);
+        css.Ids.ResetCount();
+
+        // ButtonHost (the listener host) re-read with the DoorOpener listener target already warmed.
+        css.AssembleIncremental(scene, new[] { buttonHostGo.GetEntityId() }, sceneRef);
+        var warmedCount = css.Ids.ResolutionCount;
+
+        css.Ids.Invalidate(doorOpener.GetEntityId());
+        css.Ids.ResetCount();
+        css.AssembleIncremental(scene, new[] { buttonHostGo.GetEntityId() }, sceneRef);
+        var invalidatedCount = css.Ids.ResolutionCount;
+
+        Assert.AreEqual(warmedCount + 1, invalidatedCount,
+            "Invalidating only the listener TARGET's Ids cache entry must cost exactly one extra " +
+            "resolve on the next incremental assemble of its listener host — proof the listener-target " +
+            "resolve routes through the counted GlobalObjectIdCache seam.");
+    }
+
+    // The reference TARGET moves/reparents/renames (its GlobalObjectId, and therefore its mapped
+    // LogicalId, is unchanged, so the map's generation stays stable and the assemble takes the
+    // incremental path) while the referrer is NOT in the change set. Its cached ObjectRef must not
+    // go stale and no spurious dangling-reference report must appear.
+    [Test]
+    public void Identity_ReferenceTargetMoved_ByteEqualsColdRead_NoSpuriousDangling()
+    {
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var openerGo = new GameObject("Opener");
+        var doorGo = new GameObject("Door");
+        var newParentGo = new GameObject("NewParent");
+        var doorOpener = openerGo.AddComponent<DoorOpener>();
+        doorOpener.target = doorGo;
+        SaveActiveScene();
+
+        var scene = EditorSceneManager.GetActiveScene();
+        var css = new ChangeScopedSnapshot();
+        var map = new IdentityMap
+        {
+            Entries = new[]
+            {
+                new IdentityMapEntry
+                {
+                    LogicalId = "Opener", Kind = "GameObject",
+                    GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(openerGo).ToString(),
+                },
+                new IdentityMapEntry
+                {
+                    LogicalId = "Door", Kind = "GameObject",
+                    GlobalObjectId = GlobalObjectId.GetGlobalObjectIdSlow(doorGo).ToString(),
+                },
+            },
+        };
+        var sceneRef = SceneRefResolver.ForMap(map);
+        css.AssembleCold(scene, sceneRef);
+
+        doorGo.transform.SetParent(newParentGo.transform);
+        doorGo.name = "DoorMoved";
+        SaveActiveScene();
+
+        var incremental = css.AssembleIncremental(scene, new[] { doorGo.GetEntityId() }, sceneRef);
+        var freshCold = SceneSnapshotReader.Read(scene, ObjectReferenceResolver.BuildSceneRefResolver(map));
+
+        Assert.AreEqual(
+            CanonicalJson.Serialize(freshCold),
+            CanonicalJson.Serialize(incremental),
+            "An incremental assemble after the reference TARGET moved/renamed (LogicalId unchanged, " +
+            "generation stable) must be byte-equal to a fresh cold read — the referrer's cached " +
+            "ObjectRef must not go stale.");
     }
 }

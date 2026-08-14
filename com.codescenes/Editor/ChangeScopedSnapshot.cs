@@ -33,12 +33,13 @@ namespace SceneBuilder.Editor
         {
             Ids.Clear();
             Ids.WarmBatch(CollectAllObjects(scene));
+            var bound = sceneRef.Bind(Ids);
 
             var nodeByGoEntityId = new Dictionary<EntityId, SnapshotNode>();
 
             SnapshotNode BuildNode(GameObject go)
             {
-                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve, sceneRef.Resolve, sceneRef.ResolveListener);
+                var node = SceneSnapshotReader.ReadNode(go, Ids.Resolve, bound.Resolve, bound.ResolveListener);
                 CacheDescendants(go, node, nodeByGoEntityId);
                 return node;
             }
@@ -91,6 +92,7 @@ namespace SceneBuilder.Editor
             }
 
             Ids.Invalidate(idsToInvalidate);
+            var bound = sceneRef.Bind(Ids);
 
             var priorNodes = _nodeByGoEntityId;
             var nodeByGoEntityId = new Dictionary<EntityId, SnapshotNode>();
@@ -116,7 +118,7 @@ namespace SceneBuilder.Editor
                 SnapshotNode node;
                 if (changedGo.Contains(entityId) || !priorNodes.TryGetValue(entityId, out var cached))
                 {
-                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve, sceneRef.Resolve, sceneRef.ResolveListener);
+                    node = SceneSnapshotReader.ReadNodeShallow(go, children, Ids.Resolve, bound.Resolve, bound.ResolveListener);
                 }
                 else
                 {
