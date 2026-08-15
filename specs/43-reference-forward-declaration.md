@@ -324,9 +324,13 @@ A, B and C are Core-only and fast-gate.
   `SceneBuilder.Core/Reconcile/ComponentPatchApplier.cs`,
   `SceneBuilder.Core/Reconcile/SourceEdit.cs` (if a new edit record or mode flag is added),
   `SceneBuilder.Core.Tests/**` (the two-pass compile simulation).
-- **Task D: live EditMode two-sync gate test [adapter, FULL gate].** In a real scene, drive the two-sync
-  repro with a later-declared scene-ROOT target, and a parent-references-own-child variant, asserting the
-  emitted source compiles and a third sync is a fixed point. Depends on B and C. TOUCHES:
+- **Task D: live EditMode gate tests, full scenario matrix [adapter, FULL gate].** In a real editor scene,
+  cover the ENTIRE Unity confirmation checklist (all 15 scenarios: the 9 forward-reference cases AND the 6
+  regression cases), each asserting emitted-source compile via `BuilderCompileCheck` and a fixed-point
+  further sync. The regression cases (10 to 15) are mandatory, not optional: they are how we prove the
+  emit-order change did not perturb existing scenes (backward references, already-declared targets, a
+  pre-existing converged multi-node scene at zero edits, no-forward-reference multi-component nodes, and
+  scene-side sibling reorders round-tripping). Depends on B and C. TOUCHES:
   `unity-gate/Assets/GateTests/**`.
 
 ## Core and adapter test plan
@@ -347,29 +351,63 @@ RED tests, behavior not structure:
   above the referencing component; the anchor `.Component<Linker>()` did not move; and a third pass is a
   fixed point. A two-same-type-component variant (the forward-referrer authored first) asserts no component
   reorder churn. A no-forward-reference control keeps the in-place closure fold.
-- **Task D (EditMode, required).** In a real scene, converge an `Opener` with an unauthored
-  `Linker.target`, create a new ROOT `Door` at end-of-roots, wire `Opener.Linker.target = Door`, and run
-  two manual syncs through `EmittedCodeCompiles.SyncAndAssertCompiles`. Assert the second sync's builder
-  source compiles (`BuilderCompileCheck` stays green, no `CS0841`), the reference round-trips, and a third
-  sync is a fixed point. Repeat with a parent whose own component references its own child, created from
-  scratch in one sync.
+- **Task D (EditMode, required).** Implement the FULL Unity confirmation checklist (all 15 scenarios)
+  against a real editor scene, each driven through `EmittedCodeCompiles.SyncAndAssertCompiles` /
+  `BuilderCompileCheck`. The forward-reference cases (1 to 9) assert the emitted source compiles (no
+  `CS0841` / `CS0103`), the reference round-trips, and a further sync is a fixed point. The regression
+  cases (10 to 15) assert the specified behavior is unchanged, with the pre-existing-converged-scene case
+  (12) and the no-references case (15) asserting ZERO edits so a broken emit order cannot pass. Do not
+  sample a subset; the breadth is the point of this task.
 
 ## Unity confirmation checklist
 
-These become the EditMode tests above.
+These become the EditMode tests above (Task D). The set is deliberately broad: the fix changes a hot
+emit path, so the regression cases (10 to 15) matter as much as the forward-reference cases (1 to 9).
+EVERY case asserts, in addition to its stated expectation, that a further sync produces zero edits (a
+fixed point) so no case silently churns.
 
-1. Converge a scene with one root `Opener` carrying a `Linker` component whose reference field is
-   unauthored. Add a new root object `Door`, positioned after `Opener`. Set `Opener`'s `Linker.target` to
-   `Door`. Sync once, then sync again. Expected: the builder source compiles after both syncs; `Door`'s
-   declaration is seated above `opener.Component<Linker>(c => c.Set("target", door))`; the roots stay
-   `Opener@0, Door@1`; `Opener.Linker.target` resolves to `Door`; a third sync produces zero edits.
-2. Author from scratch a parent whose own component references its own child (an `Aim` component on the
-   parent whose `muzzle` targets the child). Sync once. Expected: the source compiles in a single sync;
-   the child's `Add` is emitted above the referencing component; the child heads its own handle; the
-   reference resolves in this sync (no `CS0103`, no deferral); a second sync is a fixed point.
-3. Repeat item 1 with `Opener` carrying two `Linker` components, the forward-referring one authored first.
-   Sync twice. Expected: the source compiles; the two components keep their authored order (no component
-   reorder churn on the following sync); a third sync is a fixed point.
+Forward-reference cases (must compile, resolve, and converge):
+
+1. One root `Opener` carrying a `Linker` whose reference field is unauthored, converged. Add a new root
+   `Door` after `Opener`, set `Opener.Linker.target = Door`, sync twice. Expected: source compiles after
+   both syncs; `Door`'s declaration is seated above `opener.Component<Linker>(c => c.Set("target", door))`;
+   roots stay `Opener@0, Door@1`; the reference resolves to `Door`.
+2. From scratch, a parent whose own component references its own child (`Aim.muzzle -> child`). Sync once.
+   Expected: compiles in ONE sync; the child's `Add` is above the referencing component; the child heads
+   its own handle; the reference resolves this sync (no `CS0103`, no deferral).
+3. Item 2 reached the OTHER way: converge the parent, its child, and the component with an unauthored
+   field first, then wire `Aim.muzzle = child` on a second sync (the introduce path). Expected: same
+   converged source as item 2 (from-scratch and introduce agree), compiles, reference resolves.
+4. An earlier-declared root references a LATER-declared, non-hierarchical sibling (`o1.comp.target = o2`,
+   `o2` after `o1`). Expected: compiles; `o2` seated above `o1`'s component; sibling order preserved.
+5. A component references a descendant deeper than one level (a grandchild). Expected: the grandchild's
+   declaration (and its parent's) precede the referencing component; compiles.
+6. `Opener` carrying TWO `Linker` components, the forward-referring one authored FIRST. Sync twice.
+   Expected: compiles; the two components keep their authored order (no component-reorder churn).
+7. One component with MIXED fields in a single closure: a forward reference, a backward reference, and a
+   plain value. Expected: the whole component is seated after the forward target; the backward and plain
+   fields still render in the same closure; compiles; one component, not split.
+8. Two same-batch nodes cross-referencing (`A.comp.target = B`, both created in one sync). Expected: both
+   acquire handles, the reference resolves in one sync, handle names compile (no `CS0103`, no dropped ref).
+9. A reference target that is itself created in the same batch as a CHILD of a later-declared parent
+   (target's parent is declared after the referrer). Expected: parent-before-child forces the ordering;
+   compiles or, if genuinely unreachable in one sync, defers cleanly with no `CS0841` and converges.
+
+Regression cases (behavior must be UNCHANGED, proving the emit-order change perturbs nothing):
+
+10. A backward reference (a child's component references its parent). Expected: folds in the closure
+    in place, NO hoist, NO reorder, byte-identical to today.
+11. A reference to an object already declared earlier (the ordinary case). Expected: in-place fold, no new
+    placement, no churn.
+12. A pre-existing converged scene carrying references AND multiple components across several nodes,
+    re-synced with no change. Expected: ZERO edits. No node's declaration and no component moves. This is
+    the primary "did not break an already-good file" assertion.
+13. A multi-component node with NO forward reference. Expected: components stay in scene order; no reorder.
+14. Scene-side reorder round-trips: drag the later target sibling ABOVE the referrer, sync; then drag an
+    UNRELATED sibling BETWEEN referrer and target, sync. Expected: both re-sync cleanly, the reference
+    stays valid and compiling, and the only edits are the sibling moves themselves.
+15. A scene with no references at all (plain hierarchy + components), re-synced. Expected: zero edits, emit
+    order unchanged from today.
 
 ## Dependencies
 
