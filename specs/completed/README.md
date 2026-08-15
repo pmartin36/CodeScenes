@@ -392,3 +392,27 @@ with no new watcher/pump/reload behavior that batchmode is blind to, and the shi
 real prefab instances in a live scene - asserting an excluded-path override converges (second build zero
 ops) with a located WARNING surfaced once naming instance + component type + path, and the stale override
 surfaced on the build and not re-logged in-session.
+
+## 43 - Reference forward-declaration (declare-before-use)
+
+A scene reference from an earlier-declared object to a later-declared one emitted a folded reference above
+the target's declaration, so the generated builder failed to compile (`CS0841`). Reproduced live over two
+manual syncs.
+
+Fix (Core, reconcile-internal, no authoring-API surface): declare-before-use. The reconciler emits the
+reference target before the reference-bearing component, so the reference folds in the ordinary
+`.Component<T>(c => c.Set(...))` closure and compiles, the same shape a human or an LLM would write. It
+converges because a node's components and children are independently-ordered peer lists
+(`StatementPlacement.cs:35-37`) and the component reorder pass keys on components only
+(`ComponentReconciler.cs:200-232`), so placing the target ahead of the component never churns. Two paths:
+the from-scratch emit order in `ReconcilerAppends` (child before the referencing component, child gets its
+own handle, which also closed a `CS0103`/dropped cross-ref defect found during verification), and the
+two-sync introduce path routed through the generalized placement floor instead of the in-place fold.
+Commits `3344530` (Core) + `e548dc6` (EditMode). Gate `passed=821 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`).
+
+Chosen after rejecting relocation (churns the component reorder pass), a capturable `ComponentHandle<T>`
+return (breaks fluent chaining, drags in Runtime/parser/DocGen), and a `Configure<T>(ordinal)` verb (a
+codegen-only construct an LLM would not author from scratch, plus a fragile source ordinal). The EditMode
+layer is the live-editor check: a 15-scenario matrix (9 forward-reference cases plus 6 regression cases,
+including a pre-existing converged multi-node scene re-syncing to zero edits) drives real editor scenes
+through `BuilderCompileCheck`, each asserting compile and a fixed point.

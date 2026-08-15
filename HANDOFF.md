@@ -5,7 +5,7 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=807 failed=0 skipped=0)`
+Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=821 failed=0 skipped=0)`
 (2026-08-14, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
 skip is not a Unity pass — force it). `verify.sh` now discounts one known host engine message
 by exact text (`69a74df`); a crash or any other error still fails.
@@ -82,15 +82,6 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
   desktop platforms, and which machine identifier is actually stable. Both are spikes, not guesses.
   The backend half lives in the site repo (`CodeScenesSite/specs/01-licensing-backend.md`) and is
   already partly stood up.
-
-- **`specs/43` reference forward-declaration (CS0841).** BLOCKED on a product decision, not effort. A
-  reference from an earlier-declared object to a later-declared root emits non-compiling builder source
-  (reproduced live; entry stays in `docs/open-defects.md`). The fix needs a NEW public authoring verb —
-  a deferred field-set on an already-authored component (candidate `opener.Set<Linker>("target", door)`),
-  because the current vocabulary can only re-add the component, not reconfigure it as a standalone
-  statement. Full escalation finding is in the spec's STATUS block. To resume: decide the verb shape,
-  amend the spec's In-scope/Deliverables/Decomposition, re-run the pipeline fresh with `{ spec }` (the
-  cached ESCALATED verdict means resume-by-id will not work).
 
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 
