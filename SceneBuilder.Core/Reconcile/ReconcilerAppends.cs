@@ -31,10 +31,41 @@ namespace SceneBuilder.Core.Reconcile
             HashSet<string> reserved,
             // Threaded through only to reach the EmitComponentAppend call below (§13
             // one-pass attach) — same set ReconcileComponents' ADD path already receives.
+            // A same-batch node whose goid is a forward/backward reference target (see
+            // sameBatchRefTargets below) is registered into this set the moment it heads a
+            // handle, so a same-batch referencing component classifies it Resolvable instead
+            // of Pending.
             ISet<string> resolvableTargets,
             // Same-batch create-candidate identities — threaded through only to reach the
-            // EmitComponentAppend call below, mirroring resolvableTargets.
+            // EmitComponentAppend call below, mirroring resolvableTargets. A goid promoted into
+            // resolvableTargets (above) is removed from here in the same step.
             ISet<string> pendingTargets,
+            // Every create-candidate goid that some OTHER same-batch create-candidate's
+            // component references (Model/ObjectRefValues.Targets over each candidate's
+            // representable-component fields, intersected with the candidate goid set) —
+            // computed ONCE by CollectSameBatchRefTargets before the walk starts. A member of
+            // this set heads its own handle (headsHandle's 4th reason) even with no
+            // create-candidate children of its own, so its `Add` has somewhere to be referenced
+            // from.
+            ISet<string> sameBatchRefTargets,
+            // THE batch handle registry: every create-candidate that heads a handle this sync
+            // registers itself here under BOTH its GlobalObjectId and its own handle name, the
+            // moment the handle is derived. Threaded into resolveOwnerHandle (Reconciler.cs) so
+            // (a) a same-batch ObjectRef target (keyed by goid) resolves to its real handle
+            // instead of rendering a dangling/Pending field, and (b) a same-batch PARENT's own
+            // children resolve its receiver (keyed by the handle name itself, since a child's
+            // ParentHandle is looked up by that string) without re-deriving a numeric-suffixed
+            // duplicate.
+            IDictionary<string, string> batchHandleByGoidOrId,
+            // Every create-candidate's own representable-component append, buffered here instead
+            // of appended to `edits` inline. Flushed by FlushPendingComponentAppends AFTER this
+            // whole walk returns, so (1) by flush time every same-batch handle in
+            // batchHandleByGoidOrId/resolvableTargets is registered regardless of visit order
+            // (a forward OR backward same-batch reference both resolve), and (2) every
+            // AppendStatement this walk emits precedes every AppendComponentStatement in `edits`,
+            // so SourcePatchApplier always inserts a referenced target's `var` before the
+            // referencing component (see StatementPlacement's declare-before-use floor).
+            List<PendingComponentAppend> pendingComponentAppends,
             Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
             Dictionary<string, int> nextIndexByParentKey,
             List<SourceEdit> edits,
@@ -108,6 +139,9 @@ namespace SceneBuilder.Core.Reconcile
                         reserved,
                         resolvableTargets,
                         pendingTargets,
+                        sameBatchRefTargets,
+                        batchHandleByGoidOrId,
+                        pendingComponentAppends,
                         resolveOwnerHandle,
                         nextIndexByParentKey,
                         edits,
@@ -160,10 +194,15 @@ namespace SceneBuilder.Core.Reconcile
                     // array also heads its own handle - this covers a duplicate against an
                     // already-MAPPED sibling as well as against another append, and keeps
                     // EnsureNoAmbiguousDuplicateNames from injecting a positional `.Id(...)`.
+                    // A create candidate that some OTHER same-batch create-candidate's component
+                    // references also heads its own handle, even with no create-candidate children
+                    // and no components of its own — otherwise the referencing field has no name
+                    // to render and drops as Pending.
                     var headsHandle = node.Children.Any(c =>
                         !string.IsNullOrEmpty(c.GlobalObjectId) && !goidToLogicalId.ContainsKey(c.GlobalObjectId))
                         || representableComponents.Length > 0
-                        || nodes.Count(n => n.Name == node.Name) > 1;
+                        || nodes.Count(n => n.Name == node.Name) > 1
+                        || (!string.IsNullOrEmpty(node.GlobalObjectId) && sameBatchRefTargets.Contains(node.GlobalObjectId));
 
                     string newLogicalId;
                     string? ownHandle = null;
@@ -173,6 +212,31 @@ namespace SceneBuilder.Core.Reconcile
                         ownHandle = HandleNaming.Derive(node.Name, reserved);
                         reserved.Add(ownHandle);
                         newLogicalId = ownHandle;
+
+                        // THE batch handle registry write: registers this create-candidate under
+                        // both its goid (so a same-batch ObjectRef target, keyed by goid, resolves)
+                        // and its own handle name (so a same-batch CHILD's ParentHandle lookup,
+                        // keyed by this node's LogicalId == its own handle, resolves too — see
+                        // Reconciler.cs's resolveOwnerHandle branch). Every headsHandle node
+                        // registers here, not just sameBatchRefTargets members, because the CS0103
+                        // receiver defect (a headed parent's children re-deriving a numeric-suffixed
+                        // duplicate) is independent of whether the parent is itself a ref target.
+                        if (!string.IsNullOrEmpty(node.GlobalObjectId))
+                        {
+                            batchHandleByGoidOrId[node.GlobalObjectId] = ownHandle;
+                        }
+
+                        batchHandleByGoidOrId[ownHandle] = ownHandle;
+
+                        // A same-batch ObjectRef target carries the target's goid (it has no
+                        // LogicalId yet) — promote it out of "pending" now that it has a handle, so
+                        // ClassifySnapshotRef (consulted later, once every create-candidate's handle
+                        // is registered) sees it as Resolvable rather than dropping the field.
+                        if (!string.IsNullOrEmpty(node.GlobalObjectId) && sameBatchRefTargets.Contains(node.GlobalObjectId))
+                        {
+                            resolvableTargets.Add(node.GlobalObjectId);
+                            pendingTargets.Remove(node.GlobalObjectId);
+                        }
                     }
                     else
                     {
@@ -225,35 +289,14 @@ namespace SceneBuilder.Core.Reconcile
                     // above, so its components attach in this same pass instead of waiting for a
                     // 2nd Sync. Reuses ComponentReconciler's ADD-emission shape (same
                     // `{owner}/{Type}#{ordinal}` id, same AppendComponentStatement + Component
-                    // AddedEntry) rather than reinventing it here.
+                    // AddedEntry) rather than reinventing it here. The actual EmitComponentAppend
+                    // call is DEFERRED (buffered, not invoked here) — see pendingComponentAppends'
+                    // doc comment on the DetectAppends parameter above.
                     if (representableComponents.Length > 0)
                     {
                         var keys = ComponentReconciler.ComputeComponentKeys(representableComponents);
-                        for (var i = 0; i < representableComponents.Length; i++)
-                        {
-                            ComponentReconciler.EmitComponentAppend(
-                                newLogicalId,
-                                newLogicalId,
-                                keys[i].TypeFullName,
-                                keys[i].Ordinal,
-                                i,
-                                representableComponents[i].Fields,
-                                resolveOwnerHandle,
-                                resolvableTargets,
-                                pendingTargets,
-                                conflicts,
-                                // A genuinely-new object never overlaps a FIELD-VALUE DIFF pass (that
-                                // pass only runs for mapped owners) — this append is the ONLY place an
-                                // unresolvable target on it can ever be reported, so it must.
-                                reportUnresolvable: true,
-                                ownHandle,
-                                false,
-                                edits,
-                                addedEntries,
-                                addedAssets,
-                                assetCatalog,
-                                defaults);
-                        }
+                        pendingComponentAppends.Add(new PendingComponentAppend(
+                            newLogicalId, newLogicalId, representableComponents, keys, ownHandle));
                     }
 
                     DetectAppends(
@@ -268,6 +311,9 @@ namespace SceneBuilder.Core.Reconcile
                         reserved,
                         resolvableTargets,
                         pendingTargets,
+                        sameBatchRefTargets,
+                        batchHandleByGoidOrId,
+                        pendingComponentAppends,
                         resolveOwnerHandle,
                         nextIndexByParentKey,
                         edits,
@@ -295,6 +341,9 @@ namespace SceneBuilder.Core.Reconcile
                     reserved,
                     resolvableTargets,
                     pendingTargets,
+                    sameBatchRefTargets,
+                    batchHandleByGoidOrId,
+                    pendingComponentAppends,
                     resolveOwnerHandle,
                     nextIndexByParentKey,
                     edits,
@@ -306,6 +355,135 @@ namespace SceneBuilder.Core.Reconcile
                     facadeCatalog,
                     assetCatalog,
                     defaults);
+            }
+        }
+
+        // One create-candidate's buffered representable-component append, resolved and appended
+        // to the real `edits` list only after DetectAppends' whole walk returns (FlushPendingComponentAppends) —
+        // see pendingComponentAppends' doc comment on the DetectAppends parameter.
+        private readonly record struct PendingComponentAppend(
+            string OwnerAnchor,
+            string OwnerEffectiveId,
+            ComponentData[] RepresentableComponents,
+            (string TypeFullName, int Ordinal)[] Keys,
+            string? OwnHandle);
+
+        // The deferred half of the §13 one-pass attach: calls EmitComponentAppend for every
+        // buffered create-candidate component, in the SAME per-owner and per-node order the walk
+        // buffered them in (preserves FitSize-before-SurfaceSnap and any other canonical
+        // multi-component order). Called once, after DetectAppends' top-level call returns, so
+        // every create-candidate's handle (batchHandleByGoidOrId) and same-batch-target
+        // resolvability (resolvableTargets/pendingTargets) is already settled for the whole
+        // snapshot regardless of DFS visit order.
+        private static void FlushPendingComponentAppends(
+            List<PendingComponentAppend> pendingComponentAppends,
+            Func<string?, (string? Handle, bool Introduce)> resolveOwnerHandle,
+            ISet<string> resolvableTargets,
+            ISet<string> pendingTargets,
+            List<SourceEdit> edits,
+            List<IdentityMapEntry> addedEntries,
+            List<Conflict> conflicts,
+            List<AssetEntry> addedAssets,
+            AssetCatalog? assetCatalog,
+            ComponentDefaultOmission.Index? defaults)
+        {
+            foreach (var pending in pendingComponentAppends)
+            {
+                for (var i = 0; i < pending.RepresentableComponents.Length; i++)
+                {
+                    ComponentReconciler.EmitComponentAppend(
+                        pending.OwnerAnchor,
+                        pending.OwnerEffectiveId,
+                        pending.Keys[i].TypeFullName,
+                        pending.Keys[i].Ordinal,
+                        i,
+                        pending.RepresentableComponents[i].Fields,
+                        resolveOwnerHandle,
+                        resolvableTargets,
+                        pendingTargets,
+                        conflicts,
+                        // A genuinely-new object never overlaps a FIELD-VALUE DIFF pass (that
+                        // pass only runs for mapped owners) — this append is the ONLY place an
+                        // unresolvable target on it can ever be reported, so it must.
+                        reportUnresolvable: true,
+                        pending.OwnHandle,
+                        false,
+                        edits,
+                        addedEntries,
+                        addedAssets,
+                        assetCatalog,
+                        defaults);
+                }
+            }
+        }
+
+        // Every create-candidate goid that some OTHER same-batch create-candidate's representable
+        // component references, bounded by the append batch (not the whole scene): the
+        // intersection of "every create-candidate goid" and "every ObjectRef target reachable in a
+        // create-candidate's own component fields". A referrer that is a MAPPED owner is out of
+        // scope here — that is the introduce path, a different mechanism entirely.
+        private static HashSet<string> CollectSameBatchRefTargets(
+            SnapshotNode[] roots, IReadOnlyDictionary<string, string> goidToLogicalId)
+        {
+            var candidateGoids = new HashSet<string>(StringComparer.Ordinal);
+            var referencedByCandidates = new HashSet<string>(StringComparer.Ordinal);
+            CollectCreateCandidateRefs(roots, parentIsMapped: true, goidToLogicalId, candidateGoids, referencedByCandidates);
+
+            referencedByCandidates.IntersectWith(candidateGoids);
+            return referencedByCandidates;
+        }
+
+        // Mirrors DetectAppends' own mapped/create-candidate/orphaned dispatch structurally (a node
+        // is a create candidate iff unmapped AND its parent is a root, a MAPPED owner, or itself a
+        // create candidate) without needing headsHandle — a node's headsHandle-driven eligibility
+        // to recurse (clause 1) is already exactly "has >=1 create-candidate child", so this
+        // simpler recursion visits precisely the same set DetectAppends will.
+        private static void CollectCreateCandidateRefs(
+            SnapshotNode[] nodes,
+            bool parentIsMapped,
+            IReadOnlyDictionary<string, string> goidToLogicalId,
+            HashSet<string> candidateGoids,
+            HashSet<string> referencedByCandidates)
+        {
+            foreach (var node in nodes)
+            {
+                // Prefab-instance roots are handled entirely by HandleInstanceNode and never
+                // recursed into by DetectAppends — out of scope here too.
+                if (node.SourcePrefabGuid != null)
+                {
+                    continue;
+                }
+
+                var isMapped = !string.IsNullOrEmpty(node.GlobalObjectId) && goidToLogicalId.ContainsKey(node.GlobalObjectId);
+                if (isMapped)
+                {
+                    CollectCreateCandidateRefs(node.Children, true, goidToLogicalId, candidateGoids, referencedByCandidates);
+                    continue;
+                }
+
+                if (parentIsMapped)
+                {
+                    if (!string.IsNullOrEmpty(node.GlobalObjectId))
+                    {
+                        candidateGoids.Add(node.GlobalObjectId);
+                    }
+
+                    foreach (var component in ComponentReconciler.ExcludeTransform(node.Components))
+                    {
+                        foreach (var (_, value) in component.Fields)
+                        {
+                            foreach (var target in ObjectRefValues.Targets(value))
+                            {
+                                referencedByCandidates.Add(target);
+                            }
+                        }
+                    }
+
+                    CollectCreateCandidateRefs(node.Children, true, goidToLogicalId, candidateGoids, referencedByCandidates);
+                    continue;
+                }
+
+                CollectCreateCandidateRefs(node.Children, false, goidToLogicalId, candidateGoids, referencedByCandidates);
             }
         }
     }

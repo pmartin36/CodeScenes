@@ -125,20 +125,45 @@ namespace SceneBuilder.Core.Reconcile
         }
 
         /// <summary>
-        /// The FLOOR: the earliest block index at which a statement calling <paramref name="receiver"/>
-        /// may legally sit — one past that handle's declaration, when it is declared in this block.
-        /// Returns 0 when the receiver is not a local declared here (a lambda parameter, the `scene`
-        /// root, or a handle from an enclosing scope) — nothing to outrun.
+        /// Every identifier name a placed statement uses in its expression/initializer — its receiver
+        /// AND every argument identifier (`opener`, `Linker` is a type argument not an identifier name
+        /// here, `door`, ... for `opener.Component&lt;Linker&gt;(c =&gt; c.Set("target", door))`).
+        /// Scoped to <see cref="ChainExpressionOrNull"/> so a declaration's own LHS handle is excluded.
         /// </summary>
-        private static int MinIndexAfterReceiverDeclaration(SyntaxList<StatementSyntax> statements, string? receiver)
+        private static IEnumerable<string> NamedHandles(StatementSyntax placed)
         {
-            if (receiver == null)
+            var expression = ChainExpressionOrNull(placed);
+            if (expression == null)
             {
-                return 0;
+                yield break;
             }
 
-            var declaration = DeclarationIndexOf(statements, receiver);
-            return declaration >= 0 ? declaration + 1 : 0;
+            foreach (var identifier in expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+            {
+                yield return identifier.Identifier.Text;
+            }
+        }
+
+        /// <summary>
+        /// The FLOOR: the earliest block index at which <paramref name="placed"/> may legally sit — one
+        /// past the declaration of every in-block local it names (its receiver AND its arguments), so
+        /// it never lands above a handle it calls. Names that are not a local declared in this block (a
+        /// type name, a member name, a lambda parameter, the `scene` root, a handle from an enclosing
+        /// scope) contribute nothing — <see cref="DeclarationIndexOf"/> returns -1 for those.
+        /// </summary>
+        private static int MinIndexAfterNamedDeclarations(SyntaxList<StatementSyntax> statements, StatementSyntax placed)
+        {
+            var floor = 0;
+            foreach (var handle in NamedHandles(placed))
+            {
+                var declaration = DeclarationIndexOf(statements, handle);
+                if (declaration >= 0 && declaration + 1 > floor)
+                {
+                    floor = declaration + 1;
+                }
+            }
+
+            return floor;
         }
 
         /// <summary>
@@ -197,16 +222,71 @@ namespace SceneBuilder.Core.Reconcile
             return last + 1;
         }
 
+        // ---- Ceiling (declare-before-use, forward direction) ------------------------------------
+
+        /// <summary>
+        /// The CEILING (RULE 2's forward twin of the floor above): relocates <paramref name="handle"/>'s
+        /// own declaration to sit strictly before <paramref name="ceilingIndex"/> — the statement that
+        /// now names it — without moving <paramref name="ceilingIndex"/> itself. No-op (returns
+        /// <paramref name="statements"/> unchanged) when the handle isn't a local in this block, or its
+        /// declaration already precedes the ceiling (the ordinary/backward case). The new seat is one
+        /// past the handle's own last EARLIER same-kind peer (RULE 1) — never <see cref="PlacementIndex"/>'s
+        /// "past last peer" seat, which lands the target AFTER any dependent group of that last peer and
+        /// so can overshoot past the ceiling itself. When even that lower seat is at/after the ceiling
+        /// (an earlier peer sits between the receiver and the ceiling), the window is empty and this
+        /// defers — no relocation, leaving the caller's loop to terminate without hoisting.
+        /// </summary>
+        private static SyntaxList<StatementSyntax> HoistDeclarationBeforeCeiling(
+            SyntaxList<StatementSyntax> statements, string handle, int ceilingIndex)
+        {
+            var declIndex = DeclarationIndexOf(statements, handle);
+            if (declIndex < 0 || declIndex < ceilingIndex)
+            {
+                return statements;
+            }
+
+            var decl = (LocalDeclarationStatementSyntax)statements[declIndex];
+            var receiver = RootReceiverName(decl);
+
+            var lower = 0;
+            if (receiver != null)
+            {
+                var receiverDecl = DeclarationIndexOf(statements, receiver);
+                if (receiverDecl >= 0 && receiverDecl < declIndex)
+                {
+                    lower = receiverDecl + 1;
+                }
+
+                // A declared local is always a CHILD of its receiver — `var x = receiver.Add(...)` /
+                // `.Instance(...)` — never a component, so RULE 1's peer scan is always Child kind here.
+                for (var i = 0; i < declIndex; i++)
+                {
+                    if (IsPeer(statements[i], receiver, PeerKind.Child) && i + 1 > lower)
+                    {
+                        lower = i + 1;
+                    }
+                }
+            }
+
+            if (lower > ceilingIndex)
+            {
+                return statements;
+            }
+
+            return statements.RemoveAt(declIndex).Insert(lower, decl);
+        }
+
         // ---- Placement --------------------------------------------------------------------------
 
         /// <summary>
-        /// The block index at which a statement feeding <paramref name="receiver"/>'s
-        /// <paramref name="kind"/> list must be inserted for BuilderParser to re-read it at
+        /// The block index at which <paramref name="placed"/>, feeding <paramref name="receiver"/>'s
+        /// <paramref name="kind"/> list, must be inserted for BuilderParser to re-read it at
         /// <paramref name="siblingIndex"/>. <paramref name="statements"/> must NOT contain the
         /// statement(s) being placed.
         /// </summary>
         private static int PlacementIndex(
             SyntaxList<StatementSyntax> statements,
+            StatementSyntax placed,
             string receiver,
             PeerKind kind,
             int siblingIndex)
@@ -241,7 +321,7 @@ namespace SceneBuilder.Core.Reconcile
                 target = EndOfGroupIndex(statements, peers[peers.Count - 1]);
             }
 
-            return Math.Max(target, MinIndexAfterReceiverDeclaration(statements, receiver));
+            return Math.Max(target, MinIndexAfterNamedDeclarations(statements, placed));
         }
 
         /// <summary>
@@ -257,7 +337,7 @@ namespace SceneBuilder.Core.Reconcile
             int siblingIndex)
         {
             var block = (BlockSyntax)currentRoot.GetCurrentNode(trackedBlock)!;
-            var index = PlacementIndex(block.Statements, receiver, kind, siblingIndex);
+            var index = PlacementIndex(block.Statements, newStatement, receiver, kind, siblingIndex);
             return currentRoot.ReplaceNode(block, block.WithStatements(block.Statements.Insert(index, newStatement)));
         }
 
@@ -288,7 +368,7 @@ namespace SceneBuilder.Core.Reconcile
             currentRoot = currentRoot.RemoveNodes(group, SyntaxRemoveOptions.KeepNoTrivia)!;
 
             var targetBlock = (BlockSyntax)currentRoot.GetCurrentNode(trackedTargetBlock)!;
-            var index = PlacementIndex(targetBlock.Statements, receiver, kind, siblingIndex);
+            var index = PlacementIndex(targetBlock.Statements, statement, receiver, kind, siblingIndex);
             var placed = targetBlock.Statements.InsertRange(index, group);
 
             return currentRoot.ReplaceNode(targetBlock, targetBlock.WithStatements(placed));

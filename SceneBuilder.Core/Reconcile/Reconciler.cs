@@ -109,6 +109,12 @@ namespace SceneBuilder.Core.Reconcile
             var nextIndexByParentKey = new Dictionary<string, int>();
             var introducedHandleByParent = new Dictionary<string, string>();
 
+            // THE batch handle registry (Part 4 of the from-scratch forward-reference fix):
+            // populated by DetectAppends the moment a same-batch create-candidate heads a handle,
+            // keyed by both its GlobalObjectId and its own handle name. Declared here so
+            // ResolveOwnerHandle (below) can consult it before DetectAppends runs.
+            var batchHandleByGoidOrId = new Dictionary<string, string>(StringComparer.Ordinal);
+
             var reserved = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in identityMap.Entries)
             {
@@ -240,6 +246,18 @@ namespace SceneBuilder.Core.Reconcile
                 if (logicalId == null)
                 {
                     return (null, false); // the scene root: the receiver is the Build parameter
+                }
+
+                // THE batch handle registry: a same-batch create-candidate (goid-keyed, for an
+                // ObjectRef target) or its own handle (self-keyed, for a same-batch child's
+                // ParentHandle lookup) resolves here with no re-derivation and no IntroduceHandle —
+                // its `var` is emitted by its own AppendStatement in this same sync. Checked before
+                // HasAuthoredHandle: a batch-registered id is never itself an authored-source
+                // handle (it does not exist in `handles` yet), so the two never race for the same
+                // key.
+                if (batchHandleByGoidOrId.TryGetValue(logicalId, out var batchHandle))
+                {
+                    return (batchHandle, false);
                 }
 
                 if (HasAuthoredHandle(logicalId))
@@ -576,6 +594,17 @@ namespace SceneBuilder.Core.Reconcile
                     memberSpellingsIndex);
             }
 
+            // Every create-candidate goid some OTHER same-batch create-candidate's component
+            // references, computed ONCE before the walk so a forward reference (owner visited
+            // before its target) and a backward one both resolve identically — see
+            // CollectSameBatchRefTargets's doc comment.
+            var sameBatchRefTargets = CollectSameBatchRefTargets(actual.Roots, globalObjectIdToLogicalId);
+
+            // Buffered create-candidate component appends, flushed (FlushPendingComponentAppends)
+            // only after the walk below returns — see pendingComponentAppends' doc comment on the
+            // DetectAppends parameter.
+            var pendingComponentAppends = new List<PendingComponentAppend>();
+
             DetectAppends(
                 actual.Roots,
                 null,
@@ -588,6 +617,9 @@ namespace SceneBuilder.Core.Reconcile
                 reserved,
                 resolvableTargets,
                 pendingTargets,
+                sameBatchRefTargets,
+                batchHandleByGoidOrId,
+                pendingComponentAppends,
                 ResolveOwnerHandle,
                 nextIndexByParentKey,
                 edits,
@@ -597,6 +629,18 @@ namespace SceneBuilder.Core.Reconcile
                 addedAssets,
                 prefabPathByGuid,
                 facadeCatalog,
+                assetCatalog,
+                defaultsIndex);
+
+            FlushPendingComponentAppends(
+                pendingComponentAppends,
+                ResolveOwnerHandle,
+                resolvableTargets,
+                pendingTargets,
+                edits,
+                addedEntries,
+                conflicts,
+                addedAssets,
                 assetCatalog,
                 defaultsIndex);
 

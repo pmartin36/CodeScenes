@@ -50,10 +50,31 @@ namespace SceneBuilder.Core.Reconcile
                 var newStmt = ParseComponentStatement(edit, receiver, indent, assetCatalog)
                     .WithAdditionalAnnotations(ownAnnotation);
 
+                // The natural (emission-order) position is right after the owner's own statement or
+                // the previous same-batch sibling appended onto it (sameBatchAnchorAnnotation, as
+                // before). A field on this component can ALSO name a same-batch handle declared
+                // LATER than that natural position (a forward reference) — the declare-before-use
+                // floor (StatementPlacement's MinIndexAfterNamedDeclarations) is layered on top as a
+                // LOWER BOUND, not a replacement, so an ordinary multi-component append (no forward
+                // reference) keeps its natural chained order untouched. A blind switch to
+                // PlaceNewStatement/PeerKind.Component here would DISCARD that natural order instead
+                // of bounding it — SpatialComponentSource's dedicated `.FitSize(...)`/`.SurfaceSnap(...)`
+                // calls are not "Component" peers to PlacementIndex's peer scan, so two same-batch
+                // spatial appends onto one owner would collapse to the same insertion point and lose
+                // their canonical FitSize-before-SurfaceSnap order.
+                var (buildMethod, _) = FindBuildMethod(root);
+                var buildBody = buildMethod.Body!;
+                allTargets.Add(buildBody);
+
                 appliers.Add(currentRoot =>
                 {
-                    var ownerNode = currentRoot.GetAnnotatedNodes(sameBatchAnchorAnnotation).Single();
-                    return currentRoot.InsertNodesAfter(ownerNode, new[] { newStmt });
+                    var ownerNode = (StatementSyntax)currentRoot.GetAnnotatedNodes(sameBatchAnchorAnnotation).Single();
+                    var block = (BlockSyntax)currentRoot.GetCurrentNode(buildBody)!;
+                    var statements = block.Statements;
+                    var ownerIndex = statements.IndexOf(ownerNode);
+                    var naturalIndex = ownerIndex >= 0 ? ownerIndex + 1 : statements.Count;
+                    var target = Math.Max(naturalIndex, MinIndexAfterNamedDeclarations(statements, newStmt));
+                    return currentRoot.ReplaceNode(block, block.WithStatements(statements.Insert(target, newStmt)));
                 });
                 return;
             }
@@ -266,6 +287,52 @@ namespace SceneBuilder.Core.Reconcile
                     : ExpressionBodyToBlock((ExpressionSyntax)currentLambda.Body, newSetText);
 
                 return currentRoot.ReplaceNode(currentLambda, currentLambda.WithBody(newBody));
+            });
+
+            // Companion applier: the fold above just grew the closure to NAME edit.NewExpr's handle
+            // (e.g. `door`) — if that handle's own declaration sits at/after this component statement,
+            // the fold just wrote a forward reference (CS0841). Repair declare-before-use by hoisting
+            // the handle's declaration above the component through StatementPlacement's ceiling
+            // (symmetric to the floor every OTHER placement already inherits), never by moving the
+            // component itself. Looped because ONE component can fold several forward-referencing
+            // fields in a batch (spec:389 case 7) and each hoist can shift the component's own index.
+            appliers.Add(currentRoot =>
+            {
+                var current = (InvocationExpressionSyntax?)currentRoot.GetCurrentNode(invocation);
+                if (current == null)
+                {
+                    return currentRoot;
+                }
+
+                while (true)
+                {
+                    var stmt = current!.FirstAncestorOrSelf<StatementSyntax>();
+                    if (stmt?.Parent is not BlockSyntax block)
+                    {
+                        break;
+                    }
+
+                    var ceiling = block.Statements.IndexOf(stmt);
+                    var hoisted = block.Statements;
+                    foreach (var handle in NamedHandles(stmt))
+                    {
+                        hoisted = HoistDeclarationBeforeCeiling(hoisted, handle, ceiling);
+                    }
+
+                    if (hoisted == block.Statements)
+                    {
+                        break;
+                    }
+
+                    currentRoot = currentRoot.ReplaceNode(block, block.WithStatements(hoisted));
+                    current = (InvocationExpressionSyntax?)currentRoot.GetCurrentNode(invocation);
+                    if (current == null)
+                    {
+                        break;
+                    }
+                }
+
+                return currentRoot;
             });
         }
 
