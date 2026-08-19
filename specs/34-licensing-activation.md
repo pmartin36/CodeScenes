@@ -16,6 +16,22 @@
 
 ---
 
+## Concrete backend values (the wire this consumes)
+
+The backend is deployed. Every call is a `POST` of JSON `{ action, ... }` to the one endpoint; the
+action is one of `activate` / `trial` / `seats` / `release` (`CodeScenesSite/specs/01` §3).
+
+```
+Endpoint  https://us-central1-codescenes.cloudfunctions.net/license   (override via a single constant for local/emulator testing)
+PublicKey CodeScenesSite/functions/keys/license-public.jwk.json        (JWK n/e, RSA-2048; embed as a literal, see §7)
+Rejection reasons: invalid_key | refunded | seat_limit | rate_limited | trial_expired | invalid_request
+```
+
+The transport is behind an injectable seam so EditMode tests mock it (spec Coverage); the endpoint
+constant is overridable so a live check can point at the deployed function or a local emulator.
+
+---
+
 ## Why activation is in the editor and not on the website
 
 The purchase is a web flow: someone reads about CodeScenes anywhere, buys on Gumroad, and the key
@@ -152,8 +168,8 @@ back 30 days extends nothing.
 
 ## 4. What unlicensed actually does
 
-**This is the product decision in this milestone.** Specced as follows, to be confirmed before
-build.
+**This is the product decision in this milestone, and it is confirmed.** Build exactly as specced
+below.
 
 `Unlicensed` stops auto-sync in both directions and disables the Build/Sync menu items. It does
 **not** modify, revert or delete anything, and it never leaves a sync half-applied: an in-flight
@@ -206,36 +222,52 @@ and without leaving the editor, see which machines hold the seats, remove one, a
 
 The identifier is sent to `activate` and hashed server-side; the raw value is never stored remotely.
 
-`SystemInfo.deviceUniqueIdentifier` is the obvious source and is **not reliably stable**. It can
-change on OS reinstall, on some hardware changes, and it behaves differently across platforms. Every
-change silently consumes one of three seats, and the user has no idea why they are locked out. This
-is the most likely support burden in the whole feature.
+The identifier is `SystemInfo.deviceUniqueIdentifier`. It is **not reliably stable** in general (OS
+reinstall, some hardware changes, and it behaves differently across platforms), and each change
+silently consumes one of three seats. §5's seat list is the mitigation and must be reachable from an
+unlicensed state.
 
-**Build:** determine empirically what is stable enough on Windows, macOS and Linux — a spike, not a
-guess. Whatever is chosen, the failure mode is a user with seats consumed by machines that no longer
-exist, so §5's seat list is the mitigation and must be reachable from an unlicensed state.
+Measured on Linux (2026-08-18): `SystemInfo.deviceUniqueIdentifier` returns the exact contents of
+`/etc/machine-id` — the canonical stable machine id, unchanged across editor restart and reboot,
+changing only on OS reinstall. So on Linux the built-in value is the right one. Windows and macOS
+legs are still to be measured (a committed probe exists); until then the identifier is
+`deviceUniqueIdentifier` on all platforms, and §5 covers the instability cases.
 
-**Accept when:** the chosen identifier is stable across an editor restart, a machine reboot, and a
-Unity version upgrade on all three platforms, with the measurements recorded here.
+**Build:** send `SystemInfo.deviceUniqueIdentifier` as the machine identifier to `activate`. Do not
+re-hash it client-side; the server hashes it.
+
+**Accept when:** activating twice from the same editor across a restart consumes exactly one seat
+(the identifier is stable within a machine), and the seat list in §5 lets a user reclaim a seat held
+by a machine whose identifier has since changed.
 
 ---
 
 ## 7. Token verification
 
-The backend returns an ECDSA P-256 / SHA-256 signed token. The public key is embedded in the package
-as a literal; verification is offline via `System.Security.Cryptography.ECDsa`.
+The backend returns an **RSA-2048 / PKCS#1 v1.5 / SHA-256** signed token. The public key is embedded
+in the package as a literal (JWK `n`/`e`, base64url); verification is offline via
+`RSACryptoServiceProvider.ImportParameters` + `VerifyData(bytes, sig, SHA256, Pkcs1)`.
+
+ECDSA is not an option: on the target editor (Unity 6000.5.3f1, Mono profile) `ECDsa.Create()`
+implements neither `ImportSubjectPublicKeyInfo` nor `ImportParameters` — both throw
+`NotImplementedException` — and the `.NET 5` `DSASignatureFormat` overload of `VerifyData` is absent.
+RSA import and verify are implemented on the same profile. Measured on Linux 2026-08-18 (a Node-signed
+RSA-2048 vector verifies, a tampered byte fails, both offline); confirm on Windows and macOS.
+
+**Wire format** (matches the backend, `CodeScenesSite/functions/src/licensing/token.ts`): the token
+is `b64url(payloadJson) "." b64url(signature)`. The signature covers the **ASCII bytes of the first
+segment** (JWS-style signing input), so the editor verifies the exact bytes it received without
+re-serializing. Split on `.`, verify the signature over `ascii(segment[0])`, then base64url-decode
+`segment[0]` to the JSON payload `{ v, kind, sub, lic, iat, exp }` (iat/exp are unix **seconds**).
+The public key is published at `CodeScenesSite/functions/keys/license-public.jwk.json` (JWK `n`/`e`)
+and embedded in the package as a literal.
 
 A token is valid only if the signature verifies, `sub` matches this machine's hash, and `exp` is in
-the future. All three, every time. A token issued for another machine must
-fail even though its signature is genuine.
-
-> **Unverified.** `ECDsa.Create()` with P-256 verification has not been confirmed on the target
-> editor version across all three desktop platforms. Spike it first — it decides the wire format,
-> and Ed25519 (the better primitive) is unavailable in Unity's .NET profile without a third-party
-> dependency.
+the future. All three, every time. A token issued for another machine must fail even though its
+signature is genuine.
 
 **Accept when:** a token with any byte altered fails, a token for a different machine fails, and
-verification runs with no network access.
+verification runs with no network access, on all three desktop platforms.
 
 ---
 

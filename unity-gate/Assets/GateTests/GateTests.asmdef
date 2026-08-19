@@ -6,6 +6,7 @@
         "UnityEditor.TestRunner",
         "SceneBuilder.Editor",
         "SceneBuilder.Authoring",
+        "SceneBuilder.Licensing.Editor",
         "GateFixtures",
         "UnityEngine.UI"
     ],
