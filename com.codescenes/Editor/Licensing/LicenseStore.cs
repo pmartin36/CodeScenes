@@ -21,6 +21,8 @@ namespace SceneBuilder.Editor.Licensing
 
         public static string TokenKey => "CodeScenes.License.Token::" + Scope;
         public static string BaselineKey => "CodeScenes.License.Baseline::" + Scope;
+        public static string LicenseKeyKey => "CodeScenes.License.Key::" + Scope;
+        public static string LastAttemptKey => "CodeScenes.License.LastAttempt::" + Scope;
 
         // Test seam: invoked once per real resolution (never on a SessionState cache hit).
         public static Func<TokenVerifier> VerifierProvider = () => TokenVerifier.Production;
@@ -106,6 +108,32 @@ namespace SceneBuilder.Editor.Licensing
         public static void RecordObservedUtc(DateTime utc)
         {
             EditorPrefs.SetString(BaselineKey, utc.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture));
+        }
+
+        // Raw license key persistence (never present for a trial): the daily refresh
+        // and refund-detection re-`activate` calls need it because the persisted token
+        // carries only the hashed `lic`, not the key itself.
+        public static string CurrentLicenseKey => EditorPrefs.GetString(LicenseKeyKey, null);
+
+        public static void StoreLicenseKey(string key) => EditorPrefs.SetString(LicenseKeyKey, key);
+
+        public static DateTime LastAttemptUtc
+        {
+            get
+            {
+                string raw = EditorPrefs.GetString(LastAttemptKey, null);
+                if (string.IsNullOrEmpty(raw) || !long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out long ticks))
+                {
+                    return DateTime.MinValue;
+                }
+
+                return new DateTime(ticks, DateTimeKind.Utc);
+            }
+        }
+
+        public static void RecordAttemptUtc(DateTime utc)
+        {
+            EditorPrefs.SetString(LastAttemptKey, utc.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture));
         }
 
         // Models a domain reload for tests: clears ONLY the in-memory memo. SessionState and

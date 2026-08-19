@@ -10,6 +10,12 @@ namespace SceneBuilder.Editor.Licensing
     {
         public static string Raw => SystemInfo.deviceUniqueIdentifier;
 
+        // Seat label/os shared by activation and the daily entitlement refresh so both
+        // send identical values.
+        public static string Label => SystemInfo.deviceName;
+
+        public static string Os => SystemInfo.operatingSystem;
+
         public static string Hash
         {
             get
