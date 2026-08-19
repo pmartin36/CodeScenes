@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using NUnit.Framework;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -26,6 +27,7 @@ public class AutoBaselineReuseTests
     public void SetUp()
     {
         SceneBuilderPaths.EnsureBuildersDirectory();
+        LicenseGate.ResetToDefault();
         SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
@@ -34,6 +36,7 @@ public class AutoBaselineReuseTests
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();

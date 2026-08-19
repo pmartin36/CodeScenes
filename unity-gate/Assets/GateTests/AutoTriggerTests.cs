@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEngine;
 
@@ -19,6 +20,7 @@ public class AutoTriggerTests
     [SetUp]
     public void SetUp()
     {
+        LicenseGate.ResetToDefault();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
     }
@@ -26,6 +28,7 @@ public class AutoTriggerTests
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
         foreach (var dir in _tempDirs)

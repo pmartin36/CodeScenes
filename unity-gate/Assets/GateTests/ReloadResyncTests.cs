@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -38,6 +39,7 @@ public class ReloadResyncScene : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
+        LicenseGate.ResetToDefault();
         SceneBuilderPaths.EnsureBuildersDirectory();
         _builderPath = SceneBuilderPaths.Builder(BuilderName);
         _sidecarPath = SceneBuilderPaths.Sidecar(BuilderName);
@@ -51,6 +53,7 @@ public class ReloadResyncScene : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();

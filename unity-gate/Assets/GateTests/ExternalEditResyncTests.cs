@@ -4,6 +4,7 @@ using System.Linq;
 using NUnit.Framework;
 using SceneBuilder.Core.Sync;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -42,6 +43,7 @@ public class ExternalEditResyncScene : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
+        LicenseGate.ResetToDefault();
         SceneBuilderPaths.EnsureBuildersDirectory();
         _builderPath = SceneBuilderPaths.Builder(BuilderName);
         _sidecarPath = SceneBuilderPaths.Sidecar(BuilderName);
@@ -55,6 +57,7 @@ public class ExternalEditResyncScene : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();

@@ -1,0 +1,26 @@
+.root {
+    padding: 8px;
+}
+
+.message-label {
+    white-space: normal;
+    margin-bottom: 6px;
+}
+
+.trial-label {
+    margin-bottom: 4px;
+}
+
+.button-row {
+    flex-direction: row;
+    margin-top: 4px;
+}
+
+.seats-heading {
+    margin-top: 8px;
+    -unity-font-style: bold;
+}
+
+.seat-list {
+    margin-top: 2px;
+}

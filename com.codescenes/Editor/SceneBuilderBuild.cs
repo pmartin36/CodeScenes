@@ -82,7 +82,7 @@ namespace SceneBuilder.Editor
         /// containing "no governing builder" and writes nothing.
         /// </summary>
         [MenuItem("CodeScenes/Build Active Scene (code -> scene)")]
-        public static void BuildActiveScene()
+        public static void BuildActiveScene() => LicenseGate.RunGuarded(() =>
         {
             try
             {
@@ -102,14 +102,17 @@ namespace SceneBuilder.Editor
             {
                 Debug.LogError("[CodeScenes] Build failed:\n" + e);
             }
-        }
+        });
+
+        [MenuItem("CodeScenes/Build Active Scene (code -> scene)", true)]
+        public static bool ValidateBuildActiveScene() => LicenseGate.Allowed;
 
         /// <summary>
         /// Build (code-&gt;scene) EVERY discovered builder whose OWN scene is currently open — never
         /// force-opens a scene (spec Out of scope).
         /// </summary>
         [MenuItem("CodeScenes/Build All")]
-        public static void BuildAll()
+        public static void BuildAll() => LicenseGate.RunGuarded(() =>
         {
             try
             {
@@ -127,7 +130,10 @@ namespace SceneBuilder.Editor
             {
                 Debug.LogError("[CodeScenes] Build failed:\n" + e);
             }
-        }
+        });
+
+        [MenuItem("CodeScenes/Build All", true)]
+        public static bool ValidateBuildAll() => LicenseGate.Allowed;
 
         private static void BuildRoute(BuilderRoute route, Scene scene)
         {

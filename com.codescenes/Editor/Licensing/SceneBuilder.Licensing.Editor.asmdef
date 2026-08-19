@@ -1,7 +1,9 @@
 {
     "name": "SceneBuilder.Licensing.Editor",
     "rootNamespace": "SceneBuilder.Editor.Licensing",
-    "references": [],
+    "references": [
+        "SceneBuilder.Editor"
+    ],
     "includePlatforms": [
         "Editor"
     ],

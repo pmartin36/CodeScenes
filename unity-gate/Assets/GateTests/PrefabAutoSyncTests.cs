@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -34,6 +35,7 @@ public class PrefabAutoSyncWidget : IPrefabDefinition
     [SetUp]
     public void SetUp()
     {
+        LicenseGate.ResetToDefault();
         SceneBuilderPaths.EnsurePrefabBuildersDirectory();
         _builderPath = SceneBuilderPaths.PrefabBuilder(BuilderName);
         _sidecarPath = SceneBuilderPaths.PrefabSidecar(BuilderName);
@@ -51,6 +53,7 @@ public class PrefabAutoSyncWidget : IPrefabDefinition
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();

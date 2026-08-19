@@ -121,10 +121,10 @@ namespace SceneBuilder.Editor
             return assembler;
         }
 
-        /// <summary>Arm iff the persisted master toggle is on; else disarm. Domain-reload survival + menu-flip wiring.</summary>
+        /// <summary>Arm iff the persisted master toggle is on and the license gate allows it; else disarm. Domain-reload survival + menu-flip wiring.</summary>
         public static void ApplyToggleState()
         {
-            if (SceneBuilderAutoToggle.Enabled && !EditorApplication.isPlayingOrWillChangePlaymode)
+            if (SceneBuilderAutoToggle.Enabled && !EditorApplication.isPlayingOrWillChangePlaymode && LicenseGate.Allowed)
             {
                 Arm();
             }
@@ -404,6 +404,11 @@ namespace SceneBuilder.Editor
         internal static void PumpOnce(double now)
         {
             DrainWatcherPaths();
+
+            if (!LicenseGate.Allowed)
+            {
+                return;
+            }
 
             var sceneDue = _sceneDeadlineArmed && now >= _sceneDeadline;
             var sourceDue = _sourceDeadlineArmed && now >= _sourceDeadline;
@@ -875,7 +880,7 @@ namespace SceneBuilder.Editor
             _prefabAssetDeadlineArmed = false;
             _prefabAssetDeadline = 0;
 
-            Arm();
+            ApplyToggleState();
         }
     }
 }

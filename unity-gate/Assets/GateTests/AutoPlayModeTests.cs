@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEngine;
 
@@ -13,6 +14,7 @@ public class AutoPlayModeTests
     [SetUp]
     public void SetUp()
     {
+        LicenseGate.ResetToDefault();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
     }
@@ -20,6 +22,7 @@ public class AutoPlayModeTests
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
     }

@@ -4,6 +4,7 @@ using NUnit.Framework;
 using SceneBuilder.Core.Identity;
 using SceneBuilder.Core.Serialization;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
@@ -42,6 +43,7 @@ public class {builderName} : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
+        LicenseGate.ResetToDefault();
         SceneBuilderRouter.ResetForTests();
 
         SceneBuilderPaths.EnsureBuildersDirectory();
@@ -75,6 +77,7 @@ public class {builderName} : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderRouter.ResetForTests();
 
         if (File.Exists(_alphaBuilderPath)) File.Delete(_alphaBuilderPath);

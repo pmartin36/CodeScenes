@@ -86,7 +86,7 @@ namespace SceneBuilder.Editor
         /// containing "no governing builder" and writes nothing.
         /// </summary>
         [MenuItem("CodeScenes/Sync Active Scene (scene -> code)")]
-        public static void SyncActiveScene()
+        public static void SyncActiveScene() => LicenseGate.RunGuarded(() =>
         {
             try
             {
@@ -113,14 +113,17 @@ namespace SceneBuilder.Editor
             {
                 Debug.LogError("[CodeScenes] Sync failed:\n" + e);
             }
-        }
+        });
+
+        [MenuItem("CodeScenes/Sync Active Scene (scene -> code)", true)]
+        public static bool ValidateSyncActiveScene() => LicenseGate.Allowed;
 
         /// <summary>
         /// Sync-back (scene-&gt;code) EVERY discovered builder whose OWN scene is currently open —
         /// never force-opens a scene (spec Out of scope).
         /// </summary>
         [MenuItem("CodeScenes/Sync All")]
-        public static void SyncAll()
+        public static void SyncAll() => LicenseGate.RunGuarded(() =>
         {
             try
             {
@@ -137,7 +140,10 @@ namespace SceneBuilder.Editor
             {
                 Debug.LogError("[CodeScenes] Sync failed:\n" + e);
             }
-        }
+        });
+
+        [MenuItem("CodeScenes/Sync All", true)]
+        public static bool ValidateSyncAll() => LicenseGate.Allowed;
 
         /// <summary>
         /// Sync-back (scene-&gt;code) against a PASSED scene + paths: read <paramref name="scene"/>,

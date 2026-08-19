@@ -112,8 +112,10 @@ namespace SceneBuilder.Editor.Licensing
 
         // Raw license key persistence (never present for a trial): the daily refresh
         // and refund-detection re-`activate` calls need it because the persisted token
-        // carries only the hashed `lic`, not the key itself.
-        public static string CurrentLicenseKey => EditorPrefs.GetString(LicenseKeyKey, null);
+        // carries only the hashed `lic`, not the key itself. EditorPrefs.GetString marshals a
+        // null default to an empty string rather than echoing it back, so an unset key is
+        // normalized back to null here rather than at each caller.
+        public static string CurrentLicenseKey => EditorPrefs.HasKey(LicenseKeyKey) ? EditorPrefs.GetString(LicenseKeyKey) : null;
 
         public static void StoreLicenseKey(string key) => EditorPrefs.SetString(LicenseKeyKey, key);
 

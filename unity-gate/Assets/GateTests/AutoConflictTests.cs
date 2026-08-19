@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using SceneBuilder.Editor;
+using SceneBuilder.Editor.Licensing;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -40,6 +41,7 @@ public class AutoConflictScene : ISceneDefinition
     [SetUp]
     public void SetUp()
     {
+        LicenseGate.ResetToDefault();
         // Unrelated helper dir kept only for Conflict_DualTrigger_RunsOneCombinedCycle_NotTwoSingles'
         // External.cs (never a governing builder).
         _dir = Path.Combine(Path.GetTempPath(), "sb_conflict_" + Guid.NewGuid().ToString("N"));
@@ -57,6 +59,7 @@ public class AutoConflictScene : ISceneDefinition
     [TearDown]
     public void TearDown()
     {
+        LicenseEnforcement.Register();
         SceneBuilderRouter.ResetForTests();
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();

@@ -21,6 +21,13 @@ namespace SceneBuilder.Editor.Licensing
 
         public static event Action OutcomeChanged;
 
+        // Test isolation seam: resets the outcome with no event raised, so a test that
+        // asserts one outcome does not leak into a later test in the same domain.
+        internal static void ResetForTests()
+        {
+            LastOutcome = TrialClaimOutcome.None;
+        }
+
         internal static async Task ClaimAsync(ILicenseTransport transport)
         {
             string requestJson = LicenseWire.TrialRequest(MachineIdentity.Raw, MachineIdentity.Label, MachineIdentity.Os);

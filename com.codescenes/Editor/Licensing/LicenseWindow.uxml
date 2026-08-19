@@ -1,0 +1,21 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement name="root" class="root">
+        <ui:Label name="messageLabel" class="message-label" text="" />
+
+        <ui:VisualElement name="entryGroup">
+            <ui:Label name="trialLabel" class="trial-label" text="" />
+            <ui:TextField name="keyField" label="License key" />
+            <ui:VisualElement class="button-row">
+                <ui:Button name="activateButton" text="Activate" />
+                <ui:Button name="buyButton" text="Buy a license" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement name="licensedGroup">
+            <ui:Label text="CodeScenes is activated." />
+        </ui:VisualElement>
+
+        <ui:Label text="Seats" class="seats-heading" />
+        <ui:VisualElement name="seatList" class="seat-list" />
+    </ui:VisualElement>
+</ui:UXML>
