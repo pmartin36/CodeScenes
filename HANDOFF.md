@@ -80,13 +80,30 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 - **M-Licensing SHIPPED** (spec in `specs/completed/34`), gate `passed=921`, live-verified, and the
   Gumroad happy path confirmed end to end against the deployed backend. One follow-up remains,
   non-blocking: a Cloud budget alert on the backend (`CodeScenesSite`). The backend
-  (`CodeScenesSite/specs/01`) is built and deployed; its remaining work is a real seat-limit/refund
-  exercise once the product publishes. The cross-platform spike legs are closed by docs, not pending
+  (`CodeScenesSite/specs/01`) is built and deployed; the Gumroad product is now published, so a real
+  seat-limit/refund exercise against it is the remaining backend check. The cross-platform spike legs are closed by docs, not pending
   runs: `deviceUniqueIdentifier` is documented per-platform (Win = board+BIOS+OS serials, mac =
   IOPlatformUUID, Linux = machine-id) and stable across restart/reboot/upgrade on all three, and
   `RSACryptoServiceProvider` is Mono's managed impl shared across every desktop editor, so the Linux
   measurements generalize (see `specs/completed/34` §6/§7). Deactivating a machine is already covered
   by Remove on that machine's seat row.
+
+### 3. Shipping / launch (the path to actually selling CodeScenes)
+
+Licensing was the last feature gate; what remains is packaging, legal, and launch. Tracked in
+`specs/package-publishing-readiness.md` (a checklist + decisions, NOT a tdd-pipeline spec):
+- **Two-build production is compliance-required and NOT done.** Unity Provider Agreement §4.9.1.2
+  means the Asset Store copy and the Gumroad copy must be the same complete product — so a keyless
+  Asset Store build must ship alongside the Gumroad one. The channel mechanism is built (spec 34,
+  `CODESCENES_ASSET_STORE` define + the licensing asmdef's `!CODESCENES_ASSET_STORE` defineConstraint
+  + fail-closed), but no tooling produces the two artifacts, and the Asset Store variant must
+  physically strip `com.codescenes/Editor/Licensing/` at pack time (a buyer lacks the define). See the
+  spec's "Two-build production" section.
+- Four packaging decisions (LICENSE, analyzer delivery, plugin platforms, distribution format) then
+  the file adds (LICENSE.md, Third Party Notices.md, CHANGELOG.md, README.md, version bump).
+- Gumroad product is **published** (done). Still needed: the site Buy CTA in place of the waitlist
+  (`CodeScenesSite/specs/01` §1), and a backend Cloud budget alert.
+- `specs/hero-demo-minigolf.md` (Minigolf) is launch-video polish, not a store blocker.
 
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 

@@ -67,6 +67,44 @@ gap for a paid product:
   codescenes.dev; `keywords` (only useful on a registry/Asset Store).
 - Optional `Documentation~/` and `Samples~/`. A `Samples~/` demo scene is worth having for a paid tool.
 
+## Two-build production (compliance-required, NOT yet done)
+
+**Why this is mandatory, not optional.** Unity Provider Agreement §4.9.1.2 (see
+`CodeScenesSite/research/04-asset-store-distribution.md`) requires the Asset Store copy and the
+off-store copy to be the same complete product, nothing enhanced sold off-store. So CodeScenes must
+ship on BOTH channels, and the Asset Store copy must be **fully featured with no key, no activation,
+no trial, and no backend contact** (Unity's own per-seat EULA covers it); the Gumroad copy is the same
+product plus the activation layer. `specs/completed/34` "Two distribution channels, two builds" owns
+the design.
+
+**What is already built** (spec 34, bucket b4, commit `4756951`) — the channel MECHANISM, under test:
+- `LicenseChannel.AssetStoreDefine` = `CODESCENES_ASSET_STORE`, in the MAIN assembly (observable in
+  both builds).
+- `SceneBuilder.Licensing.Editor.asmdef` carries `"defineConstraints": ["!CODESCENES_ASSET_STORE"]`,
+  so with the define set the whole licensing assembly (window, seats, trial, enforcement provider,
+  transport) is excluded from compilation.
+- Fail-closed: no define -> Gumroad build, activation required. `LicenseGate` (main assembly) defaults
+  allowed, and only the licensing assembly registers a restrictive verdict, so an excluded-licensing
+  build is fully functional.
+
+**The gap** — no tooling produces the two artifacts, and the `defineConstraint` alone does NOT protect
+a buyer: it only excludes licensing when the project *doing the compile* defines
+`CODESCENES_ASSET_STORE`, and an Asset Store buyer's project will not. Shipping the same files to the
+Asset Store would compile the licensing assembly on their machine and demand a key they were never
+issued, exactly the failure spec 34 warns about.
+
+**Recommended method.** Produce the Asset Store variant by **physically removing
+`com.codescenes/Editor/Licensing/`** (the folder and its `.meta`) from the packed copy, so licensing
+cannot compile regardless of the buyer's defines. The define + `defineConstraint` remain the dev-time
+way to compile and test the Asset-Store configuration locally (set `CODESCENES_ASSET_STORE` in a test
+project, confirm licensing drops out). This wants a small repeatable pack step/script (two outputs:
+Gumroad = licensing included, Asset Store = licensing stripped), tied to the distribution-format
+decision (#4 above).
+
+**Accept when:** the Asset Store artifact exposes no `CodeScenes/License` menu item, makes no request
+to the backend, shows no activation/trial UI, and every feature works with `LicenseGate.Allowed`
+true; the Gumroad artifact still requires activation; and the two are otherwise feature-identical.
+
 ## Verified facts behind the above
 
 - Manifest + asmdefs + folder metas present and correct (loads today).
