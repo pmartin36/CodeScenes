@@ -12,7 +12,7 @@ namespace SceneBuilder.Editor
     public static class SceneBuilderAutoToggle
     {
         /// <summary>The single checkable menu item governing both sync directions.</summary>
-        public const string MenuPath = "CodeScenes/Auto";
+        public const string MenuPath = "CodeScenes/Auto-sync";
 
         /// <summary>
         /// Stable EditorPrefs key for this project: <c>SceneBuilder.Auto.Enabled::&lt;projectRootHash&gt;</c>.
@@ -33,7 +33,7 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>Flips the persisted value, syncs the menu checkmark, and arms/disarms the live loop.</summary>
-        [MenuItem(MenuPath, false, 100)]
+        [MenuItem(MenuPath, false, 0)]
         public static void Toggle()
         {
             Enabled = !Enabled;

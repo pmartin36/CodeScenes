@@ -22,6 +22,10 @@ using UnityEngine;
 // "CodeScenes/License" menu entry point and a CreateGUI that builds without throwing.
 public class LicenseWindowTests
 {
+    // A format-valid Gumroad-shaped key (four dash-separated 8-char groups); the scripted transport
+    // decides accept/reject, but the key must pass the model's client-side shape check to be sent.
+    private const string ValidKey = "1234ABCD-5678EF90-ABCDEF12-34567890";
+
     private RSA _rsa;
     private DateTime _baseNow;
 
@@ -142,11 +146,11 @@ public class LicenseWindowTests
             "{\"ok\":true,\"token\":\"" + token + "\",\"seatsUsed\":2,\"seatsTotal\":3}"));
         var model = new LicenseWindowModel { Transport = transport };
 
-        model.ActivateAsync("KEY-1").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
 
         Assert.AreEqual(LicenseWindowView.Licensed, model.View);
         Assert.That(model.Message, Does.Contain("2 of 3 seats in use"));
-        Assert.AreEqual("KEY-1", LicenseStore.CurrentLicenseKey,
+        Assert.AreEqual(ValidKey, LicenseStore.CurrentLicenseKey,
             "a successful activate must persist the raw key, or the daily refresh can never re-activate.");
         Assert.AreEqual(LicenseState.Licensed, LicenseStore.Current);
     }
@@ -158,7 +162,7 @@ public class LicenseWindowTests
         transport.Enqueue(LicenseHttpResponse.Unreachable());
         var model = new LicenseWindowModel { Transport = transport };
 
-        model.ActivateAsync("KEY-1").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
 
         Assert.AreEqual(1, transport.Requests.Count);
         var probe = JsonUtility.FromJson<RequestProbe>(transport.Requests[0]);
@@ -182,7 +186,7 @@ public class LicenseWindowTests
             + "{\"hash\":\"h3\",\"label\":\"Linux Box\",\"os\":\"Linux\"}]}"));
         var model = new LicenseWindowModel { Transport = transport };
 
-        model.ActivateAsync("KEY-1").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
 
         Assert.AreEqual(LicenseWindowView.SeatManagement, model.View);
         Assert.AreEqual(3, model.Seats.Length);
@@ -208,17 +212,64 @@ public class LicenseWindowTests
             + "{\"hash\":\"h2\",\"label\":\"PC\",\"os\":\"Windows\"},"
             + "{\"hash\":\"h3\",\"label\":\"Linux Box\",\"os\":\"Linux\"}]}"));
         var model = new LicenseWindowModel { Transport = transport };
-        model.ActivateAsync("KEY-1").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
 
         model.RemoveSeatAsync("h1").GetAwaiter().GetResult();
 
         Assert.AreEqual(2, transport.Requests.Count);
         var probe = JsonUtility.FromJson<RequestProbe>(transport.Requests[1]);
         Assert.AreEqual("release", probe.action);
-        Assert.AreEqual("KEY-1", probe.licenseKey,
+        Assert.AreEqual(ValidKey, probe.licenseKey,
             "the key was entered but never persisted (activation failed on seat_limit); it must be retained in-memory.");
         Assert.AreEqual("h1", probe.hash);
         Assert.AreEqual(2, model.Seats.Length);
+    }
+
+    [Test]
+    public void RemoveSeatAsync_CurrentMachine_ClearsTokenAndReturnsToNoLicense()
+    {
+        LicenseStore.StoreToken(SignToken(MachineIdentity.Hash, ToUnix(_baseNow) - 60, ToUnix(_baseNow) + 86400 * 14));
+        LicenseStore.StoreLicenseKey(ValidKey);
+        var transport = new ScriptedTransport();
+        transport.Enqueue(LicenseHttpResponse.Completed(200,
+            "{\"ok\":true,\"machines\":["
+            + "{\"hash\":\"" + MachineIdentity.Hash + "\",\"label\":\"This Machine\",\"os\":\"Linux\"},"
+            + "{\"hash\":\"h2\",\"label\":\"PC\",\"os\":\"Windows\"}]}"));
+        transport.Enqueue(LicenseHttpResponse.Completed(200,
+            "{\"ok\":true,\"machines\":[{\"hash\":\"h2\",\"label\":\"PC\",\"os\":\"Windows\"}]}"));
+        var model = new LicenseWindowModel { Transport = transport };
+        model.Initialize();
+        Assert.AreEqual(LicenseWindowView.Licensed, model.View, "Precondition: opens Licensed.");
+
+        model.RemoveSeatAsync(MachineIdentity.Hash).GetAwaiter().GetResult();
+
+        Assert.AreEqual(LicenseWindowView.NoLicense, model.View,
+            "removing THIS machine's seat must return to the Activate view, not keep showing 'activated'.");
+        Assert.AreEqual(LicenseState.Unlicensed, LicenseStore.Current,
+            "removing THIS machine's seat must clear the local token so the machine is no longer Licensed.");
+        Assert.IsTrue(string.IsNullOrEmpty(LicenseStore.CurrentToken));
+    }
+
+    [Test]
+    public void RemoveSeatAsync_OtherMachine_StaysLicensed()
+    {
+        LicenseStore.StoreToken(SignToken(MachineIdentity.Hash, ToUnix(_baseNow) - 60, ToUnix(_baseNow) + 86400 * 14));
+        LicenseStore.StoreLicenseKey(ValidKey);
+        var transport = new ScriptedTransport();
+        transport.Enqueue(LicenseHttpResponse.Completed(200,
+            "{\"ok\":true,\"machines\":["
+            + "{\"hash\":\"" + MachineIdentity.Hash + "\",\"label\":\"This Machine\",\"os\":\"Linux\"},"
+            + "{\"hash\":\"h2\",\"label\":\"PC\",\"os\":\"Windows\"}]}"));
+        transport.Enqueue(LicenseHttpResponse.Completed(200,
+            "{\"ok\":true,\"machines\":[{\"hash\":\"" + MachineIdentity.Hash + "\",\"label\":\"This Machine\",\"os\":\"Linux\"}]}"));
+        var model = new LicenseWindowModel { Transport = transport };
+        model.Initialize();
+
+        model.RemoveSeatAsync("h2").GetAwaiter().GetResult();
+
+        Assert.AreEqual(LicenseWindowView.Licensed, model.View,
+            "removing a DIFFERENT machine must keep this machine Licensed.");
+        Assert.AreEqual(LicenseState.Licensed, LicenseStore.Current);
     }
 
     [Test]
@@ -238,14 +289,14 @@ public class LicenseWindowTests
         transport.Enqueue(LicenseHttpResponse.Completed(200,
             "{\"ok\":true,\"token\":\"" + token + "\",\"seatsUsed\":3,\"seatsTotal\":3}"));
         var model = new LicenseWindowModel { Transport = transport };
-        model.ActivateAsync("KEY-1").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
         model.RemoveSeatAsync("h1").GetAwaiter().GetResult();
 
-        model.ActivateAsync("KEY-1").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
 
         Assert.AreEqual(LicenseWindowView.Licensed, model.View);
         Assert.That(model.Message, Does.Contain("3 of 3 seats in use"));
-        Assert.AreEqual("KEY-1", LicenseStore.CurrentLicenseKey);
+        Assert.AreEqual(ValidKey, LicenseStore.CurrentLicenseKey);
     }
 
     [Test]
@@ -257,6 +308,33 @@ public class LicenseWindowTests
         model.Buy();
 
         Assert.AreEqual(LicenseWindowModel.GumroadProductUrl, captured);
+    }
+
+    [TestCase("1234ABCD-5678EF90-ABCDEF12-34567890", true)]
+    [TestCase("abcdef12-34567890-abcdef12-34567890", true)]
+    [TestCase("", false)]
+    [TestCase("   ", false)]
+    [TestCase("not-a-key", false)]
+    [TestCase("1234ABCD5678EF90ABCDEF1234567890", false)]
+    [TestCase("1234ABCD-5678EF90-ABCDEF12", false)]
+    public void LooksLikeKey_MatchesTheGumroadShape(string key, bool expected)
+    {
+        Assert.AreEqual(expected, LicenseWindowModel.LooksLikeKey(key));
+    }
+
+    [Test]
+    public void ActivateAsync_MalformedKey_ShowsFormatMessageAndSendsNoRequest()
+    {
+        var transport = new ScriptedTransport();
+        var model = new LicenseWindowModel { Transport = transport };
+
+        model.ActivateAsync("nope").GetAwaiter().GetResult();
+
+        Assert.AreEqual(LicenseWindowView.NoLicense, model.View);
+        Assert.IsNotEmpty(model.Message);
+        Assert.AreEqual(0, transport.Requests.Count,
+            "a malformed key must be rejected client-side with no round trip.");
+        Assert.AreEqual(LicenseState.Unlicensed, LicenseStore.Current);
     }
 
     [Test]
@@ -287,7 +365,7 @@ public class LicenseWindowTests
     {
         string token = SignToken(MachineIdentity.Hash, ToUnix(_baseNow) - 60, ToUnix(_baseNow) + 86400 * 14);
         LicenseStore.StoreToken(token);
-        LicenseStore.StoreLicenseKey("KEY-1");
+        LicenseStore.StoreLicenseKey(ValidKey);
         var transport = new ScriptedTransport();
         transport.Enqueue(LicenseHttpResponse.Completed(200,
             "{\"ok\":true,\"machines\":["
@@ -310,7 +388,7 @@ public class LicenseWindowTests
         transport.Enqueue(LicenseHttpResponse.Completed(200, "{\"ok\":false,\"reason\":\"invalid_key\"}"));
         var model = new LicenseWindowModel { Transport = transport };
 
-        model.ActivateAsync("BAD-KEY").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
 
         Assert.AreEqual(LicenseWindowView.NoLicense, model.View);
         Assert.IsNotEmpty(model.Message);
@@ -325,7 +403,7 @@ public class LicenseWindowTests
         transport.Enqueue(LicenseHttpResponse.Unreachable());
         var model = new LicenseWindowModel { Transport = transport };
 
-        model.ActivateAsync("KEY-1").GetAwaiter().GetResult();
+        model.ActivateAsync(ValidKey).GetAwaiter().GetResult();
 
         Assert.AreEqual(LicenseWindowView.NoLicense, model.View);
         Assert.IsNotEmpty(model.Message);

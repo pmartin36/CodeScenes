@@ -60,6 +60,9 @@ public class LicenseEnforcementTests
         // Restore the real provider so no test here leaks a manually-injected gate state into any
         // other suite, then leave auto-sync in its default armed state for the next test file.
         LicenseEnforcement.Register();
+        // Restore the auto-sync master toggle to its default (missing key reads ON) so a test that
+        // flipped it for the menu-validate cases cannot leak an OFF state into another suite.
+        EditorPrefs.DeleteKey(SceneBuilderAutoToggle.PrefKey);
         SceneBuilderAutoSync.ResetForTests();
         SuppressionScope.ResetForTests();
         _rsa?.Dispose();
@@ -240,17 +243,34 @@ public class LicenseEnforcementTests
     }
 
     [Test]
-    public void MenuValidates_LicensedRealProvider_AllFourReturnTrue()
+    public void MenuValidates_LicensedAndAutoOff_AllFourReturnTrue()
     {
         StoreLicense();
         LicenseEnforcement.Register();
+        SceneBuilderAutoToggle.Enabled = false; // manual mode: the debug Build/Sync commands are usable
 
         foreach (var menuItem in BuildSyncCommandPaths)
         {
             var validate = FindValidateMethod(menuItem);
             Assert.IsNotNull(validate, $"{menuItem} must have a paired [MenuItem(path, true)] validate method.");
             Assert.IsTrue((bool)validate.Invoke(null, null),
-                $"{menuItem}'s validate must return true while the real provider resolves Licensed.");
+                $"{menuItem}'s validate must return true while Licensed and auto-sync is off.");
+        }
+    }
+
+    [Test]
+    public void MenuValidates_LicensedButAutoOn_AllFourReturnFalse()
+    {
+        StoreLicense();
+        LicenseEnforcement.Register();
+        SceneBuilderAutoToggle.Enabled = true; // auto-sync handles both directions; manual commands are redundant
+
+        foreach (var menuItem in BuildSyncCommandPaths)
+        {
+            var validate = FindValidateMethod(menuItem);
+            Assert.IsNotNull(validate, $"{menuItem} must have a paired [MenuItem(path, true)] validate method.");
+            Assert.IsFalse((bool)validate.Invoke(null, null),
+                $"{menuItem}'s validate must return false while auto-sync is on, so the manual command is disabled.");
         }
     }
 
@@ -260,7 +280,7 @@ public class LicenseEnforcementTests
     [Test]
     public void EveryCodeScenesCommandMenuItem_HasAPairedValidate()
     {
-        var denylist = new HashSet<string> { "CodeScenes/Auto" };
+        var denylist = new HashSet<string> { "CodeScenes/Auto-sync" };
         var commands = new List<(string path, MethodInfo method)>();
         var validates = new Dictionary<string, MethodInfo>();
         CollectCodeScenesMenuItems(commands, validates);
@@ -282,10 +302,10 @@ public class LicenseEnforcementTests
 
     private static readonly string[] BuildSyncCommandPaths =
     {
-        "CodeScenes/Build Active Scene (code -> scene)",
-        "CodeScenes/Build All",
-        "CodeScenes/Sync Active Scene (scene -> code)",
-        "CodeScenes/Sync All",
+        "CodeScenes/Build/Current Scene",
+        "CodeScenes/Build/All Scenes",
+        "CodeScenes/Sync/Current Scene",
+        "CodeScenes/Sync/All Scenes",
     };
 
     private static MethodInfo FindValidateMethod(string menuItem)

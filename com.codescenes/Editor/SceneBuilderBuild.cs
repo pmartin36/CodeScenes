@@ -81,7 +81,7 @@ namespace SceneBuilder.Editor
         /// active scene matches no discovered route, logs one located <see cref="Debug.LogError"/>
         /// containing "no governing builder" and writes nothing.
         /// </summary>
-        [MenuItem("CodeScenes/Build Active Scene (code -> scene)")]
+        [MenuItem("CodeScenes/Build/Current Scene", false, 1)]
         public static void BuildActiveScene() => LicenseGate.RunGuarded(() =>
         {
             try
@@ -104,14 +104,14 @@ namespace SceneBuilder.Editor
             }
         });
 
-        [MenuItem("CodeScenes/Build Active Scene (code -> scene)", true)]
-        public static bool ValidateBuildActiveScene() => LicenseGate.Allowed;
+        [MenuItem("CodeScenes/Build/Current Scene", true)]
+        public static bool ValidateBuildActiveScene() => LicenseGate.Allowed && !SceneBuilderAutoToggle.Enabled;
 
         /// <summary>
         /// Build (code-&gt;scene) EVERY discovered builder whose OWN scene is currently open — never
         /// force-opens a scene (spec Out of scope).
         /// </summary>
-        [MenuItem("CodeScenes/Build All")]
+        [MenuItem("CodeScenes/Build/All Scenes", false, 2)]
         public static void BuildAll() => LicenseGate.RunGuarded(() =>
         {
             try
@@ -132,8 +132,8 @@ namespace SceneBuilder.Editor
             }
         });
 
-        [MenuItem("CodeScenes/Build All", true)]
-        public static bool ValidateBuildAll() => LicenseGate.Allowed;
+        [MenuItem("CodeScenes/Build/All Scenes", true)]
+        public static bool ValidateBuildAll() => LicenseGate.Allowed && !SceneBuilderAutoToggle.Enabled;
 
         private static void BuildRoute(BuilderRoute route, Scene scene)
         {

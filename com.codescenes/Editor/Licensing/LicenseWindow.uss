@@ -1,26 +1,106 @@
 .root {
     padding: 8px;
+    min-width: 300px;
 }
 
-.message-label {
+/* Status strip, styled like a Unity HelpBox. Hidden by the view when empty. */
+.message {
     white-space: normal;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    border-radius: 3px;
+    border-width: 1px;
+    background-color: var(--unity-colors-helpbox-background);
+    border-color: var(--unity-colors-helpbox-border);
 }
 
-.trial-label {
+/* A titled section: bold header over an inset panel, like an Inspector block. */
+.section {
+    margin-bottom: 10px;
+}
+
+.section-title {
+    -unity-font-style: bold;
     margin-bottom: 4px;
 }
 
-.button-row {
-    flex-direction: row;
-    margin-top: 4px;
+.section-body {
+    padding: 8px;
+    border-radius: 3px;
+    border-width: 1px;
+    background-color: var(--unity-colors-box-background);
+    border-color: var(--unity-colors-box-border);
 }
 
-.seats-heading {
-    margin-top: 8px;
+.trial-label {
+    white-space: normal;
+    margin-bottom: 8px;
+    -unity-font-style: italic;
+}
+
+.field-label {
+    margin-bottom: 2px;
+}
+
+/* Full-width input; the label sits above it, not inline, so everything left-aligns. */
+.key-field {
+    margin-bottom: 8px;
+}
+
+.key-field > .unity-base-field__input {
+    min-width: 0;
+}
+
+/* Buttons stack full-width for a consistent left/right edge. */
+.btn {
+    height: 22px;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.btn-primary {
+    -unity-font-style: bold;
+    margin-bottom: 10px;
+}
+
+.hint {
+    margin-bottom: 4px;
+    color: var(--unity-colors-default-text);
+    opacity: 0.7;
+}
+
+.licensed-label {
+    white-space: normal;
+}
+
+/* The seat list is the dark inset box Paul asked for. */
+.seat-list {
+    border-radius: 3px;
+    border-width: 1px;
+    background-color: var(--unity-colors-box-background);
+    border-color: var(--unity-colors-box-border);
+}
+
+.seat-row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 6px;
+    border-bottom-width: 1px;
+    border-bottom-color: var(--unity-colors-box-border);
+}
+
+.seat-row__label {
+    flex-grow: 1;
+    flex-shrink: 1;
+    white-space: normal;
+}
+
+.seat-row--current .seat-row__label {
     -unity-font-style: bold;
 }
 
-.seat-list {
-    margin-top: 2px;
+.seat-remove {
+    height: 20px;
+    margin-left: 8px;
 }

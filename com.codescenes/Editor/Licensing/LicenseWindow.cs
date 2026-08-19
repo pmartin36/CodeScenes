@@ -11,7 +11,7 @@ namespace SceneBuilder.Editor.Licensing
         private const string UxmlPath = "Packages/com.codescenes/Editor/Licensing/LicenseWindow.uxml";
         private const string UssPath = "Packages/com.codescenes/Editor/Licensing/LicenseWindow.uss";
 
-        [MenuItem("CodeScenes/License")]
+        [MenuItem("CodeScenes/License", false, 20)]
         public static void Open()
         {
             GetWindow<LicenseWindow>("CodeScenes License");
@@ -21,12 +21,16 @@ namespace SceneBuilder.Editor.Licensing
 
         private VisualElement _entryGroup;
         private VisualElement _licensedGroup;
+        private VisualElement _seatsGroup;
         private VisualElement _seatList;
         private TextField _keyField;
         private Button _activateButton;
         private Button _buyButton;
         private Label _trialLabel;
         private Label _messageLabel;
+
+        private IVisualElementScheduledItem _activatingAnim;
+        private int _activatingDots;
 
         private void CreateGUI()
         {
@@ -49,6 +53,7 @@ namespace SceneBuilder.Editor.Licensing
 
             _entryGroup = rootVisualElement.Q<VisualElement>("entryGroup");
             _licensedGroup = rootVisualElement.Q<VisualElement>("licensedGroup");
+            _seatsGroup = rootVisualElement.Q<VisualElement>("seatsGroup");
             _seatList = rootVisualElement.Q<VisualElement>("seatList");
             _keyField = rootVisualElement.Q<TextField>("keyField");
             _activateButton = rootVisualElement.Q<Button>("activateButton");
@@ -78,12 +83,24 @@ namespace SceneBuilder.Editor.Licensing
 
             if (_activateButton != null)
             {
-                _activateButton.SetEnabled(_model.View != LicenseWindowView.Activating);
+                bool activating = _model.View == LicenseWindowView.Activating;
+                _activateButton.SetEnabled(!activating);
+                if (activating)
+                {
+                    StartActivatingAnimation();
+                }
+                else
+                {
+                    StopActivatingAnimation();
+                    _activateButton.text = "Activate";
+                }
             }
 
             if (_messageLabel != null)
             {
-                _messageLabel.text = _model.Message ?? string.Empty;
+                string message = _model.Message ?? string.Empty;
+                _messageLabel.text = message;
+                SetVisible(_messageLabel, message.Length > 0);
             }
 
             if (_trialLabel != null)
@@ -101,20 +118,57 @@ namespace SceneBuilder.Editor.Licensing
                     _seatList.Add(BuildSeatRow(seat));
                 }
             }
+
+            // Hide the whole Seats section when there is nothing to manage, so the no-license
+            // view is not padded out by an empty inset box.
+            SetVisible(_seatsGroup, _model.Seats.Length > 0);
         }
 
         private VisualElement BuildSeatRow(Seat seat)
         {
             var row = new VisualElement { name = "seatRow" };
-            row.style.flexDirection = FlexDirection.Row;
+            row.AddToClassList("seat-row");
 
-            string suffix = _model.IsCurrentMachine(seat) ? " (this machine)" : string.Empty;
-            row.Add(new Label($"{seat.label} ({seat.os}){suffix}"));
+            bool isCurrent = _model.IsCurrentMachine(seat);
+            if (isCurrent)
+            {
+                row.AddToClassList("seat-row--current");
+            }
+
+            string suffix = isCurrent ? " (this machine)" : string.Empty;
+            var label = new Label($"{seat.label} ({seat.os}){suffix}");
+            label.AddToClassList("seat-row__label");
+            row.Add(label);
 
             var remove = new Button(() => _ = _model.RemoveSeatAsync(seat.hash)) { text = "Remove" };
+            remove.AddToClassList("seat-remove");
             row.Add(remove);
 
             return row;
+        }
+
+        // Animate the disabled Activate button as the in-progress indicator: "Activating" with a
+        // cycling 1..3 dot tail, so the click has visible feedback while the request is in flight.
+        private void StartActivatingAnimation()
+        {
+            if (_activatingAnim != null)
+            {
+                return;
+            }
+
+            _activatingDots = 0;
+            _activateButton.text = "Activating";
+            _activatingAnim = _activateButton.schedule.Execute(() =>
+            {
+                _activatingDots = (_activatingDots % 3) + 1;
+                _activateButton.text = "Activating" + new string('.', _activatingDots);
+            }).Every(300);
+        }
+
+        private void StopActivatingAnimation()
+        {
+            _activatingAnim?.Pause();
+            _activatingAnim = null;
         }
 
         private static void SetVisible(VisualElement element, bool visible)

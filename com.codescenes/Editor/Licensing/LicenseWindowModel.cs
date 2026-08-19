@@ -21,6 +21,15 @@ namespace SceneBuilder.Editor.Licensing
         internal const int SeatCap = 3;
 
         private const string OfflineMessage = "Could not reach the license server. Check your connection and try again.";
+        private const string InvalidKeyFormatMessage =
+            "That doesn't look like a license key. It should look like XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX.";
+
+        // A cheap client-side shape check (four dash-separated 8-char alphanumeric groups, the Gumroad
+        // key format) so an empty or obviously mistyped key gives instant feedback instead of a
+        // pointless round trip. The server remains the authority on whether a well-formed key is real.
+        internal static bool LooksLikeKey(string key) =>
+            !string.IsNullOrWhiteSpace(key) &&
+            System.Text.RegularExpressions.Regex.IsMatch(key.Trim(), "^[0-9A-Za-z]{8}(-[0-9A-Za-z]{8}){3}$");
 
         internal ILicenseTransport Transport = new LicenseTransport();
         internal Action<string> OpenUrl = Application.OpenURL;
@@ -70,7 +79,18 @@ namespace SceneBuilder.Editor.Licensing
 
         public async Task ActivateAsync(string key)
         {
+            key = key?.Trim() ?? string.Empty;
             _activeKey = key;
+
+            if (!LooksLikeKey(key))
+            {
+                Message = InvalidKeyFormatMessage;
+                View = LicenseWindowView.NoLicense;
+                Raise();
+                return;
+            }
+
+            Message = string.Empty; // the Activate button shows the in-progress state
             View = LicenseWindowView.Activating;
             Raise();
 
@@ -133,7 +153,22 @@ namespace SceneBuilder.Editor.Licensing
             {
                 Seats = parsed.machines ?? Array.Empty<Seat>();
                 SeatsUsed = Seats.Length;
-                Message = "Seat removed.";
+
+                if (hash == MachineIdentity.Hash)
+                {
+                    // Removing THIS machine gives up its own seat: drop the local token so the
+                    // machine is no longer Licensed, and return to the Activate view. Otherwise the
+                    // window would keep showing "activated" off a token whose seat is gone.
+                    LicenseStore.Clear();
+                    _activeKey = null;
+                    View = LicenseWindowView.NoLicense;
+                    TrialDaysRemaining = 0;
+                    Message = "This machine's seat was removed. Activate again to use CodeScenes here.";
+                }
+                else
+                {
+                    Message = "Seat removed.";
+                }
             }
             else
             {
