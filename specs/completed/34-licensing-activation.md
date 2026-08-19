@@ -227,11 +227,16 @@ reinstall, some hardware changes, and it behaves differently across platforms), 
 silently consumes one of three seats. §5's seat list is the mitigation and must be reachable from an
 unlicensed state.
 
-Measured on Linux (2026-08-18): `SystemInfo.deviceUniqueIdentifier` returns the exact contents of
-`/etc/machine-id` — the canonical stable machine id, unchanged across editor restart and reboot,
-changing only on OS reinstall. So on Linux the built-in value is the right one. Windows and macOS
-legs are still to be measured (a committed probe exists); until then the identifier is
-`deviceUniqueIdentifier` on all platforms, and §5 covers the instability cases.
+Per-platform derivation (Unity ScriptReference), which settles the cross-platform question from docs
+rather than three physical runs: **Windows** hashes BaseBoard + BIOS + OS serials; **macOS** uses
+`IOPlatformUUID`; **Linux** reads `/var/lib/dbus/machine-id` or `/etc/machine-id` (measured
+byte-identical to `deviceUniqueIdentifier` on Linux, 2026-08-18). All three desktop platforms are
+supported (never `unsupportedIdentifier`), and none of those underlying values change on an editor
+restart, reboot, or Unity upgrade, so the identifier is stable within a machine on all three by
+construction. It DOES change on OS reinstall (Windows OS-serial, Linux machine-id regenerates) and
+major hardware swaps (Windows board/BIOS, macOS logic board); macOS is the most stable. Those are
+exactly the cases §5's seat list mitigates. (Windows historically had drive-related flakiness in
+older Unity versions; the current derivation excludes drive serials.)
 
 **Build:** send `SystemInfo.deviceUniqueIdentifier` as the machine identifier to `activate`. Do not
 re-hash it client-side; the server hashes it.
@@ -252,7 +257,11 @@ ECDSA is not an option: on the target editor (Unity 6000.5.3f1, Mono profile) `E
 implements neither `ImportSubjectPublicKeyInfo` nor `ImportParameters` — both throw
 `NotImplementedException` — and the `.NET 5` `DSASignatureFormat` overload of `VerifyData` is absent.
 RSA import and verify are implemented on the same profile. Measured on Linux 2026-08-18 (a Node-signed
-RSA-2048 vector verifies, a tampered byte fails, both offline); confirm on Windows and macOS.
+RSA-2048 vector verifies, a tampered byte fails, both offline). This generalizes to Windows and macOS
+without a separate run: Unity ships one Mono scripting runtime with the same managed
+`System.Security.Cryptography` class libraries on every desktop editor, and `RSACryptoServiceProvider`
+here is Mono's managed implementation (not the Windows CryptoAPI path of .NET Framework), so identical
+behavior across the three follows from the shared runtime.
 
 **Wire format** (matches the backend, `CodeScenesSite/functions/src/licensing/token.ts`): the token
 is `b64url(payloadJson) "." b64url(signature)`. The signature covers the **ASCII bytes of the first

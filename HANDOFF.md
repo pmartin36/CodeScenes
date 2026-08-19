@@ -77,13 +77,15 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 ### 2. Features, in this order
 
 - **M-Licensing SHIPPED** (spec in `specs/completed/34`), gate `passed=921`, live-verified, and the
-  Gumroad happy path confirmed end to end against the deployed backend. Three follow-ups remain, none
-  blocking: (1) run the Windows/macOS legs of the RSA-verify and machine-id probes (the RSA finding
-  and `deviceUniqueIdentifier` choice are Linux-measured; the cross-platform probe is committed at
-  `unity-gate` history / scratchpad `MachineIdSpikeTests.cs`); (2) an optional "Deactivate this
-  machine" button on the Licensed view; (3) a Cloud budget alert on the backend
-  (`CodeScenesSite`). The backend (`CodeScenesSite/specs/01`) is built and deployed; its remaining
-  work is a real seat-limit/refund exercise once the product publishes.
+  Gumroad happy path confirmed end to end against the deployed backend. One follow-up remains,
+  non-blocking: a Cloud budget alert on the backend (`CodeScenesSite`). The backend
+  (`CodeScenesSite/specs/01`) is built and deployed; its remaining work is a real seat-limit/refund
+  exercise once the product publishes. The cross-platform spike legs are closed by docs, not pending
+  runs: `deviceUniqueIdentifier` is documented per-platform (Win = board+BIOS+OS serials, mac =
+  IOPlatformUUID, Linux = machine-id) and stable across restart/reboot/upgrade on all three, and
+  `RSACryptoServiceProvider` is Mono's managed impl shared across every desktop editor, so the Linux
+  measurements generalize (see `specs/completed/34` §6/§7). Deactivating a machine is already covered
+  by Remove on that machine's seat row.
 
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 
