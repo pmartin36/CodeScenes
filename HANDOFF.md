@@ -5,10 +5,11 @@ This file says only what to do next and in what order.
 
 ## State of `main`
 
-Tree clean. Gate `GATE PASS: Core + Unity EditMode green (passed=821 failed=0 skipped=0)`
-(2026-08-14, `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a
-skip is not a Unity pass — force it). `verify.sh` now discounts one known host engine message
-by exact text (`69a74df`); a crash or any other error still fails.
+Tree clean except the auto-populated `docs/agent-friction.*` (a `Stop` hook writes them). Gate
+`GATE PASS: Core + Unity EditMode green (passed=921 failed=0 skipped=0)` (2026-08-19,
+`GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a skip is not a
+Unity pass — force it). M-Licensing (spec 34) shipped 2026-08-19. `verify.sh` discounts one known
+host engine message by exact text (`69a74df`); a crash or any other error still fails.
 
 **Spec 36 (uniform value descent) SHIPPED and live-verified 2026-08-06** — moved to
 `specs/completed/`. All five passes route container descent through `ValueWalk`, which gained
