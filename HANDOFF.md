@@ -76,12 +76,14 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 ### 2. Features, in this order
 
-- **`specs/34` M-Licensing.** Activation, seats and the 14-day trial, for the Gumroad build only.
-  Not sequenced against the above — it gates shipping, not any other milestone. Two open items block
-  a pipeline run: whether `ECDsa` P-256 verification works on the target editor across all three
-  desktop platforms, and which machine identifier is actually stable. Both are spikes, not guesses.
-  The backend half lives in the site repo (`CodeScenesSite/specs/01-licensing-backend.md`) and is
-  already partly stood up.
+- **M-Licensing SHIPPED** (spec in `specs/completed/34`), gate `passed=921`, live-verified, and the
+  Gumroad happy path confirmed end to end against the deployed backend. Three follow-ups remain, none
+  blocking: (1) run the Windows/macOS legs of the RSA-verify and machine-id probes (the RSA finding
+  and `deviceUniqueIdentifier` choice are Linux-measured; the cross-platform probe is committed at
+  `unity-gate` history / scratchpad `MachineIdSpikeTests.cs`); (2) an optional "Deactivate this
+  machine" button on the Licensed view; (3) a Cloud budget alert on the backend
+  (`CodeScenesSite`). The backend (`CodeScenesSite/specs/01`) is built and deployed; its remaining
+  work is a real seat-limit/refund exercise once the product publishes.
 
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 

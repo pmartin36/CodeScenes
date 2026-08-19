@@ -416,3 +416,36 @@ codegen-only construct an LLM would not author from scratch, plus a fragile sour
 layer is the live-editor check: a 15-scenario matrix (9 forward-reference cases plus 6 regression cases,
 including a pre-existing converged multi-node scene re-syncing to zero edits) drives real editor scenes
 through `BuilderCompileCheck`, each asserting compile and a fixed point.
+
+## 34 - M-Licensing (activation, seats, the 14-day trial)
+
+Paid-tool licensing for the Gumroad build: in-editor key activation, 3-machine seat management, a
+14-day trial, and a once-per-day async entitlement check that never blocks domain reload or sync. A
+valid signed token is validated offline, so a licensed user in steady state sees nothing. Unlicensed
+freezes auto-sync in both directions and disables the Build/Sync menus without ever leaving a sync
+half-applied; the `LicenseGate` (main assembly, default-allowed) is the one seam every sync entry
+point consults, and the licensing assembly (`SceneBuilder.Licensing.Editor`, separately excludable
+for the Asset Store build) registers the real `LicenseState`-backed verdict.
+
+Two spike results overturned the spec's assumptions, both measured, not guessed: **the token is
+RSA-2048 / PKCS#1 v1.5 / SHA-256, not ECDSA P-256** (`ECDsa` implements neither `ImportParameters`
+nor `ImportSubjectPublicKeyInfo` on Unity 6000.5.3f1's Mono profile; RSA verifies via
+`RSACryptoServiceProvider`), and the machine identifier is `SystemInfo.deviceUniqueIdentifier`
+(byte-identical to `/etc/machine-id` on Linux; Windows/macOS legs still to be measured). The backend
+half (activate/trial/seats/release functions, Gumroad verify behind an injectable seam, RSA signing)
+lives in `CodeScenesSite` and is deployed at `us-central1-codescenes.cloudfunctions.net/license`.
+
+Built through the tdd-pipeline (commits `1e64523`, `2e8d691`, `9f7e971`, `4756951`), then a UI/menu
+polish pass (`0af98e7`): the activation window is sectioned inspector-style, the menu is Auto-sync /
+Build ▸ / Sync ▸ / — / License with Build and Sync greyed while Auto-sync is on, the Activate button
+animates an "Activating" state, malformed keys are rejected client-side, and removing the current
+machine's own seat clears the local token. Gate `passed=921 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`).
+
+Live-verified twice via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-licensing-1.log`):
+real-backend activation licenses the machine and arms sync, an unlicensed transition freezes it and
+disables the menus with a clean console, and re-activation resumes with no seat leak. The full Gumroad
+happy path was also confirmed by hand end to end (a real test-purchase key -> deployed `activate` ->
+seat bound in prod Firestore -> issued token verifies against the editor's embedded public key).
+
+Known follow-ups (not blockers): the Windows/macOS legs of the RSA and machine-id spikes, an optional
+"Deactivate this machine" button on the Licensed view, and a Cloud budget alert on the backend.
