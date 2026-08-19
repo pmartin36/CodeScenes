@@ -45,9 +45,14 @@ These need a human call before the mechanical work is meaningful.
    to pin explicit `PluginImporter` platforms before shipping, chiefly to keep the editor-only Roslyn
    DLLs out of player builds, or to accept Unity's import-time defaults.
 
-4. **Distribution format.** Licensing (`specs/34`) says Gumroad only. Decide the delivery artifact: a
-   UPM tarball the buyer adds by path/URL, or a `.unitypackage` they import. (An Asset Store listing
-   later would add its own submission requirements beyond this list.)
+4. **Distribution format — DECIDED.** The off-store buyer installs the package via Unity Package
+   Manager "Add package from git URL" pointing at the public monorepo subfolder:
+   `https://github.com/pmartin36/CodeScenes.git?path=com.codescenes`. That install IS the free trial;
+   Gumroad sells only the activation key, not a download. No `.unitypackage`, no tarball. The repo is
+   public (confirmed by anonymous `ls-remote`), so the whole monorepo — Core, specs, docs — is public;
+   that is accepted. The Asset Store copy is a separate keyless artifact (licensing stripped, see the
+   two-build section) uploaded through Unity's own system. NOTE: git-URL install requires the package
+   state to actually be pushed; `main` has run far ahead of `origin` in practice.
 
 ## Files to add (mechanical, once the decisions above are made)
 

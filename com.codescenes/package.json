@@ -5,5 +5,17 @@
   "description": "Code-native Unity scene authoring with bidirectional code<->scene sync.",
   "unity": "6000.0",
   "author": { "name": "pmartin36" },
-  "hideInEditor": false
+  "license": "SEE LICENSE IN LICENSE.md",
+  "documentationUrl": "https://codescenes.dev",
+  "licensesUrl": "https://codescenes.dev",
+  "hideInEditor": false,
+  "dependencies": {
+    "com.unity.modules.physics": "1.0.0",
+    "com.unity.modules.ui": "1.0.0",
+    "com.unity.modules.uielements": "1.0.0",
+    "com.unity.modules.imgui": "1.0.0",
+    "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0"
+  }
 }
