@@ -66,6 +66,22 @@ namespace SceneBuilder.Authoring
                                   bool forward = false, bool back = false,
                                   SceneObjectHandle target = null) => this;
 
+        /// <summary>
+        /// Single-axis corridor placement: lands this object's bounds flush against
+        /// <paramref name="from"/> at <paramref name="fraction"/> 0 and flush against
+        /// <paramref name="to"/> at <paramref name="fraction"/> 1, moving only along
+        /// <paramref name="axis"/>. <paramref name="fraction"/> is unclamped, so a value outside
+        /// [0, 1] places past the respective anchor. <paramref name="axis"/> is a world direction by
+        /// default, or the matching local axis of <paramref name="alongOrientationOf"/> when given, so
+        /// placement can follow a tilted reference. Which anchor owns the fraction-0 end is fixed by
+        /// argument order (<paramref name="from"/>), not by which anchor sits at the higher world
+        /// coordinate. Hierarchy-independent — anchors and self may live under unrelated parents.
+        /// Chaining more than two <c>Between</c> calls into a longer anchor cycle is undefined: each
+        /// evaluates independently and the last one to run wins.
+        /// </summary>
+        public NodeHandle Between(SceneObjectHandle from, SceneObjectHandle to, float fraction,
+            Between.Axis axis, SceneObjectHandle alongOrientationOf = null) => this;
+
         /// <summary>Set the GameObject tag.</summary>
         public NodeHandle Tag(string tag) => this;
 

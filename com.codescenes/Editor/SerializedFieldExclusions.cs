@@ -84,6 +84,7 @@ namespace SceneBuilder.Editor
         {
             SpatialComponents.FitSizeTypeName,
             SpatialComponents.SurfaceSnapTypeName,
+            SpatialComponents.BetweenTypeName,
         };
 
         // Fields with no Inspector control (or a control that recomputes them) on specific declaring

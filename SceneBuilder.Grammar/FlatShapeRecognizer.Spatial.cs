@@ -20,6 +20,12 @@ namespace SceneBuilder.Grammar
         private static readonly string[] SurfaceSnapAxisKeywords = { "up", "down", "left", "right", "forward", "back" };
         private const string SurfaceSnapTargetKeyword = "target";
 
+        private const string BetweenFromKeyword = "from";
+        private const string BetweenToKeyword = "to";
+        private const string BetweenFractionKeyword = "fraction";
+        private const string BetweenAxisKeyword = "axis";
+        private const string BetweenOrientationKeyword = "alongOrientationOf";
+
         private static void ApplyFitSize(ArgumentListSyntax args, InvocationExpressionSyntax invocation, RecognizerContext ctx)
         {
             var hasAspect = false;
@@ -121,6 +127,41 @@ namespace SceneBuilder.Grammar
             if (!(up || down || left || right || forward || back))
             {
                 Report(ctx, invocation, SB1001, "SurfaceSnap requires at least one snap axis (up/down/left/right/forward/back)");
+            }
+        }
+
+        private static void ApplyBetween(ArgumentListSyntax args, InvocationExpressionSyntax invocation, RecognizerContext ctx)
+        {
+            var hasFrom = false;
+            var hasTo = false;
+            var hasFraction = false;
+            var hasAxis = false;
+
+            foreach (var arg in args.Arguments)
+            {
+                if (arg.NameColon == null)
+                {
+                    Report(ctx, arg, SB1001, "Between arguments must be named (from:/to:/fraction:/axis:/alongOrientationOf:)");
+                    continue;
+                }
+
+                var name = arg.NameColon.Name.Identifier.Text;
+                switch (name)
+                {
+                    case BetweenFromKeyword: hasFrom = true; break;
+                    case BetweenToKeyword: hasTo = true; break;
+                    case BetweenFractionKeyword: hasFraction = true; break;
+                    case BetweenAxisKeyword: hasAxis = true; break;
+                    case BetweenOrientationKeyword: break;
+                    default:
+                        Report(ctx, arg, SB1001, $"Unknown Between argument '{name}'");
+                        break;
+                }
+            }
+
+            if (!(hasFrom && hasTo && hasFraction && hasAxis))
+            {
+                Report(ctx, invocation, SB1001, "Between requires from:, to:, fraction:, and axis: (alongOrientationOf: optional)");
             }
         }
     }

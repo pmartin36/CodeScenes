@@ -200,6 +200,9 @@ namespace SceneBuilder.Grammar
                     case "SurfaceSnap":
                         ApplySurfaceSnap(args, invocation, ctx);
                         break;
+                    case "Between":
+                        ApplyBetween(args, invocation, ctx);
+                        break;
                     case "RectTransform":
                         ApplyRectTransform(args, ctx);
                         break;

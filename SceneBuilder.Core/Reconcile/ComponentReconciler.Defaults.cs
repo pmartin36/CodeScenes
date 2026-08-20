@@ -82,6 +82,13 @@ namespace SceneBuilder.Core.Reconcile
                     .IsEmptyNested(componentLogicalId, typeFullName, fieldKey, conflicts);
         }
 
+        // Between's fraction/axis are always-authored placement, never an "unset" sentinel — a
+        // fraction of 0 or an index-0 axis is a real value, so default-pruning must never drop
+        // either, on the append path (below) or the scene->code reset path (TryEmitDefaultReset).
+        private static bool IsAlwaysEmitted(string typeFullName, string fieldKey) =>
+            typeFullName == SpatialComponents.BetweenTypeName
+            && (fieldKey == SpatialComponents.BetweenFields.Fraction || fieldKey == SpatialComponents.BetweenFields.Axis);
+
         // `defaults` null (Index.Empty semantics) keeps every field — never drop user data for a
         // type with no template. A NESTED field's default-ness is decided per-MEMBER (spec 32 C4) via
         // NestedValueEmission.Project rather than whole-node equality: an Unsupported member carries
@@ -96,6 +103,12 @@ namespace SceneBuilder.Core.Reconcile
             var kept = new List<KeyValuePair<string, ValueNode>>();
             foreach (var field in fields)
             {
+                if (IsAlwaysEmitted(typeFullName, field.Key))
+                {
+                    kept.Add(field);
+                    continue;
+                }
+
                 if (field.Value is not ValueNode.Nested)
                 {
                     if (defaults.IsDefault(typeFullName, field.Key, field.Value))
@@ -135,6 +148,11 @@ namespace SceneBuilder.Core.Reconcile
             List<SourceEdit> edits,
             List<Conflict> conflicts)
         {
+            if (IsAlwaysEmitted(sourceComp.Type.FullName, fieldKey))
+            {
+                return false;
+            }
+
             var index = defaults ?? Index.Empty;
 
             // Buffered, then merged only on a branch that HANDLES the field. The decision reports

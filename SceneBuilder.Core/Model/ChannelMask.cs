@@ -23,6 +23,12 @@ namespace SceneBuilder.Core.Model
         PivotX            = 1 << 14,
         PivotY            = 1 << 15,
 
+        // Reserved rotation seats for a future OrientToSurface; nothing drives rotation in this
+        // feature.
+        RotationX         = 1 << 16,
+        RotationY         = 1 << 17,
+        RotationZ         = 1 << 18,
+
         AnchoredPosition = AnchoredPositionX | AnchoredPositionY,
         SizeDelta        = SizeDeltaX        | SizeDeltaY,
         AnchorMin        = AnchorMinX        | AnchorMinY,

@@ -326,7 +326,7 @@ namespace SceneBuilder.Core.Parsing
             // they stay StatementAnchored = false (the pinned default) like every other chained
             // shape. Reads the ORIGINAL unsplit `calls` so a trailing `.Ref<T>()` keeps this
             // conservative false.
-            if (statementLevel && calls.Count == 1 && calls[0].Method is "Component" or "FitSize" or "SurfaceSnap")
+            if (statementLevel && calls.Count == 1 && calls[0].Method is "Component" or "FitSize" or "SurfaceSnap" or "Between")
             {
                 node.Components[node.Components.Count - 1].StatementAnchored = true;
             }
@@ -423,6 +423,9 @@ namespace SceneBuilder.Core.Parsing
                         break;
                     case "SurfaceSnap":
                         ApplySurfaceSnap(node, args, invocation, ctx);
+                        break;
+                    case "Between":
+                        ApplyBetween(node, args, invocation, ctx);
                         break;
                     case "RectTransform":
                         ApplyRectTransform(node, args);

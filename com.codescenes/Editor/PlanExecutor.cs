@@ -494,6 +494,10 @@ namespace SceneBuilder.Editor
                     // spec 23) rather than sticky-detaching off a stale pre-rebuild baseline as if it
                     // were a large manual drag.
                     t.GetComponent<SurfaceSnap>()?.ResetBaseline();
+                    // Symmetric reset for Between (spec 45): the raw m_LocalPosition write is the
+                    // plugin's own, not a user drag, so its next Evaluate() re-derives from this fresh
+                    // baseline instead of treating the rebuild as a manual move.
+                    t.GetComponent<Between>()?.ResetBaseline();
                     break;
                 case ValueNode.Vec3 v when op.Path == "m_LocalScale":
                     t.localScale = new Vector3(v.Value.X, v.Value.Y, v.Value.Z);

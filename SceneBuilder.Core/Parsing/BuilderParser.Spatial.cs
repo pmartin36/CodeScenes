@@ -236,6 +236,93 @@ namespace SceneBuilder.Core.Parsing
             return false;
         }
 
+        // `.Between(from: a, to: b, fraction: 0.25f, axis: Between.Axis.X[, alongOrientationOf: r])`.
+        // Structural errors (unnamed arg) are already ruled out by the recognizer -> Unreachable.
+        // from/to/alongOrientationOf are ObjectRefs (total via ValueNodeParser); axis is parsed
+        // directly from the rightmost member identifier (never the generic MemberAccess->Enum arm,
+        // which would yield the runtime '+' TypeFullName) into the canonical authoring TypeFullName.
+        private static void ApplyBetween(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
+        {
+            var fields = new List<KeyValuePair<string, ValueNode>>();
+            var spans = new List<KeyValuePair<string, SourceSpan>>();
+            var oriented = false;
+            var axisResolved = false;
+            var resolvedAxis = SpatialAxis.X;
+
+            foreach (var arg in args.Arguments)
+            {
+                if (arg.NameColon == null)
+                {
+                    throw Unreachable();
+                }
+
+                var name = arg.NameColon.Name.Identifier.Text;
+                var span = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
+
+                switch (name)
+                {
+                    case SpatialComponents.BetweenFields.From:
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.From, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.From, span));
+                        break;
+                    case SpatialComponents.BetweenFields.To:
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.To, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.To, span));
+                        break;
+                    case SpatialComponents.BetweenFields.Fraction:
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.Fraction, ParseSpatialScalar(arg.Expression, ctx)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.Fraction, span));
+                        break;
+                    case SpatialComponents.BetweenFields.Axis:
+                        ValueNode axisValue;
+                        if (arg.Expression is MemberAccessExpressionSyntax ma && SpatialComponents.TryAxisFromMember(ma.Name.Identifier.Text, out resolvedAxis))
+                        {
+                            axisResolved = true;
+                            axisValue = ValueNode.Enum.Canonical(SpatialComponents.BetweenEnums.AxisTypeName, new[] { ma.Name.Identifier.Text });
+                        }
+                        else
+                        {
+                            axisValue = new ValueNode.Unsupported(arg.Expression.ToString());
+                        }
+
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.Axis, axisValue));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.Axis, span));
+                        break;
+                    case "alongOrientationOf":
+                        oriented = true;
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.Orientation, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.Orientation, span));
+                        break;
+                    default:
+                        throw Unreachable();
+                }
+            }
+
+            var memberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
+            var anchorStart = memberAccess.OperatorToken.SpanStart;
+            var cb = new ComponentBuilder
+            {
+                TypeFullName = SpatialComponents.BetweenTypeName,
+                AnchorSpan = new SourceSpan(anchorStart, invocation.Span.End - anchorStart),
+            };
+            foreach (var f in fields)
+            {
+                cb.Fields.Add(f);
+            }
+
+            foreach (var s in spans)
+            {
+                cb.FieldValueSpans.Add(s);
+            }
+
+            node.Components.Add(cb);
+
+            if (axisResolved)
+            {
+                node.DrivenChannels |= SpatialComponents.BetweenDrivenMask(resolvedAxis, oriented);
+            }
+        }
+
         private static bool TryCoerceFloat(ValueNode v, out float f)
         {
             switch (v)

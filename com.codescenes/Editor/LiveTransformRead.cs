@@ -89,18 +89,18 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
-        /// ORs together the driven channels of every ACTIVE-AND-ENABLED FitSize/SurfaceSnap on
+        /// ORs together the driven channels of every ACTIVE-AND-ENABLED FitSize/SurfaceSnap/Between on
         /// <paramref name="go"/> — the same guard those components' own <c>Evaluate()</c> use
         /// (<c>isActiveAndEnabled</c>), so "reader says driven" always agrees with "component
         /// actually drives". A disabled/inactive component contributes nothing (releases its
         /// channel so a manual edit syncs normally). Mirrors the parse-time mapping in
-        /// <c>SpatialComponents.FitSizeMask</c>/<c>SurfaceSnapMask</c> so desired and actual never diverge.
-        /// Also ORs in whatever Unity itself reports as driven on the GameObject's RectTransform (ugui
-        /// layout components — Canvas, layout groups, ContentSizeFitter), via
-        /// <see cref="RectDrivenChannels"/>; None for a plain Transform. Moved verbatim (m-ui-recttransform
-        /// b3-t1 iteration 2) from <c>SceneSnapshotReader.DeriveDrivenChannels</c> so EVERY adapter read
-        /// path — including the prefab-instance AddedGameObjects probe — reports real driven channels,
-        /// never a hardcoded <c>ChannelMask.None</c>.
+        /// <c>SpatialComponents.FitSizeMask</c>/<c>SurfaceSnapMask</c>/<c>BetweenDrivenMask</c> so desired
+        /// and actual never diverge. Also ORs in whatever Unity itself reports as driven on the
+        /// GameObject's RectTransform (ugui layout components — Canvas, layout groups,
+        /// ContentSizeFitter), via <see cref="RectDrivenChannels"/>; None for a plain Transform. This is
+        /// the ONE driven-channel derivation EVERY adapter read path uses — including the
+        /// prefab-instance AddedGameObjects probe — so none of them ever reports a hardcoded
+        /// <c>ChannelMask.None</c>.
         /// </summary>
         internal static ChannelMask DrivenChannels(GameObject go)
         {
@@ -122,6 +122,16 @@ namespace SceneBuilder.Editor
                         snapper.vertical != SurfaceSnap.Vertical.None,
                         snapper.horizontal != SurfaceSnap.Horizontal.None,
                         snapper.depth != SurfaceSnap.Depth.None);
+                }
+            }
+
+            foreach (var between in go.GetComponents<Between>())
+            {
+                if (between.isActiveAndEnabled)
+                {
+                    mask |= SpatialComponents.BetweenDrivenMask(
+                        (SpatialAxis)(int)between.axis,
+                        between.orientation != null);
                 }
             }
 

@@ -1,9 +1,85 @@
 namespace SceneBuilder.Core.Model
 {
+    // Core-side mirror of the runtime Between.Axis nested enum; order and underlying values MUST
+    // match Between.Axis / BetweenEnums.Members index-for-index.
+    public enum SpatialAxis
+    {
+        X = 0,
+        Y = 1,
+        Z = 2,
+    }
+
     public static class SpatialComponents
     {
         public const string FitSizeTypeName   = "SceneBuilder.Authoring.FitSize";
         public const string SurfaceSnapTypeName = "SceneBuilder.Authoring.SurfaceSnap";
+
+        public const string BetweenTypeName = "SceneBuilder.Authoring.Between";
+
+        public static class BetweenFields
+        {
+            public const string From = "from";
+            public const string To = "to";
+            public const string Fraction = "fraction";
+            public const string Axis = "axis";
+            public const string Orientation = "orientation";
+        }
+
+        /// <summary>The Between.Axis nested enum type FullName (nested-type "+" separator) and member
+        /// names, mirroring the runtime <c>SceneBuilder.Authoring.Between+Axis</c> nested enum
+        /// byte-for-byte. <see cref="Members"/> is index-ordered to match <see cref="SpatialAxis"/>'s
+        /// underlying values.</summary>
+        public static class BetweenEnums
+        {
+            public const string AxisTypeName = "SceneBuilder.Authoring.Between+Axis";
+            public const string X = "X";
+            public const string Y = "Y";
+            public const string Z = "Z";
+            public static readonly string[] Members = { X, Y, Z };
+        }
+
+        /// <summary>THE single owner of which channels a Between drives. World placement
+        /// (oriented==false) drives only the one world-position component the axis names; an
+        /// orientation-following placement (oriented==true) can move all three world-position
+        /// components regardless of which axis it travels along.</summary>
+        public static ChannelMask BetweenDrivenMask(SpatialAxis axis, bool oriented)
+        {
+            if (oriented)
+            {
+                return ChannelMask.PositionX | ChannelMask.PositionY | ChannelMask.PositionZ;
+            }
+
+            switch (axis)
+            {
+                case SpatialAxis.X: return ChannelMask.PositionX;
+                case SpatialAxis.Y: return ChannelMask.PositionY;
+                case SpatialAxis.Z: return ChannelMask.PositionZ;
+                default:
+                    throw new System.ArgumentOutOfRangeException(nameof(axis), axis, null);
+            }
+        }
+
+        /// <summary>The ONE axis&lt;-&gt;<see cref="BetweenEnums"/> member table shared by parse (axis ->
+        /// member) and emit (member -> axis). Never duplicate this mapping elsewhere.</summary>
+        public static string AxisMember(SpatialAxis axis)
+        {
+            return BetweenEnums.Members[(int)axis];
+        }
+
+        public static bool TryAxisFromMember(string member, out SpatialAxis axis)
+        {
+            for (var i = 0; i < BetweenEnums.Members.Length; i++)
+            {
+                if (BetweenEnums.Members[i] == member)
+                {
+                    axis = (SpatialAxis)i;
+                    return true;
+                }
+            }
+
+            axis = default;
+            return false;
+        }
 
         /// <summary>A FitSize always drives the full Scale mask.</summary>
         public const ChannelMask FitSizeMask = ChannelMask.Scale;

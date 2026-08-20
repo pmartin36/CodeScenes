@@ -10,7 +10,15 @@ namespace SceneBuilder.Core.Reconcile
     {
         internal static bool IsSpatial(string typeFullName) =>
             typeFullName == SpatialComponents.FitSizeTypeName
-            || typeFullName == SpatialComponents.SurfaceSnapTypeName;
+            || typeFullName == SpatialComponents.SurfaceSnapTypeName
+            || typeFullName == SpatialComponents.BetweenTypeName;
+
+        // Between.Axis's authoring-form prefix, derived once from BetweenEnums.AxisTypeName's
+        // runtime nested-type spelling ("SceneBuilder.Authoring.Between+Axis" -> "Between.Axis")
+        // rather than a separately hand-typed literal.
+        private static readonly string BetweenAxisAuthoringPrefix = SpatialComponents.BetweenEnums.AxisTypeName
+            .Substring(SpatialComponents.BetweenEnums.AxisTypeName.LastIndexOf('.') + 1)
+            .Replace('+', '.');
 
         internal static string RenderStatement(
             string receiver,
@@ -29,8 +37,46 @@ namespace SceneBuilder.Core.Reconcile
                 return RenderFitSizeArguments(fields, fieldExpressions);
             }
 
+            if (typeFullName == SpatialComponents.BetweenTypeName)
+            {
+                return RenderBetweenArguments(fields, fieldExpressions);
+            }
+
             return string.Join(", ", fields.Select(kv =>
                 $"{RenderArgumentKeyValue(typeFullName, kv.Key, kv.Value, fieldExpressions)}"));
+        }
+
+        // Fixed argument order (from, to, fraction, axis[, alongOrientationOf]) — never the
+        // FieldMap's insertion order. alongOrientationOf renders only when the Orientation field
+        // is present (world case omits it entirely; no "unset" sentinel).
+        private static string RenderBetweenArguments(FieldMap fields, IReadOnlyDictionary<string, string>? fieldExpressions)
+        {
+            var parts = new List<string>
+            {
+                $"from: {RenderFieldValue(SpatialComponents.BetweenFields.From, fields[SpatialComponents.BetweenFields.From], fieldExpressions)}",
+                $"to: {RenderFieldValue(SpatialComponents.BetweenFields.To, fields[SpatialComponents.BetweenFields.To], fieldExpressions)}",
+                $"fraction: {RenderFieldValue(SpatialComponents.BetweenFields.Fraction, fields[SpatialComponents.BetweenFields.Fraction], fieldExpressions)}",
+                $"axis: {RenderBetweenAxis(fields[SpatialComponents.BetweenFields.Axis])}",
+            };
+
+            if (fields.ContainsKey(SpatialComponents.BetweenFields.Orientation))
+            {
+                parts.Add($"alongOrientationOf: {RenderFieldValue(SpatialComponents.BetweenFields.Orientation, fields[SpatialComponents.BetweenFields.Orientation], fieldExpressions)}");
+            }
+
+            return string.Join(", ", parts);
+        }
+
+        // Between.Axis renders in AUTHORING form ("Between.Axis.X"), never the runtime nested-type
+        // FullName ("SceneBuilder.Authoring.Between+Axis.X" — the '+' is not valid C#).
+        private static string RenderBetweenAxis(ValueNode value)
+        {
+            if (value is ValueNode.Enum(_, var members, _) && members.Count == 1)
+            {
+                return $"{BetweenAxisAuthoringPrefix}.{members[0]}";
+            }
+
+            throw new System.NotSupportedException($"Between field 'axis' has an unrenderable value: {value}");
         }
 
         // b3-t1: FitSize's `mode` field discriminates which of `value` (aspect: width/height/depth)
@@ -85,8 +131,12 @@ namespace SceneBuilder.Core.Reconcile
             return $"{key}: {valueExpr}";
         }
 
-        private static string MethodName(string typeFullName) =>
-            typeFullName == SpatialComponents.FitSizeTypeName ? "FitSize" : "SurfaceSnap";
+        private static string MethodName(string typeFullName)
+        {
+            if (typeFullName == SpatialComponents.FitSizeTypeName) return "FitSize";
+            if (typeFullName == SpatialComponents.BetweenTypeName) return "Between";
+            return "SurfaceSnap";
+        }
 
         // Reuses SourceExpr so float/vec formatting is byte-identical to the parser's accepted
         // form (bare `2f`, tuple `(2f, 1f, 0.5f)`) — NOT ValueNodeLiteral's
@@ -129,6 +179,11 @@ namespace SceneBuilder.Core.Reconcile
             if (component.Type.FullName == SpatialComponents.SurfaceSnapTypeName)
             {
                 return 1;
+            }
+
+            if (component.Type.FullName == SpatialComponents.BetweenTypeName)
+            {
+                return 2;
             }
 
             return 0;
