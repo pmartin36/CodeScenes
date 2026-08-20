@@ -142,12 +142,12 @@ namespace SceneBuilder.Authoring
             Vector3 pos = transform.position;
             Transform lastSurface = null;
 
-            if (vertical == Vertical.Down) ResolveAndApplyAxis(bounds, 1, -1, ref pos, ref lastSurface);
-            if (vertical == Vertical.Up) ResolveAndApplyAxis(bounds, 1, 1, ref pos, ref lastSurface);
-            if (horizontal == Horizontal.Left) ResolveAndApplyAxis(bounds, 0, -1, ref pos, ref lastSurface);
-            if (horizontal == Horizontal.Right) ResolveAndApplyAxis(bounds, 0, 1, ref pos, ref lastSurface);
-            if (depth == Depth.Forward) ResolveAndApplyAxis(bounds, 2, 1, ref pos, ref lastSurface);
-            if (depth == Depth.Back) ResolveAndApplyAxis(bounds, 2, -1, ref pos, ref lastSurface);
+            if (vertical == Vertical.Down) ResolveAndApplyAxis(r, bounds, 1, -1, ref pos, ref lastSurface);
+            if (vertical == Vertical.Up) ResolveAndApplyAxis(r, bounds, 1, 1, ref pos, ref lastSurface);
+            if (horizontal == Horizontal.Left) ResolveAndApplyAxis(r, bounds, 0, -1, ref pos, ref lastSurface);
+            if (horizontal == Horizontal.Right) ResolveAndApplyAxis(r, bounds, 0, 1, ref pos, ref lastSurface);
+            if (depth == Depth.Forward) ResolveAndApplyAxis(r, bounds, 2, 1, ref pos, ref lastSurface);
+            if (depth == Depth.Back) ResolveAndApplyAxis(r, bounds, 2, -1, ref pos, ref lastSurface);
 
             transform.position = pos;
             _lastWritten = pos;
@@ -159,9 +159,10 @@ namespace SceneBuilder.Authoring
         /// <summary>Resolves the surface for one axis/direction and applies the flush delta to
         /// <paramref name="pos"/> on that axis only (the whole world AABB translates by it, so the
         /// face lands exactly on the surface regardless of pivot). No move if no surface resolves.</summary>
-        private void ResolveAndApplyAxis(Bounds bounds, int axis, int dirSign, ref Vector3 pos, ref Transform lastSurface)
+        private void ResolveAndApplyAxis(Renderer r, Bounds bounds, int axis, int dirSign, ref Vector3 pos, ref Transform lastSurface)
         {
-            float faceCoord = dirSign < 0 ? bounds.min[axis] : bounds.max[axis];
+            float half = ProjectedExtent.HalfExtentAlong(r, AxisDir(axis));
+            float faceCoord = bounds.center[axis] + dirSign * half;
             float? surface = null;
             Transform surfaceTransform = null;
 
@@ -171,7 +172,8 @@ namespace SceneBuilder.Authoring
                 if (targetRenderer != null)
                 {
                     Bounds tb = targetRenderer.bounds;
-                    surface = dirSign < 0 ? tb.max[axis] : tb.min[axis];
+                    float tHalf = ProjectedExtent.HalfExtentAlong(targetRenderer, AxisDir(axis));
+                    surface = tb.center[axis] - dirSign * tHalf;
                     surfaceTransform = target;
                 }
             }
@@ -255,6 +257,8 @@ namespace SceneBuilder.Authoring
 
             return best;
         }
+
+        private static Vector3 AxisDir(int axis) => axis == 0 ? Vector3.right : axis == 1 ? Vector3.up : Vector3.forward;
 
         /// <summary>No non-self ray hit and no explicit target: scan every <see cref="Renderer"/> in the
         /// scene (excluding self/descendants), prefer candidates on the correct side of the face whose

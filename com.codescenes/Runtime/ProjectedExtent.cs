@@ -14,12 +14,18 @@ namespace SceneBuilder.Authoring
         public static float HalfExtentAlong(Renderer r, Vector3 d)
         {
             Transform t = r.transform;
-            Bounds lb = r.localBounds;
-            Vector3 ls = t.lossyScale;
+            return HalfExtentAlong(r.localBounds, t.rotation, t.lossyScale, d);
+        }
 
-            Vector3 axisX = t.right * (lb.extents.x * ls.x);
-            Vector3 axisY = t.up * (lb.extents.y * ls.y);
-            Vector3 axisZ = t.forward * (lb.extents.z * ls.z);
+        /// <summary>Half-extent of a mesh's <paramref name="localBounds"/> — under an explicit
+        /// <paramref name="rotation"/>/<paramref name="scale"/> rather than a live <see cref="Renderer"/> —
+        /// projected onto the unit world direction <paramref name="d"/>. Lets a caller (e.g. FitSize's
+        /// mesh-bounds solve) measure at unit localScale without dividing by the object's own scale.</summary>
+        public static float HalfExtentAlong(Bounds localBounds, Quaternion rotation, Vector3 scale, Vector3 d)
+        {
+            Vector3 axisX = (rotation * Vector3.right) * (localBounds.extents.x * scale.x);
+            Vector3 axisY = (rotation * Vector3.up) * (localBounds.extents.y * scale.y);
+            Vector3 axisZ = (rotation * Vector3.forward) * (localBounds.extents.z * scale.z);
 
             return Mathf.Abs(Vector3.Dot(axisX, d))
                  + Mathf.Abs(Vector3.Dot(axisY, d))

@@ -116,7 +116,7 @@ namespace SceneBuilder.Authoring
             Vector3 newScale = transform.localScale;
             if (drivingAxis >= 0)
             {
-                float denom = local[drivingAxis] * pls[drivingAxis];
+                float denom = 2f * ProjectedExtent.HalfExtentAlong(mf.sharedMesh.bounds, transform.rotation, pls, AxisDir(drivingAxis));
                 if (Mathf.Approximately(denom, 0f))
                 {
                     WarnDegenerate();
@@ -131,7 +131,7 @@ namespace SceneBuilder.Authoring
                 bool anyDegenerate = false;
                 for (int i = 0; i < 3; i++)
                 {
-                    float denom = local[i] * pls[i];
+                    float denom = 2f * ProjectedExtent.HalfExtentAlong(mf.sharedMesh.bounds, transform.rotation, pls, AxisDir(i));
                     if (Mathf.Approximately(denom, 0f))
                     {
                         anyDegenerate = true;
@@ -159,6 +159,8 @@ namespace SceneBuilder.Authoring
                 Mode.Depth => 2,
                 _ => -1,
             };
+
+        private static Vector3 AxisDir(int axis) => axis == 0 ? Vector3.right : axis == 1 ? Vector3.up : Vector3.forward;
 
         private void WarnDegenerate()
         {
