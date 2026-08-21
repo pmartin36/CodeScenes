@@ -16,7 +16,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRIVATE_REPO="git@github.com:pmartin36/private-build-scripts.git"
 PRIVATE_DIR="$REPO_ROOT/build/private-build-scripts"
-SCRIPT="$PRIVATE_DIR/pack-assetstore.sh"
+SCRIPT="$PRIVATE_DIR/codescenes/pack-assetstore.sh"
 OUT="$REPO_ROOT/build/assetstore-out"
 
 if [[ ! -f "$SCRIPT" ]]; then
