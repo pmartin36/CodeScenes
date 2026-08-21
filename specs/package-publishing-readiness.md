@@ -92,19 +92,23 @@ the design.
   allowed, and only the licensing assembly registers a restrictive verdict, so an excluded-licensing
   build is fully functional.
 
-**The gap** — no tooling produces the two artifacts, and the `defineConstraint` alone does NOT protect
-a buyer: it only excludes licensing when the project *doing the compile* defines
-`CODESCENES_ASSET_STORE`, and an Asset Store buyer's project will not. Shipping the same files to the
-Asset Store would compile the licensing assembly on their machine and demand a key they were never
-issued, exactly the failure spec 34 warns about.
+**Why the `defineConstraint` alone is not enough** — it only excludes licensing when the project
+*doing the compile* defines `CODESCENES_ASSET_STORE`, and an Asset Store buyer's project will not.
+Shipping the same files to the Asset Store would compile the licensing assembly on their machine and
+demand a key they were never issued, exactly the failure spec 34 warns about. So the Asset Store
+variant must **physically remove `com.codescenes/Editor/Licensing/`** at pack time.
 
-**Recommended method.** Produce the Asset Store variant by **physically removing
-`com.codescenes/Editor/Licensing/`** (the folder and its `.meta`) from the packed copy, so licensing
-cannot compile regardless of the buyer's defines. The define + `defineConstraint` remain the dev-time
-way to compile and test the Asset-Store configuration locally (set `CODESCENES_ASSET_STORE` in a test
-project, confirm licensing drops out). This wants a small repeatable pack step/script (two outputs:
-Gumroad = licensing included, Asset Store = licensing stripped), tied to the distribution-format
-decision (#4 above).
+**BUILT.** `unity-build.sh` at the monorepo root produces the keyless build: `./unity-build.sh`
+(add `--verify` for a headless compile check). It is a thin public bootstrap that shallow-clones the
+private repo `pmartin36/private-build-scripts` over SSH (keeping the exact strip recipe out of the
+public repo) and runs its `pack-assetstore.sh`, which copies `com.codescenes`, deletes
+`Editor/Licensing/`, guards that the main assembly does not reference the licensing namespace and
+that the `CodeScenes/License` menu is gone, and (with `--verify`) headlessly confirms the result
+compiles with no `SceneBuilder.Licensing.Editor` assembly. Output lands in gitignored
+`build/assetstore-out/com.codescenes`. Validated end to end (real clone -> strip -> keyless compile).
+The `CODESCENES_ASSET_STORE` define + `defineConstraint` remain the dev-time way to test the
+configuration in place. **Remaining: the Asset Store submission itself** (upload that output through
+Unity's publisher tools; their review takes time).
 
 **Accept when:** the Asset Store artifact exposes no `CodeScenes/License` menu item, makes no request
 to the backend, shows no activation/trial UI, and every feature works with `LicenseGate.Allowed`
