@@ -19,10 +19,11 @@ namespace SceneBuilder.Analyzers.Tests
             ["SB1106"] = DiagnosticSeverity.Info,
             ["SB1201"] = DiagnosticSeverity.Error,
             ["SB1202"] = DiagnosticSeverity.Warning,
+            ["SB1203"] = DiagnosticSeverity.Warning,
         };
 
         [Fact]
-        public void Registry_DeclaresAllElevenSB1xxx_WithSpecSeverities()
+        public void Registry_DeclaresAllTwelveSB1xxx_WithSpecSeverities()
         {
             Assert.Equal(ExpectedSeverities.Count, DiagnosticDescriptors.All.Length);
 

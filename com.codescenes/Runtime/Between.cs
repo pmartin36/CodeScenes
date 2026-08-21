@@ -22,9 +22,10 @@ namespace SceneBuilder.Authoring
     // MonoBehaviour body) stays excluded as before.
     [ExecuteAlways]
     [DefaultExecutionOrder(-80)] // after SurfaceSnap(-90): places relative to already-snapped anchors
-    public sealed partial class Between : MonoBehaviour
+    public sealed partial class Between : MonoBehaviour, IPositionDriver
     {
         private const float Epsilon = 1e-4f;
+        private const float AxisEps = 1e-4f;
 
         public Transform from;
         public Transform to;
@@ -39,6 +40,11 @@ namespace SceneBuilder.Authoring
         private bool _needsEval = true;
         private bool _loggedError;
         private bool _loggedWarning;
+        private bool _loggedConflict;
+
+        // Explicit impl: no new public/authoring member, so no DocGen/reflection-contract change.
+        AxisFlags IPositionDriver.ClaimedWorldAxes() => ComputeClaim();
+        int IPositionDriver.PriorityOrder => -80;
 
         private bool HasWrittenBefore => !float.IsNaN(_lastWritten.x);
 
@@ -72,6 +78,7 @@ namespace SceneBuilder.Authoring
         {
             _loggedError = false;
             _loggedWarning = false;
+            _loggedConflict = false;
             _needsEval = true;
             Evaluate();
         }
@@ -132,6 +139,23 @@ namespace SceneBuilder.Authoring
             float ps0 = fromInnerFace + s * es;
             float ps1 = toInnerFace - s * es;
 
+            // Between moves self along a single vector `d`; if it lost ANY world axis it claimed to a
+            // higher-priority sibling driver it cannot cleanly place, so it fully defers -- no forward
+            // write AND no back-solve, so the sibling's write to the shared axis is never misread as a
+            // user drag and never corrupts `fraction`.
+            PositionAuthority.ResolveOwned(this, this, out bool yielded);
+            if (yielded)
+            {
+                if (!_loggedConflict)
+                {
+                    Debug.LogWarning($"[CodeScenes] Between on '{name}' yields its position axis to a higher-priority driver on the same object; not placing.", this);
+                    _loggedConflict = true;
+                }
+                _needsEval = false;
+                transform.hasChanged = false;
+                return;
+            }
+
             if (HasWrittenBefore
                 && (transform.position - _lastWritten).sqrMagnitude > Epsilon * Epsilon)
             {
@@ -169,6 +193,33 @@ namespace SceneBuilder.Authoring
             _lastWritten = transform.position;
             _needsEval = false;
             transform.hasChanged = false;
+        }
+
+        /// <summary>The world axes this Between will write on its next Evaluate: a world placement
+        /// (no <see cref="orientation"/>) claims only the single named <see cref="axis"/>; an
+        /// orientation-following placement claims every world axis its tilt-carrying direction
+        /// actually touches (<see cref="AxisDirection"/>), which can differ from the named axis once
+        /// tilted (e.g. a yawed frame's local X reaching into world X and Z).</summary>
+        private AxisFlags ComputeClaim()
+        {
+            if (from == null || to == null) return AxisFlags.None;
+
+            if (orientation == null)
+            {
+                switch (axis)
+                {
+                    case Axis.X: return AxisFlags.X;
+                    case Axis.Y: return AxisFlags.Y;
+                    default: return AxisFlags.Z;
+                }
+            }
+
+            Vector3 d = AxisDirection();
+            AxisFlags claim = AxisFlags.None;
+            if (Mathf.Abs(d.x) > AxisEps) claim |= AxisFlags.X;
+            if (Mathf.Abs(d.y) > AxisEps) claim |= AxisFlags.Y;
+            if (Mathf.Abs(d.z) > AxisEps) claim |= AxisFlags.Z;
+            return claim;
         }
 
         /// <summary>The unit world direction the configured <see cref="axis"/> names: a world axis by

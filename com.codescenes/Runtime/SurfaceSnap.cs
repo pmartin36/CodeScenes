@@ -20,7 +20,7 @@ namespace SceneBuilder.Authoring
     // hits the right field.
     [ExecuteAlways]
     [DefaultExecutionOrder(-90)] // after FitSize(-100): snaps the post-resize size
-    public sealed class SurfaceSnap : MonoBehaviour
+    public sealed class SurfaceSnap : MonoBehaviour, IPositionDriver
     {
         private const float RayMargin = 0.05f;
         private const float RayMaxDistance = 10000f;
@@ -47,6 +47,18 @@ namespace SceneBuilder.Authoring
         public float captureThreshold = 2.5f;
 
         private bool _loggedError;
+        private bool _loggedConflict;
+
+        // Explicit impl: no new public/authoring member, so no DocGen/reflection-contract change.
+        AxisFlags IPositionDriver.ClaimedWorldAxes()
+        {
+            AxisFlags claim = AxisFlags.None;
+            if (horizontal != Horizontal.None) claim |= AxisFlags.X;
+            if (vertical != Vertical.None) claim |= AxisFlags.Y;
+            if (depth != Depth.None) claim |= AxisFlags.Z;
+            return claim;
+        }
+        int IPositionDriver.PriorityOrder => -90;
 
         /// <summary>The last surface this component snapped against — used only to gate recompute
         /// (re-snap when the surface itself moves) without a raycast every idle frame.</summary>
@@ -86,6 +98,7 @@ namespace SceneBuilder.Authoring
         private void OnValidate()
         {
             _loggedError = false;
+            _loggedConflict = false;
             _needsSnap = true;
             Evaluate();
         }
@@ -109,9 +122,18 @@ namespace SceneBuilder.Authoring
                 return;
             }
 
-            bool axis0Snapped = horizontal != Horizontal.None;
-            bool axis1Snapped = vertical != Vertical.None;
-            bool axis2Snapped = depth != Depth.None;
+            // Resolve which claimed axes are actually ours before the drag-detection math below, so a
+            // yielded axis is neither counted toward the drag/detach distance nor written.
+            var owned = PositionAuthority.ResolveOwned(this, this, out bool yielded);
+            if (yielded && !_loggedConflict)
+            {
+                Debug.LogWarning($"[CodeScenes] SurfaceSnap on '{name}' yields a contested axis to a higher-priority driver on the same object.", this);
+                _loggedConflict = true;
+            }
+
+            bool axis0Snapped = horizontal != Horizontal.None && (owned & AxisFlags.X) != 0;
+            bool axis1Snapped = vertical != Vertical.None && (owned & AxisFlags.Y) != 0;
+            bool axis2Snapped = depth != Depth.None && (owned & AxisFlags.Z) != 0;
 
             if (HasWrittenBefore)
             {
@@ -142,12 +164,12 @@ namespace SceneBuilder.Authoring
             Vector3 pos = transform.position;
             Transform lastSurface = null;
 
-            if (vertical == Vertical.Down) ResolveAndApplyAxis(r, bounds, 1, -1, ref pos, ref lastSurface);
-            if (vertical == Vertical.Up) ResolveAndApplyAxis(r, bounds, 1, 1, ref pos, ref lastSurface);
-            if (horizontal == Horizontal.Left) ResolveAndApplyAxis(r, bounds, 0, -1, ref pos, ref lastSurface);
-            if (horizontal == Horizontal.Right) ResolveAndApplyAxis(r, bounds, 0, 1, ref pos, ref lastSurface);
-            if (depth == Depth.Forward) ResolveAndApplyAxis(r, bounds, 2, 1, ref pos, ref lastSurface);
-            if (depth == Depth.Back) ResolveAndApplyAxis(r, bounds, 2, -1, ref pos, ref lastSurface);
+            if (vertical == Vertical.Down && axis1Snapped) ResolveAndApplyAxis(r, bounds, 1, -1, ref pos, ref lastSurface);
+            if (vertical == Vertical.Up && axis1Snapped) ResolveAndApplyAxis(r, bounds, 1, 1, ref pos, ref lastSurface);
+            if (horizontal == Horizontal.Left && axis0Snapped) ResolveAndApplyAxis(r, bounds, 0, -1, ref pos, ref lastSurface);
+            if (horizontal == Horizontal.Right && axis0Snapped) ResolveAndApplyAxis(r, bounds, 0, 1, ref pos, ref lastSurface);
+            if (depth == Depth.Forward && axis2Snapped) ResolveAndApplyAxis(r, bounds, 2, 1, ref pos, ref lastSurface);
+            if (depth == Depth.Back && axis2Snapped) ResolveAndApplyAxis(r, bounds, 2, -1, ref pos, ref lastSurface);
 
             transform.position = pos;
             _lastWritten = pos;

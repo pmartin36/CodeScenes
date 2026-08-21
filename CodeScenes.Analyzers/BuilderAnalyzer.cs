@@ -22,6 +22,7 @@ namespace CodeScenes.Analyzers
             context.RegisterSyntaxNodeAction(FlatShapeAnalysis.AnalyzeCompilationUnit, SyntaxKind.CompilationUnit);
             context.RegisterSyntaxNodeAction(NudgeAnalysis.AnalyzeCompilationUnit, SyntaxKind.CompilationUnit);
             context.RegisterSyntaxNodeAction(UnityEventAnalysis.AnalyzeCompilationUnit, SyntaxKind.CompilationUnit);
+            context.RegisterSyntaxNodeAction(SpatialAuthorityAnalysis.AnalyzeCompilationUnit, SyntaxKind.CompilationUnit);
         }
     }
 }

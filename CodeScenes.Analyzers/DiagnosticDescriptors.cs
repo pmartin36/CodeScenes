@@ -13,6 +13,7 @@ namespace CodeScenes.Analyzers
         private const string ShapeCategory = "CodeScenes.Shape";
         private const string NudgeCategory = "CodeScenes.Nudge";
         private const string UnityEventCategory = "CodeScenes.UnityEvent";
+        private const string SpatialCategory = "CodeScenes.Spatial";
 
         // SB100x flat-shape (Error) — MessageFormat "{0}" so b2-t2 passes ShapeViolation.Message verbatim.
         public static readonly DiagnosticDescriptor SB1001 = new(
@@ -105,10 +106,19 @@ namespace CodeScenes.Analyzers
             DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
 
+        // SB1203 same-axis position-driver conflict (Warning — runtime still arbitrates deterministically).
+        public static readonly DiagnosticDescriptor SB1203 = new(
+            "SB1203",
+            "Two position drivers claim the same axis",
+            "Two position drivers on this node claim the same axis; they will fight at runtime. Give them different axes, share one orientation reference, or remove one.",
+            SpatialCategory,
+            DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
         public static readonly ImmutableArray<DiagnosticDescriptor> All = ImmutableArray.Create(
             SB1001, SB1002, SB1003,
             SB1101, SB1102, SB1103, SB1104, SB1105, SB1106,
-            SB1201, SB1202);
+            SB1201, SB1202, SB1203);
 
         public static readonly ImmutableDictionary<string, DiagnosticDescriptor> ById =
             All.ToImmutableDictionary(d => d.Id);
