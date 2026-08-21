@@ -449,3 +449,30 @@ seat bound in prod Firestore -> issued token verifies against the editor's embed
 
 Known follow-ups (not blockers): the Windows/macOS legs of the RSA and machine-id spikes, an optional
 "Deactivate this machine" button on the Licensed view, and a Cloud budget alert on the backend.
+
+## 45 - Between placement + frame-aware spatial kernel
+
+New editor-time `Between` component: `node.Between(from:, to:, fraction:, axis:, alongOrientationOf:)`
+places an object at `fraction` (0..1, unclamped) along one named axis between two anchors, flush-bumping
+at 0 and 1, moving only along that axis so the perpendicular offset between anchors (e.g. a height
+difference) is ignored. Axes are world by default; `alongOrientationOf` supplies a rotated reference for
+tilted content. It is hierarchy-independent (anchors contribute world position/bounds only) and
+back-solves `fraction` when the object is dragged along the axis. The world-AABB face math is replaced by
+a shared `ProjectedExtent` kernel that `SurfaceSnap` and `FitSize` now use too (a regression test asserts
+untilted scenes are byte-identical). A second position-driver now exists, so `PositionAuthority` adds
+per-axis conflict handling: a compile-time analyzer diagnostic plus deterministic runtime arbitration
+that yields the lower-priority driver with one warning. `RotationX/Y/Z` channels are reserved (not used)
+for a future `OrientToSurface`; align-to-normal is explicitly out of scope here.
+
+Built through the tdd-pipeline (commits `0d9ef00`, `54e68bc`, `833e46f`). Gate
+`passed=947 failed=0 skipped=0` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-between-1.log`): all six
+scenarios observed in a running editor against real `transform.position`/bounds — flush at
+`fraction` 0/0.5/1, overshoot past both anchors at -0.25/1.25, Y untouched when anchors differ in height,
+placement following a 45deg-yawed root under `alongOrientationOf`, and the same-axis `SurfaceSnap`+`Between`
+conflict emitting exactly one warning while Between defers. The key case: dragging a placed object to
+`(7,3,2)` back-solved `fraction` 0.5 -> 0.75 from the along-axis component while the perpendicular Y/Z
+stayed exactly as dragged, idempotent on re-eval. The runtime-field back-solve was observed live; the
+source-file leg of sync-back is covered by the `RoundTripBetweenSync` EditMode suite. Console clean of
+product errors.
