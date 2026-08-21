@@ -72,6 +72,6 @@ Sections 4, 6, 7, and 9 survive termination.
 
 This Agreement is the entire agreement between you and Licensor regarding the Software and supersedes
 any prior agreement. If any provision is held unenforceable, the remaining provisions remain in
-effect. Governing law and venue: [JURISDICTION TO BE SET BY LICENSOR].
+effect.
 
 Contact: https://codescenes.dev
