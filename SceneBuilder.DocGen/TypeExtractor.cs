@@ -13,10 +13,14 @@ namespace SceneBuilder.DocGen
     {
         public static List<ApiType> FromDirectory(string directory, string repoRoot)
         {
-            var types = new List<ApiType>();
-
             var files = Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories)
                 .OrderBy(f => f, StringComparer.Ordinal);
+
+            // A partial type is declared across several files; each yields one ApiType that we then
+            // merge into a single entry keyed by Id (namespace-flat name + generic arity). Insertion
+            // order is preserved so the emitted list stays file-then-declaration ordered.
+            var byId = new Dictionary<string, List<ApiType>>();
+            var order = new List<string>();
 
             foreach (var file in files)
             {
@@ -27,11 +31,73 @@ namespace SceneBuilder.DocGen
                 {
                     if (declaration.Parent is BaseTypeDeclarationSyntax) continue;
                     if (!IsPublic(declaration, insideInterface: false)) continue;
-                    types.Add(ReadType(declaration, relative));
+
+                    var part = ReadType(declaration, relative);
+                    if (!byId.TryGetValue(part.Id, out var parts))
+                    {
+                        parts = new List<ApiType>();
+                        byId[part.Id] = parts;
+                        order.Add(part.Id);
+                    }
+
+                    parts.Add(part);
                 }
             }
 
-            return types;
+            return order.Select(id =>
+            {
+                var parts = byId[id];
+                return parts.Count == 1 ? parts[0] : MergePartials(parts);
+            }).ToList();
+        }
+
+        /// <summary>
+        /// Folds the several declarations of one partial type into a single <see cref="ApiType"/>:
+        /// members re-group across the parts by (Name, Kind) so overloads still collapse, nested
+        /// types and enum values union, and the richest metadata wins — the base list and summary
+        /// from whichever part carries one.
+        /// </summary>
+        private static ApiType MergePartials(List<ApiType> parts)
+        {
+            // The base-list-bearing declaration is the "body" file; take its shell metadata.
+            var primary = parts.FirstOrDefault(p => p.BaseType is not null) ?? parts[0];
+
+            var merged = new ApiType
+            {
+                Id = primary.Id,
+                Name = primary.Name,
+                DisplayName = primary.DisplayName,
+                Kind = primary.Kind,
+                Signature = primary.Signature,
+                BaseType = primary.BaseType,
+                Category = parts.Select(p => p.Category).FirstOrDefault(c => c is not null),
+                SourcePath = primary.SourcePath,
+                TypeParams = primary.TypeParams,
+            };
+
+            merged.Summary.AddRange((parts.FirstOrDefault(p => p.Summary.Count > 0) ?? primary).Summary);
+            merged.Remarks.AddRange((parts.FirstOrDefault(p => p.Remarks.Count > 0) ?? primary).Remarks);
+
+            foreach (var group in parts.SelectMany(p => p.Members).GroupBy(m => (m.Name, m.Kind)))
+            {
+                var first = group.First();
+                var entry = new ApiMember
+                {
+                    Name = first.Name,
+                    Kind = first.Kind,
+                    Id = first.Id,
+                    IsStatic = group.All(m => m.IsStatic),
+                };
+                foreach (var member in group) entry.Overloads.AddRange(member.Overloads);
+                var withSummary = group.FirstOrDefault(m => m.Summary.Count > 0);
+                if (withSummary is not null) entry.Summary.AddRange(withSummary.Summary);
+                merged.Members.Add(entry);
+            }
+
+            merged.NestedTypes.AddRange(parts.SelectMany(p => p.NestedTypes));
+            merged.EnumValues.AddRange(parts.SelectMany(p => p.EnumValues));
+
+            return merged;
         }
 
         private static ApiType ReadType(BaseTypeDeclarationSyntax declaration, string sourcePath)
@@ -50,6 +116,7 @@ namespace SceneBuilder.DocGen
                 Kind = KindOf(declaration),
                 Signature = TypeSignature(declaration),
                 BaseType = declaration.BaseList?.Types.FirstOrDefault()?.Type.ToString(),
+                Category = CategoryOf(declaration),
                 SourcePath = sourcePath,
                 TypeParams = typeParams,
             };
@@ -250,6 +317,21 @@ namespace SceneBuilder.DocGen
             return !member.Modifiers.Any(SyntaxKind.PrivateKeyword)
                 && !member.Modifiers.Any(SyntaxKind.ProtectedKeyword)
                 && !member.Modifiers.Any(SyntaxKind.InternalKeyword);
+        }
+
+        /// <summary>
+        /// <c>"component"</c> when the declaration's base list names <c>MonoBehaviour</c>; null
+        /// otherwise. Syntax match on the base-list text, which is correct here since DocGen never
+        /// binds symbols. A component is the only category we tag; everything else stays uncategorised.
+        /// </summary>
+        private static string? CategoryOf(BaseTypeDeclarationSyntax declaration)
+        {
+            var derivesFromMonoBehaviour = declaration.BaseList?.Types
+                .Select(t => t.Type.ToString())
+                .Any(text => text == "MonoBehaviour" || text.EndsWith(".MonoBehaviour", StringComparison.Ordinal))
+                ?? false;
+
+            return derivesFromMonoBehaviour ? "component" : null;
         }
 
         private static string KindOf(BaseTypeDeclarationSyntax declaration) => declaration switch

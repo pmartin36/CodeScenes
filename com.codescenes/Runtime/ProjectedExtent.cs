@@ -7,7 +7,7 @@ namespace SceneBuilder.Authoring
     /// arbitrary world unit direction, accounting for the object's own rotation and scale. Degenerates
     /// to the world-AABB face half-extent for a world axis on an unrotated object.
     /// </summary>
-    public static class ProjectedExtent
+    internal static class ProjectedExtent
     {
         /// <summary>Half-extent of <paramref name="r"/>'s local bounds projected onto the unit world
         /// direction <paramref name="d"/>.</summary>

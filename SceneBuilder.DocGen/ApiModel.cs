@@ -20,6 +20,10 @@ namespace SceneBuilder.DocGen
         public string Kind { get; set; } = "";
         public string Signature { get; set; } = "";
         public string? BaseType { get; set; }
+
+        /// <summary><c>"component"</c> when the type derives from <c>MonoBehaviour</c>; absent otherwise.</summary>
+        public string? Category { get; set; }
+
         public string SourcePath { get; set; } = "";
         public List<DocNode> Summary { get; set; } = new();
         public List<DocNode> Remarks { get; set; } = new();
