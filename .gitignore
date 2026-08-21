@@ -45,3 +45,6 @@ unity-gate/ProjectSettings/SceneTemplateSettings.json
 # ---- OS ----
 .DS_Store
 Thumbs.db
+
+# ---- Asset Store build tooling: fetched private script + keyless build output (never committed) ----
+/build/
