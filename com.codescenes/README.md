@@ -20,6 +20,18 @@ Installing gives you a 14-day free trial. After that, continued use needs a lice
 Buy a key at https://codescenes.dev, then in Unity open **CodeScenes > License**, paste the key, and
 click **Activate**. One key covers up to three machines; manage them from the same window.
 
+## Use with AI
+
+CodeScenes ships a skill that teaches an AI coding agent how to author your scenes. To use it with
+Claude Code, copy the skill into your project:
+
+```
+cp -r Packages/com.codescenes/Documentation~/codescenes-authoring .claude/skills/
+```
+
+The full authoring API reference the skill draws on is at
+`Packages/com.codescenes/Documentation~/authoring-api.md`.
+
 ## Requirements
 
 - Unity 6000.0 or newer.
