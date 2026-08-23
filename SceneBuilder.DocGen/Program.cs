@@ -3,9 +3,10 @@ using System.Text.Json.Serialization;
 using SceneBuilder.DocGen;
 
 var outPath = ArgValue("--out");
-if (outPath is null)
+var mdPath = ArgValue("--md");
+if (outPath is null && mdPath is null)
 {
-    Console.Error.WriteLine("usage: dotnet run --project SceneBuilder.DocGen -- --out <path/to/api.json>");
+    Console.Error.WriteLine("usage: dotnet run --project SceneBuilder.DocGen -- (--out <api.json> | --md <api.md>)");
     Console.Error.WriteLine("       [--runtime <dir>] [--descriptors <file>]");
     return 2;
 }
@@ -45,14 +46,28 @@ var options = new JsonSerializerOptions
     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
 };
 
-var json = JsonSerializer.Serialize(document, options);
-var full = Path.GetFullPath(outPath);
-Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-File.WriteAllText(full, json + "\n");
-
 var memberCount = AllTypes(document.Types).Sum(t => t.Members.Count);
-Console.WriteLine(
-    $"{document.Types.Count} types, {memberCount} members, {document.Diagnostics.Count} diagnostics -> {full}");
+
+if (outPath is not null)
+{
+    var json = JsonSerializer.Serialize(document, options);
+    var full = Path.GetFullPath(outPath);
+    Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+    File.WriteAllText(full, json + "\n");
+    Console.WriteLine(
+        $"{document.Types.Count} types, {memberCount} members, {document.Diagnostics.Count} diagnostics -> {full}");
+}
+
+if (mdPath is not null)
+{
+    var md = Markdown.Render(document);
+    var full = Path.GetFullPath(mdPath);
+    Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+    File.WriteAllText(full, md);
+    Console.WriteLine(
+        $"{document.Types.Count} types, {memberCount} members, {document.Diagnostics.Count} diagnostics -> {full}");
+}
+
 return 0;
 
 static IEnumerable<ApiType> AllTypes(IEnumerable<ApiType> types)
