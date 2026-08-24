@@ -219,3 +219,14 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   under a field's old FormerlySerializedAs name will not resolve. Not in spec 47's Accept-when, so it
   did not affect the b1-t1 deliverable; flagged so the claimed capability is not assumed to ship.
   OWNER: unassigned. FOUND-BY: typed-selector-real-serialized-names.
+
+- SEVERITY low — EditMode gate is not robust to the Linux kernel "Unrecognized thread niceness
+  after calling setpriority. Target niceness is -6 and actual niceness is 6" [Error] log. It is
+  emitted by the OS during EditorSceneManager.NewScene and Unity's UnityLogCheckDelegatingCommand
+  treats the unexpected [Error] as an unhandled-log failure, red-flagging whichever unrelated test
+  happens to trigger it (this run: RoundTripBuiltinRefEmittedCodeTests.
+  SceneToCode_FirstBuiltinRefSyncedIntoFileWithNoAssetCall_InjectsAssetRefsUsingAndCompiles,
+  RoundTripBuiltinRefEmittedCodeTests.cs:33). It is OS noise, not product behavior, and lands on a
+  random test each run. Fix direction: globally LogAssert.Expect / ignore this specific setpriority
+  niceness line in the EditMode test harness setup so it cannot fail an unrelated test. OWNER:
+  unassigned. FOUND-BY: requirecomponent-preserved (b1-t1 validation).

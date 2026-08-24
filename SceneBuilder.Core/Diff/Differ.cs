@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Identity;
@@ -13,7 +14,9 @@ namespace SceneBuilder.Core.Diff
 
         private static readonly Dictionary<string, FieldMap> EmptyTypeDefaults = new();
 
-        public static ChangeSet Diff(SceneModel desired, SceneSnapshot actual, IdentityMap identityMap)
+        // requiredTypeNames: for a TypeRef, the FullNames of components it requires (directly or
+        // transitively). Accepted here; EmitComponentEdits is the guard's single removal-decision site.
+        public static ChangeSet Diff(SceneModel desired, SceneSnapshot actual, IdentityMap identityMap, Func<TypeRef, ISet<string>>? requiredTypeNames = null)
         {
             var logicalIdToGlobalObjectId = IdentityNodeIndex.LogicalIdToGlobalObjectId(identityMap);
 
@@ -40,7 +43,7 @@ namespace SceneBuilder.Core.Diff
             var conflicts = new List<Conflict>();
             var fieldGate = new ExcludedFieldGate(actual.FieldExclusions, conflicts);
 
-            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, fieldGate, ops, diagnostics, conflicts);
+            WalkDesired(desired.Roots, null, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, fieldGate, requiredTypeNames, ops, diagnostics, conflicts);
 
             foreach (var kv in snapshotByGoid)
             {
@@ -84,6 +87,7 @@ namespace SceneBuilder.Core.Diff
             IdentityMap identityMap,
             Dictionary<string, FieldMap> typeDefaults,
             ExcludedFieldGate fieldGate,
+            Func<TypeRef, ISet<string>>? requiredTypeNames,
             List<ChangeOp> ops,
             List<Diagnostic> diagnostics,
             List<Conflict> conflicts)
@@ -102,7 +106,7 @@ namespace SceneBuilder.Core.Diff
                     && snapshotByGoid.TryGetValue(goid, out var entry))
                 {
                     visitedGoids.Add(goid);
-                    EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, typeDefaults, fieldGate, ops);
+                    EmitEdits(node, parentLogicalId, matchedIndex, logicalIdToGlobalObjectId, entry, identityMap, typeDefaults, fieldGate, requiredTypeNames, ops);
 
                     // Matched PrefabInstanceNode ⇒ diff its structured override collections
                     // (Overrides/AddedComponents/RemovedComponents) against the matched snapshot's.
@@ -134,10 +138,10 @@ namespace SceneBuilder.Core.Diff
                 }
                 else
                 {
-                    EmitCreate(node, parentLogicalId, identityMap, fieldGate, ops);
+                    EmitCreate(node, parentLogicalId, identityMap, fieldGate, requiredTypeNames, ops);
                 }
 
-                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, fieldGate, ops, diagnostics, conflicts);
+                WalkDesired(node.Children, node.LogicalId, logicalIdToGlobalObjectId, snapshotByGoid, visitedGoids, identityMap, typeDefaults, fieldGate, requiredTypeNames, ops, diagnostics, conflicts);
             }
         }
 
@@ -150,6 +154,7 @@ namespace SceneBuilder.Core.Diff
             IdentityMap identityMap,
             Dictionary<string, FieldMap> typeDefaults,
             ExcludedFieldGate fieldGate,
+            Func<TypeRef, ISet<string>>? requiredTypeNames,
             List<ChangeOp> ops)
         {
             var snapshot = entry.Node;
@@ -195,7 +200,7 @@ namespace SceneBuilder.Core.Diff
                 ops.Add(new Reorder { LogicalId = node.LogicalId, SiblingIndex = siblingIndex });
             }
 
-            EmitComponentEdits(node, snapshot, identityMap, typeDefaults, fieldGate, ops);
+            EmitComponentEdits(node, snapshot, identityMap, typeDefaults, fieldGate, requiredTypeNames, ops);
         }
 
         // Unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
@@ -248,7 +253,7 @@ namespace SceneBuilder.Core.Diff
         // component's own LogicalId. Transform is excluded from the actual side (never authored,
         // never removed/reordered). Removed-component identity is resolved from the IdentityMap's
         // Component entries (managed gate), never synthesized.
-        private static void EmitComponentEdits(GameObjectNode node, SnapshotNode snapshot, IdentityMap identityMap, Dictionary<string, FieldMap> typeDefaults, ExcludedFieldGate fieldGate, List<ChangeOp> ops)
+        private static void EmitComponentEdits(GameObjectNode node, SnapshotNode snapshot, IdentityMap identityMap, Dictionary<string, FieldMap> typeDefaults, ExcludedFieldGate fieldGate, Func<TypeRef, ISet<string>>? requiredTypeNames, List<ChangeOp> ops)
         {
             var ownerLogicalId = node.LogicalId;
             var desiredComps = fieldGate.Admit(node.Components);
@@ -280,6 +285,24 @@ namespace SceneBuilder.Core.Diff
             var setFieldOps = new List<ChangeOp>();
             var removeOps = new List<ChangeOp>();
             var reorderOps = new List<ChangeOp>();
+
+            // The union of type FullNames every SURVIVING (desired) component requires, directly or
+            // transitively. A live-only component named here is intrinsic to a component the builder
+            // still declares (e.g. CanvasRenderer under a Graphic) and must never be planned for
+            // removal just because the builder itself omits it. Built from desiredComps, not
+            // desiredKeys, so a requirer dropped from desired drops out of the union in the same pass
+            // and its formerly-required component becomes removable again.
+            var requiredBySurvivors = new HashSet<string>(StringComparer.Ordinal);
+            if (requiredTypeNames != null)
+            {
+                foreach (var desiredComponent in desiredComps)
+                {
+                    foreach (var fullName in requiredTypeNames(desiredComponent.Type))
+                    {
+                        requiredBySurvivors.Add(fullName);
+                    }
+                }
+            }
 
             for (var i = 0; i < desiredComps.Length; i++)
             {
@@ -375,6 +398,11 @@ namespace SceneBuilder.Core.Diff
                 }
 
                 var actualComponent = actualComps[i];
+                if (requiredBySurvivors.Contains(actualComponent.Type.FullName))
+                {
+                    continue;
+                }
+
                 if (managedEntriesByType.TryGetValue(actualComponent.Type.FullName, out var entries) && key.Ordinal < entries.Count)
                 {
                     removeOps.Add(new RemoveComponent
@@ -445,7 +473,7 @@ namespace SceneBuilder.Core.Diff
             InstanceOverrideDiff.Emit(node, new SnapshotNode(), ops, conflicts, fieldGate);
         }
 
-        private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, ExcludedFieldGate fieldGate, List<ChangeOp> ops)
+        private static void EmitCreate(GameObjectNode node, string? parentLogicalId, IdentityMap identityMap, ExcludedFieldGate fieldGate, Func<TypeRef, ISet<string>>? requiredTypeNames, List<ChangeOp> ops)
         {
             ops.Add(new AddNode { LogicalId = node.LogicalId, Name = node.Name, ParentLogicalId = parentLogicalId });
             ops.Add(new SetTransform { LogicalId = node.LogicalId, Transform = node.Transform });
@@ -476,7 +504,7 @@ namespace SceneBuilder.Core.Diff
             // matching the mapped path's emission. Children are handled by WalkDesired's recursion.
             // No matched component exists on an empty snapshot, so the type-defaults map is never
             // consulted here — an empty map keeps that explicit.
-            EmitComponentEdits(node, new SnapshotNode(), identityMap, EmptyTypeDefaults, fieldGate, ops);
+            EmitComponentEdits(node, new SnapshotNode(), identityMap, EmptyTypeDefaults, fieldGate, requiredTypeNames, ops);
         }
     }
 }

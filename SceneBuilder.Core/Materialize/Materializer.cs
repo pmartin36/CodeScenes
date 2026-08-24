@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SceneBuilder.Core.Identity;
@@ -9,9 +10,9 @@ namespace SceneBuilder.Core.Materialize
 {
     public static class Materializer
     {
-        public static Plan.Plan Materialize(SceneModel desired, SceneSnapshot actual, IdentityMap identityMap)
+        public static Plan.Plan Materialize(SceneModel desired, SceneSnapshot actual, IdentityMap identityMap, Func<Model.TypeRef, ISet<string>>? requiredTypeNames = null)
         {
-            var changeSet = Change.Differ.Diff(desired, actual, identityMap);
+            var changeSet = Change.Differ.Diff(desired, actual, identityMap, requiredTypeNames);
 
             var passA = new List<PlanOp>();
             var passB = new List<PlanOp>();

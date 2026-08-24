@@ -7,29 +7,34 @@ using UnityEngine;
 namespace SceneBuilder.Editor
 {
     /// <summary>
-    /// Answers whether a component <see cref="TypeRef"/> carries (transitively) a
-    /// <c>[RequireComponent(typeof(RectTransform))]</c>. Resolves the type through the shared
-    /// <see cref="ComponentTypeResolver"/> — never a re-implemented type scan — and returns false
-    /// for a TypeRef that does not resolve, rather than throwing.
+    /// Answers which component types a <see cref="TypeRef"/> carries (transitively) via
+    /// <c>[RequireComponent]</c>. Resolves the type through the shared
+    /// <see cref="ComponentTypeResolver"/> — never a re-implemented type scan — and returns an
+    /// empty set for a TypeRef that does not resolve, rather than throwing.
     /// </summary>
     public static class RequireComponentPredicate
     {
-        public static bool RequiresRectTransform(TypeRef typeRef)
+        public static bool RequiresRectTransform(TypeRef typeRef) =>
+            RequiredTypeNames(typeRef).Contains("UnityEngine.RectTransform");
+
+        public static ISet<string> RequiredTypeNames(TypeRef typeRef)
         {
+            var required = new HashSet<string>(StringComparer.Ordinal);
             var type = ComponentTypeResolver.Resolve(typeRef);
             if (type is null)
             {
-                return false;
+                return required;
             }
 
-            return Walk(type, new HashSet<Type>());
+            Walk(type, new HashSet<Type>(), required);
+            return required;
         }
 
-        private static bool Walk(Type type, HashSet<Type> visited)
+        private static void Walk(Type type, HashSet<Type> visited, HashSet<string> required)
         {
             if (!visited.Add(type))
             {
-                return false;
+                return;
             }
 
             foreach (var attribute in type.GetCustomAttributes(typeof(RequireComponent), inherit: true))
@@ -39,26 +44,17 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                foreach (var required in new[] { requireComponent.m_Type0, requireComponent.m_Type1, requireComponent.m_Type2 })
+                foreach (var requiredType in new[] { requireComponent.m_Type0, requireComponent.m_Type1, requireComponent.m_Type2 })
                 {
-                    if (required is null)
+                    if (requiredType is null)
                     {
                         continue;
                     }
 
-                    if (required == typeof(RectTransform))
-                    {
-                        return true;
-                    }
-
-                    if (Walk(required, visited))
-                    {
-                        return true;
-                    }
+                    required.Add(requiredType.FullName!);
+                    Walk(requiredType, visited, required);
                 }
             }
-
-            return false;
         }
     }
 }

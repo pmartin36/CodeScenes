@@ -251,7 +251,7 @@ namespace SceneBuilder.Editor
             var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(remapped);
             var snapshot = target.ReadSnapshot(sceneRef, ObjectReferenceResolver.BuildListenerResolver(remapped));
 
-            var plan = Materializer.Materialize(desired, snapshot, remapped);
+            var plan = Materializer.Materialize(desired, snapshot, remapped, RequireComponentPredicate.RequiredTypeNames);
 
             PlanExecutor.ExecutionResult execution;
             using (target.BeginWrite())
