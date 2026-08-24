@@ -540,3 +540,25 @@ expected located errors (alignment naming both `m_HorizontalAlignment`/`m_Vertic
 additionally captured live. Console errors during the pass were pre-existing (a DemoScene
 `m_TaaSettings` standing note on scene-load reconcile, scene->code and out of 47's scope) or engine
 environment noise, none caused by 47.
+
+## 48 - a [RequireComponent]-required component is preserved, not churned
+
+The `Differ.EmitComponentEdits` removal loop no longer emits a `RemoveComponent` for a live component
+required (directly or transitively) via `[RequireComponent]` by a SURVIVING (desired) component on the
+same object. `RequireComponentPredicate` was generalized to return a type's transitive required-set
+(`RequiredTypeNames`), and the Editor injects it into Core's removal guard as a closure (the same
+pattern `RectTransformPromotion` uses). Canonically `CanvasRenderer`, forced by every `Image`/`TMP`
+`Graphic`: the builder never names it, yet it is treated as intrinsic and not removed, so no
+`.Component<CanvasRenderer>()` workaround is needed. Keying on surviving requirers keeps it correct
+when the requirer itself is deleted (the required component then becomes legitimately removable).
+
+Built through the tdd-pipeline (commit `ef53405`). Gate
+`GATE PASS: Core + Unity EditMode green (passed=960 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec48.log`): an `Image`-only
+builder (import-free `Graphic`) never naming `CanvasRenderer` built twice code->scene; across both
+builds zero `Can't remove CanvasRenderer ... depends on it` errors, the live `CanvasRenderer` present
+after each (`comps=[RectTransform,CanvasRenderer,Image]`), and the second build a fixed point (0 plan
+ops). Live-verify also surfaced a MIRROR gap on the other direction (scene->code emission re-adds the
+required `CanvasRenderer` as an authored `.Component<>()`), which spec 48 does not touch; filed in
+`docs/open-defects.md` for a follow-up.
