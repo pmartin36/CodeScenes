@@ -2,8 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Serialization;
 using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Reconcile;
 
@@ -314,13 +316,42 @@ namespace SceneBuilder.Editor
             return ResolvePath(so, member, resolvedType.FullName);
         }
 
-        // User MonoBehaviour serialized field: path == member name. Built-in: Unity's m_-mangled path
-        // (mass -> m_Mass). Fail loud + located if neither resolves.
+        // Resolves an authored member name to a real serialized path on the probe `so`, first-hit-wins:
+        // (1) EXACT — the member is itself a serialized path (user field, or a raw serialized name).
+        // (2) MANAGED reverse spelling — SerializedMemberMap's public<->serialized map, for a
+        //     [SerializeField] private m_foo authored by its public property `foo`.
+        // (3) MANGLE — the legacy m_+PascalCase guess (mass -> m_Mass); kept so anything the prior
+        //     implementation resolved still resolves identically.
+        // (4) NORMALIZED probe scan — strip a leading "m_", drop spaces, compare case-insensitively
+        //     against every real top-level serialized name the probe reports (fieldOfView -> "field of
+        //     view", fontSize -> m_fontSize).
+        // (5) ENUM property-divergence — when `member` is a public enum-typed property whose backing
+        //     serialized field's name diverges beyond case/m_/space (collisionDetectionMode ->
+        //     m_CollisionDetection, interpolation -> m_Interpolate), match by enum-TYPE identity —
+        //     the candidate SerializedProperty's own enumNames against Enum.GetNames(member's
+        //     property type) — against every enum-typed real name; a unique match wins, more than one
+        //     is ambiguous and falls through to the throw below rather than guess. A field carrying
+        //     [FormerlySerializedAs] is never offered as a candidate here (see
+        //     IsFormerlySerializedAsAlias) since a legacy migration-only field can share an enum's
+        //     type without being its live backing store.
+        // Every return here is either FindProperty-checked or drawn from the live probe's own
+        // enumeration, so a fabricated path is unreachable by construction. A miss that Unity has split
+        // across two or more real serialized fields (TextMeshProUGUI.alignment ->
+        // m_HorizontalAlignment/m_VerticalAlignment) names them in the thrown error; any other miss
+        // throws the generic located error.
         private static string ResolvePath(SerializedObject so, string member, string typeFullName)
         {
             if (so.FindProperty(member) != null)
             {
                 return member;
+            }
+
+            var componentType = so.targetObject.GetType();
+
+            if (SerializedMemberMap.TrySerializedName(componentType, member, out var reversed)
+                && so.FindProperty(reversed) != null)
+            {
+                return reversed;
             }
 
             var mangled = "m_" + char.ToUpperInvariant(member[0]) + member.Substring(1);
@@ -329,9 +360,155 @@ namespace SceneBuilder.Editor
                 return mangled;
             }
 
+            var probePaths = ProbePropertyPaths(so);
+            var normalizedMember = Normalize(member);
+
+            foreach (var candidate in probePaths)
+            {
+                if (Normalize(candidate) == normalizedMember)
+                {
+                    return candidate;
+                }
+            }
+
+            var enumProperty = componentType.GetProperty(member, BindingFlags.Public | BindingFlags.Instance);
+            if (enumProperty != null && enumProperty.PropertyType.IsEnum)
+            {
+                // Enum-TYPE identity is decided by comparing the live SerializedProperty's own
+                // enumNames against the target C# enum's member names (Normalize-compared per
+                // member, since Unity's native enum popup inserts a space at camelCase boundaries —
+                // "Continuous Dynamic" for the C# member ContinuousDynamic), not by re-deriving a
+                // conventional property name from the serialized name (SerializedMemberMap.
+                // ResolveEnumType's ladder): that ladder assumes the conventional name is a PREFIX
+                // of the real property name, which fails for real divergences like m_Interpolate
+                // ("interpolate") -> interpolation (the 11th character differs, so the prefix check
+                // never matches). Comparing enumNames sidesteps spelling entirely and is exact.
+                var targetEnumNames = Enum.GetNames(enumProperty.PropertyType);
+                string? enumMatch = null;
+                foreach (var candidate in probePaths)
+                {
+                    var candidateProperty = so.FindProperty(candidate);
+                    if (candidateProperty == null || candidateProperty.propertyType != SerializedPropertyType.Enum)
+                    {
+                        continue;
+                    }
+
+                    if (!EnumNameSetsMatch(candidateProperty.enumNames, targetEnumNames))
+                    {
+                        continue;
+                    }
+
+                    if (enumMatch != null)
+                    {
+                        // Ambiguous -- never guess between two candidate enum fields.
+                        enumMatch = null;
+                        break;
+                    }
+
+                    enumMatch = candidate;
+                }
+
+                if (enumMatch != null)
+                {
+                    return enumMatch;
+                }
+            }
+
+            var splitCandidates = probePaths
+                .Where(p => Normalize(p) != normalizedMember && Normalize(p).EndsWith(normalizedMember, StringComparison.Ordinal))
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .ToArray();
+
+            if (splitCandidates.Length >= 2)
+            {
+                throw new InvalidOperationException(
+                    $"[SceneBuilder] Cannot resolve authored member '{member}' to a serialized path on '{typeFullName}': " +
+                    $"Unity splits it across {string.Join(", ", splitCandidates.Select(p => $"'{p}'"))} " +
+                    "- set each serialized field directly.");
+            }
+
             throw new InvalidOperationException(
                 $"[SceneBuilder] Cannot resolve authored member '{member}' to a serialized path on '{typeFullName}'. " +
                 "Use the raw .Set(\"m_Path\", value) form.");
+        }
+
+        // The real top-level serialized property names the probe reports, in iteration order. Walks
+        // with Next, NOT NextVisible -- NextVisible yields only what a default inspector draws, so a
+        // custom-inspector-drawn field (e.g. Rigidbody.m_Constraints) would be invisible, matching the
+        // same hazard SerializedFieldBridge.CollectFields avoids. Excludes any field carrying
+        // [FormerlySerializedAs] -- see IsFormerlySerializedAsAlias.
+        private static List<string> ProbePropertyPaths(SerializedObject so)
+        {
+            var componentType = so.targetObject.GetType();
+            var paths = new List<string>();
+            var it = so.GetIterator();
+            var enterChildren = true;
+            while (it.Next(enterChildren))
+            {
+                enterChildren = false;
+                if (IsFormerlySerializedAsAlias(componentType, it.propertyPath))
+                {
+                    continue;
+                }
+
+                paths.Add(it.propertyPath);
+            }
+
+            return paths;
+        }
+
+        // A field carrying [FormerlySerializedAs] is a legacy alias Unity migrates FROM on load
+        // (e.g. TextMeshProUGUI.m_textAlignment, superseded by the split m_HorizontalAlignment /
+        // m_VerticalAlignment fields) -- a value written there never durably applies, so it must
+        // never be offered as a resolve target even when its declared type happens to coincide with
+        // the authored member's (m_textAlignment is itself TextAlignmentOptions-typed, the same type
+        // as the public `alignment` property, which would otherwise look like a unique enum match).
+        private static bool IsFormerlySerializedAsAlias(Type componentType, string propertyPath)
+        {
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            for (Type? t = componentType; t != null; t = t.BaseType)
+            {
+                var field = t.GetField(propertyPath, flags);
+                if (field != null)
+                {
+                    return field.GetCustomAttribute<FormerlySerializedAsAttribute>() != null;
+                }
+            }
+
+            return false;
+        }
+
+        // The one authored-name <-> serialized-name comparison key: strip a leading "m_", drop all
+        // spaces, lowercase. Shared by the normalized-scan and split-detection steps above so both
+        // agree on what counts as "the same name".
+        private static string Normalize(string name)
+        {
+            var stripped = name.StartsWith("m_", StringComparison.Ordinal) && name.Length > 2
+                ? name.Substring(2)
+                : name;
+            return stripped.Replace(" ", string.Empty).ToLowerInvariant();
+        }
+
+        // Same-length, same-order, Normalize-compared member lists -- the identity check for "these
+        // two enum member lists are the same enum type", tolerant of Unity's native enum popup
+        // inserting a space at camelCase boundaries (enumNames) versus the plain C# member spelling
+        // (Enum.GetNames).
+        private static bool EnumNameSetsMatch(string[] a, string[] b)
+        {
+            if (a.Length != b.Length)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < a.Length; i++)
+            {
+                if (Normalize(a[i]) != Normalize(b[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> RemapSpans(

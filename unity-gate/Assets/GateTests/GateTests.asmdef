@@ -8,7 +8,8 @@
         "SceneBuilder.Authoring",
         "SceneBuilder.Licensing.Editor",
         "GateFixtures",
-        "UnityEngine.UI"
+        "UnityEngine.UI",
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [
         "Editor"

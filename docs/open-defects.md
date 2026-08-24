@@ -233,3 +233,15 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   and stops emitting reorders it can never apply. Add a Core round-trip test over a forward-ref fixture
   where the referrer's sibling index < the handle's, asserting PatchEdits == 0 on re-sync. OWNER:
   unassigned. FOUND-BY: spec-46 live-verify.
+
+- SEVERITY low — the typed-selector resolver does not honor [FormerlySerializedAs] aliases when
+  RESOLVING an authored member, despite spec 47 §"The fix" step 2 claiming it will "honor ...
+  [FormerlySerializedAs] aliases, reusing SerializedMemberMap's public<->serialized map". The reused
+  map (`com.codescenes/Editor/SerializedMemberMap.cs:279-323`, BuildMemberMap) is built from
+  GetFields() -> field.Name only and reads NO [FormerlySerializedAs] attribute; grep confirms zero
+  FormerlySerializedAs read-for-resolution anywhere in `com.codescenes/` or `SceneBuilder.Core`.
+  (Note: `AuthoredPathResolver.IsFormerlySerializedAsAlias` reads the attribute only to EXCLUDE
+  legacy alias fields as resolve targets, not to resolve BY an old alias name.) A member authored
+  under a field's old FormerlySerializedAs name will not resolve. Not in spec 47's Accept-when, so it
+  did not affect the b1-t1 deliverable; flagged so the claimed capability is not assumed to ship.
+  OWNER: unassigned. FOUND-BY: typed-selector-real-serialized-names.

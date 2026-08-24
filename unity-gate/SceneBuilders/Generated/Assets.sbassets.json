@@ -1,4 +1,82 @@
 {
   "schemaVersion": 1,
-  "entries": []
+  "entries": [
+    {
+      "group": "Materials",
+      "folderSegments": [
+        "TextMesh_Pro",
+        "Resources",
+        "Fonts___Materials"
+      ],
+      "memberName": "LiberationSans_SDF___Drop_Shadow",
+      "guid": "e73a58f6e2794ae7b1b7e50b7fb811b0",
+      "fileId": 0,
+      "path": "Assets/TextMesh Pro/Resources/Fonts \u0026 Materials/LiberationSans SDF - Drop Shadow.mat",
+      "subAsset": ""
+    },
+    {
+      "group": "Materials",
+      "folderSegments": [
+        "TextMesh_Pro",
+        "Resources",
+        "Fonts___Materials"
+      ],
+      "memberName": "LiberationSans_SDF___Outline",
+      "guid": "79459efec17a4d00a321bdcc27bbc385",
+      "fileId": 0,
+      "path": "Assets/TextMesh Pro/Resources/Fonts \u0026 Materials/LiberationSans SDF - Outline.mat",
+      "subAsset": ""
+    },
+    {
+      "group": "ScriptableObjects",
+      "folderSegments": [
+        "TextMesh_Pro",
+        "Resources"
+      ],
+      "memberName": "TMP_Settings",
+      "guid": "3f5b5dff67a942289a9defa416b206f3",
+      "fileId": 0,
+      "path": "Assets/TextMesh Pro/Resources/TMP Settings.asset",
+      "subAsset": ""
+    },
+    {
+      "group": "ScriptableObjects",
+      "folderSegments": [
+        "TextMesh_Pro",
+        "Resources",
+        "Fonts___Materials"
+      ],
+      "memberName": "LiberationSans_SDF",
+      "guid": "8f586378b4e144a9851e7b34d9b748ee",
+      "fileId": 0,
+      "path": "Assets/TextMesh Pro/Resources/Fonts \u0026 Materials/LiberationSans SDF.asset",
+      "subAsset": ""
+    },
+    {
+      "group": "ScriptableObjects",
+      "folderSegments": [
+        "TextMesh_Pro",
+        "Resources",
+        "Fonts___Materials"
+      ],
+      "memberName": "LiberationSans_SDF___Fallback",
+      "guid": "2e498d1c8094910479dc3e1b768306a4",
+      "fileId": 0,
+      "path": "Assets/TextMesh Pro/Resources/Fonts \u0026 Materials/LiberationSans SDF - Fallback.asset",
+      "subAsset": ""
+    },
+    {
+      "group": "ScriptableObjects",
+      "folderSegments": [
+        "TextMesh_Pro",
+        "Resources",
+        "Style_Sheets"
+      ],
+      "memberName": "Default_Style_Sheet",
+      "guid": "f952c082cb03451daed3ee968ac6c63e",
+      "fileId": 0,
+      "path": "Assets/TextMesh Pro/Resources/Style Sheets/Default Style Sheet.asset",
+      "subAsset": ""
+    }
+  ]
 }
