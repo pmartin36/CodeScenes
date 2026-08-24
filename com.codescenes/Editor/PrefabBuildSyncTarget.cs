@@ -218,12 +218,13 @@ namespace SceneBuilder.Editor
         internal static SceneBuilderBuild.BuildResult Build(
             string builderPath, string prefabAssetPath, string sidecarPath)
         {
+            var builderName = Path.GetFileNameWithoutExtension(builderPath);
             var source = File.ReadAllText(builderPath);
             var parse = BuilderParser.Parse(source);
             var validation = PrefabSingleRootValidator.Validate(parse, source, builderPath);
             if (!validation.Ok)
             {
-                return new SceneBuilderBuild.BuildResult { Diagnostics = validation.Diagnostics };
+                return SceneBuilderBuildStatus.RecordRefused(builderName, validation.Diagnostics);
             }
 
             var roots = parse.Model.Roots;
@@ -245,7 +246,7 @@ namespace SceneBuilder.Editor
                             $"filename '{stem}'. SaveAsPrefabAsset would silently rename it on every build.",
                         Suggestion = $"Rename the root to '{stem}', or rename the target prefab to '{root.Name}.prefab'.",
                     };
-                    return new SceneBuilderBuild.BuildResult { Diagnostics = new[] { diagnostic } };
+                    return SceneBuilderBuildStatus.RecordRefused(builderName, new[] { diagnostic });
                 }
             }
 

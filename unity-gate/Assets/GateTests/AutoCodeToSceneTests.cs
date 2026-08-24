@@ -139,7 +139,7 @@ public class AutoCodeToSceneScene : ISceneDefinition
         File.WriteAllText(_builderPath, Source("        foo.Bar();"));
 
         LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(
-            System.Text.RegularExpressions.Regex.Escape(_builderPath) + ".*line"));
+            System.Text.RegularExpressions.Regex.Escape(_builderPath) + @"(\(\d+,\d+\)|.*line)"));
 
         SceneBuilderAutoSync.ExecuteCodeToScene(new[] { _builderPath });
 

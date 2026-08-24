@@ -116,22 +116,11 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                try
+                EnsureAssetFolderExists(route.PrefabPath);
+                var result = PrefabBuildSyncTarget.Build(route.BuilderPath, route.PrefabPath, route.SidecarPath);
+                foreach (var diagnostic in result.Diagnostics)
                 {
-                    EnsureAssetFolderExists(route.PrefabPath);
-                    var result = PrefabBuildSyncTarget.Build(route.BuilderPath, route.PrefabPath, route.SidecarPath);
-                    foreach (var diagnostic in result.Diagnostics)
-                    {
-                        Debug.LogError(
-                            $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
-                            $"{diagnostic.Message} — prefab left untouched.");
-                    }
-                }
-                catch (ParseException e)
-                {
-                    Debug.LogError(
-                        $"[CodeScenes] Parse error in {route.BuilderPath} at line {e.Line}, column {e.Column}: " +
-                        $"{e.Message} — prefab left untouched.");
+                    Debug.LogError(SceneBuilderBuildStatus.FormatLocated(diagnostic));
                 }
             }
         }

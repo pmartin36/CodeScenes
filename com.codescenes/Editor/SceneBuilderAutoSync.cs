@@ -679,27 +679,16 @@ namespace SceneBuilder.Editor
                     continue;
                 }
 
-                try
+                var result = SceneBuilderBuild.Run(route.BuilderPath, route.ScenePath, route.SidecarPath, scene);
+                foreach (var diagnostic in result.Diagnostics)
                 {
-                    var result = SceneBuilderBuild.Run(route.BuilderPath, route.ScenePath, route.SidecarPath, scene);
-                    foreach (var diagnostic in result.Diagnostics)
-                    {
-                        Debug.LogError(
-                            $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
-                            $"{diagnostic.Message} — scene left untouched.");
-                    }
+                    Debug.LogError(SceneBuilderBuildStatus.FormatLocated(diagnostic));
+                }
 
-                    // Establish/refresh the b6-t1 conflict-aware baseline at this converged tail (scope-
-                    // validator finding, bucket-b6.md #1) — without this, a real session's baseline stays
-                    // null forever and every dual-trigger cycle silently degrades to the clobbering fallback.
-                    CaptureBaseline(scene);
-                }
-                catch (ParseException e)
-                {
-                    Debug.LogError(
-                        $"[CodeScenes] Parse error in {route.BuilderPath} at line {e.Line}, column {e.Column}: " +
-                        $"{e.Message} — scene left untouched.");
-                }
+                // Establish/refresh the conflict-aware baseline at this converged tail — without this,
+                // a real session's baseline stays null forever and every dual-trigger cycle silently
+                // degrades to the clobbering fallback.
+                CaptureBaseline(scene);
             }
         }
 
@@ -820,9 +809,7 @@ namespace SceneBuilder.Editor
             var buildResult = SceneBuilderBuild.Run(builderPath, currentScene.path, sidecarPath, currentScene);
             foreach (var diagnostic in buildResult.Diagnostics)
             {
-                Debug.LogError(
-                    $"[CodeScenes] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): " +
-                    $"{diagnostic.Message} — code-only field(s) left unmaterialized.");
+                Debug.LogError(SceneBuilderBuildStatus.FormatLocated(diagnostic));
             }
 
             CaptureBaseline(EditorSceneManager.GetActiveScene());

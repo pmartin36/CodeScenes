@@ -136,6 +136,11 @@ namespace SceneBuilder.Editor
         /// <summary>Registers a key (component/GameObject LogicalId) for the next scene-view overlay draw.</summary>
         public void RegisterOverlay(string key) => _registered.Add(key);
 
+        /// <summary>Removes exactly one key from the overlay registry, leaving every other registered
+        /// key untouched — the per-builder counterpart to <see cref="Clear"/>'s wipe-all, so a clean
+        /// build can drop only its own standing build-error entry.</summary>
+        public static void RemoveOverlay(string key) => _registered.Remove(key);
+
         /// <summary>Clears the overlay registry — called at the start of the next converged cycle.</summary>
         public static void Clear() => _registered.Clear();
 

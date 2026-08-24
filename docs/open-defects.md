@@ -248,3 +248,15 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   skips the implied component) and an EditMode test (round-trip an Image builder, assert scene->code
   does NOT write `.Component<CanvasRenderer>()`). Defines new emission behavior -> warrants its own
   spec. OWNER: unassigned. FOUND-BY: spec-48 live-verify.
+
+- SEVERITY med — `ValueNodeParser.Parse` recognizes an asset reference ONLY when it is a bare
+  `Asset(...)` / `Builtin(...)` invocation whose target is an `IdentifierNameSyntax`
+  (`SceneBuilder.Core/Parsing/ValueNodeParser.cs:37-43`), which requires
+  `using static SceneBuilder.Authoring.AssetRefs;`. The equally-valid public authoring form
+  `AssetRefs.Asset("...")` (qualified, `com.codescenes/Runtime/AssetReference.cs:40-53`) is a
+  `MemberAccessExpressionSyntax` target and matches no case, so it falls through to
+  `ValueNode.Unsupported`. `PlanningValidator.WalkAssetValue` only inspects `ValueNode.AssetRef`
+  nodes, so a nonexistent/typo'd asset written in the qualified form is never flagged: the build
+  succeeds clean and the intended `.Set` is silently dropped, no diagnostic. On-theme for
+  parse-error-not-silent-dead-sync (a user's asset assignment silently disappears). OWNER: unassigned.
+  FOUND-BY: parse-error-not-silent-dead-sync.

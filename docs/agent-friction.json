@@ -2,7 +2,7 @@
   "entries": {
     "Assertion failed on expression: '!gAlreadyClosing'": {
       "class": "ENVIRONMENT",
-      "count": 16,
+      "count": 17,
       "first_seen": "2026-07-31",
       "last_seen": "2026-08-24",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
@@ -10,7 +10,7 @@
     },
     "Assertion failed on expression: 'm_PodArrays.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 15,
+      "count": 16,
       "first_seen": "2026-07-31",
       "last_seen": "2026-08-24",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
@@ -18,7 +18,7 @@
     },
     "Assertion failed on expression: 'm_RendererNodes.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 5,
+      "count": 6,
       "first_seen": "2026-07-31",
       "last_seen": "2026-08-24",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
@@ -190,9 +190,14 @@
       "size": 326931
     },
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec47.log": {
-      "bytes": 280203,
+      "bytes": 281050,
       "head": "edb1e5e8ffee6d80",
       "size": 281050
+    },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec48.log": {
+      "bytes": 263155,
+      "head": "330cc4c0cf26dec2",
+      "size": 263155
     }
   }
 }

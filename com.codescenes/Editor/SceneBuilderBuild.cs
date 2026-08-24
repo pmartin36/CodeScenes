@@ -146,12 +146,9 @@ namespace SceneBuilder.Editor
             var result = Run(route.BuilderPath, route.ScenePath, route.SidecarPath, scene);
             foreach (var diagnostic in result.Diagnostics)
             {
-                Debug.LogError(FormatDiagnostic(diagnostic));
+                Debug.LogError(SceneBuilderBuildStatus.FormatLocated(diagnostic));
             }
         }
-
-        private static string FormatDiagnostic(SceneBuilder.Core.Validation.Diagnostic diagnostic) =>
-            $"[SceneBuilder] {diagnostic.Code} {diagnostic.File}({diagnostic.Line},{diagnostic.Col}): {diagnostic.Message}";
 
         // m-nested-props b7-t2: a located NestedOverrideBootstrap Conflict has no source span (it is
         // resolved against the LIVE instance, not the parse) — reported at (0,0), same as the other
@@ -185,6 +182,7 @@ namespace SceneBuilder.Editor
         /// </summary>
         internal static BuildResult RunCore(IBuildSyncTarget target, string builderPath, string sidecarPath)
         {
+            var builderName = Path.GetFileNameWithoutExtension(builderPath);
             var source = File.ReadAllText(builderPath);
 
             // Carry over existing GlobalObjectIds so rebuilds reconcile in place (no id churn).
@@ -206,7 +204,16 @@ namespace SceneBuilder.Editor
             // it through the same parse seam so a typed `Assets.Group.X` member resolves.
             var assetCatalog = AssetCatalogLoader.Load();
 
-            var rawParse = BuilderParser.Parse(source, existingMap, facadeCatalog, assetCatalog);
+            ParseResult rawParse;
+            try
+            {
+                rawParse = BuilderParser.Parse(source, existingMap, facadeCatalog, assetCatalog);
+            }
+            catch (ParseException e)
+            {
+                return SceneBuilderBuildStatus.RecordRefused(builderName, e, builderPath);
+            }
+
             var validation = PlanningValidator.Validate(
                 rawParse, source, new UnityResolutionProvider(existingMap?.Assets), builderPath);
 
@@ -214,9 +221,12 @@ namespace SceneBuilder.Editor
             // collected refusal so callers (including tests) observe it via the returned
             // `BuildResult.Diagnostics`, not an unhandled console error. The interactive entry point
             // (`BuildActiveScene`/`BuildAll`) logs each diagnostic for the user after calling `Run`.
+            // The standing build-status recorder observes every outcome regardless — it is silent too
+            // (state + scene-view overlay only); a channel that needs a console line renders one
+            // through `SceneBuilderBuildStatus.FormatLocated`.
             if (!validation.Ok)
             {
-                return new BuildResult { Diagnostics = validation.Diagnostics };
+                return SceneBuilderBuildStatus.RecordRefused(builderName, validation.Diagnostics);
             }
 
             // THE shared source->desired seam (parse -> resolve authored paths -> lower asset refs).
@@ -230,7 +240,7 @@ namespace SceneBuilder.Editor
             // the collect-all planning pass above — scene untouched, never a silent drop/guess.
             if (loaded.BootstrapConflicts.Count > 0)
             {
-                return new BuildResult { Diagnostics = ToDiagnostics(loaded.BootstrapConflicts, builderPath) };
+                return SceneBuilderBuildStatus.RecordRefused(builderName, ToDiagnostics(loaded.BootstrapConflicts, builderPath));
             }
 
             var parse = loaded.Parse;
@@ -322,14 +332,14 @@ namespace SceneBuilder.Editor
             LastBuilderPath = builderPath;
             LastSidecarPath = sidecarPath;
 
-            return new BuildResult
+            return SceneBuilderBuildStatus.RecordClean(builderName, new BuildResult
             {
                 Map = map,
                 ObjectCount = execution.GameObjectsByLogicalId.Count,
                 PlanOpCount = plan.Ops.Length,
                 Flags = plan.Diagnostics,
                 Notes = surfacedNotes.ToArray(),
-            };
+            });
         }
 
         public static BuildResult Run(string builderPath, string scenePath, string sidecarPath, Scene scene)
