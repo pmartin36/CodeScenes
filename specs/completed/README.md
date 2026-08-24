@@ -476,3 +476,31 @@ conflict emitting exactly one warning while Between defers. The key case: draggi
 stayed exactly as dragged, idempotent on re-eval. The runtime-field back-solve was observed live; the
 source-file leg of sync-back is covered by the `RoundTripBetweenSync` EditMode suite. Console clean of
 product errors.
+
+## 46 - sync-back emits compiling C# (private members, forward declarations)
+
+Two scene->code emitter defects that each wrote non-compiling builder source (and led the first
+minigolf one-shot to disable two-way sync) are fixed. A non-public serialized field
+(`[SerializeField] private` / internal) now emits the raw-string `c.Set("<serializedName>", value)`
+form instead of a typed selector `c.Set(r => r.field, value)` that cannot compile against a private
+member; the emitter carries the member's accessibility via `SceneSnapshot.InaccessibleMembers` +
+`MemberSpelling` so the choice is one shared decision, not per call site. Spec 43's declare-before-use
+ordering was extended in `StatementPlacement` to the recurring case a handle referenced by an
+earlier-emitted statement, with a guard that fails when any emitted statement names a `var` declared
+on a later line. Covered by Core tests (`DeclareBeforeUseGuardTests`, `NonPublicFieldSelectorEmitTests`)
+and EditMode gate tests (`NonPublicFieldSyncCompileTests`, `SyncBackCompilesRoundTripTests`).
+
+Built through the tdd-pipeline (commit `7cb6411`). Gate
+`GATE PASS: Core + Unity EditMode green (passed=949 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec46.log`): against a
+running editor, (a) a `[SerializeField] private float` set in the scene synced back as
+`c.Set("hiddenValue", 42f)` and the product's own `BuilderCompileCheck` returned zero errors; (b) a
+forward reference hoisted `var beta` above its use with zero `CS0841`; (c) the builder was byte-identical
+across three consecutive syncs. Live-verify also root-caused a convergence defect the (b) hoist itself
+triggers: when a referrer sits at a lower sibling index than the handle it references (the natural
+add-A-then-B case), the hoisted `var` declaration order fights the sibling-order reorder pass, which
+emits two byte-identical `ReorderStatement` no-ops every sync — suppressed by the pre-existing 322e143
+guard (so the file stays byte-stable) but logged as an Error each cycle. Filed in `docs/open-defects.md`
+and fixed as a follow-up RED-first bug fix (StatementPlacement / reorder pass), not folded into 46's
+commit; 46's own `SyncBackCompilesRoundTripTests` dodged the shape via `door.SetSiblingIndex(2)`.
