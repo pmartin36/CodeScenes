@@ -105,6 +105,18 @@ Licensing was the last feature gate; what remains is packaging, legal, and launc
   (`CodeScenesSite/specs/01` §1), and a backend Cloud budget alert.
 - `specs/hero-demo-minigolf.md` (Minigolf) is launch-video polish, not a store blocker.
 
+### 4. Eval-surfaced sync/authoring bug backlog (from the minigolf one-shot)
+
+The first hero-demo one-shot (Claude session `a6792c4f`) exposed real defects — the building agent
+even disabled two-way sync as "untenable" after the emitter wrote non-compiling code. Six focused
+bug specs, ordered by priority; each is pipeline-ready (owner + mechanism + accept-when):
+- **`specs/46`** sync-back must emit compiling C# (private-field selectors + forward-decl ordering). CRITICAL — the core loop.
+- **`specs/47`** typed selectors resolve real serialized names (AuthoredPathResolver reflects the live probe).
+- **`specs/48`** RequireComponent-added components preserved, not churned (Differ removal guard).
+- **`specs/49`** a code->scene parse error surfaces as durable build-state, not a dead-sync mystery.
+- **`specs/50`** auto-sync reliability (scene-open drop, atomic-write blindness, pump death after play mode).
+- **`specs/51`** authoring surface accepts natural forms (instance component surface, sub-asset type disambiguation, const-string paths).
+
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 
 ## Resuming an interrupted pipeline run
