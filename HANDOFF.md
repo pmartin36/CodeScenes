@@ -92,18 +92,20 @@ predating the collapse-rule fix, so **check whether it still reproduces** before
 
 Licensing was the last feature gate; what remains is packaging, legal, and launch. Tracked in
 `specs/package-publishing-readiness.md` (a checklist + decisions, NOT a tdd-pipeline spec):
-- **Two-build production is compliance-required and NOT done.** Unity Provider Agreement §4.9.1.2
-  means the Asset Store copy and the Gumroad copy must be the same complete product — so a keyless
-  Asset Store build must ship alongside the Gumroad one. The channel mechanism is built (spec 34,
-  `CODESCENES_ASSET_STORE` define + the licensing asmdef's `!CODESCENES_ASSET_STORE` defineConstraint
-  + fail-closed), but no tooling produces the two artifacts, and the Asset Store variant must
-  physically strip `com.codescenes/Editor/Licensing/` at pack time (a buyer lacks the define). See the
-  spec's "Two-build production" section.
-- Four packaging decisions (LICENSE, analyzer delivery, plugin platforms, distribution format) then
-  the file adds (LICENSE.md, Third Party Notices.md, CHANGELOG.md, README.md, version bump).
-- Gumroad product is **published** (done). Still needed: the site Buy CTA in place of the waitlist
-  (`CodeScenesSite/specs/01` §1), and a backend Cloud budget alert.
-- `specs/hero-demo-minigolf.md` (Minigolf) is launch-video polish, not a store blocker.
+- **Two-build production tooling is BUILT.** `./unity-build.sh` (public bootstrap) fetches the private
+  pack script from `pmartin36/private-build-scripts` (SSH) and emits the keyless Asset Store variant
+  (strips `com.codescenes/Editor/Licensing/`) to gitignored `build/assetstore-out/`, validated end to
+  end. Remaining: the actual **Asset Store submission** (upload that output through Unity's publisher
+  tools; their review takes time). See `specs/package-publishing-readiness.md` "Two-build production".
+- Packaging decisions + files DONE: proprietary EULA (`LICENSE.md`, no governing-law clause),
+  analyzers builder-`.csproj`-only, plugins pinned editor-only, distribution = git-URL install;
+  `Third Party Notices.md`, `CHANGELOG.md`, `README.md`, module-dep fix all shipped. Remaining: a
+  **version bump** (`0.1.0` -> a release, tag it, pin the site git URL to `#v1.0.0`).
+- Gumroad product **published**; site **Buy CTA is live** (deployed to codescenes.dev). Remaining: a
+  backend Cloud budget alert (minor), and a real seat-limit/refund exercise on the live product.
+- `specs/hero-demo-minigolf.md` (Minigolf) is the **product proof**, not optional polish. Being built
+  via the skill-hardening one-shot loop (see §4); the brief is now a pure buyer-style game spec and
+  the `codescenes-authoring` skill ships in the package (`com.codescenes/Documentation~/`).
 
 ### 4. Eval-surfaced sync/authoring bug backlog (from the minigolf one-shot)
 
