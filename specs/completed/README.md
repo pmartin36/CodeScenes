@@ -502,8 +502,15 @@ triggers: when a referrer sits at a lower sibling index than the handle it refer
 add-A-then-B case), the hoisted `var` declaration order fights the sibling-order reorder pass, which
 emits two byte-identical `ReorderStatement` no-ops every sync — suppressed by the pre-existing 322e143
 guard (so the file stays byte-stable) but logged as an Error each cycle. Filed in `docs/open-defects.md`
-and fixed as a follow-up RED-first bug fix (StatementPlacement / reorder pass), not folded into 46's
-commit; 46's own `SyncBackCompilesRoundTripTests` dodged the shape via `door.SetSiblingIndex(2)`.
+not folded into 46's commit; 46's own `SyncBackCompilesRoundTripTests` dodged the shape via
+`door.SetSiblingIndex(2)`. Fixed RED-first as a follow-up: the reorder pass in
+`SceneBuilder.Core/Reconcile/Reconciler.cs` now consults a `ForwardReferencePinnedReorders` guard
+(`Reconciler.Reorder.cs`) that pins both ends of any inline forward reference (a chained
+`Add(...).Component<T>(c => c.Set(field, sibling))` naming a sibling the scene orders after the owner)
+so the unachievable reorder is never emitted; the hoist-forced order is the converged target.
+`ForwardReferenceConvergenceTests` (Core) asserts a true fixed point (`PatchEdits == 0`, not
+suppression) and a non-dodged case was added to `SyncBackCompilesRoundTripTests` (EditMode). Gate
+`GATE PASS: Core + Unity EditMode green (passed=959 failed=0 skipped=0)`.
 
 ## 47 - typed member-selector resolves the component's REAL serialized names
 

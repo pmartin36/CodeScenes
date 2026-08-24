@@ -120,4 +120,57 @@ public class SyncBackCompilesRoundTripScene : ISceneDefinition
         Assert.AreEqual(beforeThird, File.ReadAllText(_builderPath),
             "Re-syncing the converged builder must be byte-stable.");
     }
+
+    // The NON-dodged forward-reference shape (the test above pushes Door to the LAST sibling, which
+    // its separate declaration can always trail; here the reference is INLINE in the referrer's own
+    // Add-chain). Opener's chained component names Door, so declare-before-use pins Door's
+    // declaration ahead of Opener's statement in source. When the scene then orders Door AFTER
+    // Opener -- the referrer's sibling index BELOW the referenced handle's -- source sibling order
+    // can never match the scene's. The reorder pass must treat the hoist-forced order as its
+    // converged target: emit no reorder, reach a TRUE fixed point (PatchEdits == 0, not a
+    // byte-identical suppression), and never log the Convergence-defect Error.
+    [Test]
+    public void SceneToCode_InlineForwardReference_ReferrerSiblingBelowReferenced_ConvergesWithoutDefectError()
+    {
+        File.WriteAllText(_builderPath, Source(
+            "        var door = scene.Add(\"Door\");\n" +
+            "        scene.Add(\"Opener\").Component<DoorOpener>(c => c.Set(\"target\", door));"));
+        var scene = EditorSceneManager.GetActiveScene();
+        SceneBuilderBuild.Run(_builderPath, ScenePath, _sidecarPath, scene);
+
+        var opener = Find(EditorSceneManager.GetActiveScene(), "Opener");
+        var door = Find(EditorSceneManager.GetActiveScene(), "Door");
+        Assert.IsNotNull(opener, "Opener was not created by SceneBuilderBuild.Run");
+        Assert.IsNotNull(door, "Door was not created by SceneBuilderBuild.Run");
+        Assert.AreEqual(door, opener.GetComponent<DoorOpener>().target, "The inline reference did not resolve on Build.");
+
+        // Order Door (sibling 1) AFTER Opener (sibling 0): the referrer now sits below the handle
+        // its own statement names. This is the shape the reorder pass can never satisfy.
+        door.transform.SetSiblingIndex(1);
+        Assert.AreEqual(0, opener.transform.GetSiblingIndex(), "Opener must be the earlier sibling.");
+        Assert.AreEqual(1, door.transform.GetSiblingIndex(), "Door must be the later sibling.");
+
+        var first = Sync();
+        Assert.AreEqual(0, first.PatchEdits,
+            "The unachievable inline forward-reference reorder must not be emitted.");
+
+        var written = File.ReadAllText(_builderPath);
+        var doorIndex = written.IndexOf("Add(\"Door\")", System.StringComparison.Ordinal);
+        var referrerIndex = written.IndexOf("Add(\"Opener\")", System.StringComparison.Ordinal);
+        Assert.IsTrue(doorIndex >= 0 && referrerIndex >= 0, "Both statements must be present:\n" + written);
+        Assert.IsTrue(doorIndex < referrerIndex,
+            "Door's declaration must precede the inline referrer that names it:\n" + written);
+
+        var beforeSecond = File.ReadAllText(_builderPath);
+        var second = Sync();
+        Assert.AreEqual(0, second.PatchEdits, "Re-syncing the converged builder must be a true fixed point.");
+        Assert.IsFalse(second.Changed, "Re-syncing the converged builder must not rewrite the source.");
+        Assert.AreEqual(beforeSecond, File.ReadAllText(_builderPath), "Re-syncing must be byte-stable.");
+
+        // The defect's observable symptom is the `[SceneBuilder] Convergence defect: ...` Error logged
+        // Unity-side (SceneBuilderSync.cs) whenever reconcile emits edits that apply byte-identically.
+        // It must never fire for this shape. The Unity Test Framework fails this test on ANY
+        // unexpected Debug.LogError, so an unExpect'd Convergence-defect Error here is itself the
+        // assertion -- no reorder edit was produced to trigger it.
+    }
 }

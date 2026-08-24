@@ -88,6 +88,12 @@ namespace SceneBuilder.Core.Reconcile
             var modelByLogicalId = new Dictionary<string, GameObjectNode>();
             FlattenModel(expected.Roots, modelByLogicalId);
 
+            // Siblings whose scene reorder is UNACHIEVABLE because an inline forward reference pins
+            // their source order (declare-before-use). The sibling-order reorder pass treats this
+            // hoist-forced ordering as its converged target and emits no reorder it could never apply.
+            var forwardReferencePinned = ForwardReferencePinnedReorders(
+                expected, chainedComponentSet, snapshotByGoid, logicalIdToGlobalObjectId);
+
             var conflicts = new List<Conflict>();
             var reportedMissingAnchor = new HashSet<string>();
             ISet<string> suppressed = new HashSet<string>();
@@ -389,7 +395,16 @@ namespace SceneBuilder.Core.Reconcile
                         break;
 
                     case Reorder:
-                        edits.Add(new ReorderStatement { Anchor = op.LogicalId, NewSiblingIndex = entry.SiblingIndex });
+                        // An inline forward reference (a node's own Add-chain naming a later-declared
+                        // sibling) forces that sibling's declaration to lead in source, so source
+                        // sibling order can never match scene order for the pinned pair. Emitting the
+                        // reorder anyway produces an edit the applier's declare-before-use hoist undoes
+                        // byte-identically every sync. The hoist-forced order IS the converged target.
+                        if (!forwardReferencePinned.Contains(op.LogicalId))
+                        {
+                            edits.Add(new ReorderStatement { Anchor = op.LogicalId, NewSiblingIndex = entry.SiblingIndex });
+                        }
+
                         break;
 
                     case SetTag:

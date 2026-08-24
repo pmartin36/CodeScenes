@@ -208,32 +208,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   not heal the unchanged case; a diff-independent source normalizer would. OWNER: unassigned.
   FOUND-BY: syncback-emits-compiling-code (b1-t1 research).
 
-- SEVERITY med — a forward-reference builder never reaches a true reconcile fixed point; every
-  re-sync logs a Convergence defect Error. When a statement references a handle declared later, spec
-  46(b)'s declare-before-use hoist (StatementPlacement) moves the `var` declaration ABOVE its use, so
-  source statement order no longer matches scene sibling order. The sibling-order reorder pass then
-  emits ReorderStatement edits every sync to force source order back to scene order, but applying them
-  would re-break declare-before-use, so placement keeps the declaration hoisted and the edits apply
-  byte-IDENTICALLY forever. Measured shape on a converged builder (Alpha at sibling 0 references Beta
-  at sibling 1, `var beta` hoisted above Alpha): two no-op edits per sync,
-  `ReorderStatement{Anchor=beta,NewSiblingIndex=1}` + `ReorderStatement{Anchor=Alpha,NewSiblingIndex=0}`.
-  The pre-existing convergence guard (SceneBuilderSync.cs:314, added 322e143, predating spec-46)
-  suppresses the re-apply so the file stays byte-stable, but emits `[SceneBuilder] Convergence defect:
-  reconcile produced N patch edit(s) that applied byte-identically` at Error severity on EVERY sync of
-  any builder with this shape — the natural "add A, later add B, A references B" case, so B has the
-  higher sibling index. Reproduces on an isolated fixture, not demo-scene drift; making B's sibling
-  index precede A's converges immediately (PatchEdits=0). CAUSED BY spec 46(b): the hoist traded the
-  CS0841 compile error for this perpetual no-op reorder. The file-level byte-stability that satisfies
-  spec-46 accept-when (c) is delivered by suppression, not true convergence. Spec-46's gate test
-  SyncBackCompilesRoundTripTests dodges the shape via door.SetSiblingIndex(2), so both the offline Core
-  and EditMode suites are blind to it. Owner: StatementPlacement + the sibling-order reorder pass
-  (SceneBuilder.Core/Reconcile/). Fix direction (either): the declare-before-use hoist carries the
-  referenced statement's sibling-order position so declaration order can lead sibling order without the
-  reorder pass fighting it, OR the reorder pass treats a hoist-forced ordering as its converged target
-  and stops emitting reorders it can never apply. Add a Core round-trip test over a forward-ref fixture
-  where the referrer's sibling index < the handle's, asserting PatchEdits == 0 on re-sync. OWNER:
-  unassigned. FOUND-BY: spec-46 live-verify.
-
 - SEVERITY low — the typed-selector resolver does not honor [FormerlySerializedAs] aliases when
   RESOLVING an authored member, despite spec 47 §"The fix" step 2 claiming it will "honor ...
   [FormerlySerializedAs] aliases, reusing SerializedMemberMap's public<->serialized map". The reused
