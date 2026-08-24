@@ -102,6 +102,27 @@ public class Playground : ISceneDefinition
 }
 ```
 
+## Your own components and game logic
+
+CodeScenes authors the *scene*, not runtime behavior. For anything that has to run, gameplay, input,
+scoring, write ordinary Unity **MonoBehaviours** in `Assets/Scripts/` (normal C#, real logic, `Update`,
+etc.). Then attach them in the builder exactly like a built-in component and set their serialized
+fields:
+
+```csharp
+// Assets/Scripts/BallController.cs is a normal MonoBehaviour with public/[SerializeField] fields.
+scene.Add("Ball")
+    .Component<Rigidbody>()
+    .Component<BallController>(c => c.Set("power", 12f));   // your script, your field
+```
+
+So the split is: **logic lives in your MonoBehaviours; the builder only places objects, attaches those
+components, sets their fields, and wires events.** The builder is parsed (not run), so never put game
+logic in `Build` itself.
+
+For a repeated structure (a wall segment used many times, an obstacle), you can author it once as a
+code prefab (`IPrefabDefinition`, same authoring API) and instance it, or just repeat the statements.
+
 ## Hard rules (violating these is the usual cause of a broken build)
 
 1. `Build` is parsed, not run — declarative calls and literal values only.
