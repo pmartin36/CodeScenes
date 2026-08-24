@@ -110,9 +110,8 @@ Licensing was the last feature gate; what remains is packaging, legal, and launc
 ### 4. Eval-surfaced sync/authoring bug backlog (from the minigolf one-shot)
 
 The first hero-demo one-shot (Claude session `a6792c4f`) exposed real defects — the building agent
-even disabled two-way sync as "untenable" after the emitter wrote non-compiling code. Five focused
+even disabled two-way sync as "untenable" after the emitter wrote non-compiling code. Four focused
 bug specs remain, ordered by priority; each is pipeline-ready (owner + mechanism + accept-when):
-- **`specs/47`** typed selectors resolve real serialized names (AuthoredPathResolver reflects the live probe).
 - **`specs/48`** RequireComponent-added components preserved, not churned (Differ removal guard).
 - **`specs/49`** a code->scene parse error surfaces as durable build-state, not a dead-sync mystery.
 - **`specs/50`** auto-sync reliability (scene-open drop, atomic-write blindness, pump death after play mode).
