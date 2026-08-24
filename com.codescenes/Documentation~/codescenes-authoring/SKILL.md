@@ -17,6 +17,24 @@ description of the scene, written as method calls, that a parser reads.
 
 Consequence: values are literals. `Transform(pos: (1f, 2f, 3f))`, not `Transform(pos: Compute())`.
 
+## Place and size by relationship — do NOT hand-measure
+
+Before you reach for the editor to measure an asset's bounds or compute coordinates: usually you
+don't have to. CodeScenes has editor-time solvers that position and size objects by their
+*relationship* to others, and they re-solve when things move. Prefer these over measured numbers:
+
+- **`.SurfaceSnap(down: true)`** — rest an object flush on whatever is beneath it (drop the ball onto
+  the green, sit a prop on the floor). No computing a Y from the mesh's bounds. Any axis:
+  `up/down/left/right/forward/back`, or an explicit `target`.
+- **`.FitSize(width: 2f)`** — make an object an exact **world** size regardless of the mesh's native
+  dimensions, rotation, or parent scale. No computing a scale factor. Pass any of `width/height/depth`.
+- **`.Between(from, to, fraction, axis)`** — place an object flush between two others at a fraction
+  along one axis (0 = against `from`, 1 = against `to`). No computing a midpoint.
+
+So instead of "measure the tile, then place the next at x+2.4", snap and fit and fit-between. You will
+still use plain `Transform(pos: ...)` for deliberate absolute layout, but reach for the solvers first
+whenever a position or size is really "relative to that other thing."
+
 ## Where the file goes
 
 - Builders live in **`<ProjectRoot>/SceneBuilders/<Name>.cs`** — a folder next to `Assets/`, NOT
@@ -68,8 +86,8 @@ Component fields use Unity's **serialized names** (`m_Mesh`, `m_Materials`, `m_I
 component in the Inspector's Debug mode or the authoring-api.md notes.
 
 Other `NodeHandle` calls: `.RectTransform(...)` (UI), `.Tag`, `.Layer`, `.Active(false)`,
-`.Static(true)`, and the spatial helpers `.FitSize`, `.SurfaceSnap`, `.Between`. `ComponentHandle`
-also has `.OnClick(...)` / `.OnEvent(...)` for wiring UnityEvents. See the reference.
+`.Static(true)` (the spatial solvers `.FitSize` / `.SurfaceSnap` / `.Between` are covered above).
+`ComponentHandle` also has `.OnClick(...)` / `.OnEvent(...)` for wiring UnityEvents. See the reference.
 
 ## A complete builder
 
