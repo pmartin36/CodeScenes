@@ -62,18 +62,35 @@ offending call. Location is not the gap. The gap is threefold:
 ## The fix
 
 **OWNER.** A single per-builder build-status recorder, `SceneBuilderBuildStatus`
-(`com.codescenes/Editor/`), is THE one place a code→scene build outcome is recorded, and every refusal
-channel funnels its result through it rather than logging in isolation. It owns two operations keyed on
-`BuilderRoute.BuilderName`: `RecordRefused(builderName, Diagnostic)` (or the located `ParseException`
-data) and `RecordClean(builderName)`. State is persisted in `SessionState` (survives domain reload,
-dies with the editor session, needs no file under `SceneBuilders/` that would re-trigger the watcher),
-mirroring how `SceneBuilderAutoToggle` persists in `EditorPrefs`. Placing the recorder at the shared
-outcome point, not behind an opt-in each executor remembers to call, is required by CLAUDE.md: every
-current and future caller of the code→scene path inherits it. The three call sites
-(`SceneBuilderAutoSync.cs:685-702`, `:821-826`, `SceneBuilderBuild.cs:147-151`) route their
-refuse/clean outcome through the recorder instead of a bare `Debug.LogError`; the located Console error
-stays (it is the fail-loud line), but it is now emitted by the recorder so its format is single-sourced
-and always carries `File`, `Line`, `Col`, `Code`/kind, `Message`, and the offending call text.
+(`com.codescenes/Editor/`), is THE one place a code→scene (and code→prefab) build outcome is recorded.
+It is placed at the shared build core, `SceneBuilderBuild.RunCore`
+(`com.codescenes/Editor/SceneBuilderBuild.cs:186`) — the single method every scene build
+(`SceneBuilderBuild.Run` is a thin wrapper over it, `:335`) and every prefab build
+(`PrefabBuildSyncTarget.Build`, `:253`) delegates to. `RunCore` records at each of its outcomes: its two
+refusal returns (`:219` validation diagnostics, `:233` bootstrap conflicts) call `RecordRefused`, its
+success return (`:325`) calls `RecordClean`, and a `ParseException` thrown by the raw parse (`:209`,
+previously uncaught and propagated past every return) is now caught inside `RunCore`, recorded via
+`RecordRefused`, and returned as a refused `BuildResult` — so the thrown and the collected refusal
+modalities converge on one recorded shape. Because the recorder lives inside `RunCore`, every current
+and future caller inherits it by construction with nothing to opt into: `ExecuteCodeToScene`
+(`SceneBuilderAutoSync.cs:684`), the both-changed code-only tail (`ExecuteBothChanged`, `:820`), the
+manual menu path (`SceneBuilderBuild.BuildRoute`, `:146`), and — the channel that is silent today —
+`SceneBuilderResync.RunMaterialize` (`:102`, focus-regain / scene-open / domain-reload), which discards
+the `BuildResult` and drops its diagnostics entirely (a thrown `ParseException` there is swallowed by the
+`ResyncRoute` outer catch as a raw unlocated `Debug.LogException`). The prefab code→asset channel
+(`ExecutePrefabCodeToAsset` → `PrefabBuildSyncTarget.Build`) inherits it through `RunCore`, and its two
+**pre-`RunCore`** refusal returns (multi-root, `PrefabBuildSyncTarget.cs:226`; SB2402
+root-name/filename mismatch, `:248`) route their refused `BuildResult` through the same recorder factory,
+since they mint an outcome before `RunCore` is reached. The recorder keys on `BuilderName`, which at this
+layer is `Path.GetFileNameWithoutExtension(builderPath)` — the exact derivation the router uses
+(`SceneBuilderRouter.cs:103`) — so no `BuilderRoute` need be threaded in. It owns
+`RecordRefused(builderName, Diagnostic /* or located ParseException data */)` and
+`RecordClean(builderName)`. State persists in `SessionState` (survives domain reload, dies with the
+editor session, needs no file under `SceneBuilders/` that would re-trigger the watcher), the same
+mechanism `LicenseStore` uses (`Licensing/LicenseStore.cs:44-62`). The bare per-site `Debug.LogError`
+calls (`SceneBuilderAutoSync.cs:685-702`, `:821-826`, `SceneBuilderBuild.cs:147-150`,
+`SceneBuilderAutoSync.Prefab.cs:125-134`) are replaced by the recorder's single-sourced located line,
+always carrying `File`, `Line`, `Col`, `Code`/kind, `Message`, and the offending call text.
 
 **MECHANISM.** The recorded state is surfaced where the author already looks for sync state, alongside
 the master toggle, as a distinct fact:
@@ -88,9 +105,38 @@ the master toggle, as a distinct fact:
   `com.codescenes/Editor/ConflictSurfacing.cs:136-204`) registers a "build error at <File>:<Line>" entry
   while a refusal stands, so the state is visible in the scene view the author is editing, and clears on
   the next clean build. Reusing this registry keeps one durable-surface mechanism, not a second one.
+  `ConflictSurfacing` today has `RegisterOverlay(string key)` (instance, `:137`) over a shared
+  `static HashSet<string> _registered` (`:20`) and only a `static Clear()` (`:140`) that wipes ALL
+  entries — there is NO per-key un-register, so `RecordClean` cannot drop one builder's overlay entry
+  without clobbering unrelated conflict overlays. Add `public static void RemoveOverlay(string key)`
+  (a per-key removal) plus a static register path (a static `RegisterOverlay` overload, or register via
+  the `new ConflictSurfacing()` instance the both-changed path already constructs at
+  `SceneBuilderAutoSync.cs:813`) so the static recorder can register on refusal and remove exactly its
+  own key on recovery. `Clear()`'s wipe-all semantics stay unchanged for the converged-cycle reset.
 - **Cleared on recovery.** A subsequent clean build of the same builder calls `RecordClean`, which drops
-  the standing state, un-registers the overlay entry, and updates the menu item. After the author fixes
-  the offending line, the next otherwise-valid edit builds and the error state disappears with it.
+  the standing state, un-registers ONLY that builder's overlay entry (via the new `RemoveOverlay`), and
+  updates the menu item. After the author fixes the offending line, the next otherwise-valid edit builds
+  and the error state disappears with it, leaving any unrelated conflict overlay intact.
+
+**INVARIANT.** No `BuildResult` carrying a refusal can be produced without the recorder observing it,
+and a clean build always clears any standing refusal for that builder.
+
+**MECHANISM (of the invariant).** `RunCore` yields its outcome only through the recorder: every `return`
+in `RunCore` is `return SceneBuilderBuildStatus.Record*(builderName, ...)`, and the `ParseException` path
+is caught inside `RunCore` and routed through the same recorder. `Run` forwards `RunCore`'s return
+verbatim, so no scene-side channel can obtain a `BuildResult` the recorder did not see. The two prefab
+pre-`RunCore` refusals (`PrefabBuildSyncTarget.cs:226,248`) call the same recorder factory.
+
+**CHECK that fails on bypass (NOT a literal scan).** A source scan for the old formatted refusal
+literals is structurally blind: `RunMaterialize` discards its result and contains no refusal literal, so
+it could stay dark while the scan reports GREEN — exactly gap #3. Replace it with a behavioral EditMode
+check that drives the actual channels: a refusal delivered through the Materialize/resync direction
+(`SceneBuilderResync.RunMaterialize`, the previously-silent channel) sets the standing status with file,
+line, and `BuilderName` and leaves the scene untouched — asserted by driving a broken builder through
+`ResyncRoute`/`RunMaterialize`, not by scanning source; and each remaining channel (auto code→scene, the
+both-changed tail, the menu path, and prefab code→asset including a pre-`RunCore` name-mismatch refusal)
+sets the standing status on refuse and clears it on the next clean build. A channel that fails to record
+therefore fails a test, whereas the old scan passed it.
 
 Whole-scene refusal is unchanged: a parse/plan error still leaves the scene untouched, and no builder
 with a broken statement is ever partially applied. Only the signal changes.
@@ -107,9 +153,20 @@ with a broken statement is ever partially applied. Only the signal changes.
   or be lost to a stale console.
 - After the author fixes the offending line, an otherwise-valid edit to the same builder builds
   successfully and the standing error state (menu item and overlay) clears.
+- A refusal delivered through the Materialize/resync direction (focus-regain, scene-open, or
+  domain-reload via `SceneBuilderResync.RunMaterialize`) sets the same standing status — file, line,
+  `BuilderName` — as a refusal on the auto code→scene path; this channel drops its diagnostics entirely
+  today and is the specific regression the fix must close.
+- A code→prefab refusal, including a pre-`RunCore` refusal (multi-root, or SB2402 root-name/filename
+  mismatch), also sets the standing status rather than only logging a console line.
+- `RecordClean` for one builder clears only that builder's overlay entry (via `RemoveOverlay`) and leaves
+  any unrelated conflict overlay registered by `ConflictSurfacing` intact.
 - A regression test asserts the recorded/surfaced diagnostic carries builder file, line, and builder
   identity (`BuilderName`), and that a refusal sets the standing status while a following clean build
   clears it. Because the refusal is produced against a real builder file routed to a live editor scene,
   this is an EditMode test in `unity-gate/Assets/GateTests/` (a builder whose `.On(...)` line is
   unsupported → status set with file+line+identity, scene untouched; fix the line → build succeeds →
-  status cleared), the boundary the headless Core suite is structurally blind to.
+  status cleared), the boundary the headless Core suite is structurally blind to. The SAME test drives
+  the previously-silent Materialize/resync channel (a broken builder through `ResyncRoute`/`RunMaterialize`
+  sets the standing status) — the behavioral check that replaces a literal source scan, which is blind to
+  a channel with no refusal literal.
