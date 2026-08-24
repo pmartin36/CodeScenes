@@ -92,6 +92,18 @@ namespace SceneBuilder.Editor
             return type;
         }
 
+        /// <summary>
+        /// True when <paramref name="serializedPath"/> is backed by a managed field on
+        /// <paramref name="componentType"/> (a user-authored serializable field the selector identifier
+        /// names) but has no compiling public spelling (<see cref="TryPublicMemberName"/> false) — a
+        /// typed selector naming it would not compile. A NATIVE field (no managed <see cref="FieldInfo"/>
+        /// backing it at all, e.g. <c>Rigidbody.m_Mass</c>) is never marked: its accessible spelling
+        /// (<c>mass</c>) is a property with no field of its own, so a typed selector over it compiles.
+        /// </summary>
+        internal static bool IsInaccessibleViaSelector(Type componentType, string serializedPath) =>
+            GetFieldRecursive(componentType, serializedPath) != null
+            && !TryPublicMemberName(componentType, serializedPath, out _);
+
         private static FieldInfo? GetFieldRecursive(Type type, string name)
         {
             const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;

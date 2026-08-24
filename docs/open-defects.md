@@ -189,3 +189,21 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   fixture builder written before its scene was opened); fires once, not per-keystroke. Pre-existing;
   unrelated to `0c4feff`. Fix: log the skip at Info/Warning, not Error. OWNER: unassigned. FOUND-BY:
   spec-42 live-verify.
+
+- SEVERITY med — prefab-instance override closure re-renders a typed selector for an inaccessible
+  member. `.Override(e => e.Set(x => x.priv, v))` re-renders via RenderOverrideSetCall's `member:`
+  arm (SceneBuilder.Core/Reconcile/SourcePatchApplier.Instances.cs:288-291) as a typed selector
+  `(T x) => x.<name>`, the same non-compiling class (CS0122) as spec-46 defect-1 but on the
+  prefab-instance override path, which spec-46's accept-when (a plain component field) does not
+  exercise. syncback-emits-compiling-code b1-t1 fixes only the component `.Set(...)` closure in
+  ComponentPatchApplier; the override render path is a distinct mechanism and was not covered. Fix
+  direction: apply the same inaccessible-member downgrade at the override render site. OWNER:
+  unassigned. FOUND-BY: syncback-emits-compiling-code (b1-t1 research).
+
+- SEVERITY low — no self-heal of an authored inaccessible typed selector without a scene change. An
+  authored inaccessible typed selector in an already-converged builder produces no
+  PatchComponentField (SceneBuilder.Core/Reconcile/ComponentReconciler.cs:415-420 fires only on a
+  value diff), so sync never rewrites it and BuilderCompileCheck stays red for that file. b1-t1's
+  value-change-driven downgrade satisfies spec-46's "field set from the scene" accept-when but does
+  not heal the unchanged case; a diff-independent source normalizer would. OWNER: unassigned.
+  FOUND-BY: syncback-emits-compiling-code (b1-t1 research).

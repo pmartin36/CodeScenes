@@ -88,6 +88,7 @@ namespace SceneBuilder.Editor
 
             var defaults = new List<ComponentData>(typeNames.Count);
             var memberSpellings = new List<MemberSpelling>();
+            var inaccessibleMembers = new List<InaccessibleMember>();
             foreach (var typeName in typeNames)
             {
                 if (ComponentDefaultTemplate.TryGet(typeName, out var fields))
@@ -108,6 +109,15 @@ namespace SceneBuilder.Editor
                         });
                     }
                 }
+
+                if (ComponentDefaultTemplate.TryGetInaccessibleMembers(typeName, out var members))
+                {
+                    var type = new TypeRef(typeName);
+                    foreach (var memberName in members)
+                    {
+                        inaccessibleMembers.Add(new InaccessibleMember { Type = type, MemberName = memberName });
+                    }
+                }
             }
 
             return new SceneSnapshot
@@ -116,6 +126,7 @@ namespace SceneBuilder.Editor
                 Roots = roots,
                 ComponentDefaults = defaults.ToArray(),
                 MemberSpellings = memberSpellings.ToArray(),
+                InaccessibleMembers = inaccessibleMembers.ToArray(),
                 FieldExclusions = SerializedFieldExclusions.Policy.Instance,
             };
         }

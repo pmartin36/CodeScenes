@@ -276,6 +276,36 @@ namespace SceneBuilder.Core.Reconcile
             return statements.RemoveAt(declIndex).Insert(lower, decl);
         }
 
+        /// <summary>
+        /// Finds <paramref name="handle"/>'s earliest referrer in <paramref name="statements"/> — the
+        /// first statement, other than the declaration itself, whose <see cref="NamedHandles"/>
+        /// include it — and hoists the declaration above it via <see cref="HoistDeclarationBeforeCeiling"/>.
+        /// No-op when nothing in the block references the handle, or its only referrers already
+        /// follow the declaration (the ordinary case). This is the thin finder the MOVE/reparent
+        /// repair loop below needs: <see cref="HoistDeclarationBeforeCeiling"/> itself takes the
+        /// ceiling index as a given (the introduce companion already knows its own statement's
+        /// index), but a relocated declaration must first discover WHICH statement, if any, now sits
+        /// as its ceiling.
+        /// </summary>
+        private static SyntaxList<StatementSyntax> HoistDeclarationAboveReferrers(
+            SyntaxList<StatementSyntax> statements, string handle)
+        {
+            for (var i = 0; i < statements.Count; i++)
+            {
+                if (DeclaredHandle(statements[i]) == handle)
+                {
+                    continue;
+                }
+
+                if (NamedHandles(statements[i]).Contains(handle, StringComparer.Ordinal))
+                {
+                    return HoistDeclarationBeforeCeiling(statements, handle, i);
+                }
+            }
+
+            return statements;
+        }
+
         // ---- Placement --------------------------------------------------------------------------
 
         /// <summary>
@@ -371,7 +401,30 @@ namespace SceneBuilder.Core.Reconcile
             var index = PlacementIndex(targetBlock.Statements, statement, receiver, kind, siblingIndex);
             var placed = targetBlock.Statements.InsertRange(index, group);
 
-            return currentRoot.ReplaceNode(targetBlock, targetBlock.WithStatements(placed));
+            currentRoot = currentRoot.ReplaceNode(targetBlock, targetBlock.WithStatements(placed));
+
+            // RULE 2's ceiling for the move path: PlacementIndex above only enforces the FLOOR (never
+            // seat the group below a handle IT calls). A relocation can still push a handle the group
+            // DECLARES below an external referrer outside the group — one chained off some OTHER
+            // receiver, e.g. `opener.Component<Linker>(c => c.Set("target", door))` when `door` moves
+            // past it. Hoist each handle the group declares back above its earliest referrer, looped
+            // per handle because one hoist can shift the index the next handle's scan needs.
+            foreach (var declaredHandle in group.Select(DeclaredHandle).Where(handle => handle != null))
+            {
+                while (true)
+                {
+                    var currentTargetBlock = (BlockSyntax)currentRoot.GetCurrentNode(trackedTargetBlock)!;
+                    var hoisted = HoistDeclarationAboveReferrers(currentTargetBlock.Statements, declaredHandle!);
+                    if (hoisted == currentTargetBlock.Statements)
+                    {
+                        break;
+                    }
+
+                    currentRoot = currentRoot.ReplaceNode(currentTargetBlock, currentTargetBlock.WithStatements(hoisted));
+                }
+            }
+
+            return currentRoot;
         }
 
         /// <summary>
@@ -379,5 +432,100 @@ namespace SceneBuilder.Core.Reconcile
         /// expression-bodied-lambda shape, where there is no statement list to seat anything in.
         /// </summary>
         private static BlockSyntax? EnclosingBlock(StatementSyntax statement) => statement.Parent as BlockSyntax;
+
+        // ---- Final declare-before-use repair (whole-tree, whole-batch) ---------------------------
+
+        /// <summary>
+        /// Repairs every block in <paramref name="root"/> so no statement names a handle declared at
+        /// or after its own index. Independent of any single edit's placement logic: a batch of
+        /// several placing edits can each individually satisfy RULE 1 (sibling order) while together
+        /// leaving some untouched statement above a handle it references, once that handle's
+        /// declaration lands past it. Blocks are disjoint in the emitted builder shape (no nested
+        /// statement lists), so each is repaired independently.
+        /// </summary>
+        private static CompilationUnitSyntax EnsureDeclareBeforeUse(CompilationUnitSyntax root) =>
+            root.ReplaceNodes(
+                root.DescendantNodes().OfType<BlockSyntax>(),
+                (originalBlock, _) => originalBlock.WithStatements(RepairDeclareBeforeUse(originalBlock.Statements)));
+
+        /// <summary>
+        /// Fixed-point repair for one block's statement list. On each violation (a statement naming a
+        /// handle declared later), first tries <see cref="HoistDeclarationAboveReferrers"/> — the
+        /// same ceiling the move/reparent path uses. When RULE 1 blocks that (an earlier same-kind
+        /// peer sits between the declaration and its referrer, so hoisting the declaration up would
+        /// violate sibling order), sinks the referring statement down past the declaration instead,
+        /// via <see cref="MinIndexAfterNamedDeclarations"/> — the same floor a freshly placed
+        /// statement is clamped to. Terminates within the block's own size even if a violation is
+        /// genuinely irreconcilable (returns the best-effort result rather than looping forever).
+        /// </summary>
+        private static SyntaxList<StatementSyntax> RepairDeclareBeforeUse(SyntaxList<StatementSyntax> statements)
+        {
+            for (var guard = 0; guard <= statements.Count; guard++)
+            {
+                var violation = FindDeclareBeforeUseViolation(statements);
+                if (violation == null)
+                {
+                    return statements;
+                }
+
+                var (referrerIndex, handle) = violation.Value;
+
+                var hoisted = HoistDeclarationAboveReferrers(statements, handle);
+                if (hoisted != statements)
+                {
+                    statements = hoisted;
+                    continue;
+                }
+
+                var sunk = SinkStatementBelowItsFloor(statements, referrerIndex);
+                if (sunk == statements)
+                {
+                    return statements;
+                }
+
+                statements = sunk;
+            }
+
+            return statements;
+        }
+
+        /// <summary>
+        /// The first (referrer index, handle) pair where <paramref name="statements"/>[referrer index]
+        /// names a handle whose declaration sits at or after that index, or null when the list is
+        /// already declare-before-use clean.
+        /// </summary>
+        private static (int ReferrerIndex, string Handle)? FindDeclareBeforeUseViolation(
+            SyntaxList<StatementSyntax> statements)
+        {
+            for (var i = 0; i < statements.Count; i++)
+            {
+                foreach (var handle in NamedHandles(statements[i]))
+                {
+                    var declarationIndex = DeclarationIndexOf(statements, handle);
+                    if (declarationIndex > i)
+                    {
+                        return (i, handle);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Relocates the statement at <paramref name="index"/> to one past the last named handle it
+        /// references (its receiver AND every argument) — the same floor
+        /// <see cref="MinIndexAfterNamedDeclarations"/> computes for a statement being freshly placed.
+        /// No-op when that floor is not actually past <paramref name="index"/> (defensive: the caller
+        /// only calls this on a confirmed violation, where the floor is always past the referrer).
+        /// </summary>
+        private static SyntaxList<StatementSyntax> SinkStatementBelowItsFloor(
+            SyntaxList<StatementSyntax> statements, int index)
+        {
+            var statement = statements[index];
+            var without = statements.RemoveAt(index);
+            var floor = MinIndexAfterNamedDeclarations(without, statement);
+            return floor > index ? without.Insert(floor, statement) : statements;
+        }
     }
 }

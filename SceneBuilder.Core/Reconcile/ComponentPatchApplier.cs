@@ -178,7 +178,12 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, SourceSpan> anchors,
             PatchComponentField edit,
             List<SyntaxNode> allTargets,
-            List<Func<SyntaxNode, SyntaxNode>> appliers)
+            List<Func<SyntaxNode, SyntaxNode>> appliers,
+            // A component member-set whose typed selector names a member the adapter has marked
+            // inaccessible (a managed serialized field with no compiling public spelling) is
+            // downgraded to string-key form in the SAME edit that patches the value — a typed
+            // selector over such a member never compiles (CS0122).
+            InaccessibleMemberIndex? inaccessibleMembers = null)
         {
             var textSpan = TextSpan.FromBounds(edit.ValueSpan.Start, edit.ValueSpan.Start + edit.ValueSpan.Length);
             var target = root.FindNode(textSpan, getInnermostNodeForTie: true);
@@ -190,6 +195,35 @@ namespace SceneBuilder.Core.Reconcile
             if (!isArgument && (target is not ExpressionSyntax || target.Span != textSpan))
             {
                 throw Fail(root, $"Could not resolve value span for component field patch on '{edit.Anchor}'.");
+            }
+
+            // The enclosing `.Set(...)` call, if the patched value sits inside one. When its first
+            // argument is a typed member selector (`sel => sel.M`) naming an inaccessible (T, M), the
+            // downgrade rewrites arg0 to the string literal `"M"` alongside the value in ONE
+            // ReplaceNode over the invocation — two separate ReplaceNodes touching the same call would
+            // leave the second's tracked node stale.
+            var setInvocation = target.FirstAncestorOrSelf<InvocationExpressionSyntax>(inv =>
+                inv.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "Set" });
+
+            if (setInvocation != null
+                && setInvocation.ArgumentList.Arguments.Count > 0
+                && setInvocation.ArgumentList.Arguments[0].Expression is SimpleLambdaExpressionSyntax
+                    { Body: MemberAccessExpressionSyntax selectorMember }
+                && inaccessibleMembers != null
+                && ComponentTargetResolution.TryParseLogicalId(edit.Anchor, out _, out var typeFullName, out _)
+                && inaccessibleMembers.IsInaccessible(typeFullName, selectorMember.Name.Identifier.Text))
+            {
+                var memberName = selectorMember.Name.Identifier.Text;
+
+                allTargets.Add(setInvocation);
+                appliers.Add(currentRoot =>
+                {
+                    var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(setInvocation)!;
+                    var newArgList = SyntaxFactory.ParseArgumentList(
+                        $"({SourceExpr.StringLiteral(memberName)}, {edit.NewExpr})");
+                    return currentRoot.ReplaceNode(current, current.WithArgumentList(newArgList));
+                });
+                return;
             }
 
             allTargets.Add(target);

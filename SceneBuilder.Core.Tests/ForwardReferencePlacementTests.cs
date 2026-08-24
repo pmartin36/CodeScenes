@@ -1,8 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SceneBuilder.Core.Parsing;
 using SceneBuilder.Core.Reconcile;
 using Xunit;
@@ -151,43 +148,6 @@ public class ForwardScene : ISceneDefinition
 }
 ";
             AssertNoForwardLocalReference(corrected);
-        }
-
-        // For every block, for every statement at index i, every identifier it uses that matches an
-        // in-block local declaration must be declared strictly before i. Independent of the
-        // production floor (StatementPlacement.cs) so it is a real oracle, not a tautology.
-        private static void AssertNoForwardLocalReference(string source)
-        {
-            var root = CSharpSyntaxTree.ParseText(source).GetRoot();
-
-            foreach (var block in root.DescendantNodes().OfType<BlockSyntax>())
-            {
-                var statements = block.Statements;
-                var declIndex = new Dictionary<string, int>();
-                for (var i = 0; i < statements.Count; i++)
-                {
-                    if (statements[i] is LocalDeclarationStatementSyntax local)
-                    {
-                        foreach (var variable in local.Declaration.Variables)
-                        {
-                            declIndex[variable.Identifier.Text] = i;
-                        }
-                    }
-                }
-
-                for (var i = 0; i < statements.Count; i++)
-                {
-                    foreach (var id in statements[i].DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
-                    {
-                        if (declIndex.TryGetValue(id.Identifier.Text, out var declaredAt))
-                        {
-                            Assert.True(
-                                declaredAt < i,
-                                $"'{id.Identifier.Text}' used at statement {i} before its declaration at {declaredAt}: {statements[i]}");
-                        }
-                    }
-                }
-            }
         }
     }
 }

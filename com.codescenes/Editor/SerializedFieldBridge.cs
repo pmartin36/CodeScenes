@@ -112,6 +112,12 @@ namespace SceneBuilder.Editor
             // carries no entry for it, and the reconciler's existing UnsyncableListener path fires.
             List<(string SerializedPath, string PublicName)>? spellings = null;
 
+            // Every top-level serialized field with no compiling public typed-selector spelling
+            // (SerializedMemberMap.IsInaccessibleViaSelector), gathered alongside the field read so
+            // ComponentDefaultTemplate.RegisterInaccessibleMembers sees the exact same set the live
+            // read does — read and signal can never diverge.
+            List<string>? inaccessibleMembers = null;
+
             // Computed ONCE per component, ahead of the field loop: the propertyPath of every
             // managed-ref occurrence that is either a sibling-shared instance or a cycle's
             // back-edge is a report-only Unsupported marker, not a forked/non-terminating read
@@ -139,6 +145,11 @@ namespace SceneBuilder.Editor
                     (spellings ??= new List<(string, string)>()).Add((it.propertyPath, publicName));
                 }
 
+                if (ownerType != null && SerializedMemberMap.IsInaccessibleViaSelector(ownerType, it.propertyPath))
+                {
+                    (inaccessibleMembers ??= new List<string>()).Add(it.propertyPath);
+                }
+
                 // Field types M3 cannot represent — object/asset references (mesh, material, physics
                 // material) and LayerMask are M4+ — are SKIPPED, never written. Emitting them would
                 // produce uncompilable tokens (a bare `ObjectReference` / `LayerMask` identifier).
@@ -158,6 +169,11 @@ namespace SceneBuilder.Editor
             {
                 spellings.Sort((a, b) => string.CompareOrdinal(a.SerializedPath, b.SerializedPath));
                 ComponentDefaultTemplate.RegisterMemberSpellings(ownerTypeFullName, spellings);
+            }
+
+            if (ownerType?.FullName is { } ownerTypeFullNameForInaccessible && inaccessibleMembers is { Count: > 0 })
+            {
+                ComponentDefaultTemplate.RegisterInaccessibleMembers(ownerTypeFullNameForInaccessible, inaccessibleMembers);
             }
 
             return fields;

@@ -21,6 +21,12 @@ namespace SceneBuilder.Core.Model
         // producer fills it. See MemberSpellingIndex for the lookup over this array.
         public MemberSpelling[] MemberSpellings { get; init; } = Array.Empty<MemberSpelling>();
 
+        // Per-(component TYPE, member name) fact that a typed selector naming that member would not
+        // compile (a managed serialized field that is private/[SerializeField]-private with no public
+        // property setter). A reflection fact of the type, carried once per snapshot for the same
+        // reason MemberSpellings is. See InaccessibleMemberIndex for the lookup over this array.
+        public InaccessibleMember[] InaccessibleMembers { get; init; } = Array.Empty<InaccessibleMember>();
+
         // The adapter/Core crossing: which serialized-field roots are not author intent for a given
         // component type. Default excludes nothing, so a snapshot that does not set this diffs and
         // materializes exactly as one with no field-exclusion machinery at all. Not persisted: a

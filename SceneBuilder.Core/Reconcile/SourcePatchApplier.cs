@@ -26,7 +26,12 @@ namespace SceneBuilder.Core.Reconcile
             // calling ValueNodeLiteral with no catalog at all, silently downgrading every such field
             // to the `Asset("path")` string form. Optional/trailing so every pre-existing call site
             // stays green unchanged.
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // Per (component TYPE, member name) fact that a typed selector naming that member would
+            // not compile. Optional/trailing, default Empty (via ResolvePatchComponentField's own
+            // default), so every pre-existing call site keeps its current behavior — same pattern as
+            // assetCatalog above.
+            InaccessibleMemberIndex? inaccessibleMembers = null)
         {
             var tree = CSharpSyntaxTree.ParseText(source);
             var root = (CompilationUnitSyntax)tree.GetRoot();
@@ -111,7 +116,7 @@ namespace SceneBuilder.Core.Reconcile
                         // left to do in the main dispatch loop.
                         break;
                     case PatchComponentField patchComponentField:
-                        ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers);
+                        ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers, inaccessibleMembers);
                         break;
                     case IntroduceComponentField introduceComponentField:
                         ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers, assetCatalog);
@@ -170,6 +175,18 @@ namespace SceneBuilder.Core.Reconcile
             if (currentRoot is CompilationUnitSyntax patchedUnit)
             {
                 currentRoot = EnsureAssetRefsUsing(patchedUnit);
+            }
+
+            // Declare-before-use, over the FINAL root rather than per-edit: a batch of several
+            // ReorderStatement edits (one per node whose sibling index moved) settles the block's
+            // Child/Component peer order correctly, but a statement that named a moved handle and
+            // was not itself part of the batch can still end up above that handle's new declaration
+            // — the per-edit hoist in PlaceExistingStatement only repairs the handle(s) ITS OWN
+            // moved group declares. This pass catches whatever is left, whichever edit combination
+            // produced it.
+            if (currentRoot is CompilationUnitSyntax preRepairUnit)
+            {
+                currentRoot = EnsureDeclareBeforeUse(preRepairUnit);
             }
 
             return currentRoot.ToFullString();
