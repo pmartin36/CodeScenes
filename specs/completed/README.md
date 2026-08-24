@@ -504,3 +504,32 @@ emits two byte-identical `ReorderStatement` no-ops every sync — suppressed by 
 guard (so the file stays byte-stable) but logged as an Error each cycle. Filed in `docs/open-defects.md`
 and fixed as a follow-up RED-first bug fix (StatementPlacement / reorder pass), not folded into 46's
 commit; 46's own `SyncBackCompilesRoundTripTests` dodged the shape via `door.SetSiblingIndex(2)`.
+
+## 47 - typed member-selector resolves the component's REAL serialized names
+
+`AuthoredPathResolver.ResolvePath` no longer guesses a serialized path from a fixed
+`field -> m_Field` camelCase->PascalCase mangling; it enumerates the live `SerializedObject` probe it
+already holds and matches the authored member against the component's ACTUAL property names (exact
+propertyPath, then the reflected `[SerializeField]`/`[FormerlySerializedAs]` spelling, then a
+case-insensitive match against the probe's real names and their de-`m_`/de-space normalization). Enum
+members carry through the existing enum->int lowering, so an enum-typed typed selector writes without a
+raw `(int)` cast. A member that maps to no real property still throws the located
+`Cannot resolve authored member ...`, and a member Unity splits across two fields (TMP `alignment`)
+fails located and names both real fields. The invariant: ResolvePath returns only a path the probe
+reports, so a fabricated path is unreachable by construction.
+
+Built through the tdd-pipeline (commit `7c82840`). Gate
+`GATE PASS: Core + Unity EditMode green (passed=958 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec47.log`): each member
+authored through the typed selector `.Set(x => x.<member>, value)` and built code->scene into a fresh
+scene, then read back from live component state. `Camera.nearClipPlane`/`fieldOfView` resolved to the
+spaced `near clip plane`/`field of view`; `Light.type`, `Image.fillMethod`,
+`Rigidbody.collisionDetectionMode` (`m_CollisionDetection`) and `Rigidbody.interpolation`
+(`m_Interpolate`) resolved and wrote their divergent real serialized fields as bare enum literals with
+no `(int)` cast, `diagnostics=0` per build. The no-such-member and TMP `alignment`-split cases threw the
+expected located errors (alignment naming both `m_HorizontalAlignment`/`m_VerticalAlignment`).
+`TextMeshProUGUI.fontSize` (`m_fontSize`) is covered by the green EditMode gate test and was
+additionally captured live. Console errors during the pass were pre-existing (a DemoScene
+`m_TaaSettings` standing note on scene-load reconcile, scene->code and out of 47's scope) or engine
+environment noise, none caused by 47.
