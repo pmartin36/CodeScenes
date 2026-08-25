@@ -181,15 +181,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   its single-Build-method fallback (:38-50), so a prefab file with multiple Build methods gets no
   in-IDE recognition. Out of spec-39 (no analyzer scope). OWNER: unassigned. FOUND-BY: prefab-authoring (b1-t2).
 
-- SEVERITY low — a benign code->scene build skip is logged at ERROR severity. When the pump routes a
-  code->scene cycle while the target scene is not open, `SceneBuilderAutoSync.ExecuteCodeToScene`
-  (`com.codescenes/Editor/SceneBuilderAutoSync.cs`, the skip-guard around `:671`) emits
-  `[CodeScenes] <builder>: scene ... is not open — code->scene build skipped` at Error level, so a
-  non-error condition surfaces as a red console Error. Observed once during spec-42 live-verify (a
-  fixture builder written before its scene was opened); fires once, not per-keystroke. Pre-existing;
-  unrelated to `0c4feff`. Fix: log the skip at Info/Warning, not Error. OWNER: unassigned. FOUND-BY:
-  spec-42 live-verify.
-
 - SEVERITY med — prefab-instance override closure re-renders a typed selector for an inaccessible
   member. `.Override(e => e.Set(x => x.priv, v))` re-renders via RenderOverrideSetCall's `member:`
   arm (SceneBuilder.Core/Reconcile/SourcePatchApplier.Instances.cs:288-291) as a typed selector

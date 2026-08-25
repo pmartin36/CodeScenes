@@ -590,3 +590,35 @@ registered) while auto stayed ON, a clean builder read `No build errors`; the re
 (an unrelated conflict overlay survived, proving per-key removal); and a refusal driven through
 `SceneBuilderResync.ResyncRoute` (Materialize direction) set the standing status (`SB2201 ...(6,9)`),
 the exact regression the fix closes. Console clean of unexpected errors.
+
+## 50 - auto-sync reliability (scene-open race, atomic-write blindness, pump death)
+
+Three transport-layer defects in the auto-sync loop (`com.codescenes/Editor/SceneBuilderAutoSync.cs`),
+each of which silently dropped a sync that should have run:
+1. A code->scene cycle whose target scene is not yet open now DEFERS instead of dropping: on a
+   `TryGetOpenScene` miss the path is re-enqueued and the deadline re-armed (`DeferCodeToScene`), so the
+   next pump tick after the scene opens runs the build; a retry ceiling (10) abandons a genuinely
+   never-opening builder rather than spinning forever.
+2. The source watcher no longer uses a server-side `"*.cs"` name filter (which missed atomic-replace
+   writes whose temp name did not match); it watches the directory unfiltered and filters by `.cs`
+   extension on the main thread, so a rename-into-place is seen. A content-hash rescan of discovered
+   builders on focus-regain is the backstop for any write that still slips.
+3. The update pump is live after every play-mode / probe round trip with no manual domain reload: the
+   `EnteredEditMode` re-arm defers via `delayCall` (so `isPlayingOrWillChangePlaymode` reads false), plus
+   a self-healing `PumpWatchdog` on a class-lifetime hook re-arms whenever the toggle is on, the license
+   allows, and play mode is off but the pump is not subscribed.
+
+This also retires the stale open-defect (the old per-cycle "scene is not open — build skipped" logged at
+Error): the skip is now a silent defer.
+
+Built through the tdd-pipeline (commit `c30160f`). Gate
+`GATE PASS: Core + Unity EditMode green (passed=989 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec50.log`), 3/3 with auto ON:
+(1) a source change enqueued while the scene was closed ran a pump tick that left the path PENDING (not
+dropped), then executed and moved the marker to (1,2,3) once the scene opened; (2) an atomic replace
+(temp + rename) converged the scene to (7,8,9) at parity with a plain append, and a focus-regain rescan
+converged a watcher-slipped write to (4,5,6) with no in-scene edit; (3) an `EnteredPlayMode`->`EnteredEditMode`
+round trip through `OnPlayModeStateChanged` left `IsArmed=True` and a real edit drove a scene->code cycle
+through natural update ticks with no manual reload. The "did not open after 10 attempts — abandoned" lines
+were fix #1's retry ceiling firing because the harness held scenes closed past the ceiling, not a defect.
