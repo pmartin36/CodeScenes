@@ -168,7 +168,7 @@ namespace SceneBuilder.Core.Parsing
             // Primitive arms never fire here -- this reuses the SAME one-reference normalization
             // its catch-all applies to a static argument, the ONE site ObjectRefDescentScanTests
             // pins for this test.
-            var target = ClassifyStaticArg(ValueNodeParser.Parse(targetExpr, ctx.AssetCatalog, ctx.FacadeConflicts), targetExpr).Value;
+            var target = ClassifyStaticArg(ValueNodeParser.Parse(targetExpr, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings), targetExpr).Value;
 
             var isDynamic = dynamicExpr is LiteralExpressionSyntax dynamicLiteral &&
                              dynamicLiteral.IsKind(SyntaxKind.TrueLiteralExpression);
@@ -212,7 +212,7 @@ namespace SceneBuilder.Core.Parsing
                 else if (methodArgs.Count == 1)
                 {
                     var argExpr = UnwrapTypedRef(methodArgs[0].Expression);
-                    var lowered = ValueNodeParser.Parse(argExpr, ctx.AssetCatalog, ctx.FacadeConflicts);
+                    var lowered = ValueNodeParser.Parse(argExpr, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings);
                     (mode, argValue) = ClassifyStaticArg(lowered, argExpr);
                 }
                 else

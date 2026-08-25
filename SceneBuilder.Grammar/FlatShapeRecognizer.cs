@@ -25,7 +25,7 @@ namespace SceneBuilder.Grammar
 
         public static IReadOnlyList<ShapeViolation> Analyze(BlockSyntax buildBody, string sceneParamName, bool isVariant = false)
         {
-            var ctx = new RecognizerContext(sceneParamName, isVariant);
+            var ctx = new RecognizerContext(sceneParamName, isVariant, StringConstantFolder.Collect(buildBody));
 
             foreach (var statement in buildBody.Statements)
             {
@@ -42,6 +42,14 @@ namespace SceneBuilder.Grammar
             switch (statement)
             {
                 case LocalDeclarationStatementSyntax local:
+                    if (local.Declaration.Variables.Count == 1 &&
+                        StringConstantFolder.IsConstStringDeclaration(local.Modifiers, local.Declaration.Type))
+                    {
+                        // A `const string` local is a constant binding (collected up front by
+                        // StringConstantFolder.Collect), not a builder statement.
+                        return;
+                    }
+
                     if (local.Declaration.Variables.Count != 1)
                     {
                         Report(ctx, local, SB1001, "Unsupported local declaration (expected a single builder handle)");
@@ -112,6 +120,22 @@ namespace SceneBuilder.Grammar
                 return;
             }
 
+            // A prefab-instance handle captured in an earlier statement: every call on it is an
+            // instance verb, mirroring BuilderParser.cs's captured-instance arm.
+            if (ctx.InstanceHandles.Contains(receiver.Identifier.Text))
+            {
+                var instanceChainedCalls = DispatchInstanceVerbs(calls, ctx);
+                ApplyChainedCalls(instanceChainedCalls, ctx);
+
+                if (handleName != null)
+                {
+                    ctx.Scope.Add(handleName);
+                    ctx.InstanceHandles.Add(handleName);
+                }
+
+                return;
+            }
+
             var (remainingCalls, refCall) = SplitTrailingComponentRef(calls);
             ApplyChainedCalls(remainingCalls, ctx);
 
@@ -140,7 +164,7 @@ namespace SceneBuilder.Grammar
                 return;
             }
 
-            if (!IsStringLiteral(addArgs[0].Expression))
+            if (!IsStringLiteral(addArgs[0].Expression, ctx))
             {
                 Report(ctx, addArgs[0].Expression, SB1001, "Expected a string literal");
             }
@@ -459,7 +483,7 @@ namespace SceneBuilder.Grammar
             }
 
             var expr = args.Arguments[0].Expression;
-            if (!IsStringLiteral(expr))
+            if (!IsStringLiteral(expr, ctx))
             {
                 Report(ctx, expr, SB1001, "Expected a string literal");
             }
@@ -495,8 +519,11 @@ namespace SceneBuilder.Grammar
             }
         }
 
-        private static bool IsStringLiteral(ExpressionSyntax expression) =>
-            expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression);
+        // The ONE literal helper for every string-literal-demanding site — a bare string literal,
+        // or a fold of `ctx`'s collected `const string` environment (StringConstantFolder), the
+        // mirror of BuilderParser.EvalStringLiteral's acceptance shape.
+        private static bool IsStringLiteral(ExpressionSyntax expression, RecognizerContext ctx) =>
+            StringConstantFolder.IsFoldable(expression, ctx.ConstStrings);
 
         private static bool IsBoolLiteral(ExpressionSyntax expression) =>
             expression is LiteralExpressionSyntax literal &&
@@ -524,15 +551,25 @@ namespace SceneBuilder.Grammar
 
         private sealed class RecognizerContext
         {
-            public RecognizerContext(string sceneParamName, bool isVariant = false)
+            public RecognizerContext(string sceneParamName, bool isVariant = false, IReadOnlyDictionary<string, string>? constStrings = null)
             {
                 SceneParamName = sceneParamName;
                 IsVariant = isVariant;
+                ConstStrings = constStrings ?? new Dictionary<string, string>();
             }
 
             public string SceneParamName { get; }
             public bool IsVariant { get; }
+
+            // The `const string` fold environment collected once at Analyze entry
+            // (StringConstantFolder.Collect) — consulted by IsStringLiteral.
+            public IReadOnlyDictionary<string, string> ConstStrings { get; }
             public HashSet<string> Scope { get; } = new();
+
+            // The subset of Scope bound to a prefab-instance handle (via `.Instance(...)`) — gates
+            // the captured-instance verb arm in ProcessBuilderChain. Every name in here is also in
+            // Scope; Scope holds every declared handle regardless of kind.
+            public HashSet<string> InstanceHandles { get; } = new();
             public List<ShapeViolation> Violations { get; } = new();
         }
     }

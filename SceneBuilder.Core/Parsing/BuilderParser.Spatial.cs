@@ -96,7 +96,7 @@ namespace SceneBuilder.Core.Parsing
         // Scalar field: reuse ValueNodeParser, then coerce any numeric primitive to Float
         // (spec: width/height/depth are FLOAT ValueNodes). Non-numeric -> Unsupported (total).
         private static ValueNode ParseSpatialScalar(ExpressionSyntax expr, ParserContext ctx)
-            => TryCoerceFloat(ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts), out var f)
+            => TryCoerceFloat(ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings), out var f)
                 ? ValueNode.Primitive.Float(f)
                 : new ValueNode.Unsupported(expr.ToString());
 
@@ -106,14 +106,14 @@ namespace SceneBuilder.Core.Parsing
         private static ValueNode ParseSpatialVec3(ExpressionSyntax expr, ParserContext ctx)
         {
             if (expr is TupleExpressionSyntax tuple && tuple.Arguments.Count == 3
-                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[0].Expression, ctx.AssetCatalog, ctx.FacadeConflicts), out var x)
-                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[1].Expression, ctx.AssetCatalog, ctx.FacadeConflicts), out var y)
-                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[2].Expression, ctx.AssetCatalog, ctx.FacadeConflicts), out var z))
+                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[0].Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings), out var x)
+                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[1].Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings), out var y)
+                && TryCoerceFloat(ValueNodeParser.Parse(tuple.Arguments[2].Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings), out var z))
             {
                 return new ValueNode.Vec3(new Vec3(x, y, z));
             }
 
-            return ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts); // Vector3(...) -> Vec3; else Unsupported
+            return ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings); // Vector3(...) -> Vec3; else Unsupported
         }
 
         // `.SurfaceSnap(down: true, left: true, target: floor)` — bool axis flags + optional target ObjectRef.
@@ -142,7 +142,7 @@ namespace SceneBuilder.Core.Parsing
 
                 if (name == SpatialComponents.SurfaceSnapFields.Target)
                 {
-                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
                     spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SurfaceSnapFields.Target, span));
                     continue;
                 }
@@ -262,11 +262,11 @@ namespace SceneBuilder.Core.Parsing
                 switch (name)
                 {
                     case SpatialComponents.BetweenFields.From:
-                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.From, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.From, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
                         spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.From, span));
                         break;
                     case SpatialComponents.BetweenFields.To:
-                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.To, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.To, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
                         spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.To, span));
                         break;
                     case SpatialComponents.BetweenFields.Fraction:
@@ -290,7 +290,7 @@ namespace SceneBuilder.Core.Parsing
                         break;
                     case "alongOrientationOf":
                         oriented = true;
-                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.Orientation, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts)));
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.BetweenFields.Orientation, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
                         spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.BetweenFields.Orientation, span));
                         break;
                     default:

@@ -20,13 +20,14 @@ namespace SceneBuilder.Core.Parsing
 
         // b2-t1: `assetCatalog`/`conflicts` are optional so every pre-existing 1-arg call site
         // keeps binding unchanged. They flow only to the new Assets-root arm (TryParseAssetChain)
-        // and the recursion carriers that can reach it.
-        public static ValueNode Parse(ExpressionSyntax expr, AssetCatalog? assetCatalog = null, List<Conflict>? conflicts = null)
+        // and the recursion carriers that can reach it. `constStrings` is likewise optional
+        // (defaults to none), consulted only by TryStringLiteral for the Asset/Builtin arms.
+        public static ValueNode Parse(ExpressionSyntax expr, AssetCatalog? assetCatalog = null, List<Conflict>? conflicts = null, IReadOnlyDictionary<string, string>? constStrings = null)
         {
             switch (expr)
             {
                 case PrefixUnaryExpressionSyntax unary when unary.OperatorToken.IsKind(SyntaxKind.MinusToken):
-                    return ParseNegated(unary, assetCatalog, conflicts);
+                    return ParseNegated(unary, assetCatalog, conflicts, constStrings);
 
                 case LiteralExpressionSyntax literal:
                     return ParseLiteral(literal, expr);
@@ -36,11 +37,11 @@ namespace SceneBuilder.Core.Parsing
 
                 case InvocationExpressionSyntax invocation
                     when invocation.Expression is IdentifierNameSyntax id && id.Identifier.Text == "Asset":
-                    return ParseAsset(invocation);
+                    return ParseAsset(invocation, constStrings);
 
                 case InvocationExpressionSyntax invocation
                     when invocation.Expression is IdentifierNameSyntax id && id.Identifier.Text == "Builtin":
-                    return ParseBuiltin(invocation);
+                    return ParseBuiltin(invocation, constStrings);
 
                 case MemberAccessExpressionSyntax member
                     when member.Expression.ToString() == "Asset" && member.Name.Identifier.Text == "None":
@@ -75,22 +76,22 @@ namespace SceneBuilder.Core.Parsing
                         new[] { memberAccess.Name.Identifier.Text });
 
                 case ObjectCreationExpressionSyntax objectCreation:
-                    return ParseObjectCreation(objectCreation, expr, assetCatalog, conflicts);
+                    return ParseObjectCreation(objectCreation, expr, assetCatalog, conflicts, constStrings);
 
                 case ArrayCreationExpressionSyntax { Initializer: { } arrayInitializer }:
-                    return ParseList(arrayInitializer, assetCatalog, conflicts);
+                    return ParseList(arrayInitializer, assetCatalog, conflicts, constStrings);
 
                 case ImplicitArrayCreationExpressionSyntax implicitArray:
-                    return ParseList(implicitArray.Initializer, assetCatalog, conflicts);
+                    return ParseList(implicitArray.Initializer, assetCatalog, conflicts, constStrings);
 
                 default:
                     return Unsupported(expr);
             }
         }
 
-        private static ValueNode ParseNegated(PrefixUnaryExpressionSyntax unary, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
+        private static ValueNode ParseNegated(PrefixUnaryExpressionSyntax unary, AssetCatalog? assetCatalog, List<Conflict>? conflicts, IReadOnlyDictionary<string, string>? constStrings)
         {
-            var operand = Parse(unary.Operand, assetCatalog, conflicts);
+            var operand = Parse(unary.Operand, assetCatalog, conflicts, constStrings);
             return operand switch
             {
                 ValueNode.Primitive(PrimitiveKind.Int, int i) => ValueNode.Primitive.Int(-i),
@@ -173,18 +174,18 @@ namespace SceneBuilder.Core.Parsing
             return false;
         }
 
-        private static ValueNode ParseObjectCreation(ObjectCreationExpressionSyntax objectCreation, ExpressionSyntax whole, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
+        private static ValueNode ParseObjectCreation(ObjectCreationExpressionSyntax objectCreation, ExpressionSyntax whole, AssetCatalog? assetCatalog, List<Conflict>? conflicts, IReadOnlyDictionary<string, string>? constStrings)
         {
             var initializerKind = objectCreation.Initializer?.Kind();
 
             if (initializerKind == SyntaxKind.ObjectInitializerExpression)
             {
-                return ParseNested(objectCreation.Type, objectCreation.Initializer!, whole, assetCatalog, conflicts);
+                return ParseNested(objectCreation.Type, objectCreation.Initializer!, whole, assetCatalog, conflicts, constStrings);
             }
 
             if (initializerKind == SyntaxKind.CollectionInitializerExpression)
             {
-                return ParseList(objectCreation.Initializer!, assetCatalog, conflicts);
+                return ParseList(objectCreation.Initializer!, assetCatalog, conflicts, constStrings);
             }
 
             var typeName = TypeNameOf(objectCreation.Type);
@@ -204,7 +205,7 @@ namespace SceneBuilder.Core.Parsing
             _ => null,
         };
 
-        private static ValueNode ParseNested(TypeSyntax type, InitializerExpressionSyntax initializer, ExpressionSyntax whole, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
+        private static ValueNode ParseNested(TypeSyntax type, InitializerExpressionSyntax initializer, ExpressionSyntax whole, AssetCatalog? assetCatalog, List<Conflict>? conflicts, IReadOnlyDictionary<string, string>? constStrings)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
 
@@ -215,16 +216,16 @@ namespace SceneBuilder.Core.Parsing
                     return Unsupported(whole);
                 }
 
-                fields.Add(new KeyValuePair<string, ValueNode>(ident.Identifier.Text, Parse(assignment.Right, assetCatalog, conflicts)));
+                fields.Add(new KeyValuePair<string, ValueNode>(ident.Identifier.Text, Parse(assignment.Right, assetCatalog, conflicts, constStrings)));
             }
 
             // Full written type text (namespace preserved), NOT TypeNameOf (drops the namespace).
             return new ValueNode.Nested(type.ToString().Trim(), new FieldMap(fields));
         }
 
-        private static ValueNode ParseList(InitializerExpressionSyntax initializer, AssetCatalog? assetCatalog, List<Conflict>? conflicts)
+        private static ValueNode ParseList(InitializerExpressionSyntax initializer, AssetCatalog? assetCatalog, List<Conflict>? conflicts, IReadOnlyDictionary<string, string>? constStrings)
         {
-            var items = initializer.Expressions.Select(e => Parse(e, assetCatalog, conflicts)).ToArray();
+            var items = initializer.Expressions.Select(e => Parse(e, assetCatalog, conflicts, constStrings)).ToArray();
             return new ValueNode.List(items);
         }
 
@@ -300,7 +301,7 @@ namespace SceneBuilder.Core.Parsing
             return false;
         }
 
-        private static ValueNode ParseAsset(InvocationExpressionSyntax invocation)
+        private static ValueNode ParseAsset(InvocationExpressionSyntax invocation, IReadOnlyDictionary<string, string>? constStrings)
         {
             var args = invocation.ArgumentList.Arguments;
             if (args.Count is not (1 or 2)) return Unsupported(invocation);
@@ -308,40 +309,36 @@ namespace SceneBuilder.Core.Parsing
             var arg = args[0].Expression;
             if (args.Count == 1)
             {
-                if (TryStringLiteral(arg, out var path))
+                if (TryStringLiteral(arg, constStrings, out var path))
                     return new ValueNode.AssetRef(new AssetRef { DisplayPath = path });
                 if (arg is LiteralExpressionSyntax lit && lit.IsKind(SyntaxKind.NullLiteralExpression))
                     return new ValueNode.AssetRef(null);
                 return Unsupported(invocation);
             }
 
-            // 2-arg sub-asset form: both args must be string literals.
-            if (!TryStringLiteral(arg, out var displayPath)) return Unsupported(invocation);
-            if (!TryStringLiteral(args[1].Expression, out var subAsset)) return Unsupported(invocation);
+            // 2-arg sub-asset form: both args must be string literals or fold to one.
+            if (!TryStringLiteral(arg, constStrings, out var displayPath)) return Unsupported(invocation);
+            if (!TryStringLiteral(args[1].Expression, constStrings, out var subAsset)) return Unsupported(invocation);
             return new ValueNode.AssetRef(new AssetRef { DisplayPath = displayPath, SubAsset = subAsset });
         }
 
-        private static ValueNode ParseBuiltin(InvocationExpressionSyntax invocation)
+        private static ValueNode ParseBuiltin(InvocationExpressionSyntax invocation, IReadOnlyDictionary<string, string>? constStrings)
         {
             var args = invocation.ArgumentList.Arguments;
             if (args.Count is not (1 or 2)) return Unsupported(invocation);
-            if (!TryStringLiteral(args[0].Expression, out var name)) return Unsupported(invocation);
+            if (!TryStringLiteral(args[0].Expression, constStrings, out var name)) return Unsupported(invocation);
             var typeHint = "";
-            if (args.Count == 2 && !TryStringLiteral(args[1].Expression, out typeHint)) return Unsupported(invocation);
+            if (args.Count == 2 && !TryStringLiteral(args[1].Expression, constStrings, out typeHint)) return Unsupported(invocation);
             return new ValueNode.AssetRef(new AssetRef { DisplayPath = name, IsBuiltin = true, TypeHint = typeHint });
         }
 
-        private static bool TryStringLiteral(ExpressionSyntax expr, out string value)
-        {
-            if (expr is LiteralExpressionSyntax lit && lit.IsKind(SyntaxKind.StringLiteralExpression))
-            {
-                value = lit.Token.ValueText;
-                return true;
-            }
+        private static readonly IReadOnlyDictionary<string, string> EmptyConstStrings = new Dictionary<string, string>();
 
-            value = "";
-            return false;
-        }
+        // The single owner of Asset/Builtin string-argument acceptance: a bare literal, or a
+        // fold of the caller's `const string` environment (StringConstantFolder — Core's, since
+        // this file lives in SceneBuilder.Core.Parsing).
+        private static bool TryStringLiteral(ExpressionSyntax expr, IReadOnlyDictionary<string, string>? constStrings, out string value) =>
+            StringConstantFolder.TryFold(expr, constStrings ?? EmptyConstStrings, out value);
 
         // b2-t1: claims an `Assets.<Group>.<folders...>.<Leaf>` chain ONLY when catalog-shaped —
         // root identifier `Assets`, a non-null catalog, AND the Group (2nd segment) is KNOWN in

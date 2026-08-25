@@ -70,7 +70,7 @@ namespace SceneBuilder.Core.Parsing
             }
             else
             {
-                var path = EvalStringLiteral(arg0);
+                var path = EvalStringLiteral(arg0, ctx);
                 var stem = Path.GetFileNameWithoutExtension(path);
 
                 node = new NodeBuilder { Name = stem, IsInstance = true, SourcePrefabPath = path };
@@ -79,36 +79,7 @@ namespace SceneBuilder.Core.Parsing
 
             var chainedCalls = new List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
             var addChildCalls = new List<(ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
-            foreach (var call in calls.Skip(1))
-            {
-                switch (call.Method)
-                {
-                    case "Override":
-                        ApplyOverride(node, call.Args, ctx);
-                        break;
-                    case "AddComponent":
-                        ApplyAddComponent(node, call.Invocation, call.Args, ctx);
-                        break;
-                    case "RemoveComponent":
-                        ApplyRemoveComponent(node, call.Invocation);
-                        break;
-                    case "On":
-                        // b4-t2 (test-writer stub): real resolution lands in BuilderParser.Facade.cs.
-                        ApplyScopedOn(node, call.Args, ctx);
-                        break;
-                    case "RemoveChild":
-                        ApplyRemoveChild(node, call.Args, ctx);
-                        break;
-                    case "AddChild":
-                        // Deferred: the added child's LogicalId is parented on `node.LogicalId`,
-                        // which is only final after resolution below.
-                        addChildCalls.Add((call.Args, call.Invocation));
-                        break;
-                    default:
-                        chainedCalls.Add(call);
-                        break;
-                }
-            }
+            DispatchInstanceVerbs(node, calls.Skip(1), ctx, chainedCalls, addChildCalls);
 
             var explicitId = ApplyChainedCalls(node, chainedCalls, ctx);
 
@@ -126,6 +97,81 @@ namespace SceneBuilder.Core.Parsing
             foreach (var (args, invocation) in addChildCalls)
             {
                 ApplyAddChild(node, args, invocation, ctx);
+            }
+        }
+
+        // Per-verb dispatch for a call chain rooted on a prefab-instance node — shared by the INLINE
+        // form (ProcessInstanceChain, after skipping the leading `Instance(...)` call) and the
+        // CAPTURED form (ProcessCapturedInstanceChain, where every call in the chain is a verb).
+        // `AddChild` is deferred into `addChildCalls` since its child's LogicalId is parented on
+        // `node.LogicalId`, which is not final until the caller resolves it; everything else lowers
+        // immediately onto `node`. Anything left over lands in `chainedCalls` for ApplyChainedCalls.
+        private static void DispatchInstanceVerbs(
+            NodeBuilder node,
+            IEnumerable<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls,
+            ParserContext ctx,
+            List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> chainedCalls,
+            List<(ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> addChildCalls)
+        {
+            foreach (var call in calls)
+            {
+                switch (call.Method)
+                {
+                    case "Override":
+                        ApplyOverride(node, call.Args, ctx);
+                        break;
+                    case "Component":
+                    case "AddComponent":
+                        ApplyAddComponent(node, call.Invocation, call.Args, ctx);
+                        break;
+                    case "RemoveComponent":
+                        ApplyRemoveComponent(node, call.Invocation);
+                        break;
+                    case "On":
+                        // b4-t2 (test-writer stub): real resolution lands in BuilderParser.Facade.cs.
+                        ApplyScopedOn(node, call.Args, ctx);
+                        break;
+                    case "RemoveChild":
+                        ApplyRemoveChild(node, call.Args, ctx);
+                        break;
+                    case "AddChild":
+                        // Deferred: the added child's LogicalId is parented on `node.LogicalId`,
+                        // which is only final after the caller resolves it.
+                        addChildCalls.Add((call.Args, call.Invocation));
+                        break;
+                    default:
+                        chainedCalls.Add(call);
+                        break;
+                }
+            }
+        }
+
+        // A prefab-instance handle CAPTURED in an earlier statement, with an instance verb called on
+        // it in a LATER statement (`var ball = scene.Instance(...); ball.Component<T>();`). Unlike
+        // ProcessInstanceChain (where the leading `Instance(...)` call still needs skipping and
+        // LogicalId is resolved fresh), `node` already exists and its LogicalId is already final —
+        // so AddChild is applied immediately instead of deferred, and every call in `calls` is a verb.
+        private static void ProcessCapturedInstanceChain(NodeBuilder node, List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls, string? handleName, ParserContext ctx)
+        {
+            var chainedCalls = new List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
+            var addChildCalls = new List<(ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
+            DispatchInstanceVerbs(node, calls, ctx, chainedCalls, addChildCalls);
+
+            var explicitId = ApplyChainedCalls(node, chainedCalls, ctx);
+            if (explicitId != null)
+            {
+                node.LogicalId = explicitId;
+            }
+
+            foreach (var (args, invocation) in addChildCalls)
+            {
+                ApplyAddChild(node, args, invocation, ctx);
+            }
+
+            if (handleName != null)
+            {
+                ctx.Handles[handleName] = node;
+                node.Handle = handleName;
             }
         }
 
@@ -335,7 +381,7 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
-            var value = ValueNodeParser.Parse(args[1].Expression, ctx.AssetCatalog, ctx.FacadeConflicts);
+            var value = ValueNodeParser.Parse(args[1].Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings);
             var target = new OverrideTarget { ComponentType = typeFullName, ChildPath = childPath };
 
             return value is ValueNode.AssetRef or ValueNode.ObjectRef
@@ -397,7 +443,7 @@ namespace SceneBuilder.Core.Parsing
                 return;
             }
 
-            var name = EvalStringLiteral(args.Arguments[1].Expression);
+            var name = EvalStringLiteral(args.Arguments[1].Expression, ctx);
 
             var child = new NodeBuilder { Name = name };
             child.AnchorSpan = new SourceSpan(invocation.Span.Start, invocation.Span.Length);
@@ -435,11 +481,11 @@ namespace SceneBuilder.Core.Parsing
         {
             if (arg0 is not SimpleLambdaExpressionSyntax)
             {
-                childPath = EvalStringLiteral(arg0);
+                childPath = EvalStringLiteral(arg0, ctx);
                 return true;
             }
 
-            TryReadSelectorSegments(arg0, out var segments, out var byPropertyName);
+            TryReadSelectorSegments(arg0, ctx, out var segments, out var byPropertyName);
 
             if (ctx.FacadeCatalog != null &&
                 ctx.FacadeCatalog.TryResolveSelector(node.SourcePrefabGuid ?? "", segments, byPropertyName, out childPath, out _))

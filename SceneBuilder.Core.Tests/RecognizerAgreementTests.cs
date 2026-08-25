@@ -40,6 +40,95 @@ public class ValidInstanceScene : ISceneDefinition
     }
 }
 ");
+            yield return Case("Valid_InlineInstanceComponent", @"
+public class ValidInlineInstanceComponentScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        scene.Instance(""Assets/Prefabs/Enemy.prefab"").Component<Rigidbody>();
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceComponent", @"
+public class ValidCapturedInstanceComponentScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.Component<Rigidbody>();
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceAddComponent", @"
+public class ValidCapturedInstanceAddComponentScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.AddComponent<Rigidbody>();
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceMultiConfigure", @"
+public class ValidCapturedInstanceMultiConfigureScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.Component<SphereCollider>(c => { c.Set(""m_Radius"", 2f); c.Set(""m_IsTrigger"", true); });
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceOverride", @"
+public class ValidCapturedInstanceOverrideScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.Override(e => e.Set<Rigidbody>(""m_Mass"", 2f));
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceRemoveComponent", @"
+public class ValidCapturedInstanceRemoveComponentScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.RemoveComponent<BoxCollider>();
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceOn", @"
+public class ValidCapturedInstanceOnScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.On(""Turret"", b => { });
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceAddChild", @"
+public class ValidCapturedInstanceAddChildScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.AddChild("""", ""Muzzle"");
+    }
+}
+");
+            yield return Case("Valid_CapturedInstanceRemoveChild", @"
+public class ValidCapturedInstanceRemoveChildScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var ball = scene.Instance(""Assets/Prefabs/Enemy.prefab"");
+        ball.RemoveChild(""Turret"");
+    }
+}
+");
             yield return Case("Valid_FitSize", @"
 public class ValidFitSizeScene : ISceneDefinition
 {
@@ -364,6 +453,8 @@ public class ValidSetRefNullScene : ISceneDefinition
             yield return Body("Tag_NotStringLiteral", @"scene.Add(""A"").Tag(5);");
             yield return Body("Active_NotBoolLiteral", @"scene.Add(""A"").Active(5);");
             yield return Body("Layer_NotNumericLiteral", @"scene.Add(""A"").Layer(""x"");");
+            // A verb reserved for an instance receiver is still refused on a plain node.
+            yield return Body("NodeReceiver_AddComponent", @"var n = scene.Add(""A""); n.AddComponent<Rigidbody>();");
 
             // BuilderParser.Instance.cs sites --------------------------------------------------------
             yield return Body("Instance_NoPathArgument", @"scene.Instance();");
@@ -472,6 +563,34 @@ public class {name}Scene : ISceneDefinition
         [InlineData("Valid_SetRefManagedReference")]
         [InlineData("Valid_SetRefNull")]
         public void Analyze_WellFormedSetRefCall_ReportsZeroViolations(string caseName)
+        {
+            var source = (string)Corpus().Single(c => (string)c[0] == caseName)[1];
+
+            var tree = CSharpSyntaxTree.ParseText(source);
+            var root = tree.GetRoot();
+            var buildMethod = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .Single(m => m.Identifier.Text == "Build");
+            var sceneParamName = buildMethod.ParameterList.Parameters[0].Identifier.Text;
+            var body = buildMethod.Body!;
+
+            var violations = FlatShapeRecognizer.Analyze(body, sceneParamName);
+
+            Assert.Empty(violations);
+        }
+
+        // The Corpus agreement Theory only proves the two sides AGREE -- a captured-instance verb
+        // call BOTH sides reject (as SB1002) would satisfy that theory without the verb ever being
+        // accepted on a captured handle. This pins the actual acceptance: each instance verb, used
+        // on a handle captured in an EARLIER statement, reports ZERO shape violations -- the same
+        // as it already does chained straight off `Instance(...)`.
+        [Theory]
+        [InlineData("Valid_CapturedInstanceAddComponent")]
+        [InlineData("Valid_CapturedInstanceOverride")]
+        [InlineData("Valid_CapturedInstanceRemoveComponent")]
+        [InlineData("Valid_CapturedInstanceOn")]
+        [InlineData("Valid_CapturedInstanceAddChild")]
+        [InlineData("Valid_CapturedInstanceRemoveChild")]
+        public void Analyze_CapturedInstanceVerb_ReportsZeroViolations(string caseName)
         {
             var source = (string)Corpus().Single(c => (string)c[0] == caseName)[1];
 

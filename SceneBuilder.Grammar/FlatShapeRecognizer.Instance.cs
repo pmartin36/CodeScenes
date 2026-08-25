@@ -28,19 +28,38 @@ namespace SceneBuilder.Grammar
                 return;
             }
 
-            if (!IsStringLiteral(instanceArgs[0].Expression) && !IsPrefabsMemberAccess(instanceArgs[0].Expression))
+            if (!IsStringLiteral(instanceArgs[0].Expression, ctx) && !IsPrefabsMemberAccess(instanceArgs[0].Expression))
             {
                 Report(ctx, instanceArgs[0].Expression, SB1001, "Expected a string literal");
             }
 
+            var chainedCalls = DispatchInstanceVerbs(calls.Skip(1), ctx);
+            ApplyChainedCalls(chainedCalls, ctx);
+
+            if (handleName != null)
+            {
+                ctx.Scope.Add(handleName);
+                ctx.InstanceHandles.Add(handleName);
+            }
+        }
+
+        // Per-verb shape check for a call chain rooted on a prefab-instance receiver — shared by the
+        // INLINE form (ProcessInstanceChain, after skipping the leading `Instance(...)` call) and the
+        // CAPTURED form (the instance arm in ProcessBuilderChain, where every call in the chain is a
+        // verb). Mirrors BuilderParser.Instance.cs's DispatchInstanceVerbs exactly, so the two sides
+        // agree on which shapes are instance verbs. Returns the leftover non-verb calls.
+        private static List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> DispatchInstanceVerbs(
+            IEnumerable<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)> calls, RecognizerContext ctx)
+        {
             var chainedCalls = new List<(string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation)>();
-            foreach (var call in calls.Skip(1))
+            foreach (var call in calls)
             {
                 switch (call.Method)
                 {
                     case "Override":
                         ApplyOverride(call.Args, ctx);
                         break;
+                    case "Component":
                     case "AddComponent":
                         ApplyAddComponent(call.Invocation, call.Args, ctx);
                         break;
@@ -62,12 +81,7 @@ namespace SceneBuilder.Grammar
                 }
             }
 
-            ApplyChainedCalls(chainedCalls, ctx);
-
-            if (handleName != null)
-            {
-                ctx.Scope.Add(handleName);
-            }
+            return chainedCalls;
         }
 
         // A variant's root-level `.Override`/`.AddComponent`/`.RemoveComponent`/`.On`
@@ -123,7 +137,7 @@ namespace SceneBuilder.Grammar
             var arg0 = args.Arguments[0].Expression;
             var isTypedSelector = arg0 is SimpleLambdaExpressionSyntax { Body: MemberAccessExpressionSyntax };
 
-            if (!isTypedSelector && !IsStringLiteral(arg0))
+            if (!isTypedSelector && !IsStringLiteral(arg0, ctx))
             {
                 Report(ctx, arg0, SB1001, "On(...) requires a typed member-chain selector (e.g. `t => t.A.B`) or a string path");
             }
@@ -360,12 +374,12 @@ namespace SceneBuilder.Grammar
             }
 
             var arg0 = args.Arguments[0].Expression;
-            if (!IsTypedChildSelector(arg0) && !IsStringLiteral(arg0))
+            if (!IsTypedChildSelector(arg0) && !IsStringLiteral(arg0, ctx))
             {
                 Report(ctx, arg0, SB1001, "AddChild parent requires a typed member-chain selector (e.g. `t => t.A.B`) or a string path");
             }
 
-            if (!IsStringLiteral(args.Arguments[1].Expression))
+            if (!IsStringLiteral(args.Arguments[1].Expression, ctx))
             {
                 Report(ctx, args.Arguments[1].Expression, SB1001, "Expected a string literal");
             }
@@ -387,7 +401,7 @@ namespace SceneBuilder.Grammar
             }
 
             var arg0 = args.Arguments[0].Expression;
-            if (!IsTypedChildSelector(arg0) && !IsStringLiteral(arg0))
+            if (!IsTypedChildSelector(arg0) && !IsStringLiteral(arg0, ctx))
             {
                 Report(ctx, arg0, SB1001, "RemoveChild(...) requires a typed member-chain selector (e.g. `t => t.A.B`) or a string path");
             }

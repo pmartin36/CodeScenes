@@ -20,7 +20,7 @@ namespace SceneBuilder.Core.Parsing
         private static void ApplyScopedOn(NodeBuilder node, ArgumentListSyntax args, ParserContext ctx)
         {
             var arg0 = args.Arguments[0].Expression;
-            TryReadSelectorSegments(arg0, out var segments, out var byPropertyName);
+            TryReadSelectorSegments(arg0, ctx, out var segments, out var byPropertyName);
 
             if (ctx.FacadeCatalog != null &&
                 ctx.FacadeCatalog.TryResolveSelector(node.SourcePrefabGuid ?? "", segments, byPropertyName, out var childPath, out var localId))
@@ -111,7 +111,7 @@ namespace SceneBuilder.Core.Parsing
         // innermost Expression is the lambda parameter, not a segment) and reverse to get
         // root-to-leaf order; segments are PropertyName identifiers. String: split on '/';
         // segments are RealName literals.
-        private static void TryReadSelectorSegments(ExpressionSyntax arg0, out List<string> segments, out bool byPropertyName)
+        private static void TryReadSelectorSegments(ExpressionSyntax arg0, ParserContext ctx, out List<string> segments, out bool byPropertyName)
         {
             if (arg0 is SimpleLambdaExpressionSyntax { Body: ExpressionSyntax body })
             {
@@ -129,7 +129,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             byPropertyName = false;
-            var path = EvalStringLiteral(arg0);
+            var path = EvalStringLiteral(arg0, ctx);
             segments = new List<string>(path.Split('/'));
         }
     }

@@ -44,7 +44,8 @@ namespace SceneBuilder.Core.Parsing
 
             RecognizeOrThrow(tree, body, sceneParamName, isVariant);
 
-            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap), facadeCatalog, assetCatalog, isVariant);
+            var constStrings = StringConstantFolder.Collect(body);
+            var ctx = new ParserContext(sceneParamName, new LogicalIdResolver(existingMap), facadeCatalog, assetCatalog, isVariant, constStrings);
 
             // A variant's single root IS the base prefab instance — pre-seeded BEFORE the
             // statement walk so root-level `.Override`/`.AddComponent`/`.RemoveComponent`/`.On`
@@ -242,6 +243,14 @@ namespace SceneBuilder.Core.Parsing
             switch (statement)
             {
                 case LocalDeclarationStatementSyntax local:
+                    if (local.Declaration.Variables.Count == 1 &&
+                        StringConstantFolder.IsConstStringDeclaration(local.Modifiers, local.Declaration.Type))
+                    {
+                        // A `const string` local is a constant binding (collected up front by
+                        // StringConstantFolder.Collect), not a builder statement — it emits no node.
+                        break;
+                    }
+
                     if (local.Declaration.Variables.Count != 1)
                     {
                         throw Unreachable();
@@ -309,6 +318,14 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
+            // A prefab-instance handle captured in an earlier statement: every call on it is an
+            // instance verb (Component/AddComponent/Override/...), never a plain-node setter.
+            if (node.IsInstance)
+            {
+                ProcessCapturedInstanceChain(node, calls, handleName, ctx);
+                return;
+            }
+
             var (remainingCalls, refCall) = SplitTrailingComponentRef(calls);
 
             var explicitId = ApplyChainedCalls(node, remainingCalls, ctx);
@@ -358,7 +375,7 @@ namespace SceneBuilder.Core.Parsing
                 throw Unreachable();
             }
 
-            var name = EvalStringLiteral(addArgs[0].Expression);
+            var name = EvalStringLiteral(addArgs[0].Expression, ctx);
             var node = new NodeBuilder { Name = name };
             node.AnchorSpan = new SourceSpan(calls[0].Invocation.Span.Start, calls[0].Invocation.Span.Length);
 
@@ -394,7 +411,7 @@ namespace SceneBuilder.Core.Parsing
                         ApplyTransform(node, args);
                         break;
                     case "Tag":
-                        node.Tag = EvalStringLiteral(args.Arguments[0].Expression);
+                        node.Tag = EvalStringLiteral(args.Arguments[0].Expression, ctx);
                         node.HasTag = true;
                         break;
                     case "Layer":
@@ -410,7 +427,7 @@ namespace SceneBuilder.Core.Parsing
                         node.HasStatic = true;
                         break;
                     case "Id":
-                        explicitId = EvalStringLiteral(args.Arguments[0].Expression);
+                        explicitId = EvalStringLiteral(args.Arguments[0].Expression, ctx);
                         var idMemberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
                         var idAnchorStart = idMemberAccess.OperatorToken.SpanStart;
                         node.IdCallSpan = new SourceSpan(idAnchorStart, invocation.Span.End - idAnchorStart);
@@ -619,7 +636,7 @@ namespace SceneBuilder.Core.Parsing
             }
 
             var valueExpr = args[1].Expression;
-            var value = ValueNodeParser.Parse(valueExpr, ctx.AssetCatalog, ctx.FacadeConflicts);
+            var value = ValueNodeParser.Parse(valueExpr, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings);
             var valueSpan = new SourceSpan(valueExpr.SpanStart, valueExpr.Span.Length);
             return (key, value, valueSpan);
         }
@@ -704,11 +721,16 @@ namespace SceneBuilder.Core.Parsing
 
         // ---- Literal evaluation ---------------------------------------------------------
 
-        private static string EvalStringLiteral(ExpressionSyntax expression)
+        // The ONE literal helper for every string-literal-demanding site (see the class-level
+        // required-`ParserContext`-param audit) — a bare string literal or a fold of `ctx`'s
+        // collected `const string` environment (StringConstantFolder.Collect). Required (never
+        // optional/defaulted) so a missed call site fails to compile rather than silently
+        // bypassing the fold.
+        private static string EvalStringLiteral(ExpressionSyntax expression, ParserContext ctx)
         {
-            if (expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            if (StringConstantFolder.TryFold(expression, ctx.ConstStrings, out var value))
             {
-                return literal.Token.ValueText;
+                return value;
             }
 
             throw Unreachable();
@@ -913,19 +935,25 @@ namespace SceneBuilder.Core.Parsing
 
         private sealed class ParserContext
         {
-            public ParserContext(string sceneParamName, LogicalIdResolver resolver, FacadeCatalog? facadeCatalog = null, AssetCatalog? assetCatalog = null, bool isVariant = false)
+            public ParserContext(string sceneParamName, LogicalIdResolver resolver, FacadeCatalog? facadeCatalog = null, AssetCatalog? assetCatalog = null, bool isVariant = false, IReadOnlyDictionary<string, string>? constStrings = null)
             {
                 SceneParamName = sceneParamName;
                 Resolver = resolver;
                 FacadeCatalog = facadeCatalog;
                 AssetCatalog = assetCatalog;
                 IsVariant = isVariant;
+                ConstStrings = constStrings ?? new Dictionary<string, string>();
             }
 
             public string SceneParamName { get; }
             public LogicalIdResolver Resolver { get; }
             public FacadeCatalog? FacadeCatalog { get; }
             public AssetCatalog? AssetCatalog { get; }
+
+            // The `const string` fold environment collected once at ParseCore entry
+            // (StringConstantFolder.Collect) — consulted by EvalStringLiteral and threaded into
+            // ValueNodeParser.Parse for the Asset/Builtin value positions.
+            public IReadOnlyDictionary<string, string> ConstStrings { get; }
             public Dictionary<string, NodeBuilder> Handles { get; } = new();
 
             // The component-ref address space -- a `.Ref<T>()`-terminated chain's declared var,

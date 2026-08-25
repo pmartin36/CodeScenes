@@ -72,7 +72,7 @@ namespace SceneBuilder.Core.Parsing
             // UnwrapTypedRef strips a member's own `.As<T>()`/`.As()` emission cast first (the same
             // authoring-only typing scaffold UnityEvent static args use), recovering the underlying
             // handle/asset-factory expression the ordinary leaf parse already knows how to read.
-            return ValueNodeParser.Parse(UnwrapTypedRef(expr), ctx.AssetCatalog, ctx.FacadeConflicts);
+            return ValueNodeParser.Parse(UnwrapTypedRef(expr), ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings);
         }
 
         // A ManagedReference-flavored copy of ValueNodeParser.ParseNested's member loop: the

@@ -14,8 +14,9 @@ namespace SceneBuilder.Authoring
     /// <remarks>
     /// A prefab instance is authored as one whole unit: you do not author child GameObjects inside its
     /// hierarchy. Change what the instance carries with <see cref="Override"/>,
-    /// <see cref="AddComponent{T}()"/> and <see cref="RemoveComponent{T}"/>, and reach a nested target
-    /// with <see cref="On(string, Action{ScopedHandle})"/>.
+    /// <see cref="AddComponent{T}()"/> (or its <see cref="Component{T}()"/> alias) and
+    /// <see cref="RemoveComponent{T}"/>, and reach a nested target with
+    /// <see cref="On(string, Action{ScopedHandle})"/>.
     /// </remarks>
     public class InstanceHandle : SceneObjectHandle
     {
@@ -59,6 +60,12 @@ namespace SceneBuilder.Authoring
             configure?.Invoke(new ComponentHandle<T>());
             return this;
         }
+
+        /// <summary>Alias for <see cref="AddComponent{T}()"/>.</summary>
+        public InstanceHandle Component<T>() => AddComponent<T>();
+
+        /// <summary>Alias for <see cref="AddComponent{T}(Action{ComponentHandle{T}})"/>.</summary>
+        public InstanceHandle Component<T>(Action<ComponentHandle<T>> configure) => AddComponent(configure);
 
         /// <summary>Remove a component of type <typeparamref name="T"/> from the instance root (must exist on the source prefab).</summary>
         public InstanceHandle RemoveComponent<T>() => this;
@@ -136,6 +143,12 @@ namespace SceneBuilder.Authoring
             configure?.Invoke(new ComponentHandle<T>());
             return this;
         }
+
+        /// <summary>Alias for <see cref="AddComponent{T}()"/>.</summary>
+        public new InstanceHandle<TRef> Component<T>() => AddComponent<T>();
+
+        /// <summary>Alias for <see cref="AddComponent{T}(Action{ComponentHandle{T}})"/>.</summary>
+        public new InstanceHandle<TRef> Component<T>(Action<ComponentHandle<T>> configure) => AddComponent(configure);
 
         /// <summary>Remove a component of type <typeparamref name="T"/> from the instance root (must exist on the source prefab).</summary>
         public new InstanceHandle<TRef> RemoveComponent<T>() => this;
