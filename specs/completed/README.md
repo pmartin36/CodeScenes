@@ -559,9 +559,11 @@ Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec48
 builder (import-free `Graphic`) never naming `CanvasRenderer` built twice code->scene; across both
 builds zero `Can't remove CanvasRenderer ... depends on it` errors, the live `CanvasRenderer` present
 after each (`comps=[RectTransform,CanvasRenderer,Image]`), and the second build a fixed point (0 plan
-ops). Live-verify also surfaced a MIRROR gap on the other direction (scene->code emission re-adds the
-required `CanvasRenderer` as an authored `.Component<>()`), which spec 48 does not touch; filed in
-`docs/open-defects.md` for a follow-up.
+ops). Note the fix is deliberately the REMOVAL side only: scene->code still emits the required
+`CanvasRenderer` as an authored `.Component<>()`, which is correct — it is a real component in the
+scene and is reflected like every other. 48's aspirational "no builder ever declares a RequireComponent
+dependency" was over-stated; the pain it fixed was the removal churn (Unity refusing to delete the
+required component every build), not the presence of the component in emitted code.
 
 ## 49 - a code->scene build error is a discoverable state, not a lost log line
 

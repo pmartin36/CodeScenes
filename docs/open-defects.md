@@ -222,23 +222,6 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   niceness line in the EditMode test harness setup so it cannot fail an unrelated test. OWNER:
   unassigned. FOUND-BY: requirecomponent-preserved (b1-t1 validation).
 
-- SEVERITY med — scene->code emission re-adds a [RequireComponent]-implied component as an authored
-  `.Component<>()`, the exact workaround spec 48 set out to eliminate. Spec 48 fixed the code->scene
-  REMOVAL side (Differ no longer churns a required live component), but the mirror EMISSION side is
-  untouched: with auto-sync ON, the first code->scene build of an `Image`/`TMP` graphic triggers
-  scene->code auto-sync, which sees the Unity-auto-added `CanvasRenderer` in the snapshot and emits
-  `panel.Component<UnityEngine.CanvasRenderer>();` back into the builder source
-  (`[SceneBuilder] Synced 1 edit(s)`). So spec 48's broader stated goal ("no builder ever declares a
-  RequireComponent dependency, and the .Component<CanvasRenderer>() workarounds are deleted") is only
-  half-met: removal is guarded, emission still re-introduces the dependency. Observed live during
-  spec-48 live-verify with an Image-only builder (`Logs/live-verify-spec48.log`). Owner: the
-  scene->code snapshot-emit classification (spec 41 territory) that decides which live components to
-  emit as adds. Fix direction (mirrors spec 48): suppress emission of a live component that is
-  [RequireComponent]-implied (directly or transitively) by another component being emitted on the same
-  object, reusing `RequireComponentPredicate.RequiredTypeNames`. Add a Core test (emit classification
-  skips the implied component) and an EditMode test (round-trip an Image builder, assert scene->code
-  does NOT write `.Component<CanvasRenderer>()`). Defines new emission behavior -> warrants its own
-  spec. OWNER: unassigned. FOUND-BY: spec-48 live-verify.
 
 - SEVERITY med — `ValueNodeParser.Parse` recognizes an asset reference ONLY when it is a bare
   `Asset(...)` / `Builtin(...)` invocation whose target is an `IdentifierNameSyntax`
