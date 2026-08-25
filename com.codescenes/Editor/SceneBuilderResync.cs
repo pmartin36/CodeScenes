@@ -51,7 +51,23 @@ namespace SceneBuilder.Editor
 
                 var facadeCatalog = FacadeCatalogLoader.Load();
                 var assetCatalog = AssetCatalogLoader.Load();
-                var desired = DesiredModelLoader.Load(source, map, facadeCatalog, assetCatalog).Desired;
+
+                DesiredModelLoader.Loaded loaded;
+                try
+                {
+                    loaded = DesiredModelLoader.Load(source, map, facadeCatalog, assetCatalog);
+                }
+                catch (Exception)
+                {
+                    // The source will not resolve into a desired model, so no hash and no direction
+                    // can be decided; Reconcile would overwrite the author's broken in-progress source.
+                    // Defer to the code->scene refusal RunCore already owns: it re-parses, refuses
+                    // located, records the standing status, and leaves the scene untouched.
+                    RunMaterialize(route, scene);
+                    return SyncDirection.Materialize;
+                }
+
+                var desired = loaded.Desired;
 
                 var sceneRef = ObjectReferenceResolver.BuildSceneRefResolver(map);
                 var snapshot = SceneSnapshotReader.Read(scene, sceneRef, ObjectReferenceResolver.BuildListenerResolver(map));

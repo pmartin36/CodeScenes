@@ -167,6 +167,61 @@ public class BuildStatusRecorderScene : ISceneDefinition
         Assert.AreEqual(_builderPath, refusal.File, "Standing refusal recorded the wrong builder file.");
     }
 
+    // (2b) Materialize/resync channel, STEADY STATE (a sync checkpoint is on disk, unlike (2) which
+    // forces the pre-checkpoint branch): an unresolved component type throws while ResyncRoute
+    // computes its own desired-model hash to decide a direction, before Materialize is reached. The
+    // standing status must still be set and the live scene must stay untouched.
+    [Test]
+    public void Materialize_ThrownRefusalWithCheckpoint_SetsStandingStatus_SceneUntouched()
+    {
+        Build();
+        var route = Route();
+        Assert.IsTrue(File.Exists(_statePath), "Precondition: Build() must leave a sync checkpoint.");
+
+        File.WriteAllText(_builderPath, Source(
+            "        var cube = scene.Add(\"Cube\");\n        cube.Component<Rigidbdy>();"));
+
+        SceneBuilderResync.ResyncRoute(route, EditorSceneManager.GetActiveScene());
+
+        var refusal = SceneBuilderBuildStatus.GetRefusal(BuilderName);
+        Assert.IsNotNull(refusal,
+            "An unresolved component type that throws while the Materialize/resync channel computes "
+            + "its own desired-model hash (checkpoint present) must still set the standing build-status "
+            + "refusal, not be swallowed as an unlocated NoOp.");
+        Assert.AreEqual(_builderPath, refusal.File, "Standing refusal recorded the wrong builder file.");
+        Assert.Greater(refusal.Line, 0, "Standing refusal carries no located line.");
+
+        var scene = EditorSceneManager.GetActiveScene();
+        Assert.IsNull(FindRoot(scene, "Cube"),
+            "A refused Materialize/resync must leave the live scene untouched.");
+        Assert.IsNotNull(FindRoot(scene, "Alpha"),
+            "A refused Materialize/resync must leave the live scene untouched.");
+    }
+
+    // (2c) Materialize/resync channel, STEADY STATE, raw-parse modality: a syntax error throws
+    // during the same pre-Materialize desired-model hash computation as (2b), distinct from an
+    // unresolved component type and from (2)'s pre-checkpoint branch.
+    [Test]
+    public void Materialize_ThrownRawParseErrorWithCheckpoint_SetsStandingStatus_SceneUntouched()
+    {
+        Build();
+        var route = Route();
+        Assert.IsTrue(File.Exists(_statePath), "Precondition: Build() must leave a sync checkpoint.");
+
+        File.WriteAllText(_builderPath, Source("        foo.Bar();"));
+
+        SceneBuilderResync.ResyncRoute(route, EditorSceneManager.GetActiveScene());
+
+        var refusal = SceneBuilderBuildStatus.GetRefusal(BuilderName);
+        Assert.IsNotNull(refusal,
+            "A raw-parse error that throws while the Materialize/resync channel computes its own "
+            + "desired-model hash (checkpoint present) must still set the standing build-status refusal.");
+        Assert.AreEqual(_builderPath, refusal.File, "Standing refusal recorded the wrong builder file.");
+
+        Assert.IsNotNull(FindRoot(EditorSceneManager.GetActiveScene(), "Alpha"),
+            "A refused Materialize/resync must leave the live scene untouched.");
+    }
+
     // (3) Auto code->scene channel: a refusal sets the standing status and leaves the overlay
     // registered; a following valid edit builds clean, clears the status, and removes ONLY this
     // builder's overlay key — an unrelated overlay entry survives.
