@@ -126,7 +126,7 @@ Two stops, opposite handling — conflating them wastes a full run:
   ```
   Workflow({ scriptPath: "~/.claude/skills/tdd-pipeline/pipeline.workflow.js",
              resumeFromRunId: "<RUN_ID>",
-             args: { spec: "<path>", noPush: true,
+             args: { spec: "<path>", noPush: false,
                      fastGateCommand: "GATE_SKIP_UNITY=1 ./verify.sh",
                      slowPathGlobs: ["com.codescenes/**", "unity-gate/**"] } })
   ```
@@ -138,7 +138,7 @@ Two stops, opposite handling — conflating them wastes a full run:
   - **Second halt onward:** hand-fix `.agent_handoffs/<feature>/tasks.md` (gitignored) and relaunch
     with `tasksReady: true`, NOT with `{ spec }`:
     ```
-    args: { feature: "<name>", tasksReady: true, noPush: true,
+    args: { feature: "<name>", tasksReady: true, noPush: false,
             fastGateCommand: "GATE_SKIP_UNITY=1 ./verify.sh",
             slowPathGlobs: ["com.codescenes/**", "unity-gate/**"],
             testPathGlobs: ["unity-gate/Assets/GateTests/**", "SceneBuilder.Core.Tests/**"] }
@@ -165,7 +165,9 @@ prompt at spawn, and edits get swept into the next bucket commit by `git add -A`
 
 ## Per milestone, all four steps
 
-1. Build through the tdd-pipeline — one invocation per milestone, `noPush`, on `main`.
+1. Build through the tdd-pipeline — one invocation per milestone, on `main`, pushed per bucket (push
+   often; run with `noPush: false`). The ONE exception: when explicitly working on an experimental
+   feature that might not go to `main`, do that work on its own branch and do NOT push it to `main`.
 2. Quote the `GATE PASS:` line from `./verify.sh`.
 3. Live-verify with `unity-live-verify`. Close the editor before any batchmode gate run and reopen
    after; there is one license seat.

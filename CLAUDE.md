@@ -61,7 +61,7 @@ tasks each pay the multi-minute editor suite:
 
 ```
 Workflow({ scriptPath: "~/.claude/skills/tdd-pipeline/pipeline.workflow.js",
-           args: { spec: "specs/<n>.md", noPush: true,
+           args: { spec: "specs/<n>.md", noPush: false,
                    fastGateCommand: "GATE_SKIP_UNITY=1 ./verify.sh",
                    slowPathGlobs: ["com.codescenes/**", "unity-gate/**"],
                    testPathGlobs: ["unity-gate/Assets/GateTests/**", "SceneBuilder.Core.Tests/**"] } })
