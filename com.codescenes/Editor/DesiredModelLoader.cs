@@ -133,8 +133,9 @@ namespace SceneBuilder.Editor
             var assetResolver = new AssetReferenceResolver.LoweringResolver(existingMap?.Assets);
             var desired = AssetRefLowering.Lower(
                 AssetRefLowering.ResetCatalogStampedAssetRefs(resolved),
-                assetResolver.Resolve,
-                assetResolver.ResolveBuiltin);
+                (path, subName) => assetResolver.Resolve(path, subName),
+                assetResolver.ResolveBuiltin,
+                (path, subName, field) => assetResolver.Resolve(path, subName, field));
 
             // b5-t3: lower PrefabInstanceNode.SourcePrefab the same way — a display path resolved to
             // its (guid, fileId, typeHint) via the SAME harvesting resolver, so the sidecar Assets[]

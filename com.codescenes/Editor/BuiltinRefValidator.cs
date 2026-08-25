@@ -123,7 +123,7 @@ namespace SceneBuilder.Editor
                 var componentTypeName = SimpleTypeName(component.Type.FullName);
                 foreach (var kv in component.Fields)
                 {
-                    ValidateField(go.Name, componentTypeName, kv.Key, kv.Value);
+                    ValidateField(component.Type, go.Name, componentTypeName, kv.Key, kv.Value);
                 }
             }
 
@@ -133,7 +133,8 @@ namespace SceneBuilder.Editor
             }
         }
 
-        private static void ValidateField(string objectName, string componentTypeName, string path, ValueNode node)
+        private static void ValidateField(
+            TypeRef componentType, string objectName, string componentTypeName, string topLevelKey, ValueNode node)
         {
             // The DESCENT is ValueWalk.Enumerate, the one recursion over a value's container
             // structure: it yields the value itself at path "" and every descendant in pre-order,
@@ -145,13 +146,20 @@ namespace SceneBuilder.Editor
             {
                 if (child is ValueNode.AssetRef assetRef)
                 {
-                    ValidateAssetRef(objectName, componentTypeName, path + childPath, assetRef.Ref);
+                    // A field context is meaningful ONLY for the value directly assigned to the
+                    // top-level field (childPath == "") — a value reached through a container/nested
+                    // structure keeps the untyped path, matching PlanningValidator's/AssetRefLowering's
+                    // identical restriction.
+                    AssetFieldContext? fieldContext = childPath.Length == 0
+                        ? new AssetFieldContext(componentType, topLevelKey)
+                        : null;
+                    ValidateAssetRef(objectName, componentTypeName, topLevelKey + childPath, assetRef.Ref, fieldContext);
                 }
             }
         }
 
         private static void ValidateAssetRef(
-            string objectName, string componentTypeName, string path, CoreAssetRef? reference)
+            string objectName, string componentTypeName, string path, CoreAssetRef? reference, AssetFieldContext? fieldContext)
         {
             if (reference is null
                 || !string.IsNullOrEmpty(reference.Guid)
@@ -182,8 +190,11 @@ namespace SceneBuilder.Editor
             if (!string.IsNullOrEmpty(reference.SubAsset)
                 && AssetDatabase.LoadMainAssetAtPath(reference.DisplayPath) != null)
             {
+                var expectedType = fieldContext.HasValue
+                    ? AssetReferenceResolver.LoweringResolver.ExpectedFieldType(fieldContext.Value.Component, fieldContext.Value.FieldPath)
+                    : null;
                 AssetReferenceResolver.LoweringResolver.ResolveSubObjectOrThrow(
-                    reference.DisplayPath, reference.SubAsset, location);
+                    reference.DisplayPath, reference.SubAsset, location, expectedType);
             }
         }
 

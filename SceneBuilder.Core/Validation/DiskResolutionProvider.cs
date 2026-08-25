@@ -112,7 +112,9 @@ namespace SceneBuilder.Core.Validation
             }
         }
 
-        public AssetResolution ResolveAssetPath(string displayPath, string? subAsset)
+        // field is unused: sub-asset existence AND type disambiguation are both editor-only
+        // (spec §17/§21) — every sub-asset name defers below regardless of field context.
+        public AssetResolution ResolveAssetPath(string displayPath, string? subAsset, AssetFieldContext? field = null)
         {
             if (!_managedAvailable)
             {

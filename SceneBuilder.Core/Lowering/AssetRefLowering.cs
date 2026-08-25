@@ -12,11 +12,19 @@ namespace SceneBuilder.Core.Lowering
     // verbatim. See spec §Core deliverables (specs/17-builtin-resources.md).
     public static class AssetRefLowering
     {
+        // fieldTypedResolver is consulted ONLY for a direct (non-nested) AssetRef value assigned to
+        // a top-level component field: when supplied, it carries the field's AssetFieldContext down
+        // to the resolver so a sub-asset name scan can narrow by expected type
+        // (AssetReferenceResolver.LoweringResolver.TryResolveSubObject) instead of declaring
+        // AMBIGUOUS. Null (every caller but DesiredModelLoader) preserves the plain untyped
+        // resolution exactly. A nested/container/override AssetRef is never field-typed, matching the
+        // planning-validator side of this same contract.
         public static SceneModel Lower(
             SceneModel model,
             Func<string, string?, (string guid, long fileId, string typeHint)?> resolver,
-            Func<string, string?, (string guid, long fileId, string typeHint)?>? builtinResolver = null) =>
-            Map(model, assetRef => LowerAssetRef(assetRef, resolver, builtinResolver));
+            Func<string, string?, (string guid, long fileId, string typeHint)?>? builtinResolver = null,
+            Func<string, string?, AssetFieldContext, (string guid, long fileId, string typeHint)?>? fieldTypedResolver = null) =>
+            Map(model, assetRef => LowerAssetRef(assetRef, resolver, builtinResolver), builtinResolver, fieldTypedResolver);
 
         // A typed `Assets.<Group>...<Leaf>` catalog chain (ValueNodeParser.TryParseAssetChain)
         // stamps a Guid straight from the catalog entry at PARSE time, before any lowering runs,
@@ -37,15 +45,23 @@ namespace SceneBuilder.Core.Lowering
                     ? new ValueNode.AssetRef(reference with { Guid = "", FileId = 0 })
                     : assetRef);
 
-        private static SceneModel Map(SceneModel model, Func<ValueNode.AssetRef, ValueNode.AssetRef> transform) =>
-            model with { Roots = model.Roots.Select(root => MapGameObject(root, transform)).ToArray() };
+        private static SceneModel Map(
+            SceneModel model,
+            Func<ValueNode.AssetRef, ValueNode.AssetRef> transform,
+            Func<string, string?, (string guid, long fileId, string typeHint)?>? builtinResolver = null,
+            Func<string, string?, AssetFieldContext, (string guid, long fileId, string typeHint)?>? fieldTypedResolver = null) =>
+            model with { Roots = model.Roots.Select(root => MapGameObject(root, transform, builtinResolver, fieldTypedResolver)).ToArray() };
 
-        private static GameObjectNode MapGameObject(GameObjectNode go, Func<ValueNode.AssetRef, ValueNode.AssetRef> transform)
+        private static GameObjectNode MapGameObject(
+            GameObjectNode go,
+            Func<ValueNode.AssetRef, ValueNode.AssetRef> transform,
+            Func<string, string?, (string guid, long fileId, string typeHint)?>? builtinResolver,
+            Func<string, string?, AssetFieldContext, (string guid, long fileId, string typeHint)?>? fieldTypedResolver)
         {
             var mapped = go with
             {
-                Components = go.Components.Select(c => MapComponent(c, transform)).ToArray(),
-                Children = go.Children.Select(c => MapGameObject(c, transform)).ToArray(),
+                Components = go.Components.Select(c => MapComponent(c, transform, builtinResolver, fieldTypedResolver)).ToArray(),
+                Children = go.Children.Select(c => MapGameObject(c, transform, builtinResolver, fieldTypedResolver)).ToArray(),
             };
 
             if (mapped is PrefabInstanceNode instance)
@@ -54,7 +70,7 @@ namespace SceneBuilder.Core.Lowering
                 {
                     Overrides = instance.Overrides.Select(o => MapPropertyOverride(o, transform)).ToArray(),
                     AddedComponents = instance.AddedComponents
-                        .Select(a => a with { Component = MapComponent(a.Component, transform) })
+                        .Select(a => a with { Component = MapComponent(a.Component, transform, builtinResolver, fieldTypedResolver) })
                         .ToArray(),
                 };
             }
@@ -73,15 +89,42 @@ namespace SceneBuilder.Core.Lowering
             };
         }
 
-        private static ComponentData MapComponent(ComponentData component, Func<ValueNode.AssetRef, ValueNode.AssetRef> transform)
+        private static ComponentData MapComponent(
+            ComponentData component,
+            Func<ValueNode.AssetRef, ValueNode.AssetRef> transform,
+            Func<string, string?, (string guid, long fileId, string typeHint)?>? builtinResolver,
+            Func<string, string?, AssetFieldContext, (string guid, long fileId, string typeHint)?>? fieldTypedResolver)
         {
-            return component with { Fields = MapFieldMap(component.Fields, transform) };
+            return component with
+            {
+                Fields = MapFieldMap(component.Type, component.Fields, transform, builtinResolver, fieldTypedResolver),
+            };
         }
 
-        private static FieldMap MapFieldMap(FieldMap fields, Func<ValueNode.AssetRef, ValueNode.AssetRef> transform)
+        private static FieldMap MapFieldMap(
+            TypeRef componentType,
+            FieldMap fields,
+            Func<ValueNode.AssetRef, ValueNode.AssetRef> transform,
+            Func<string, string?, (string guid, long fileId, string typeHint)?>? builtinResolver,
+            Func<string, string?, AssetFieldContext, (string guid, long fileId, string typeHint)?>? fieldTypedResolver)
         {
             return new FieldMap(fields.Select(kv =>
-                new KeyValuePair<string, ValueNode>(kv.Key, MapNode(kv.Value, transform))));
+            {
+                // A DIRECT (top-level, non-nested) AssetRef field value is the only shape a
+                // fieldTypedResolver ever sees — a nested/container value keeps the untyped path
+                // below, matching PlanningValidator.WalkAssetValue's identical restriction.
+                if (fieldTypedResolver != null && kv.Value is ValueNode.AssetRef directAssetRef)
+                {
+                    var fieldContext = new AssetFieldContext(componentType, kv.Key);
+                    var lowered = LowerAssetRef(
+                        directAssetRef,
+                        (path, sub) => fieldTypedResolver(path, sub, fieldContext),
+                        builtinResolver);
+                    return new KeyValuePair<string, ValueNode>(kv.Key, lowered);
+                }
+
+                return new KeyValuePair<string, ValueNode>(kv.Key, MapNode(kv.Value, transform));
+            }));
         }
 
         // The DESCENT is ValueWalk.Map, the one recursion over a value's container structure; this

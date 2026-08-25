@@ -11,7 +11,11 @@ namespace SceneBuilder.Core.Validation
     {
         TypeResolution ResolveComponentType(TypeRef type, IReadOnlyList<string> usings);
 
-        AssetResolution ResolveAssetPath(string displayPath, string? subAsset);
+        // field carries the owning component field's context for a DIRECT (top-level) authored
+        // AssetRef value, so a sub-asset name scan can narrow to the field's expected
+        // UnityEngine.Object type before declaring an ambiguity. Null (a nested value, or a caller
+        // with no field context) resolves exactly as before the type filter existed.
+        AssetResolution ResolveAssetPath(string displayPath, string? subAsset, AssetFieldContext? field = null);
 
         AssetResolution ResolveBuiltin(string name, string? typeHint);
     }

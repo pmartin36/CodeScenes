@@ -32,7 +32,7 @@ namespace SceneBuilder.Core.Tests
             public TypeResolution ResolveComponentType(TypeRef type, IReadOnlyList<string> usings) =>
                 OnResolveComponentType(type, usings);
 
-            public AssetResolution ResolveAssetPath(string displayPath, string? subAsset) =>
+            public AssetResolution ResolveAssetPath(string displayPath, string? subAsset, AssetFieldContext? field = null) =>
                 OnResolveAssetPath(displayPath, subAsset);
 
             public AssetResolution ResolveBuiltin(string name, string? typeHint) =>
@@ -45,7 +45,7 @@ namespace SceneBuilder.Core.Tests
             public TypeResolution ResolveComponentType(TypeRef type, IReadOnlyList<string> usings) =>
                 throw new InvalidOperationException("resolver must not be consulted for structural ambiguities");
 
-            public AssetResolution ResolveAssetPath(string displayPath, string? subAsset) =>
+            public AssetResolution ResolveAssetPath(string displayPath, string? subAsset, AssetFieldContext? field = null) =>
                 throw new InvalidOperationException("resolver must not be consulted for structural ambiguities");
 
             public AssetResolution ResolveBuiltin(string name, string? typeHint) =>

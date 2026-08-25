@@ -42,7 +42,7 @@ namespace SceneBuilder.Editor
             return new TypeResolution.Unresolved(ComponentTypeNormalizer.SuggestQualified(type.FullName));
         }
 
-        public AssetResolution ResolveAssetPath(string displayPath, string? subAsset)
+        public AssetResolution ResolveAssetPath(string displayPath, string? subAsset, AssetFieldContext? field = null)
         {
             var probe = _lowering.TryResolve(displayPath);
 
@@ -71,7 +71,10 @@ namespace SceneBuilder.Editor
 
                 case AssetReferenceResolver.LoweringResolver.PathProbeKind.Resolved:
                     // subAsset is non-null past the IsNullOrEmpty guard above (line 49).
-                    var subProbe = AssetReferenceResolver.LoweringResolver.TryResolveSubObject(probe.CurrentPath, subAsset!);
+                    var expectedType = field.HasValue
+                        ? AssetReferenceResolver.LoweringResolver.ExpectedFieldType(field.Value.Component, field.Value.FieldPath)
+                        : null;
+                    var subProbe = AssetReferenceResolver.LoweringResolver.TryResolveSubObject(probe.CurrentPath, subAsset!, expectedType);
                     switch (subProbe.Kind)
                     {
                         case AssetReferenceResolver.LoweringResolver.SubObjectProbeKind.Resolved:

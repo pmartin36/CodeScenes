@@ -51,7 +51,7 @@ public class ComponentMultiContainerAssetFieldScene : ISceneDefinition
             public TypeResolution ResolveComponentType(TypeRef type, IReadOnlyList<string> usings) =>
                 OnResolveComponentType(type, usings);
 
-            public AssetResolution ResolveAssetPath(string displayPath, string? subAsset) =>
+            public AssetResolution ResolveAssetPath(string displayPath, string? subAsset, AssetFieldContext? field = null) =>
                 OnResolveAssetPath(displayPath, subAsset);
 
             public AssetResolution ResolveBuiltin(string name, string? typeHint) =>

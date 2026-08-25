@@ -128,7 +128,7 @@ namespace SceneBuilder.Core.Validation
             {
                 foreach (var field in component.Fields)
                 {
-                    WalkAssetValue(bag, component.LogicalId, field.Key, field.Value, parse, source, resolver, file);
+                    WalkAssetValue(bag, component.Type, component.LogicalId, field.Key, field.Value, parse, source, resolver, file);
                 }
             }
 
@@ -140,6 +140,7 @@ namespace SceneBuilder.Core.Validation
 
         private static void WalkAssetValue(
             DiagnosticBag bag,
+            TypeRef componentType,
             string componentLogicalId,
             string topLevelKey,
             ValueNode value,
@@ -152,7 +153,7 @@ namespace SceneBuilder.Core.Validation
             // structure: it yields the value itself and every descendant in pre-order. This pass is
             // side-effecting and reports under the enclosing TOP-LEVEL field key, so the yielded
             // path is unused.
-            foreach (var (_, node) in ValueWalk.Enumerate(value))
+            foreach (var (path, node) in ValueWalk.Enumerate(value))
             {
                 if (node is not ValueNode.AssetRef assetRef || assetRef.Ref is null)
                 {
@@ -166,9 +167,17 @@ namespace SceneBuilder.Core.Validation
                 // to the editor) only fire when a sub-asset name was actually authored.
                 var subAsset = string.IsNullOrEmpty(reference.SubAsset) ? null : reference.SubAsset;
 
+                // A field context is meaningful ONLY for the value directly assigned to the
+                // top-level field (path == ""); a value reached through a container/nested
+                // structure keeps the untyped path, matching AssetRefLowering's identical
+                // restriction.
+                AssetFieldContext? fieldContext = path.Length == 0
+                    ? new AssetFieldContext(componentType, topLevelKey)
+                    : null;
+
                 var resolution = reference.IsBuiltin
                     ? resolver.ResolveBuiltin(reference.DisplayPath, reference.TypeHint)
-                    : resolver.ResolveAssetPath(reference.DisplayPath, subAsset);
+                    : resolver.ResolveAssetPath(reference.DisplayPath, subAsset, fieldContext);
 
                 EmitAssetDiagnostic(bag, componentLogicalId, topLevelKey, reference.DisplayPath, resolution, parse, source, file);
             }

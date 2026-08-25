@@ -174,9 +174,12 @@ namespace SceneBuilder.Editor
             /// <paramref name="subName"/> (from <c>Asset(path, subName)</c>) delegates to
             /// <see cref="ResolveSubObjectOrThrow"/> to pick the sub-object by name within
             /// <paramref name="displayPath"/>'s current file; an empty/null <paramref name="subName"/>
-            /// resolves the main asset exactly as before.
+            /// resolves the main asset exactly as before. <paramref name="field"/>, when supplied
+            /// (fed by <c>AssetRefLowering.Lower</c>'s fieldTypedResolver for a direct top-level
+            /// component field), narrows a multi-candidate sub-object scan to the field's expected
+            /// <see cref="UnityEngine.Object"/> type before an ambiguity is declared.
             /// </summary>
-            public (string guid, long fileId, string typeHint)? Resolve(string displayPath, string? subName)
+            public (string guid, long fileId, string typeHint)? Resolve(string displayPath, string? subName, AssetFieldContext? field = null)
             {
                 var probe = TryResolve(displayPath);
                 switch (probe.Kind)
@@ -210,7 +213,10 @@ namespace SceneBuilder.Editor
                             return (probe.Guid, probe.FileId, probe.TypeHint);
                         }
 
-                        var (subGuid, subFileId, subType) = ResolveSubObjectOrThrow(probe.CurrentPath, subName!, location: null);
+                        var expectedType = field.HasValue
+                            ? ExpectedFieldType(field.Value.Component, field.Value.FieldPath)
+                            : null;
+                        var (subGuid, subFileId, subType) = ResolveSubObjectOrThrow(probe.CurrentPath, subName!, location: null, expectedType);
                         _harvested.Add(new AssetEntry { Guid = subGuid, LastKnownPath = probe.CurrentPath, TypeHint = subType });
                         return (subGuid, subFileId, subType);
                 }
@@ -260,9 +266,12 @@ namespace SceneBuilder.Editor
             /// collect-all headless-validation seam) — ONE scan, two surfaces; never hand-sync a
             /// second copy. Scans every object imported at <paramref name="currentPath"/> for a name
             /// match against <paramref name="subName"/> via <see cref="AssetDatabase.LoadAllAssetsAtPath"/>.
-            /// Never throws.
+            /// <paramref name="expectedType"/> narrows a multi-candidate match down to the objects
+            /// assignable to it (subclasses count), applied ONLY when it leaves >=1 candidate — so an
+            /// untyped caller, or a name whose candidates share no assignable type, sees the plain
+            /// unfiltered match set. Never throws.
             /// </summary>
-            internal static SubObjectProbe TryResolveSubObject(string currentPath, string subName)
+            internal static SubObjectProbe TryResolveSubObject(string currentPath, string subName, Type? expectedType = null)
             {
                 var all = AssetDatabase.LoadAllAssetsAtPath(currentPath);
                 var main = AssetDatabase.LoadMainAssetAtPath(currentPath);
@@ -294,6 +303,23 @@ namespace SceneBuilder.Editor
                     if (withoutMain.Count > 0)
                     {
                         matches = withoutMain;
+                    }
+                }
+
+                if (matches.Count > 1 && expectedType != null)
+                {
+                    var assignable = new List<UnityEngine.Object>();
+                    foreach (var candidate in matches)
+                    {
+                        if (expectedType.IsAssignableFrom(candidate.GetType()))
+                        {
+                            assignable.Add(candidate);
+                        }
+                    }
+
+                    if (assignable.Count > 0)
+                    {
+                        matches = assignable;
                     }
                 }
 
@@ -341,9 +367,9 @@ namespace SceneBuilder.Editor
             /// and b3-t4's located pre-pass — never re-implemented per caller.
             /// </summary>
             internal static (string guid, long fileId, string typeHint) ResolveSubObjectOrThrow(
-                string currentPath, string subName, string? location)
+                string currentPath, string subName, string? location, Type? expectedType = null)
             {
-                var probe = TryResolveSubObject(currentPath, subName);
+                var probe = TryResolveSubObject(currentPath, subName, expectedType);
                 switch (probe.Kind)
                 {
                     case SubObjectProbeKind.Resolved:
@@ -368,6 +394,88 @@ namespace SceneBuilder.Editor
 
             private static string Prefix(string? location) =>
                 location != null ? $"[SceneBuilder] {location}: " : "[SceneBuilder] ";
+
+            // Per-domain cache, keyed by the resolved component Type's full name + serialized field
+            // path — never re-derives the same field's expected type twice, and never creates a
+            // throwaway component twice for it either.
+            private static readonly Dictionary<(string TypeFullName, string FieldPath), Type?> ExpectedFieldTypeCache = new();
+
+            /// <summary>
+            /// Derives the <see cref="UnityEngine.Object"/> subtype a component field's serialized
+            /// path expects, for the sub-object type filter in <see cref="TryResolveSubObject"/>. A
+            /// managed (C#) field resolves via <see cref="SerializedMemberMap.ResolveManagedFieldType"/>
+            /// alone (no instance needed); a NATIVE field (e.g. <c>MeshFilter.m_Mesh</c>, which has no
+            /// managed <c>FieldInfo</c>) needs a live <see cref="SerializedProperty"/> to read its PPtr
+            /// short name via <see cref="ObjectReferenceResolver.ExpectedRefType"/>, so a throwaway
+            /// component is created via <see cref="ComponentDefaultTemplate.Create"/> (the ONE
+            /// AddComponent primitive) on a <see cref="HideFlags.HideAndDontSave"/> GameObject, then
+            /// discarded. Never throws; any failure (unresolved type, un-addable component, no such
+            /// property) returns null — the untyped default.
+            /// </summary>
+            internal static Type? ExpectedFieldType(TypeRef component, string fieldPath)
+            {
+                Type? type;
+                try
+                {
+                    type = ComponentTypeResolver.Resolve(component);
+                }
+                catch
+                {
+                    return null;
+                }
+
+                if (type?.FullName == null)
+                {
+                    return null;
+                }
+
+                var key = (type.FullName, fieldPath);
+                if (ExpectedFieldTypeCache.TryGetValue(key, out var cached))
+                {
+                    return cached;
+                }
+
+                var resolved = ResolveExpectedFieldTypeUncached(type, fieldPath);
+                ExpectedFieldTypeCache[key] = resolved;
+                return resolved;
+            }
+
+            private static Type? ResolveExpectedFieldTypeUncached(Type type, string fieldPath)
+            {
+                try
+                {
+                    var managed = SerializedMemberMap.ResolveManagedFieldType(type, fieldPath);
+                    if (managed != null && typeof(UnityEngine.Object).IsAssignableFrom(managed))
+                    {
+                        return managed;
+                    }
+
+                    GameObject? temp = null;
+                    try
+                    {
+                        temp = new GameObject { hideFlags = HideFlags.HideAndDontSave };
+                        var probeComponent = ComponentDefaultTemplate.Create(temp, type);
+                        if (probeComponent == null)
+                        {
+                            return null;
+                        }
+
+                        var prop = new SerializedObject(probeComponent).FindProperty(fieldPath);
+                        return prop != null ? ObjectReferenceResolver.ExpectedRefType(prop, out _) : null;
+                    }
+                    finally
+                    {
+                        if (temp != null)
+                        {
+                            UnityEngine.Object.DestroyImmediate(temp);
+                        }
+                    }
+                }
+                catch
+                {
+                    return null;
+                }
+            }
 
             /// <summary>
             /// The non-throwing sub-object scan result — see <see cref="TryResolveSubObject"/>.
