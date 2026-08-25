@@ -53,6 +53,20 @@ namespace SceneBuilder.Editor
         internal static Func<double> Clock = () => EditorApplication.timeSinceStartup;
         internal static double SettleSeconds = 0.4;
 
+        /// <summary>Max deferred-retry attempts a code-&gt;scene cycle gets for one path before it is dropped as abandoned (never spins forever on an unroutable/never-opening target scene).</summary>
+        internal static int CodeToSceneDeferralCeiling = 10;
+
+        /// <summary>
+        /// Test seam: when true, <see cref="StartWatcher"/> skips creating the real OS-level
+        /// <see cref="FileSystemWatcher"/>s, so a test driving the pending-set LOGIC via the
+        /// injectable <see cref="Clock"/> + explicit <see cref="PumpOnce()"/> ticks against a REAL
+        /// routable builder path is not racing the real watcher's own async
+        /// <see cref="DrainWatcherPaths"/> re-arm of the same path. Does not affect
+        /// <see cref="IsArmed"/> or the update pump. Reset (disabled) by <see cref="ResetForTests"/>;
+        /// callers that want it must set it AFTER <see cref="ResetForTests"/> and re-<see cref="Arm"/>.
+        /// </summary>
+        internal static bool DisableWatcherForTests;
+
         internal static int SceneToCodeCycleCount { get; private set; }
         internal static int CodeToSceneCycleCount { get; private set; }
 
@@ -66,6 +80,11 @@ namespace SceneBuilder.Editor
         // b2-t3 (multi-scene-builders): per-builder baseline state, keyed on BuilderRoute.BuilderName —
         // never a single global, so one builder's converged baseline can never be attributed to another.
         private static readonly Dictionary<string, (string source, SceneBuilder.Core.Model.SceneSnapshot snap)> _baselines = new();
+
+        // Per-path deferral counter for the code->scene scene-open race: bounds how many times a
+        // path is re-enqueued while its routed scene is not open, so an unroutable/never-opening
+        // target scene cannot spin forever. Keyed the same way as _pendingSourcePaths (Path.GetFullPath).
+        private static readonly Dictionary<string, int> _codeToSceneDeferrals = new();
 
         internal static string? BaselineSourceFor(string builderName) =>
             _baselines.TryGetValue(builderName, out var baseline) ? baseline.source : null;
@@ -96,6 +115,11 @@ namespace SceneBuilder.Editor
         private static FileSystemWatcher? _watcher;
         private static FileSystemWatcher? _prefabWatcher;
 
+        // Last content hash seen for each discovered builder by RescanDiscoveredBuilders, keyed on
+        // Path.GetFullPath(builderPath) — suppresses re-enqueuing a builder whose content has not
+        // changed since the previous rescan.
+        private static readonly Dictionary<string, string> _rescanSourceHashes = new();
+
         // Session-local O(changed) snapshot assembler(s), one per builder — a shared instance would
         // leak one builder's incremental node/id cache into another's assemble (research.md). Wiped
         // on reload (a cold re-assemble rewarms). Reset alongside the rest of the pump's state for tests.
@@ -124,7 +148,7 @@ namespace SceneBuilder.Editor
         /// <summary>Arm iff the persisted master toggle is on and the license gate allows it; else disarm. Domain-reload survival + menu-flip wiring.</summary>
         public static void ApplyToggleState()
         {
-            if (SceneBuilderAutoToggle.Enabled && !EditorApplication.isPlayingOrWillChangePlaymode && LicenseGate.Allowed)
+            if (SceneBuilderAutoToggle.Enabled && !IsPlayingProbe() && LicenseGate.Allowed)
             {
                 Arm();
             }
@@ -173,6 +197,7 @@ namespace SceneBuilder.Editor
             if (focused)
             {
                 SceneBuilderResync.ResyncActiveScene();
+                RescanDiscoveredBuilders();
             }
         }
 
@@ -181,9 +206,43 @@ namespace SceneBuilder.Editor
             SceneBuilderResync.ResyncScene(scene);
 
         /// <summary>
+        /// Focus-regain backstop: re-enqueues any discovered builder whose on-disk content changed
+        /// since it was last seen, converging a write the watcher missed. An unchanged builder (hash
+        /// matches the last rescan's) is skipped, so a later focus never re-fires it. Enqueues through
+        /// <see cref="NotifySourceChanged"/> — never hand-mutates the pending set — so a routed builder
+        /// whose scene is not open still defers via <see cref="DeferCodeToScene"/> rather than drops.
+        /// Test seam: internal so an EditMode test can drive it deterministically (batchmode cannot
+        /// raise a real OS focus event).
+        /// </summary>
+        internal static void RescanDiscoveredBuilders()
+        {
+            foreach (var route in SceneBuilderRouter.Discover())
+            {
+                if (!File.Exists(route.BuilderPath))
+                {
+                    continue;
+                }
+
+                var key = Path.GetFullPath(route.BuilderPath);
+                var hash = SuppressionScope.ComputeContentHash(File.ReadAllText(route.BuilderPath));
+                if (_rescanSourceHashes.TryGetValue(key, out var lastHash) && lastHash == hash)
+                {
+                    continue;
+                }
+
+                _rescanSourceHashes[key] = hash;
+                NotifySourceChanged(route.BuilderPath);
+            }
+        }
+
+        /// <summary>
         /// Play-mode gate (b7-t1, spec checklist #12): disarm on entering Play (no scene-edit
         /// cycles run while playing) and re-arm on returning to Edit mode iff the persisted
-        /// master toggle is still on (toggle state survives the round trip).
+        /// master toggle is still on (toggle state survives the round trip). The re-arm is
+        /// deferred via <see cref="ScheduleReArm"/> rather than called synchronously, since
+        /// <see cref="IsPlayingProbe"/> can still read true at this callback; <see cref="PumpWatchdog"/>
+        /// runs alongside it as a self-healing backstop for a transition whose deferred callback never
+        /// fires (e.g. no domain reload).
         /// </summary>
         internal static void OnPlayModeStateChanged(PlayModeStateChange state)
         {
@@ -193,20 +252,29 @@ namespace SceneBuilder.Editor
                     Disarm();
                     break;
                 case PlayModeStateChange.EnteredEditMode:
-                    ApplyToggleState();
+                    ScheduleReArm(ApplyToggleState);
+                    PumpWatchdog();
                     break;
             }
         }
 
+        /// <summary>
+        /// Both watchers are unfiltered at the OS level (no `"*.cs"` name filter passed to the
+        /// constructor): a filtered watcher can silently drop an atomic replace's rename-into-place
+        /// event on some platforms, since the temp file's name does not match the filter. The `.cs`
+        /// extension check is applied once, on the main thread, in <see cref="EnqueueWatcherPath"/>
+        /// instead — a non-`.cs` write in the same directory (our own sidecar/state files) is filtered
+        /// there rather than never observed here.
+        /// </summary>
         private static void StartWatcher()
         {
-            if (_watcher != null)
+            if (_watcher != null || DisableWatcherForTests)
             {
                 return;
             }
 
             var dir = SceneBuilderPaths.EnsureBuildersDirectory();
-            var watcher = new FileSystemWatcher(dir, "*.cs")
+            var watcher = new FileSystemWatcher(dir)
             {
                 IncludeSubdirectories = false,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime
@@ -219,7 +287,7 @@ namespace SceneBuilder.Editor
             _watcher = watcher;
 
             var prefabDir = SceneBuilderPaths.EnsurePrefabBuildersDirectory();
-            var prefabWatcher = new FileSystemWatcher(prefabDir, "*.cs")
+            var prefabWatcher = new FileSystemWatcher(prefabDir)
             {
                 IncludeSubdirectories = false,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime
@@ -268,13 +336,20 @@ namespace SceneBuilder.Editor
 
         /// <summary>
         /// The single choke point for both the real background watcher handler and a deterministic
-        /// test seam (b6-t1). Queues the path for the source-settle debounce and, for a set-changing
-        /// event (Created/Deleted/Renamed — NOT a plain content-save Changed), flags the route set
-        /// dirty so <see cref="DrainWatcherPaths"/> invalidates <see cref="SceneBuilderRouter"/>'s
-        /// memoized route cache on the main thread.
+        /// test seam. Drops any path that is not a `.cs` file before it touches any state (both
+        /// watchers are unfiltered at the OS level; this is the one place the extension is checked).
+        /// Otherwise queues the path for the source-settle debounce and, for a set-changing event
+        /// (Created/Deleted/Renamed — NOT a plain content-save Changed), flags the route set dirty so
+        /// <see cref="DrainWatcherPaths"/> invalidates <see cref="SceneBuilderRouter"/>'s memoized route
+        /// cache on the main thread.
         /// </summary>
         internal static void EnqueueWatcherPath(string fullPath, WatcherChangeTypes changeType)
         {
+            if (!string.Equals(Path.GetExtension(fullPath), ".cs", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             lock (_watcherLock)
             {
                 _watcherPendingPaths.Add(fullPath);
@@ -386,6 +461,9 @@ namespace SceneBuilder.Editor
             _sourceDeadlineArmed = true;
             _sourceDeadline = Clock() + SettleSeconds;
         }
+
+        /// <summary>True iff <paramref name="path"/> is still awaiting a code-&gt;scene build (deferred, not dropped) in the pump's pending set — the permanent-pending test seam for the not-yet-open-scene race.</summary>
+        internal static bool IsSourcePathPending(string path) => _pendingSourcePaths.Contains(Path.GetFullPath(path));
 
         /// <summary>True iff <paramref name="fullPath"/> is on disk and its content hash matches a write we made ourselves (<see cref="SuppressionScope"/>'s own-write registry via <see cref="SceneBuilderPaths.WriteIfChanged"/>) — the loop-break shared by every source-change lane.</summary>
         private static bool DropsAsOwnWrite(string fullPath)
@@ -656,6 +734,10 @@ namespace SceneBuilder.Editor
         /// The code-&gt;scene cycle body (b5-t2, spec checklist #4): on a real external write to the
         /// governing builder, parse+validate+build in place via <see cref="SceneBuilderBuild.Run"/>;
         /// on a parse error or planning-phase diagnostic, log LOCATED and leave the scene untouched.
+        /// An unroutable path or a missing builder file is dropped outright (never re-enqueued — it
+        /// cannot become routable/present by retrying). A routed path whose scene is not yet open is
+        /// deferred via <see cref="DeferCodeToScene"/> instead of dropped, so it survives to build once
+        /// the scene opens.
         /// </summary>
         internal static void ExecuteCodeToScene(IReadOnlyCollection<string> paths)
         {
@@ -673,11 +755,11 @@ namespace SceneBuilder.Editor
 
                 if (!SceneBuilderRouter.TryGetOpenScene(route, out var scene))
                 {
-                    Debug.LogError(
-                        $"[CodeScenes] {route.BuilderName}: scene {route.ScenePath} is not open — " +
-                        "code->scene build skipped.");
+                    DeferCodeToScene(path, route);
                     continue;
                 }
+
+                _codeToSceneDeferrals.Remove(Path.GetFullPath(path));
 
                 var result = SceneBuilderBuild.Run(route.BuilderPath, route.ScenePath, route.SidecarPath, scene);
                 foreach (var diagnostic in result.Diagnostics)
@@ -690,6 +772,34 @@ namespace SceneBuilder.Editor
                 // degrades to the clobbering fallback.
                 CaptureBaseline(scene);
             }
+        }
+
+        /// <summary>
+        /// Handles a <see cref="SceneBuilderRouter.TryGetOpenScene"/> miss for <paramref name="path"/>:
+        /// below the ceiling, re-enqueues the path through <see cref="NotifySourceChanged"/> (the
+        /// single owner of the pending set, re-arming the settle deadline) so a later due tick retries
+        /// once the scene opens. At the ceiling, drops the path (clearing its counter) and logs an
+        /// abandoned error rather than retrying forever on a target scene that never opens.
+        /// <see cref="CodeToSceneDeferralCeiling"/> counts completed deferrals: the miss that reaches
+        /// the ceiling still defers, and only the miss AFTER it abandons the path — so a ceiling of 1
+        /// abandons on the very first miss (no deferral) while a ceiling of N guarantees N deferrals.
+        /// </summary>
+        private static void DeferCodeToScene(string path, BuilderRoute route)
+        {
+            var key = Path.GetFullPath(path);
+            var attempts = _codeToSceneDeferrals.TryGetValue(key, out var n) ? n : 0;
+
+            if (attempts >= CodeToSceneDeferralCeiling)
+            {
+                _codeToSceneDeferrals.Remove(key);
+                Debug.LogError(
+                    $"[CodeScenes] {route.BuilderName}: scene {route.ScenePath} did not open after " +
+                    $"{attempts} attempts — code->scene build abandoned.");
+                return;
+            }
+
+            _codeToSceneDeferrals[key] = attempts + 1;
+            NotifySourceChanged(path);
         }
 
         /// <summary>
@@ -836,6 +946,8 @@ namespace SceneBuilder.Editor
 
             Clock = () => EditorApplication.timeSinceStartup;
             SettleSeconds = 0.4;
+            CodeToSceneDeferralCeiling = 10;
+            DisableWatcherForTests = false;
             SceneToCodeCycleCount = 0;
             CodeToSceneCycleCount = 0;
             SceneToCodeExecutor = null;
@@ -846,8 +958,12 @@ namespace SceneBuilder.Editor
             PrefabAssetToCodeCycleCount = 0;
             InPrefabModeProbe = DefaultInPrefabMode;
             ActivePrefabRouteProbe = DefaultActivePrefabRoute;
+            IsPlayingProbe = DefaultIsPlaying;
+            ScheduleReArm = DefaultScheduleReArm;
             _baselines.Clear();
             _snapshotAssemblers.Clear();
+            _codeToSceneDeferrals.Clear();
+            _rescanSourceHashes.Clear();
             SceneBuilderBuild.LastBuilderPath = null;
             SceneBuilderBuild.LastSidecarPath = null;
 

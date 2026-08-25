@@ -192,11 +192,14 @@ public class {builderName} : ISceneDefinition
     }
 
     // Checklist #5 (b2-t1): when the routed builder's OWN scene is not open, the code->scene cycle
-    // must be a safe, located skip — no exception, no write to any scene (never fall back to
-    // building into whatever scene happens to be active).
+    // must defer safely — no exception, no write to any scene (never fall back to building into
+    // whatever scene happens to be active), and the path stays pending for a later retry rather
+    // than being dropped.
     [Test]
-    public void MultiScene_CodeToScene_SceneNotOpen_SkipsSafely()
+    public void MultiScene_CodeToScene_SceneNotOpen_DefersSafely()
     {
+        SceneBuilderAutoSync.Arm();
+
         Assert.IsTrue(_betaScene.IsValid(), "Precondition: Beta's scene must be open before closing it.");
         EditorSceneManager.CloseScene(_betaScene, true);
         Assert.AreEqual(AlphaScenePath, EditorSceneManager.GetActiveScene().path,
@@ -208,11 +211,11 @@ public class {builderName} : ISceneDefinition
         File.WriteAllText(_betaBuilderPath, Source("RouteBeta", "        scene.Add(\"Beta\");\n        scene.Add(\"Gamma\");"));
         SceneBuilderRouter.ResetForTests();
 
-        LogAssert.Expect(UnityEngine.LogType.Error, new System.Text.RegularExpressions.Regex("RouteBeta.*not open"));
-
         Assert.DoesNotThrow(() => SceneBuilderAutoSync.ExecuteCodeToScene(new[] { _betaBuilderPath }),
-            "A routed builder whose own scene is not open must be a safe skip, never an exception.");
+            "A routed builder whose own scene is not open must be a safe defer, never an exception.");
 
+        Assert.IsTrue(SceneBuilderAutoSync.IsSourcePathPending(_betaBuilderPath),
+            "A routed builder whose own scene is not open must stay pending for a later retry, not be dropped.");
         CollectionAssert.AreEqual(alphaSceneBytesBefore, File.ReadAllBytes(AlphaScenePath),
             "The active scene must never be written to for a builder whose own scene is closed.");
         CollectionAssert.AreEqual(betaSceneBytesBefore, File.ReadAllBytes(BetaScenePath),
