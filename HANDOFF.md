@@ -107,12 +107,13 @@ Licensing was the last feature gate; what remains is packaging, legal, and launc
   via the skill-hardening one-shot loop (see §4); the brief is now a pure buyer-style game spec and
   the `codescenes-authoring` skill ships in the package (`com.codescenes/Documentation~/`).
 
-### 4. Eval-surfaced sync/authoring bug backlog (from the minigolf one-shot)
+### 4. Eval-surfaced sync/authoring bug backlog (from the minigolf one-shot) — CLEARED
 
 The first hero-demo one-shot (Claude session `a6792c4f`) exposed real defects — the building agent
-even disabled two-way sync as "untenable" after the emitter wrote non-compiling code. One focused
-bug spec remains; it is pipeline-ready (owner + mechanism + accept-when):
-- **`specs/51`** authoring surface accepts natural forms (instance component surface, sub-asset type disambiguation, const-string paths).
+even disabled two-way sync as "untenable" after the emitter wrote non-compiling code. All six specs
+(46-51) are shipped and live-verified; records in `specs/completed/README.md`. A forward-ref reconcile
+convergence defect surfaced by 46's live-verify was also fixed (`8f34dfb`). Next work is section 3
+(launch) and the hero demo, not this backlog.
 
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 

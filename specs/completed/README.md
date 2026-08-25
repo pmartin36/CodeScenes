@@ -624,3 +624,36 @@ converged a watcher-slipped write to (4,5,6) with no in-scene edit; (3) an `Ente
 round trip through `OnPlayModeStateChanged` left `IsArmed=True` and a real edit drove a scene->code cycle
 through natural update ticks with no manual reload. The "did not open after 10 attempts — abandoned" lines
 were fix #1's retry ceiling firing because the harness held scenes closed past the ceiling, not a defect.
+
+## 51 - the authoring surface accepts natural forms
+
+Three parse/recognize/resolve gaps that rejected valid intent are closed (recognizer + parser moved
+together, pinned by the agreement tests):
+- **A — instance component surface.** `InstanceHandle`/`InstanceHandle<TRef>` gained
+  `Component<T>()`/`Component<T>(configure)` (an alias for `AddComponent<T>`), and instance verbs now
+  dispatch on a CAPTURED instance handle used in a later statement, not only inline on the `Instance(...)`
+  call — the setter-only re-dispatch routes an instance-verb call on an instance-typed receiver through
+  the same per-verb lowering `ProcessInstanceChain` uses. No instance receiver reaches the SB1002
+  `default` arm.
+- **B — sub-asset type disambiguation.** `TryResolveSubObject` gained an expected-type parameter threaded
+  from the target `SerializedProperty`; a bare sub-name matching several sub-objects filters to the one
+  assignable to the field type (so `m_Mesh` picks the `Mesh` named `start`, not the `Transform`/`MeshFilter`).
+  Only a still-ambiguous match after the type filter is a located error.
+- **C — const-string path folding.** One constant-string folder that all three literal-demanding sites
+  consult (recognizer `IsStringLiteral`, parser `EvalStringLiteral`, `ValueNodeParser.TryStringLiteral`);
+  `ParseCore`/`Analyze` first collect the const-string environment (class-level `const string` fields and
+  Build-body `const string` locals) and thread it in. The folder evaluates a literal, a reference to a
+  known const string, and a `+` concat of such constants; anything non-constant is still refused.
+
+Built through the tdd-pipeline (commits `9dae215` gaps A+C, `34b3a10` gap B). Gate
+`GATE PASS: Core + Unity EditMode green (passed=995 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec51.log`): (A) inline,
+captured-statement, and multi-statement-configure instance forms all built real Kenney fbx instances
+carrying `Rigidbody`/`SphereCollider` (radius 0.5, isTrigger) with no "Unsupported builder call"; (B)
+`Asset("start.fbx","start")` into `m_Mesh` resolved to the `Mesh` sub-object past the
+GameObject/Transform/MeshFilter/MeshRenderer name collision, and a same-type collision (two Meshes named
+`start`) still threw a located `SB2101` with the scene untouched; (C) a class-level `const string Kit` +
+a Build-body `const string` local folded through `Instance(Kit + ...)`, `Add(Grp + ...)`, and
+`Asset(Kit + ..., "start")`, while a non-const `prefix +` was still refused located (`SB1000`). Console
+clean of product errors.
