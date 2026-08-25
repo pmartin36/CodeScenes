@@ -562,3 +562,31 @@ after each (`comps=[RectTransform,CanvasRenderer,Image]`), and the second build 
 ops). Live-verify also surfaced a MIRROR gap on the other direction (scene->code emission re-adds the
 required `CanvasRenderer` as an authored `.Component<>()`), which spec 48 does not touch; filed in
 `docs/open-defects.md` for a follow-up.
+
+## 49 - a code->scene build error is a discoverable state, not a lost log line
+
+A per-builder build-status recorder `SceneBuilderBuildStatus` (`com.codescenes/Editor/`) is placed at
+the shared build core `SceneBuilderBuild.RunCore`, so every code->scene and code->prefab channel
+inherits it by construction: `RunCore`'s refusal/success returns and a now-caught `ParseException`
+record via `RecordRefused`/`RecordClean`, and `Run`/`PrefabBuildSyncTarget.Build` (plus its two
+pre-`RunCore` refusals) funnel through the same recorder. This closes the previously-silent
+`SceneBuilderResync.RunMaterialize` resync channel (focus-regain / scene-open / domain-reload) that
+discarded the `BuildResult`. State persists in `SessionState` (survives domain reload, dies with the
+session) and surfaces two ways: a standing `CodeScenes/` menu item (`Build error: <File>:<Line>` vs
+`No build errors`, pinging the offending line) and the scene-view overlay via `ConflictSurfacing`, which
+gained a per-key `RemoveOverlay` so `RecordClean` drops only that builder's entry. Whole-scene refusal
+is unchanged (scene left untouched). The decomposition first halted on plan validation (the recorder
+was under-scoped to three call sites, blind to `RunMaterialize`); the spec was corrected to the shared
+outcome point with a behavioral bypass check before the relaunch.
+
+Built through the tdd-pipeline (commits `f968482`, `19d411f`). Gate
+`GATE PASS: Core + Unity EditMode green (passed=975 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec49.log`), 5/5: an
+unsupported `.On(...)` at line 7 refused with a single located `SB1000 ...(7,16)` error and the scene
+untouched; the `CodeScenes/` menu read `Build error: LiveVerify49Scene.cs:7` (with the overlay
+registered) while auto stayed ON, a clean builder read `No build errors`; the refusal survived a real
+`RequestScriptReload` purely from `SessionState`; fixing the line built clean and cleared the state
+(an unrelated conflict overlay survived, proving per-key removal); and a refusal driven through
+`SceneBuilderResync.ResyncRoute` (Materialize direction) set the standing status (`SB2201 ...(6,9)`),
+the exact regression the fix closes. Console clean of unexpected errors.
