@@ -71,7 +71,7 @@ namespace SceneBuilder.Core.Reconcile
             // that doesn't supply MemberSpellings stays green unchanged).
             MemberSpellingIndex? memberSpellings = null)
         {
-            // Canonicalize FitSize-before-SurfaceSnap BEFORE the ADD/REORDER passes so both emit
+            // Canonicalize FitSize-before-AlignTo BEFORE the ADD/REORDER passes so both emit
             // in canonical order and the REORDER pass compares canonical-vs-canonical for the
             // spatial pair (never churns on live GetComponents order).
             var snapshotComps = SpatialComponentSource.OrderForEmit(ExcludeTransform(snapshotComponents));
@@ -100,9 +100,9 @@ namespace SceneBuilder.Core.Reconcile
             // double-counting/leaking identity-equal asset refs when the IdentityMap simply
             // hasn't recorded this component's entry yet (edit emission is unaffected).
             // The REORDER pass (3) below compares source physical order against
-            // snapshotComps' CANONICAL (FitSize-before-SurfaceSnap) order — so source must be canonicalized
+            // snapshotComps' CANONICAL (FitSize-before-AlignTo) order — so source must be canonicalized
             // identically, or an untouched node whose live GetComponents() order simply differs from
-            // canonical (e.g. authored MeshFilter/MeshRenderer/FitSize/SurfaceSnap) spuriously looks
+            // canonical (e.g. authored MeshFilter/MeshRenderer/FitSize/AlignTo) spuriously looks
             // reordered every sync (a no-op churn the applier can't actually apply to a fluent chain,
             // surfacing as the "convergence defect" byte-identical-patch guard). Matches the
             // "REORDER pass compares canonical-vs-canonical for the spatial pair" intent above.
@@ -404,11 +404,11 @@ namespace SceneBuilder.Core.Reconcile
                             var projection = NestedValueEmission.Project(snapVal, fieldDefault);
                             var emittedVal = projection.Value;
 
-                            // A spatial enum-axis flip (SurfaceSnap vertical/horizontal/depth: Down->Up)
+                            // A spatial enum-axis flip (AlignTo xMode/yMode/zMode: AbutMax->AbutMin)
                             // patches the WHOLE-argument span (see BuilderParser.Spatial) with the
                             // authoring keyword form `up: true` via RenderKeyValue — the keyword itself
                             // carries the member, so the value-only ValueNodeLiteral would splice an
-                            // invalid `SurfaceSnap+Vertical.Up` FQN into the `down:` slot.
+                            // invalid `AlignTo+Mode.AbutMin` FQN into the `y:` slot.
                             var patchExpr = SpatialComponentSource.IsSpatial(sourceComp.Type.FullName) && emittedVal is ValueNode.Enum
                                 ? SpatialComponentSource.RenderKeyValue(fieldKey, emittedVal, string.Empty)
                                 : RenderFieldValue(emittedVal, sourceComp.Type.FullName, resolveOwnerHandle, edits, ownerLogicalId, assetCatalog);
@@ -738,7 +738,7 @@ namespace SceneBuilder.Core.Reconcile
                 return SourceExpr.ValueNodeLiteral(substituted, assetCatalog);
             }
 
-            // A FitSize/SurfaceSnap field patch/introduce must render through the dedicated
+            // A FitSize/AlignTo field patch/introduce must render through the dedicated
             // formatter (SourceExpr.Float/Vec3Literal) so it stays byte-identical to the append
             // form — never the generic ValueNodeLiteral fallback.
             return SpatialComponentSource.IsSpatial(typeFullName)

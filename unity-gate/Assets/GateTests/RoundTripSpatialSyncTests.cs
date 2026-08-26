@@ -10,7 +10,7 @@ using UnityEngine.TestTools;
 using SceneBuilder.Authoring;
 using SceneBuilder.Editor;
 
-// M-Spatial (FitSize/SurfaceSnap) full bidirectional SYNC round-trip gate tests — the spec's confirmation
+// M-Spatial (FitSize/AlignTo) full bidirectional SYNC round-trip gate tests — the spec's confirmation
 // checklist items 11, 12, 13, 14, 18, and the sync half of 19 (specs/19-spatial-authoring-components.md).
 // Drives the FULL loop (code->scene via SceneBuilderBuild.Run, scene->code via
 // EmittedCodeCompiles.SyncAndAssertCompiles) against a live editor scene. Mirrors
@@ -42,21 +42,22 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
 }}";
 
     // A static floor: a Cube scaled (10,1,10) so its top face sits at world Y = 0.5 (unambiguous,
-    // distinguishable from any driven-axis value used below). No FitSize/SurfaceSnap — a plain surface.
+    // distinguishable from any driven-axis value used below). No FitSize/AlignTo — a plain surface.
     private const string FloorBody =
         "        var floor = scene.Add(\"Floor\")\n" +
         "            .Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cube\")))\n" +
         "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
         "            .Transform(scale: (10f, 1f, 10f));\n";
 
-    // A Crate: unit Cube, aspect-locked FitSize height 2, down-SurfaceSnap, starting above the floor.
+    // A Crate: unit Cube, aspect-locked FitSize height 2, aligned down onto the floor (explicit target),
+    // starting above the floor.
     private const string CrateBody =
         "        var crate = scene.Add(\"Crate\")\n" +
         "            .Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cube\")))\n" +
         "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
         "            .Transform(pos: (0f, 5f, 0f))\n" +
         "            .FitSize(height: 2f)\n" +
-        "            .SurfaceSnap(down: true);\n";
+        "            .AlignTo(floor, y: AxisAlign.AbutMax);\n";
 
     private static GameObject FindRoot(Scene scene, string name)
     {
@@ -93,9 +94,9 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
     // lazily instantiates a throwaway MonoBehaviour instance
     // (bare GameObject, no MeshFilter/Renderer) the FIRST time a component type is snapshot-read, to
     // compute a per-type default-field map — cached for the rest of the domain's lifetime. For
-    // FitSize/SurfaceSnap (both [ExecuteAlways] with an OnValidate that logs a located error against that
+    // FitSize/AlignTo (both [ExecuteAlways] with an OnValidate that logs a located error against that
     // bare probe object) this fires exactly ONCE per type, non-deterministically on whichever [Test]
-    // happens to sync a FitSize/SurfaceSnap first. Force the warm-up HERE, isolated from any real test's
+    // happens to sync a FitSize/AlignTo first. Force the warm-up HERE, isolated from any real test's
     // LogAssert window, so no individual [Test] bears this one-time, unrelated Console-noise cost.
     [OneTimeSetUp]
     public void WarmSpatialDefaultFieldCache()
@@ -111,7 +112,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
                 "            .Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cube\")))\n" +
                 "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
                 "            .FitSize(height: 1f)\n" +
-                "            .SurfaceSnap(down: true);\n"));
+                "            .AlignTo(NodeHandle.None, y: AxisAlign.AbutMax);\n"));
 
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var scene = EditorSceneManager.GetActiveScene();
@@ -159,17 +160,17 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         }
 
         // Reset the ambient active scene so this suite's Floor/Crate Renderers never leak into a
-        // LATER suite's SurfaceSnap fallback-scan (a global "every Renderer in the scene" search) —
+        // LATER suite's AlignTo fallback-scan (a global "every Renderer in the scene" search) —
         // RoundTripSpatialTests.cs's tests build directly against the ambient scene without ever
         // resetting it themselves.
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
     }
 
-    // 11. Anti-churn (source pin): author FitSize+SurfaceSnap, Build, Sync with NO edit. The rewritten
-    //     source still carries .FitSize/.SurfaceSnap and carries NO .Transform(scale:/pos:) — the driven
+    // 11. Anti-churn (source pin): author FitSize+AlignTo, Build, Sync with NO edit. The rewritten
+    //     source still carries .FitSize/.AlignTo and carries NO .Transform(scale:/pos:) — the driven
     //     channels never leak into source — and the sync itself is a no-op.
     [Test]
-    public void RoundTrip_FitSizeSurfaceSnapNoEdit_SyncIsNoOpAndEmitsNoTransform()
+    public void RoundTrip_FitSizeAlignToNoEdit_SyncIsNoOpAndEmitsNoTransform()
     {
         File.WriteAllText(_builderPath, Source(FloorBody + CrateBody));
 
@@ -180,14 +181,14 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
         Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
         crate.GetComponent<FitSize>().Evaluate();
-        crate.GetComponent<SurfaceSnap>().Evaluate();
+        crate.GetComponent<AlignTo>().Evaluate();
 
         var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
-        Assert.IsFalse(result.Changed, "An unedited FitSize/SurfaceSnap scene must Sync as a no-op.");
+        Assert.IsFalse(result.Changed, "An unedited FitSize/AlignTo scene must Sync as a no-op.");
 
         var rewritten = File.ReadAllText(_builderPath);
         StringAssert.Contains(".FitSize(", rewritten, "Rewritten source must still carry the .FitSize(...) call.\n" + rewritten);
-        StringAssert.Contains(".SurfaceSnap(", rewritten, "Rewritten source must still carry the .SurfaceSnap(...) call.\n" + rewritten);
+        StringAssert.Contains(".AlignTo(", rewritten, "Rewritten source must still carry the .AlignTo(...) call.\n" + rewritten);
 
         // Scoped to the Crate statement only — the Floor legitimately authors its OWN unrelated
         // (non-driven) .Transform(scale: (10f, 1f, 10f)) call, which would otherwise false-positive
@@ -209,7 +210,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
     //      drove, 2,2,2). Since spec 23 removed scene-write suppression, materialize re-writes the FULL
     //      authored scale (the source's default 1,1,1 — CrateBody has no .Transform(scale:)) onto that
     //      live instance every sync. Without PlanExecutor resetting FitSize's baseline (the twin of the
-    //      m_LocalPosition/SurfaceSnap reset), that plugin-own write diverges from _lastWritten and is
+    //      m_LocalPosition/AlignTo reset), that plugin-own write diverges from _lastWritten and is
     //      misread as a manual rescale, back-solving a WRONG value (2 -> ~1) that scene->code would emit
     //      into source. The fix resets the baseline at the central m_LocalScale write site, so the next
     //      Evaluate re-derives from the authored value (2) and both value and world height stay 2.
@@ -246,7 +247,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
     }
 
     // 12. Snapped axis re-snaps, free axis persists: dragging the object off the floor on Y (driven,
-    //     WITHIN SurfaceSnap's default captureThreshold of 2.5 units — the baseline flush Y is 1.5, so
+    //     WITHIN AlignTo's default captureThreshold of 2.5 units — the baseline flush Y is 1.5, so
     //     a 2-unit displacement to 3.5 is a within-threshold drag, not a sticky-detach) and to a new X
     //     (free) must re-snap Y geometrically and keep the free X. After Sync, the driven Y literal
     //     must not leak into the rewritten .Transform(pos:) call, and a rebuild from the rewritten
@@ -262,14 +263,14 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
 
         var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
         var sizer = crate.GetComponent<FitSize>();
-        var snapper = crate.GetComponent<SurfaceSnap>();
+        var aligner = crate.GetComponent<AlignTo>();
         sizer.Evaluate();
-        snapper.Evaluate(); // baseline snap: bottom face flush on the floor (world Y top == 0.5)
+        aligner.Evaluate(); // baseline align: bottom face flush on the floor (world Y top == 0.5)
 
         const float draggedX = 3f;
         const float draggedY = 3.5f; // baseline Y is 1.5; a 2-unit drag stays within captureThreshold (2.5)
         crate.transform.position = new Vector3(draggedX, draggedY, 0f); // drag: Y off-floor (within threshold), X to a new free value
-        snapper.Evaluate(); // re-snap
+        aligner.Evaluate(); // re-snap
 
         var bounds = crate.GetComponent<Renderer>().bounds;
         Assert.AreEqual(0.5f, bounds.min.y, Tol, "Re-Evaluate must re-snap Y flush on the floor after the drag.");
@@ -286,27 +287,37 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         StringAssert.Contains("3f", posCall, "The free X drag value must be present in the pos: argument.\n" + posCall);
 
         // Robust round-trip: rebuild from the rewritten source into a fresh scene — free X must
-        // survive, and the SurfaceSnap must still correctly re-snap Y regardless of the source's
-        // driven-Y placeholder.
+        // survive, and AlignTo must still correctly re-snap Y regardless of the source's driven-Y
+        // placeholder.
         RunBuild(EditorSceneManager.GetActiveScene());
         var rebuiltCrate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
         Assert.IsNotNull(rebuiltCrate, "Crate was not recreated by the rebuild.");
         Assert.AreEqual(draggedX, rebuiltCrate.transform.position.x, Tol, "Rebuild from the rewritten source must preserve the free X value.");
 
         rebuiltCrate.GetComponent<FitSize>().Evaluate();
-        var rebuiltSurfaceSnap = rebuiltCrate.GetComponent<SurfaceSnap>();
-        rebuiltSurfaceSnap.Evaluate();
+        var rebuiltAlignTo = rebuiltCrate.GetComponent<AlignTo>();
+        rebuiltAlignTo.Evaluate();
         var rebuiltBounds = rebuiltCrate.GetComponent<Renderer>().bounds;
-        Assert.AreEqual(0.5f, rebuiltBounds.min.y, Tol, "The rebuilt SurfaceSnap must still re-snap Y flush on the floor.");
+        Assert.AreEqual(0.5f, rebuiltBounds.min.y, Tol, "The rebuilt AlignTo must still re-snap Y flush on the floor.");
     }
 
-    // 13. Field edit round-trips: editing the FitSize height and toggling a SurfaceSnap flag directly on
-    //     the live components must patch ONLY the corresponding .FitSize/.SurfaceSnap argument — nothing
+    // A Crate carrying a target-less AlignTo (NodeHandle.None) — used only by field-edit tests below
+    // that never exercise real snap geometry, so a real Floor anchor is unnecessary.
+    private const string CrateBodyNoTarget =
+        "        var crate = scene.Add(\"Crate\")\n" +
+        "            .Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cube\")))\n" +
+        "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
+        "            .Transform(pos: (0f, 5f, 0f))\n" +
+        "            .FitSize(height: 2f)\n" +
+        "            .AlignTo(NodeHandle.None, y: AxisAlign.AbutMax);\n";
+
+    // 13. Field edit round-trips: editing the FitSize height and introducing an AlignTo axis directly on
+    //     the live components must patch ONLY the corresponding .FitSize/.AlignTo argument — nothing
     //     structural (no .Transform) — and a second Sync (no further edit) is a no-op.
     [Test]
-    public void SceneToCode_EditedFitSizeHeightAndSurfaceSnapFlag_PatchesArgumentOnly()
+    public void SceneToCode_EditedFitSizeHeightAndAlignToAxis_PatchesArgumentOnly()
     {
-        File.WriteAllText(_builderPath, Source(CrateBody));
+        File.WriteAllText(_builderPath, Source(CrateBodyNoTarget));
 
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var scene = EditorSceneManager.GetActiveScene();
@@ -315,22 +326,22 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
         Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
         crate.GetComponent<FitSize>().value = 3f; // mode is already Height, materialized from source
-        crate.GetComponent<SurfaceSnap>().horizontal = SurfaceSnap.Horizontal.Left;
+        crate.GetComponent<AlignTo>().xMode = AlignTo.Mode.AbutMax;
 
         var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
-        Assert.IsTrue(result.Changed, "Editing FitSize.height and SurfaceSnap.left is a real scene change; Sync must report Changed.");
+        Assert.IsTrue(result.Changed, "Editing FitSize.height and introducing AlignTo.xMode is a real scene change; Sync must report Changed.");
 
         var rewritten = File.ReadAllText(_builderPath);
         StringAssert.Contains(".FitSize(height: 3f)", rewritten, "FitSize.height edit must patch the .FitSize(height:) argument.\n" + rewritten);
         StringAssert.DoesNotContain("height: 2f", rewritten, "The old FitSize height argument must not remain.\n" + rewritten);
-        StringAssert.Contains("left: true", rewritten, "SurfaceSnap.left toggle must patch the .SurfaceSnap(...) call to include left: true.\n" + rewritten);
+        StringAssert.Contains("x: AxisAlign.AbutMax", rewritten, "AlignTo.xMode introduce must patch the .AlignTo(...) call to include x: AxisAlign.AbutMax.\n" + rewritten);
 
-        // The Crate's own pre-existing, un-driven `.Transform(pos: (0f, 5f, 0f))` (from CrateBody) is
-        // NOT something this test edits — it must remain verbatim. A pure field edit must not
+        // The Crate's own pre-existing, un-driven `.Transform(pos: (0f, 5f, 0f))` (from CrateBodyNoTarget)
+        // is NOT something this test edits — it must remain verbatim. A pure field edit must not
         // introduce a NEW driven-channel write (a .Transform(scale:) leak, or a DIFFERENT
         // .Transform(pos:) than the one already authored) — mirrors item 11's scoped check.
         StringAssert.Contains(".Transform(pos: (0f, 5f, 0f))", rewritten,
-            "The Crate's pre-existing, unrelated pos: argument must remain unchanged by a pure FitSize/SurfaceSnap field edit.\n" + rewritten);
+            "The Crate's pre-existing, unrelated pos: argument must remain unchanged by a pure FitSize/AlignTo field edit.\n" + rewritten);
         StringAssert.DoesNotContain(".Transform(scale:", rewritten,
             "A pure field edit must not introduce a .Transform(scale:) call.\n" + rewritten);
 
@@ -338,12 +349,12 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         Assert.IsFalse(second.Changed, "NOT CONVERGED: a Sync immediately after the patch, with no further edit, reported Changed=true.");
     }
 
-    // 14. Created-in-editor object with a SurfaceSnap: a GameObject added directly in the scene (not via
-    //     the builder) with a SurfaceSnap attached must append a new .Add(...) statement carrying
-    //     .SurfaceSnap(down: true) on scene->code sync, and the emitted source must compile. A second
-    //     Sync (no further change) is a no-op.
+    // 14. Created-in-editor object with an AlignTo: a GameObject added directly in the scene (not via
+    //     the builder) with an AlignTo attached (target set to the pre-existing Floor) must append a new
+    //     .Add(...) statement carrying .AlignTo(target: floor, y: AxisAlign.AbutMax) on scene->code
+    //     sync, and the emitted source must compile. A second Sync (no further change) is a no-op.
     [Test]
-    public void SceneToCode_CreatedObjectWithSurfaceSnap_AppendsSurfaceSnapCall_SecondSyncNoOp()
+    public void SceneToCode_CreatedObjectWithAlignTo_AppendsAlignToCall_SecondSyncNoOp()
     {
         File.WriteAllText(_builderPath, Source(FloorBody));
 
@@ -351,20 +362,22 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         var scene = EditorSceneManager.GetActiveScene();
         RunBuild(scene);
 
+        var floor = FindRoot(EditorSceneManager.GetActiveScene(), "Floor");
         var created = new GameObject("Crate");
         created.AddComponent<MeshFilter>();
         created.AddComponent<MeshRenderer>();
-        var snapper = created.AddComponent<SurfaceSnap>();
-        snapper.vertical = SurfaceSnap.Vertical.Down;
+        var aligner = created.AddComponent<AlignTo>();
+        aligner.target = floor.transform;
+        aligner.yMode = AlignTo.Mode.AbutMax;
 
         var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsTrue(result.Changed, "A newly created object must be reported as a scene change.");
 
         var rewritten = File.ReadAllText(_builderPath);
         StringAssert.Contains(".Add(\"Crate\")", rewritten, "A new .Add(...) statement must appear for the created object.\n" + rewritten);
-        StringAssert.Contains(".SurfaceSnap(down: true)", rewritten, "The created object's SurfaceSnap must emit the dedicated .SurfaceSnap(down: true) call.\n" + rewritten);
-        StringAssert.DoesNotContain("Component<SceneBuilder.Authoring.SurfaceSnap>", rewritten,
-            "SurfaceSnap must never be emitted via the generic .Component<>() form.\n" + rewritten);
+        StringAssert.Contains(".AlignTo(target: floor, y: AxisAlign.AbutMax)", rewritten, "The created object's AlignTo must emit the dedicated .AlignTo(...) call.\n" + rewritten);
+        StringAssert.DoesNotContain("Component<SceneBuilder.Authoring.AlignTo>", rewritten,
+            "AlignTo must never be emitted via the generic .Component<>() form.\n" + rewritten);
 
         var second = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
         Assert.IsFalse(second.Changed, "NOT CONVERGED: a Sync immediately after the append, with no further change, reported Changed=true.");
@@ -441,7 +454,7 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         var rewritten = File.ReadAllText(_builderPath);
         // Whitespace-tolerant: an INTRODUCED (previously-absent) .Transform(...) argument is rendered
         // via Roslyn's default NameColon (no forced space after the colon), unlike the dedicated
-        // .FitSize/.SurfaceSnap renderer's hand-formatted "name: value" — assert on structure, not on the
+        // .FitSize/.AlignTo renderer's hand-formatted "name: value" — assert on structure, not on the
         // exact whitespace convention of this unrelated (pre-existing, non-spatial) code path.
         StringAssert.IsMatch(@"\.Transform\(\s*scale:\s*\(3f,\s*3f,\s*3f\)\s*\)", rewritten,
             "A disabled FitSize must release the scale channel so the manual scale is written as a .Transform(scale:).\n" + rewritten);

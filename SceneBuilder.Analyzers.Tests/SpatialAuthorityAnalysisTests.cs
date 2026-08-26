@@ -8,7 +8,7 @@ using Xunit;
 
 namespace SceneBuilder.Analyzers.Tests
 {
-    // SB1203 fires when two position-driver calls (SurfaceSnap/Between) on one node claim the same
+    // SB1203 fires when two position-driver calls (AlignTo/Between) on one node claim the same
     // axis in the same frame, and stays silent when their claims are provably orthogonal.
     public class SpatialAuthorityAnalysisTests
     {
@@ -29,7 +29,7 @@ namespace SceneBuilder.Analyzers.Tests
                 .ElementAt(occurrence);
 
         [Fact]
-        public async System.Threading.Tasks.Task Analyzer_SurfaceSnapDown_AndBetweenAxisY_SameNode_FiresSB1203()
+        public async System.Threading.Tasks.Task Analyzer_AlignToDown_AndBetweenAxisY_SameNode_FiresSB1203()
         {
             const string source = @"
 public class SameAxisScene : ISceneDefinition
@@ -37,7 +37,7 @@ public class SameAxisScene : ISceneDefinition
     public void Build(SceneRoot scene)
     {
         var root = scene.Add(""Root"");
-        root.SurfaceSnap(down: true).Between(from: a, to: b, fraction: 0.5f, axis: Between.Axis.Y);
+        root.AlignTo(floor, y: AxisAlign.AbutMax).Between(from: a, to: b, fraction: 0.5f, axis: Between.Axis.Y);
     }
 }
 ";
@@ -48,7 +48,7 @@ public class SameAxisScene : ISceneDefinition
         }
 
         [Fact]
-        public async System.Threading.Tasks.Task Analyzer_SurfaceSnapDown_AndBetweenAxisX_SameNode_NoFire()
+        public async System.Threading.Tasks.Task Analyzer_AlignToDown_AndBetweenAxisX_SameNode_NoFire()
         {
             const string source = @"
 public class DifferentAxisScene : ISceneDefinition
@@ -56,7 +56,7 @@ public class DifferentAxisScene : ISceneDefinition
     public void Build(SceneRoot scene)
     {
         var root = scene.Add(""Root"");
-        root.SurfaceSnap(down: true).Between(from: a, to: b, fraction: 0.5f, axis: Between.Axis.X);
+        root.AlignTo(floor, y: AxisAlign.AbutMax).Between(from: a, to: b, fraction: 0.5f, axis: Between.Axis.X);
     }
 }
 ";
@@ -87,7 +87,7 @@ public class DifferentFramesScene : ISceneDefinition
         }
 
         [Fact]
-        public async System.Threading.Tasks.Task Analyzer_CrossStatement_SameHandle_SurfaceSnapThenBetweenSameAxis_FiresSB1203()
+        public async System.Threading.Tasks.Task Analyzer_CrossStatement_SameHandle_AlignToThenBetweenSameAxis_FiresSB1203()
         {
             const string source = @"
 public class CrossStatementScene : ISceneDefinition
@@ -95,7 +95,7 @@ public class CrossStatementScene : ISceneDefinition
     public void Build(SceneRoot scene)
     {
         var r = scene.Add(""r"");
-        r.SurfaceSnap(down: true);
+        r.AlignTo(floor, y: AxisAlign.AbutMax);
         r.Between(from: a, to: b, fraction: 0.5f, axis: Between.Axis.Y);
     }
 }

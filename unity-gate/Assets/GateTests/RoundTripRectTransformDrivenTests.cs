@@ -502,7 +502,7 @@ public class HudScene : ISceneDefinition {
     public void DrivenCanvasScaleFactorChange_RebuildEmitsNoExtraOps_KeepsDrivenScale()
     {
         // A CanvasScaler-driven scale factor is a driver the plugin does not own and cannot
-        // re-baseline (spec 23's re-baseline rationale holds for FitSize/SurfaceSnap, which
+        // re-baseline (spec 23's re-baseline rationale holds for FitSize/AlignTo, which
         // PlanExecutor.cs:393-405 explicitly re-baselines on write; it does not hold for a
         // Canvas/CanvasScaler). A Position/Scale axis driven by something the model does not author
         // is held to the live value because nothing re-baselines a driver the plugin does not own, so

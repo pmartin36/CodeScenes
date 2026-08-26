@@ -101,7 +101,7 @@ namespace SceneBuilder.Editor
 
                 // Harvesting a type's defaults AddComponents it onto this bare throwaway object, which
                 // fires the component's OnValidate on an object with no siblings. Any user MonoBehaviour
-                // whose OnValidate logs (e.g. SurfaceSnap warning it has no Renderer to snap against)
+                // whose OnValidate logs (e.g. AlignTo warning it has no Renderer to align against)
                 // would leak that to the console on every build that touches such a type. Suppress
                 // logging NARROWLY around the probe only, and always restore — so every current and
                 // future logging OnValidate inherits the fix here, not per-component.

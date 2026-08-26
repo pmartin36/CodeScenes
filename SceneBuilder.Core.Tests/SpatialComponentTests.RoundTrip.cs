@@ -12,28 +12,43 @@ namespace SceneBuilder.Core.Tests
 {
     public partial class SpatialComponentTests
     {
-        // ---- Created-node (§13) attach uses the dedicated call + FitSize-before-SurfaceSnap ----
+        // ---- Created-node (§13) attach uses the dedicated call + FitSize-before-AlignTo ----
 
+        // Floor is pre-authored (so AlignTo's mandatory target resolves) and already mapped; only the
+        // Crate root is genuinely new (a snapshot-only create-candidate).
         private const string EmptySpatialScene = @"
 public class EmptySpatialScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
+        var floor = scene.Add(""Floor"");
     }
 }
 ";
 
+        private static IdentityMap FloorOnlyMap(GameObjectNode floor) => new IdentityMap
+        {
+            Entries = new[]
+            {
+                new IdentityMapEntry { LogicalId = floor.LogicalId, GlobalObjectId = "goid-floor", Kind = "GameObject" },
+            },
+        };
+
+        private static SnapshotNode FloorSnapshotRoot() => new SnapshotNode { GlobalObjectId = "goid-floor", Name = "Floor" };
+
         [Fact]
-        public void Reconcile_CreatedNodeWithSurfaceSnap_AppendsSurfaceSnapCall_SecondSyncNoOp()
+        public void Reconcile_CreatedNodeWithAlignTo_AppendsAlignToCall_SecondSyncNoOp()
         {
             var parsed = BuilderParser.Parse(EmptySpatialScene);
-            var map = new IdentityMap { Entries = System.Array.Empty<IdentityMapEntry>() };
+            var floor = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
+            var map = FloorOnlyMap(floor);
 
-            var snapperFields = new FieldMap(new[]
+            var alignerFields = new FieldMap(new[]
             {
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
                 new KeyValuePair<string, ValueNode>(
-                    SpatialComponents.SurfaceSnapFields.Vertical,
-                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
+                    SpatialComponents.AlignToFields.YMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
             });
 
             var snapshot = new SceneSnapshot
@@ -41,13 +56,14 @@ public class EmptySpatialScene : ISceneDefinition
                 SchemaVersion = 1,
                 Roots = new[]
                 {
+                    FloorSnapshotRoot(),
                     new SnapshotNode
                     {
                         GlobalObjectId = "goid-crate",
                         Name = "Crate",
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = alignerFields },
                         },
                     },
                 },
@@ -58,12 +74,12 @@ public class EmptySpatialScene : ISceneDefinition
 
             var patched = SourcePatchApplier.Apply(EmptySpatialScene, pass1.Patch, parsed.Anchors);
 
-            Assert.Contains(".SurfaceSnap(down: true)", patched);
+            Assert.Contains(".AlignTo(target: floor, y: AxisAlign.AbutMax)", patched);
             Assert.DoesNotContain(".Component<", patched);
 
             // ---- Pass 2: reparse the applied source; unchanged scene must converge (no edits). ----
             var reparsed = BuilderParser.Parse(patched);
-            var reparsedMap = new IdentityMap { Entries = pass1.AddedEntries };
+            var reparsedMap = new IdentityMap { Entries = map.Entries.Concat(pass1.AddedEntries).ToArray() };
 
             var pass2 = Reconciler.Reconcile(reparsed.Model, snapshot, reparsedMap, reparsed.Anchors);
 
@@ -72,10 +88,11 @@ public class EmptySpatialScene : ISceneDefinition
         }
 
         [Fact]
-        public void Reconcile_SurfaceSnapAndFitSizeOnCreatedNode_AppendsInFitSizeThenSurfaceSnapOrder()
+        public void Reconcile_AlignToAndFitSizeOnCreatedNode_AppendsInFitSizeThenAlignToOrder()
         {
             var parsed = BuilderParser.Parse(EmptySpatialScene);
-            var map = new IdentityMap { Entries = System.Array.Empty<IdentityMapEntry>() };
+            var floor = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
+            var map = FloorOnlyMap(floor);
 
             var sizerFields = new FieldMap(new[]
             {
@@ -84,11 +101,12 @@ public class EmptySpatialScene : ISceneDefinition
                     new ValueNode.Enum(SpatialComponents.FitSizeEnums.ModeTypeName, new[] { SpatialComponents.FitSizeEnums.Height }, false)),
                 new KeyValuePair<string, ValueNode>(SpatialComponents.FitSizeFields.Value, ValueNode.Primitive.Float(2f)),
             });
-            var snapperFields = new FieldMap(new[]
+            var alignerFields = new FieldMap(new[]
             {
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
                 new KeyValuePair<string, ValueNode>(
-                    SpatialComponents.SurfaceSnapFields.Vertical,
-                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
+                    SpatialComponents.AlignToFields.YMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
             });
 
             var snapshot = new SceneSnapshot
@@ -96,14 +114,15 @@ public class EmptySpatialScene : ISceneDefinition
                 SchemaVersion = 1,
                 Roots = new[]
                 {
+                    FloorSnapshotRoot(),
                     new SnapshotNode
                     {
                         GlobalObjectId = "goid-crate",
                         Name = "Crate",
-                        // Snapshot lists SurfaceSnap THEN FitSize — emit must still place FitSize first.
+                        // Snapshot lists AlignTo THEN FitSize — emit must still place FitSize first.
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused-aligner", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = alignerFields },
                             new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = sizerFields },
                         },
                     },
@@ -116,14 +135,14 @@ public class EmptySpatialScene : ISceneDefinition
             var patched = SourcePatchApplier.Apply(EmptySpatialScene, pass1.Patch, parsed.Anchors);
 
             var sizerIndex = patched.IndexOf(".FitSize(", System.StringComparison.Ordinal);
-            var snapperIndex = patched.IndexOf(".SurfaceSnap(", System.StringComparison.Ordinal);
+            var alignerIndex = patched.IndexOf(".AlignTo(", System.StringComparison.Ordinal);
             Assert.True(sizerIndex >= 0, "expected a .FitSize(...) statement in applied source");
-            Assert.True(snapperIndex >= 0, "expected a .SurfaceSnap(...) statement in applied source");
-            Assert.True(sizerIndex < snapperIndex, "FitSize statement must precede SurfaceSnap statement");
+            Assert.True(alignerIndex >= 0, "expected a .AlignTo(...) statement in applied source");
+            Assert.True(sizerIndex < alignerIndex, "FitSize statement must precede AlignTo statement");
 
             // ---- Pass 2: reparse the applied source; unchanged scene must converge (no edits). ----
             var reparsed = BuilderParser.Parse(patched);
-            var reparsedMap = new IdentityMap { Entries = pass1.AddedEntries };
+            var reparsedMap = new IdentityMap { Entries = map.Entries.Concat(pass1.AddedEntries).ToArray() };
 
             var pass2 = Reconciler.Reconcile(reparsed.Model, snapshot, reparsedMap, reparsed.Anchors);
 
@@ -217,7 +236,7 @@ public class EmptySpatialScene : ISceneDefinition
             });
             var snapperFields = new FieldMap(new[]
             {
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Down, ValueNode.Primitive.Bool(true)),
+                new KeyValuePair<string, ValueNode>("down", ValueNode.Primitive.Bool(true)),
             });
 
             var model = new SceneModel
@@ -242,7 +261,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "snapper-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "snapper-1/" + SpatialComponents.AlignToTypeName + "#0", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = snapperFields },
                         },
                     },
                 },
@@ -255,7 +274,7 @@ public class EmptySpatialScene : ISceneDefinition
                     new IdentityMapEntry { LogicalId = "sizer-1", GlobalObjectId = "goid-sizer", Kind = "GameObject" },
                     new IdentityMapEntry { LogicalId = "sizer-1/" + SpatialComponents.FitSizeTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.FitSizeTypeName, ParentLogicalId = "sizer-1" },
                     new IdentityMapEntry { LogicalId = "snapper-1", GlobalObjectId = "goid-snapper", Kind = "GameObject" },
-                    new IdentityMapEntry { LogicalId = "snapper-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SurfaceSnapTypeName, ParentLogicalId = "snapper-1" },
+                    new IdentityMapEntry { LogicalId = "snapper-1/" + SpatialComponents.AlignToTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.AlignToTypeName, ParentLogicalId = "snapper-1" },
                 },
             };
 
@@ -285,7 +304,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY, Position = new Vec3(0f, 7f, 0f) },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = snapperFields },
                         },
                     },
                 },
@@ -297,16 +316,16 @@ public class EmptySpatialScene : ISceneDefinition
             Assert.Empty(result.Conflicts);
         }
 
-        // Rebuilds the component from Fields[vertical]=Enum(Down), asserting the free axis is
+        // Rebuilds the component from Fields[yMode]=Enum(AbutMax), asserting the free axis is
         // patched and the driven Y axis is not.
         [Fact]
-        public void Reconcile_SurfaceSnapDownFreeAxisDrag_PatchesFreeAxisNotDrivenY()
+        public void Reconcile_AlignToDownFreeAxisDrag_PatchesFreeAxisNotDrivenY()
         {
-            var snapperFields = new FieldMap(new[]
+            var alignerFields = new FieldMap(new[]
             {
                 new KeyValuePair<string, ValueNode>(
-                    SpatialComponents.SurfaceSnapFields.Vertical,
-                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
+                    SpatialComponents.AlignToFields.YMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
             });
 
             var model = new SceneModel
@@ -321,7 +340,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "crate-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "crate-1/" + SpatialComponents.AlignToTypeName + "#0", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = alignerFields },
                         },
                     },
                 },
@@ -332,7 +351,7 @@ public class EmptySpatialScene : ISceneDefinition
                 Entries = new[]
                 {
                     new IdentityMapEntry { LogicalId = "crate-1", GlobalObjectId = "goid-crate", Kind = "GameObject" },
-                    new IdentityMapEntry { LogicalId = "crate-1/" + SpatialComponents.SurfaceSnapTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SurfaceSnapTypeName, ParentLogicalId = "crate-1" },
+                    new IdentityMapEntry { LogicalId = "crate-1/" + SpatialComponents.AlignToTypeName + "#0", GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.AlignToTypeName, ParentLogicalId = "crate-1" },
                 },
             };
 
@@ -351,7 +370,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY, Position = new Vec3(5f, 3f, 0f) },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFields },
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = alignerFields },
                         },
                     },
                 },
@@ -364,30 +383,32 @@ public class EmptySpatialScene : ISceneDefinition
             Assert.Equal("(5f, 0f, 0f)", pos.NewExpr);
         }
 
-        // Scope-FINAL regression #2: re-authoring an EXISTING SurfaceSnap axis in-scene (flip the
-        // Vertical member Down -> Up, e.g. via the inspector dropdown) is a field-VALUE diff
-        // whose keyword itself carries the member — so the patch must replace the WHOLE `down: true`
-        // argument with the authoring form `up: true`, NEVER splice the enum literal
-        // `SceneBuilder.Authoring.SurfaceSnap+Vertical.Up` into the `down:` slot (invalid C# — the
-        // '+' nested-type separator — violating "Generated C# must compile").
+        // Scope-FINAL regression #2: re-authoring an EXISTING AlignTo axis in-scene (flip the
+        // Mode member AbutMax -> AbutMin, e.g. via the inspector dropdown) is a field-VALUE diff
+        // whose keyword renders the member directly — so the patch must replace the WHOLE
+        // `y: AxisAlign.AbutMax` argument with the authoring form `y: AxisAlign.AbutMin`, NEVER
+        // splice the enum literal `SceneBuilder.Authoring.AlignTo+Mode.AbutMin` into the `y:` slot
+        // (invalid C# — the '+' nested-type separator — violating "Generated C# must compile").
         [Fact]
-        public void Reconcile_SurfaceSnapAxisMemberFlip_DownToUp_EmitsUpTrue_NotEnumLiteral()
+        public void Reconcile_AlignToAxisMemberFlip_AbutMaxToAbutMin_EmitsAxisAlignLiteral_NotEnumFqn()
         {
-            var parsed = BuilderParser.Parse(SurfaceSnapDownOnlySource);
-            var crate = Assert.Single(parsed.Model.Roots);
-            var snapper = Assert.Single(crate.Components);
+            var parsed = BuilderParser.Parse(AlignToDownOnlySource);
+            var floor = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
+            var crate = Assert.Single(parsed.Model.Roots, r => r.Name == "Crate");
+            var aligner = Assert.Single(crate.Components);
 
             var map = new IdentityMap
             {
                 Entries = new[]
                 {
+                    new IdentityMapEntry { LogicalId = floor.LogicalId, GlobalObjectId = "goid-floor", Kind = "GameObject" },
                     new IdentityMapEntry { LogicalId = crate.LogicalId, GlobalObjectId = "goid-crate", Kind = "GameObject" },
                     new IdentityMapEntry
                     {
-                        LogicalId = snapper.LogicalId,
+                        LogicalId = aligner.LogicalId,
                         GlobalObjectId = "",
                         Kind = "Component",
-                        ComponentType = SpatialComponents.SurfaceSnapTypeName,
+                        ComponentType = SpatialComponents.AlignToTypeName,
                         ParentLogicalId = crate.LogicalId,
                     },
                 },
@@ -395,9 +416,10 @@ public class EmptySpatialScene : ISceneDefinition
 
             var editedFields = new FieldMap(new[]
             {
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
                 new KeyValuePair<string, ValueNode>(
-                    SpatialComponents.SurfaceSnapFields.Vertical,
-                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Up }, false)),
+                    SpatialComponents.AlignToFields.YMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMin }, false)),
             });
 
             var snapshot = new SceneSnapshot
@@ -405,6 +427,7 @@ public class EmptySpatialScene : ISceneDefinition
                 SchemaVersion = 1,
                 Roots = new[]
                 {
+                    new SnapshotNode { GlobalObjectId = "goid-floor", Name = "Floor" },
                     new SnapshotNode
                     {
                         GlobalObjectId = "goid-crate",
@@ -412,7 +435,7 @@ public class EmptySpatialScene : ISceneDefinition
                         Transform = new TransformData { DrivenChannels = ChannelMask.PositionY },
                         Components = new[]
                         {
-                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = editedFields },
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = editedFields },
                         },
                     },
                 },
@@ -428,12 +451,12 @@ public class EmptySpatialScene : ISceneDefinition
 
             Assert.Empty(result.Conflicts);
             var patch = Assert.IsType<PatchComponentField>(Assert.Single(result.Patch.Edits));
-            Assert.Equal("up: true", patch.NewExpr);
+            Assert.Equal("y: AxisAlign.AbutMin", patch.NewExpr);
 
-            var applied = SourcePatchApplier.Apply(SurfaceSnapDownOnlySource, result.Patch, parsed.Anchors);
-            Assert.Contains(".SurfaceSnap(up: true)", applied);
-            Assert.DoesNotContain("Vertical", applied);
-            Assert.DoesNotContain("SurfaceSnap+", applied);
+            var applied = SourcePatchApplier.Apply(AlignToDownOnlySource, result.Patch, parsed.Anchors);
+            Assert.Contains(".AlignTo(floor, y: AxisAlign.AbutMin)", applied);
+            Assert.DoesNotContain("yMode", applied);
+            Assert.DoesNotContain("AlignTo+", applied);
         }
 
         // An authored `.Transform(scale:)` co-existing with `.FitSize` on the
@@ -505,17 +528,17 @@ public class EmptySpatialScene : ISceneDefinition
         }
 
         [Fact]
-        public void RoundTrip_FitSizeSurfaceSnap_Idempotent()
+        public void RoundTrip_FitSizeAlignTo_Idempotent()
         {
             const string source = @"
-public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
+public class FitSizeAlignToRoundTripScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
         var floor = scene.Add(""Floor"");
         var crate = scene.Add(""Crate"");
         crate.FitSize(height: 2f);
-        crate.SurfaceSnap(down: true, target: floor);
+        crate.AlignTo(floor, y: AxisAlign.AbutMax);
     }
 }
 ";
@@ -524,7 +547,7 @@ public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
             var floor = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
             var crate = Assert.Single(parsed.Model.Roots, r => r.Name == "Crate");
             var sizer = Assert.Single(crate.Components, c => c.Type.FullName == SpatialComponents.FitSizeTypeName);
-            var snapper = Assert.Single(crate.Components, c => c.Type.FullName == SpatialComponents.SurfaceSnapTypeName);
+            var snapper = Assert.Single(crate.Components, c => c.Type.FullName == SpatialComponents.AlignToTypeName);
 
             var map = new IdentityMap
             {
@@ -533,7 +556,7 @@ public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
                     new IdentityMapEntry { LogicalId = floor.LogicalId, GlobalObjectId = "goid-floor", Kind = "GameObject" },
                     new IdentityMapEntry { LogicalId = crate.LogicalId, GlobalObjectId = "goid-crate", Kind = "GameObject" },
                     new IdentityMapEntry { LogicalId = sizer.LogicalId, GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.FitSizeTypeName, ParentLogicalId = crate.LogicalId },
-                    new IdentityMapEntry { LogicalId = snapper.LogicalId, GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.SurfaceSnapTypeName, ParentLogicalId = crate.LogicalId },
+                    new IdentityMapEntry { LogicalId = snapper.LogicalId, GlobalObjectId = "", Kind = "Component", ComponentType = SpatialComponents.AlignToTypeName, ParentLogicalId = crate.LogicalId },
                 },
             };
 
@@ -547,9 +570,9 @@ public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
             var snapperFieldsUnchanged = new FieldMap(new[]
             {
                 new KeyValuePair<string, ValueNode>(
-                    SpatialComponents.SurfaceSnapFields.Vertical,
-                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
-                new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
+                    SpatialComponents.AlignToFields.YMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
             });
 
             var snapshot = new SceneSnapshot
@@ -566,7 +589,7 @@ public class FitSizeSurfaceSnapRoundTripScene : ISceneDefinition
                         Components = new[]
                         {
                             new ComponentData { LogicalId = "unused-sizer", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = editedFitSizeFields },
-                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = snapperFieldsUnchanged },
+                            new ComponentData { LogicalId = "unused-snapper", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = snapperFieldsUnchanged },
                         },
                     },
                 },

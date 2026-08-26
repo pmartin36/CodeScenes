@@ -10,7 +10,7 @@ using UnityEngine.TestTools;
 using SceneBuilder.Authoring;
 using SceneBuilder.Editor;
 
-// Kernel-migration zero-regression gate (spec 45, bucket b2): SurfaceSnap and FitSize route their
+// Kernel-migration zero-regression gate (spec 45, bucket b2): AlignTo and FitSize route their
 // face/extent math through the shared ProjectedExtent kernel instead of open-coding world-AABB reads.
 public class KernelRegressionTests
 {
@@ -44,7 +44,7 @@ public class KernelRegressionScene : ISceneDefinition
         "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
         "            .Transform(pos: (0f, 5f, 0f))\n" +
         "            .FitSize(height: 1.2f)\n" +
-        "            .SurfaceSnap(down: true);\n";
+        "            .AlignTo(floor, y: AxisAlign.AbutMax);\n";
 
     private static GameObject FindRoot(Scene scene, string name) =>
         scene.GetRootGameObjects().FirstOrDefault(go => go.name == name);
@@ -66,14 +66,14 @@ public class KernelRegressionScene : ISceneDefinition
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
     }
 
-    // Zero-regression pin: a crate authored .FitSize(height:1.2f).SurfaceSnap(down:true) above a floor
-    // must reach world height 1.2 with its bottom face flush on the floor top, and its free X/Z
-    // untouched, whether the underlying face/extent math is open-coded AABB reads or routed through the
-    // shared kernel. The one-time ComponentDefaultTemplate probe-object warm-up cost for FitSize/
-    // SurfaceSnap is absorbed here (LogAssert.ignoreFailingMessages) so this suite is not order-dependent
-    // on a sibling suite's own warm-up having already run first.
+    // Zero-regression pin: a crate authored .FitSize(height:1.2f).AlignTo(floor, y: AxisAlign.AbutMax)
+    // above a floor must reach world height 1.2 with its bottom face flush on the floor top, and its
+    // free X/Z untouched, whether the underlying face/extent math is open-coded AABB reads or routed
+    // through the shared kernel. The one-time ComponentDefaultTemplate probe-object warm-up cost for
+    // FitSize/AlignTo is absorbed here (LogAssert.ignoreFailingMessages) so this suite is not
+    // order-dependent on a sibling suite's own warm-up having already run first.
     [Test]
-    public void KernelSwap_UntiltedFitSizeSurfaceSnapCrate_HeightAndFlushWithinTolerance()
+    public void KernelSwap_UntiltedFitSizeAlignToCrate_HeightAndFlushWithinTolerance()
     {
         File.WriteAllText(_builderPath, Source(FloorBody + CrateBody));
 
@@ -90,7 +90,7 @@ public class KernelRegressionScene : ISceneDefinition
             Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
 
             crate.GetComponent<FitSize>().Evaluate();
-            crate.GetComponent<SurfaceSnap>().Evaluate();
+            crate.GetComponent<AlignTo>().Evaluate();
         }
         finally
         {
@@ -102,7 +102,7 @@ public class KernelRegressionScene : ISceneDefinition
         var bounds = crate.GetComponent<Renderer>().bounds;
 
         Assert.AreEqual(1.2f, bounds.size.y, Tol, "FitSize must still drive the WORLD height to the authored value.");
-        Assert.AreEqual(floorTop, bounds.min.y, Tol, "SurfaceSnap must still rest the crate's bottom face flush on the floor top.");
+        Assert.AreEqual(floorTop, bounds.min.y, Tol, "AlignTo must still rest the crate's bottom face flush on the floor top.");
         Assert.AreEqual(0f, crate.transform.position.x, Tol, "The crate's free X must stay untouched by the kernel swap.");
         Assert.AreEqual(0f, crate.transform.position.z, Tol, "The crate's free Z must stay untouched by the kernel swap.");
     }

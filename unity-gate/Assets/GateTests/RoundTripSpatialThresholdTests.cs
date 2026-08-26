@@ -10,19 +10,18 @@ using UnityEngine.TestTools;
 using SceneBuilder.Authoring;
 using SceneBuilder.Editor;
 
-// M-Spatial (FitSize/SurfaceSnap) capture-threshold + sticky-detach gate coverage — spec 23's
+// M-Spatial (FitSize/AlignTo) capture-threshold + sticky-detach gate coverage — spec 23's
 // "Gate coverage" item "drag within threshold -> snaps back; drag beyond threshold -> detaches"
-// (b4 of specs/completed/23-fitsize-surfacesnap-transform-authority.md). b4-t1 already landed the
-// production threshold/detach logic in com.codescenes/Runtime/SurfaceSnap.cs; this file IS the
-// dedicated gate coverage for it (the beyond-threshold sticky-detach branch has no other coverage —
-// see b4-t1 validator.md), not a RED test driving new production. A failure here is a genuine
-// regression and routes back to SurfaceSnap.cs.
+// (b4 of specs/completed/23-fitsize-surfacesnap-transform-authority.md). The production
+// threshold/detach logic lives in com.codescenes/Runtime/AlignTo.cs; this file IS the dedicated gate
+// coverage for it (the beyond-threshold sticky-detach branch has no other coverage), not a RED test
+// driving new production. A failure here is a genuine regression and routes back to AlignTo.cs.
 //
 // New file (not an extension of RoundTripSpatialSyncTests.cs / RoundTripSpatialTests.cs) to avoid a
 // TOUCHES collision with the field-rename edits those files carry from sibling tasks.
 //
 // Drives the REAL code->scene build path (SceneBuilderBuild.Run) against a live editor scene, then
-// drives SurfaceSnap via explicit Evaluate() calls (synchronous EditMode does not tick
+// drives AlignTo via explicit Evaluate() calls (synchronous EditMode does not tick
 // [ExecuteAlways].Update()) and asserts OBSERVED geometry (Renderer.bounds / transform.position),
 // never labels.
 public class RoundTripSpatialThresholdTests
@@ -52,21 +51,21 @@ public class RoundTripSpatialThresholdScene : ISceneDefinition
         "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
         "            .Transform(scale: (10f, 1f, 10f));\n";
 
-    // A Crate: unit Cube, aspect-locked FitSize height 2, down-SurfaceSnap, starting above the floor.
+    // A Crate: unit Cube, aspect-locked FitSize height 2, aligned down onto the floor, starting above it.
     private const string CrateBody =
         "        var crate = scene.Add(\"Crate\")\n" +
         "            .Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cube\")))\n" +
         "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
         "            .Transform(pos: (0f, 5f, 0f))\n" +
         "            .FitSize(height: 2f)\n" +
-        "            .SurfaceSnap(down: true);\n";
+        "            .AlignTo(floor, y: AxisAlign.AbutMax);\n";
 
     private static GameObject FindRoot(Scene scene, string name)
     {
         return scene.GetRootGameObjects().FirstOrDefault(go => go.name == name);
     }
 
-    // See RoundTripSpatialSyncTests.RunBuild: PlanExecutor adds the FitSize/SurfaceSnap MonoBehaviour
+    // See RoundTripSpatialSyncTests.RunBuild: PlanExecutor adds the FitSize/AlignTo MonoBehaviour
     // (triggering its [ExecuteAlways] OnValidate -> Evaluate synchronously) before the sibling
     // MeshFilter's mesh is populated, so a transient "no mesh yet" Console error is expected noise on
     // every Build that creates a FitSize. Scoped to ONLY the Build call so a genuine error from a
@@ -108,11 +107,11 @@ public class RoundTripSpatialThresholdScene : ISceneDefinition
         }
 
         // Reset the ambient active scene so this suite's Floor/Crate Renderers never leak into a
-        // LATER suite's SurfaceSnap fallback-scan.
+        // LATER suite's AlignTo fallback-scan.
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
     }
 
-    private GameObject BuildFloorAndCrate(out FitSize sizer, out SurfaceSnap snapper)
+    private GameObject BuildFloorAndCrate(out FitSize sizer, out AlignTo aligner)
     {
         File.WriteAllText(_builderPath, Source(FloorBody + CrateBody));
 
@@ -124,9 +123,9 @@ public class RoundTripSpatialThresholdScene : ISceneDefinition
         Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
 
         sizer = crate.GetComponent<FitSize>();
-        snapper = crate.GetComponent<SurfaceSnap>();
+        aligner = crate.GetComponent<AlignTo>();
         sizer.Evaluate();
-        snapper.Evaluate(); // baseline snap: bottom face flush on the floor (world Y top == 0.5)
+        aligner.Evaluate(); // baseline align: bottom face flush on the floor (world Y top == 0.5)
 
         var baselineBounds = crate.GetComponent<Renderer>().bounds;
         Assert.AreEqual(0.5f, baselineBounds.min.y, Tol, "Baseline snap must rest flush on the floor before the drag under test.");
@@ -139,16 +138,16 @@ public class RoundTripSpatialThresholdScene : ISceneDefinition
     // units (baseline 1.5 -> 3.5; dragSq 4.0 < threshold^2 6.25) is overridden — the next Evaluate()
     // re-snaps flush (constraint wins) and the component stays enabled.
     [Test]
-    public void SurfaceSnap_DragWithinThreshold_ReSnapsFlush()
+    public void AlignTo_DragWithinThreshold_ReSnapsFlush()
     {
-        var crate = BuildFloorAndCrate(out _, out var snapper);
+        var crate = BuildFloorAndCrate(out _, out var aligner);
 
         crate.transform.position = new Vector3(0f, 3.5f, 0f); // dy = 2.0, within the 2.5 captureThreshold
-        snapper.Evaluate();
+        aligner.Evaluate();
 
         var bounds = crate.GetComponent<Renderer>().bounds;
         Assert.AreEqual(0.5f, bounds.min.y, Tol, "A within-threshold drag must re-snap flush on the floor.");
-        Assert.IsTrue(snapper.enabled, "A within-threshold drag must not detach the component.");
+        Assert.IsTrue(aligner.enabled, "A within-threshold drag must not detach the component.");
     }
 
     // Drag BEYOND captureThreshold (default 2.5): a manual displacement of 3.0 units (baseline 1.5 ->
@@ -156,14 +155,14 @@ public class RoundTripSpatialThresholdScene : ISceneDefinition
     // exactly where dragged, the component disables itself, and it does NOT re-snap even after being
     // dragged back into range; only re-enabling restores snapping.
     [Test]
-    public void SurfaceSnap_DragBeyondThreshold_DetachesStickily_UntilReEnabled()
+    public void AlignTo_DragBeyondThreshold_DetachesStickily_UntilReEnabled()
     {
-        var crate = BuildFloorAndCrate(out _, out var snapper);
+        var crate = BuildFloorAndCrate(out _, out var aligner);
 
         crate.transform.position = new Vector3(0f, 4.5f, 0f); // dy = 3.0, beyond the 2.5 captureThreshold
-        snapper.Evaluate();
+        aligner.Evaluate();
 
-        Assert.IsFalse(snapper.enabled, "A beyond-threshold drag must sticky-detach (disable) the component.");
+        Assert.IsFalse(aligner.enabled, "A beyond-threshold drag must sticky-detach (disable) the component.");
         Assert.AreEqual(4.5f, crate.transform.position.y, Tol, "A beyond-threshold drag must leave the object exactly where dragged.");
         var boundsAfterDetach = crate.GetComponent<Renderer>().bounds;
         Assert.AreEqual(3.5f, boundsAfterDetach.min.y, Tol, "The detached object must NOT re-snap to the floor.");
@@ -171,15 +170,15 @@ public class RoundTripSpatialThresholdScene : ISceneDefinition
         // Drag back into range while still detached: sticky means it does NOT re-snap merely by
         // being back within threshold distance of where it would resolve.
         crate.transform.position = new Vector3(0f, 2f, 0f);
-        snapper.Evaluate(); // no-op: Evaluate() guards on isActiveAndEnabled while enabled == false
+        aligner.Evaluate(); // no-op: Evaluate() guards on isActiveAndEnabled while enabled == false
 
         Assert.AreEqual(2f, crate.transform.position.y, Tol, "STICKY: dragging back into range must not implicitly re-snap while detached.");
         var boundsStillDetached = crate.GetComponent<Renderer>().bounds;
         Assert.AreEqual(1f, boundsStillDetached.min.y, Tol, "STICKY: the object must remain un-snapped (not flush at 0.5) until re-enabled.");
 
         // Re-enable: OnEnable() -> ResetBaseline() clears the drag baseline, restoring snapping.
-        snapper.enabled = true;
-        snapper.Evaluate();
+        aligner.enabled = true;
+        aligner.Evaluate();
 
         var boundsAfterReEnable = crate.GetComponent<Renderer>().bounds;
         Assert.AreEqual(0.5f, boundsAfterReEnable.min.y, Tol, "Re-enabling the component must restore flush snapping on the next Evaluate().");

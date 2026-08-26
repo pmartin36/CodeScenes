@@ -180,31 +180,31 @@ public class TypedSelectorScene : ISceneDefinition
             Assert.Empty(second.Skipped);
         }
 
-        // ---- fixture 3: NodeHandle.SurfaceSnap(target:) rewired onto a prefab-instance root ----
+        // ---- fixture 3: NodeHandle.AlignTo(target:) rewired onto a prefab-instance root ----
 
-        private const string SurfaceSnapSource = @"using SceneBuilder.Authoring;
+        private const string AlignToSource = @"using SceneBuilder.Authoring;
 
-public class SurfaceSnapScene : ISceneDefinition
+public class AlignToScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
         var door = scene.Add(""Door"");
         var tank = scene.Instance(""Assets/Prefabs/Tank.prefab"");
         var opener = scene.Add(""Opener"");
-        opener.SurfaceSnap(up: true, target: door);
+        opener.AlignTo(target: door, y: AxisAlign.AbutMin);
     }
 }
 ";
 
-        // #3: the second reference-accepting authoring parameter -- SurfaceSnap's optional `target`
+        // #3: the second reference-accepting authoring parameter -- AlignTo's `target`
         // -- reproduces the same defect at a second site and must bind after the same fix.
         [Fact]
-        public void SurfaceSnapTargetRewiredToInstanceRoot_AppliedSourceBinds()
+        public void AlignToTargetRewiredToInstanceRoot_AppliedSourceBinds()
         {
-            const string surfaceSnapType = "SceneBuilder.Authoring.SurfaceSnap";
-            var componentLogicalId = "opener/" + surfaceSnapType + "#0";
+            const string alignToType = "SceneBuilder.Authoring.AlignTo";
+            var componentLogicalId = "opener/" + alignToType + "#0";
 
-            var parsed = BuilderParser.Parse(SurfaceSnapSource);
+            var parsed = BuilderParser.Parse(AlignToSource);
             var lowered = ObjectRefLowering.Lower(
                 parsed.Model,
                 name => parsed.Handles.TryGetValue(name, out var id) ? id : null);
@@ -219,7 +219,7 @@ public class SurfaceSnapScene : ISceneDefinition
                     new IdentityMapEntry
                     {
                         LogicalId = componentLogicalId, GlobalObjectId = "goid-snap", Kind = "Component",
-                        ComponentType = surfaceSnapType, ParentLogicalId = "opener",
+                        ComponentType = alignToType, ParentLogicalId = "opener",
                     },
                 },
             };
@@ -227,7 +227,7 @@ public class SurfaceSnapScene : ISceneDefinition
             var snapshotFields = new FieldMap(new[]
             {
                 new KeyValuePair<string, ValueNode>(
-                    "vertical", new ValueNode.Enum("SceneBuilder.Authoring.SurfaceSnap+Vertical", new[] { "Up" }, false)),
+                    "yMode", new ValueNode.Enum("SceneBuilder.Authoring.AlignTo+Mode", new[] { "AbutMin" }, false)),
                 new KeyValuePair<string, ValueNode>("target", new ValueNode.ObjectRef("tank")),
             });
 
@@ -247,7 +247,7 @@ public class SurfaceSnapScene : ISceneDefinition
                             new ComponentData
                             {
                                 LogicalId = "unused",
-                                Type = new TypeRef(surfaceSnapType),
+                                Type = new TypeRef(alignToType),
                                 Fields = snapshotFields,
                             },
                         },
@@ -268,7 +268,7 @@ public class SurfaceSnapScene : ISceneDefinition
             var patch = Assert.Single(result.Patch.Edits.OfType<PatchComponentField>());
             Assert.Equal("tank", patch.NewExpr);
 
-            var applied = SourcePatchApplier.Apply(SurfaceSnapSource, result.Patch, anchors);
+            var applied = SourcePatchApplier.Apply(AlignToSource, result.Patch, anchors);
             Assert.Contains("target: tank", applied);
 
             var errors = AuthoringBindHarness.BindErrors(applied, AuthoringBindHarness.DoorOpenerStubs);
@@ -327,10 +327,10 @@ public class FullMatrixScene : ISceneDefinition
             c.Set(""targets"", new SceneBuilder.Authoring.SceneObjectHandle[] { tank, NodeHandle.None });
             c.Set(""targets"", new[] { door, door });
         });
-        opener.SurfaceSnap(up: true, target: door);
-        opener.SurfaceSnap(up: true, target: tank);
-        opener.SurfaceSnap(up: true, target: NodeHandle.None);
-        opener.SurfaceSnap(up: true);
+        opener.AlignTo(door, y: AxisAlign.AbutMin);
+        opener.AlignTo(tank, y: AxisAlign.AbutMin);
+        opener.AlignTo(NodeHandle.None, y: AxisAlign.AbutMin);
+        opener.AlignTo(door);
         tank.Override(e => e.Set((Game.DoorOpener x) => x.target, tank).Set((Game.DoorOpener x) => x.target, door));
     }
 }

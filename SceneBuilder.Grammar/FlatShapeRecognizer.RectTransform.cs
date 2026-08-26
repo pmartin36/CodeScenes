@@ -5,7 +5,7 @@ namespace SceneBuilder.Grammar
     // `.RectTransform(...)` structural recognizer arm. Grammar cannot reference Core (D7), so
     // SceneBuilder.Core.Model.RectTransformFields' argument-name spellings are re-declared here,
     // keyword-only, matching FlatShapeRecognizer.Spatial.cs's FitSizeAspectKeywords idiom. No
-    // whole-call combination rule exists (unlike FitSize/SurfaceSnap) — every violation is
+    // whole-call combination rule exists (unlike FitSize/AlignTo) — every violation is
     // per-argument, and a bare `.RectTransform()` is valid.
     public static partial class FlatShapeRecognizer
     {

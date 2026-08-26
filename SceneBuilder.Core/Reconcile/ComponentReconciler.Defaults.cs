@@ -166,7 +166,7 @@ namespace SceneBuilder.Core.Reconcile
                 return false;
             }
 
-            // Closed grammar (FitSize/SurfaceSnap): the dedicated fluent call throws on an empty
+            // Closed grammar (FitSize/AlignTo): the dedicated fluent call throws on an empty
             // argument list, so a removal is not representable either — a located conflict, never a
             // silent drop, and never a "vertical: " empty-argument splice.
             if (SpatialComponentSource.IsSpatial(sourceComp.Type.FullName))

@@ -471,7 +471,7 @@ namespace SceneBuilder.Core.Tests
         // lowered m_LocalPosition/m_LocalScale SetField ops so b6-t1's write seam can skip driven
         // channels on create, where there is no snapshot to compare against.
         [Fact]
-        public void Materialize_CreateFitSizeSurfaceSnapNode_LoweredTransformOpsCarryFullAuthoredValue()
+        public void Materialize_CreateFitSizeAlignToNode_LoweredTransformOpsCarryFullAuthoredValue()
         {
             // b1-t1: the SetField.DrivenChannels carrier is removed — materialize writes the
             // authored transform in full with no channel held back or masked.

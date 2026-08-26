@@ -89,12 +89,12 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
-        /// ORs together the driven channels of every ACTIVE-AND-ENABLED FitSize/SurfaceSnap/Between on
+        /// ORs together the driven channels of every ACTIVE-AND-ENABLED FitSize/AlignTo/Between on
         /// <paramref name="go"/> — the same guard those components' own <c>Evaluate()</c> use
         /// (<c>isActiveAndEnabled</c>), so "reader says driven" always agrees with "component
         /// actually drives". A disabled/inactive component contributes nothing (releases its
         /// channel so a manual edit syncs normally). Mirrors the parse-time mapping in
-        /// <c>SpatialComponents.FitSizeMask</c>/<c>SurfaceSnapMask</c>/<c>BetweenDrivenMask</c> so desired
+        /// <c>SpatialComponents.FitSizeMask</c>/<c>AlignToDrivenMask</c>/<c>BetweenDrivenMask</c> so desired
         /// and actual never diverge. Also ORs in whatever Unity itself reports as driven on the
         /// GameObject's RectTransform (ugui layout components — Canvas, layout groups,
         /// ContentSizeFitter), via <see cref="RectDrivenChannels"/>; None for a plain Transform. This is
@@ -114,14 +114,14 @@ namespace SceneBuilder.Editor
                 }
             }
 
-            foreach (var snapper in go.GetComponents<SurfaceSnap>())
+            foreach (var aligner in go.GetComponents<AlignTo>())
             {
-                if (snapper.isActiveAndEnabled)
+                if (aligner.isActiveAndEnabled)
                 {
-                    mask |= SpatialComponents.SurfaceSnapMask(
-                        snapper.vertical != SurfaceSnap.Vertical.None,
-                        snapper.horizontal != SurfaceSnap.Horizontal.None,
-                        snapper.depth != SurfaceSnap.Depth.None);
+                    mask |= SpatialComponents.AlignToDrivenMask(
+                        aligner.xMode != AlignTo.Mode.None,
+                        aligner.yMode != AlignTo.Mode.None,
+                        aligner.zMode != AlignTo.Mode.None);
                 }
             }
 

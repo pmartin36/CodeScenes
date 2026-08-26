@@ -65,7 +65,7 @@ namespace SceneBuilder.Core.Tests
         {
             var types = Extract();
 
-            foreach (var name in new[] { "FitSize", "SurfaceSnap", "Between" })
+            foreach (var name in new[] { "FitSize", "AlignTo", "Between" })
             {
                 Assert.Equal("component", types.Single(t => t.Name == name).Category);
             }
@@ -75,7 +75,7 @@ namespace SceneBuilder.Core.Tests
 
             // Exactly these three components, nothing more.
             Assert.Equal(
-                new[] { "Between", "FitSize", "SurfaceSnap" },
+                new[] { "AlignTo", "Between", "FitSize" },
                 types.Where(t => t.Category == "component").Select(t => t.Name).OrderBy(n => n).ToArray());
         }
 

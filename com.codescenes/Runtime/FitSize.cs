@@ -57,7 +57,7 @@ namespace SceneBuilder.Authoring
         // on enable, and by PlanExecutor right after it writes m_LocalScale directly on this object's
         // Transform (materialize always writes the full authored transform per spec 23 — that write is
         // the plugin's own, not a user drag, so it must not be back-solved into source as a wrong
-        // value/size). Mirrors SurfaceSnap.ResetBaseline for the m_LocalPosition case.
+        // value/size). Mirrors AlignTo.ResetBaseline for the m_LocalPosition case.
         [EditorBrowsable(EditorBrowsableState.Never)]
         public void ResetBaseline() => _lastWritten = new Vector3(float.NaN, float.NaN, float.NaN);
 

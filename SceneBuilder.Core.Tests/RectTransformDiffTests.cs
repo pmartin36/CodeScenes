@@ -96,9 +96,9 @@ namespace SceneBuilder.Core.Tests
         {
             // Base-transform driven bits are consumed by the Differ, per-axis, but ONLY when they are
             // foreign to the model's own authored intent. A base-transform driven bit reported on the
-            // MODEL side too (authored FitSize/SurfaceSnap intent — spec 23) still emits the full
+            // MODEL side too (authored FitSize/AlignTo intent — spec 23) still emits the full
             // authored value: the component re-drives from that write, because the adapter re-baselines
-            // FitSize/SurfaceSnap on it (PlanExecutor.cs:393-405).
+            // FitSize/AlignTo on it (PlanExecutor.cs:393-405).
             var driven = ChannelMask.Scale | ChannelMask.PositionX | ChannelMask.PositionY;
             var authoredModel = Rect(scale: new Vec3(2, 2, 2), driven: driven);
             var authoredSnapshot = Rect(scale: new Vec3(5, 5, 5), driven: driven);

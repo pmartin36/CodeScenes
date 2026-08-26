@@ -58,10 +58,10 @@ namespace SceneBuilder.Core.Reconcile
                 // LOWER BOUND, not a replacement, so an ordinary multi-component append (no forward
                 // reference) keeps its natural chained order untouched. A blind switch to
                 // PlaceNewStatement/PeerKind.Component here would DISCARD that natural order instead
-                // of bounding it — SpatialComponentSource's dedicated `.FitSize(...)`/`.SurfaceSnap(...)`
+                // of bounding it — SpatialComponentSource's dedicated `.FitSize(...)`/`.AlignTo(...)`
                 // calls are not "Component" peers to PlacementIndex's peer scan, so two same-batch
                 // spatial appends onto one owner would collapse to the same insertion point and lose
-                // their canonical FitSize-before-SurfaceSnap order.
+                // their canonical FitSize-before-AlignTo order.
                 var (buildMethod, _) = FindBuildMethod(root);
                 var buildBody = buildMethod.Body!;
                 allTargets.Add(buildBody);
@@ -123,7 +123,7 @@ namespace SceneBuilder.Core.Reconcile
         private static string BuildComponentStatementText(
             AppendComponentStatement edit, string receiver, AssetCatalog? assetCatalog = null)
         {
-            // FitSize/SurfaceSnap always render as their dedicated fluent call — never the
+            // FitSize/AlignTo always render as their dedicated fluent call — never the
             // generic .Component<T> form, which would fail to stamp TransformData.DrivenChannels
             // on re-parse and defeat driven-suppression.
             if (SpatialComponentSource.IsSpatial(edit.TypeFullName))
@@ -259,10 +259,10 @@ namespace SceneBuilder.Core.Reconcile
             // identical comment.
             var valueExpr = edit.NewExpr ?? SourceExpr.ValueNodeLiteral(edit.Value, assetCatalog);
 
-            // A dedicated `.FitSize(...)/.SurfaceSnap(...)` call has ALL-named-argument shape
+            // A dedicated `.FitSize(...)/.AlignTo(...)` call has ALL-named-argument shape
             // (SpatialComponentSource.RenderArguments), never the generic `c => ...` closure the
             // fallback below expects — introducing a previously-absent field (e.g. toggling a
-            // SurfaceSnap flag from unset->true) must append a new named argument in that SAME
+            // AlignTo axis from unset->AbutMax) must append a new named argument in that SAME
             // "key: value" style, not throw as an unsupported closure form.
             if (IsSpatialComponentAnchor(edit.Anchor))
             {

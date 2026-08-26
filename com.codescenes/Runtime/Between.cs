@@ -15,13 +15,13 @@ namespace SceneBuilder.Authoring
     //
     // Split as `partial` so the nested Axis enum (Between.Axis.cs, no UnityEngine dependency) can
     // stand alone as an authoring-facing type: NodeHandle.Between's signature takes Axis directly
-    // (unlike FitSize/SurfaceSnap, which take bools), and AuthoringBindHarness compiles the real
-    // com.codescenes/Runtime authoring surface excluding every file that needs the UnityEngine
-    // assembly it does not reference (SceneBuilder.Core.Tests/AuthoringBindHarness.cs) — keeping
-    // Axis in a UnityEngine-free partial file lets that harness resolve it while this file (the
-    // MonoBehaviour body) stays excluded as before.
+    // (unlike FitSize, whose NodeHandle signature takes plain floats), and AuthoringBindHarness
+    // compiles the real com.codescenes/Runtime authoring surface excluding every file that needs the
+    // UnityEngine assembly it does not reference (SceneBuilder.Core.Tests/AuthoringBindHarness.cs) —
+    // keeping Axis in a UnityEngine-free partial file lets that harness resolve it while this file
+    // (the MonoBehaviour body) stays excluded as before.
     [ExecuteAlways]
-    [DefaultExecutionOrder(-80)] // after SurfaceSnap(-90): places relative to already-snapped anchors
+    [DefaultExecutionOrder(-80)] // after AlignTo(-90): places relative to already-aligned anchors
     public sealed partial class Between : MonoBehaviour, IPositionDriver
     {
         private const float Epsilon = 1e-4f;
@@ -66,7 +66,7 @@ namespace SceneBuilder.Authoring
         // next Evaluate. Called on enable, and by PlanExecutor right after it writes m_LocalPosition
         // directly on this object's Transform (materialize always writes the full authored transform
         // per spec 23 — that write is the plugin's own, not a user drag, mirroring
-        // SurfaceSnap.ResetBaseline for the same m_LocalPosition case).
+        // AlignTo.ResetBaseline for the same m_LocalPosition case).
         [EditorBrowsable(EditorBrowsableState.Never)]
         public void ResetBaseline()
         {

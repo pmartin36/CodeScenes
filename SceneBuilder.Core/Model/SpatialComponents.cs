@@ -12,9 +12,10 @@ namespace SceneBuilder.Core.Model
     public static class SpatialComponents
     {
         public const string FitSizeTypeName   = "SceneBuilder.Authoring.FitSize";
-        public const string SurfaceSnapTypeName = "SceneBuilder.Authoring.SurfaceSnap";
 
         public const string BetweenTypeName = "SceneBuilder.Authoring.Between";
+
+        public const string AlignToTypeName = "SceneBuilder.Authoring.AlignTo";
 
         public static class BetweenFields
         {
@@ -84,21 +85,6 @@ namespace SceneBuilder.Core.Model
         /// <summary>A FitSize always drives the full Scale mask.</summary>
         public const ChannelMask FitSizeMask = ChannelMask.Scale;
 
-        /// <summary>
-        /// The single shared SurfaceSnap axis-&gt;mask mapping. Both parse (desired side) and the
-        /// live-scene snapshot reader (actual side) MUST call this so the two never diverge:
-        /// horizontal (left/right) -&gt; PositionX, vertical (up/down) -&gt; PositionY,
-        /// depth (forward/back) -&gt; PositionZ.
-        /// </summary>
-        public static ChannelMask SurfaceSnapMask(bool verticalSet, bool horizontalSet, bool depthSet)
-        {
-            var mask = ChannelMask.None;
-            if (horizontalSet) mask |= ChannelMask.PositionX;
-            if (verticalSet) mask |= ChannelMask.PositionY;
-            if (depthSet) mask |= ChannelMask.PositionZ;
-            return mask;
-        }
-
         public static class FitSizeFields
         {
             // The real runtime write contract (mode/value/size — b3-t1's enum migration, replacing the
@@ -120,7 +106,7 @@ namespace SceneBuilder.Core.Model
 
         /// <summary>b3-t1: the FitSize mode enum type FullName (nested-type "+" separator) and member
         /// names, mirroring the runtime <c>SceneBuilder.Authoring.FitSize+Mode</c> nested enum
-        /// byte-for-byte. Mirrors <see cref="SurfaceSnapEnums"/>'s role for SurfaceSnap. None MUST be
+        /// byte-for-byte. Mirrors <see cref="AlignToEnums"/>'s role for AlignTo. None MUST be
         /// index 0 (default == inert == survives default-value pruning for every authored mode).</summary>
         public static class FitSizeEnums
         {
@@ -177,84 +163,101 @@ namespace SceneBuilder.Core.Model
             return false;
         }
 
-        public static class SurfaceSnapFields
+        public static class AlignToFields
         {
-            // The per-axis enum field keys — the real runtime component write/read contract
-            // (SpatialComponents.SurfaceSnapEnums mirrors the enum type FullNames/member names).
-            public const string Vertical   = "vertical";
-            public const string Horizontal = "horizontal";
-            public const string Depth      = "depth";
-
-            public const string Target  = "target";
-
-            // Retained ONLY as a generic Core-side field-key literal used by pre-existing
-            // Differ/Reconciler tests exercising arbitrary field diffs (not the SurfaceSnap
-            // runtime component, which no longer has a "down" bool field). Do not wire this
-            // into parse/emit/reader — those all go through Vertical/Horizontal/Depth above.
-            public const string Down = "down";
+            public const string XMode  = "xMode";
+            public const string XOffset = "xOffset";
+            public const string YMode  = "yMode";
+            public const string YOffset = "yOffset";
+            public const string ZMode  = "zMode";
+            public const string ZOffset = "zOffset";
+            public const string Target = "target";
+            public const string Frame  = "frame";
+            public const string Space  = "space";
+            public const string CaptureThreshold = "captureThreshold";
         }
 
-        /// <summary>b2-t1: the SurfaceSnap per-axis enum type FullNames (nested-type "+" separator) and
-        /// member names, mirroring the runtime <c>SceneBuilder.Authoring.SurfaceSnap</c> nested enums
-        /// byte-for-byte. This is the ONE place the Core-string&lt;-&gt;runtime-type contract lives; a
-        /// gate test reflects the runtime enums and asserts they agree (idempotence depends on it — see
-        /// research.md's REFINED finding on ValueNode.Enum vs Primitive.Int).</summary>
-        public static class SurfaceSnapEnums
+        /// <summary>The AlignTo per-axis mode enum type FullName (nested-type "+" separator) and
+        /// member names, mirroring the runtime <c>SceneBuilder.Authoring.AlignTo+Mode</c> nested enum
+        /// byte-for-byte, plus the <see cref="SceneBuilder.Authoring.AlignSpace"/> contract. This is
+        /// the ONE place the Core-string&lt;-&gt;runtime-type contract lives for AlignTo; a gate test
+        /// reflects the runtime types and asserts they agree. None MUST be index 0 in the runtime enum
+        /// (default == inert, survives default-value pruning). All six Mode members are declared here
+        /// once; later work only appends preset FIELDS on the authoring struct, never new enum values.</summary>
+        public static class AlignToEnums
         {
-            public const string VerticalTypeName   = "SceneBuilder.Authoring.SurfaceSnap+Vertical";
-            public const string HorizontalTypeName = "SceneBuilder.Authoring.SurfaceSnap+Horizontal";
-            public const string DepthTypeName      = "SceneBuilder.Authoring.SurfaceSnap+Depth";
+            public const string ModeTypeName = "SceneBuilder.Authoring.AlignTo+Mode";
 
-            // Member names — None MUST be index 0 in each runtime enum (default-value pruning on read).
-            public const string None    = "None";
-            public const string Up      = "Up";
-            public const string Down    = "Down";
-            public const string Left    = "Left";
-            public const string Right   = "Right";
-            public const string Forward = "Forward";
-            public const string Back    = "Back";
+            public const string None        = "None";
+            public const string AbutMin     = "AbutMin";
+            public const string AbutMax     = "AbutMax";
+            public const string AlignMin    = "AlignMin";
+            public const string AlignMax    = "AlignMax";
+            public const string AlignCenter = "AlignCenter";
+            public static readonly string[] Members = { None, AbutMin, AbutMax, AlignMin, AlignMax, AlignCenter };
+
+            public const string AlignSpaceTypeName = "SceneBuilder.Authoring.AlignSpace";
+            public const string TargetLocal = "TargetLocal";
+            public const string World = "World";
+            public static readonly string[] SpaceMembers = { TargetLocal, World };
+
+            /// <summary>The authoring <c>AxisAlign</c> struct's FullName — the emit-side prefix source
+            /// (mirrors how <see cref="BetweenEnums.AxisTypeName"/> derives the "Between.Axis" authoring
+            /// prefix). Not nested ('+'-free): <c>AxisAlign</c> is a standalone authoring value type, not
+            /// a member of <c>AlignTo</c>.</summary>
+            public const string AxisAlignTypeName = "SceneBuilder.Authoring.AxisAlign";
         }
 
-        // The ONE keyword&lt;-&gt;(fieldKey, enumTypeName, memberName) table shared by parse (keyword ->
-        // enum field) and emit (enum field -> keyword). Never duplicate this mapping elsewhere.
-        private static readonly (string Keyword, string FieldKey, string EnumTypeName, string Member)[] AxisKeywords =
+        /// <summary>THE single axis-&gt;channel owner for AlignTo: each pinned axis (Mode != None)
+        /// drives the one world-position component it names.</summary>
+        public static ChannelMask AlignToDrivenMask(bool xPinned, bool yPinned, bool zPinned)
         {
-            ("up",      SurfaceSnapFields.Vertical,   SurfaceSnapEnums.VerticalTypeName,   SurfaceSnapEnums.Up),
-            ("down",    SurfaceSnapFields.Vertical,   SurfaceSnapEnums.VerticalTypeName,   SurfaceSnapEnums.Down),
-            ("left",    SurfaceSnapFields.Horizontal, SurfaceSnapEnums.HorizontalTypeName, SurfaceSnapEnums.Left),
-            ("right",   SurfaceSnapFields.Horizontal, SurfaceSnapEnums.HorizontalTypeName, SurfaceSnapEnums.Right),
-            ("forward", SurfaceSnapFields.Depth,      SurfaceSnapEnums.DepthTypeName,      SurfaceSnapEnums.Forward),
-            ("back",    SurfaceSnapFields.Depth,      SurfaceSnapEnums.DepthTypeName,      SurfaceSnapEnums.Back),
+            var mask = ChannelMask.None;
+            if (xPinned) mask |= ChannelMask.PositionX;
+            if (yPinned) mask |= ChannelMask.PositionY;
+            if (zPinned) mask |= ChannelMask.PositionZ;
+            return mask;
+        }
+
+        /// <summary>An AlignTo axis is pinned whenever its Mode member is not None.</summary>
+        public static bool IsAxisPinned(string modeMember) => modeMember != AlignToEnums.None;
+
+        /// <summary>The ONE axis keyword&lt;-&gt;field-name table shared by parse (keyword -> mode/offset
+        /// field) and emit (axis -> keyword). Never duplicate this mapping elsewhere.</summary>
+        private static readonly (string Keyword, SpatialAxis Axis, string ModeField, string OffsetField)[] AlignAxisFields =
+        {
+            ("x", SpatialAxis.X, AlignToFields.XMode, AlignToFields.XOffset),
+            ("y", SpatialAxis.Y, AlignToFields.YMode, AlignToFields.YOffset),
+            ("z", SpatialAxis.Z, AlignToFields.ZMode, AlignToFields.ZOffset),
         };
 
-        /// <summary>Parse direction: authoring keyword (up/down/left/right/forward/back) -&gt; the
-        /// per-axis enum field it sets.</summary>
-        public static bool TryAxisKeyword(string keyword, out string fieldKey, out string enumTypeName, out string member)
+        /// <summary>Parse direction: axis keyword (x/y/z) -&gt; the axis plus its mode/offset field
+        /// names.</summary>
+        public static bool TryAlignAxis(string keyword, out SpatialAxis axis, out string modeField, out string offsetField)
         {
-            foreach (var entry in AxisKeywords)
+            foreach (var entry in AlignAxisFields)
             {
                 if (entry.Keyword == keyword)
                 {
-                    fieldKey = entry.FieldKey;
-                    enumTypeName = entry.EnumTypeName;
-                    member = entry.Member;
+                    axis = entry.Axis;
+                    modeField = entry.ModeField;
+                    offsetField = entry.OffsetField;
                     return true;
                 }
             }
 
-            fieldKey = null!;
-            enumTypeName = null!;
-            member = null!;
+            axis = default;
+            modeField = null!;
+            offsetField = null!;
             return false;
         }
 
-        /// <summary>Emit direction: a per-axis enum field's (fieldKey, member) -&gt; the authoring
-        /// keyword that set it.</summary>
-        public static bool TryAxisFromEnumField(string fieldKey, string member, out string keyword)
+        /// <summary>Emit direction: an axis -&gt; the authoring keyword that names it.</summary>
+        public static bool TryAlignAxisKeyword(SpatialAxis axis, out string keyword)
         {
-            foreach (var entry in AxisKeywords)
+            foreach (var entry in AlignAxisFields)
             {
-                if (entry.FieldKey == fieldKey && entry.Member == member)
+                if (entry.Axis == axis)
                 {
                     keyword = entry.Keyword;
                     return true;
@@ -262,6 +265,46 @@ namespace SceneBuilder.Core.Model
             }
 
             keyword = null!;
+            return false;
+        }
+
+        /// <summary>Emit direction (mode-flip patch): a mode FIELD name (xMode/yMode/zMode) -&gt; the
+        /// authoring axis keyword that sets it — the reverse of <see cref="TryAlignAxis"/>, used by the
+        /// live-edit single-field patch render (an in-scene member flip, e.g. Down-&gt;Up, replaces the
+        /// WHOLE `y: AxisAlign.AbutMax` argument with `y: AxisAlign.AbutMin`).</summary>
+        public static bool TryAlignAxisFromModeField(string modeField, out string keyword)
+        {
+            foreach (var entry in AlignAxisFields)
+            {
+                if (entry.ModeField == modeField)
+                {
+                    keyword = entry.Keyword;
+                    return true;
+                }
+            }
+
+            keyword = null!;
+            return false;
+        }
+
+        /// <summary>The set of AlignTo.Mode presets the parser/recognizer accept as authoring
+        /// identifiers (preset name == Mode member name — identity mapping). Distinct from
+        /// <see cref="AlignToEnums.Members"/>, which fixes the full enum SCHEMA; this registry is the
+        /// smaller, growable set of presets actually wired to authoring syntax. <c>None</c> is the
+        /// default/unpinned case handled by callers, not a preset row.</summary>
+        private static readonly string[] AlignPresets =
+        {
+            AlignToEnums.AbutMin, AlignToEnums.AbutMax,
+            AlignToEnums.AlignMin, AlignToEnums.AlignMax, AlignToEnums.AlignCenter,
+        };
+
+        public static bool IsAlignPreset(string member)
+        {
+            foreach (var preset in AlignPresets)
+            {
+                if (preset == member) return true;
+            }
+
             return false;
         }
     }

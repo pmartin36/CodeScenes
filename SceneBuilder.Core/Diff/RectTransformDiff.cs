@@ -27,9 +27,9 @@ namespace SceneBuilder.Core.Diff
         // b2-t1/i3: a base Position/Scale channel the SNAPSHOT reports driven that the MODEL's own
         // DrivenChannels does NOT also claim is "driven by something the builder does not author" —
         // e.g. a CanvasScaler re-driving a Canvas's scale. The plugin cannot re-baseline a driver it
-        // does not own (unlike FitSize/SurfaceSnap, which PlanExecutor re-baselines on write), so that
+        // does not own (unlike FitSize/AlignTo, which PlanExecutor re-baselines on write), so that
         // axis must be held to the live value rather than clobbered. A channel driven on BOTH sides
-        // (authored FitSize/SurfaceSnap intent) is excluded — spec 23 still writes it in full.
+        // (authored FitSize/AlignTo intent) is excluded — spec 23 still writes it in full.
         public static ChannelMask ForeignDrivenBase(TransformData model, TransformData snapshot)
             => snapshot.DrivenChannels & ~model.DrivenChannels & DrivenTransform.BaseChannels;
 

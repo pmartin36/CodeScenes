@@ -216,7 +216,7 @@ public class BetweenIdempotentScene : ISceneDefinition
         }
 
         // A positional-arg `.Between(a, b, 0.25f, Between.Axis.X)` is REJECTED — Between is
-        // named-args-only, mirroring FitSize/SurfaceSnap.
+        // named-args-only, mirroring FitSize (AlignTo differs: its leading `target` may be positional).
         [Fact]
         public void Parse_Between_PositionalArgs_Rejected()
         {

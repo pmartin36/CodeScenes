@@ -63,7 +63,7 @@ namespace SceneBuilder.Core.Tests
         public void SpatialComponents_TypeNames_MatchRuntimeFqns()
         {
             Assert.Equal("SceneBuilder.Authoring.FitSize", SpatialComponents.FitSizeTypeName);
-            Assert.Equal("SceneBuilder.Authoring.SurfaceSnap", SpatialComponents.SurfaceSnapTypeName);
+            Assert.Equal("SceneBuilder.Authoring.AlignTo", SpatialComponents.AlignToTypeName);
         }
 
         // b3-t1: field constants migrated from NaN-sentinel width/height/depth to mode/value/size.
@@ -75,14 +75,20 @@ namespace SceneBuilder.Core.Tests
             Assert.Equal("size", SpatialComponents.FitSizeFields.Size);
         }
 
-        // b2-t1: field constants migrated from 6 bool-direction keys to 3 per-axis enum keys.
+        // The AlignTo per-axis mode/offset field keys, plus target/frame/space/captureThreshold.
         [Fact]
-        public void SpatialComponents_SurfaceSnapFieldKeys_MatchExpectedLiterals()
+        public void SpatialComponents_AlignToFieldKeys_MatchExpectedLiterals()
         {
-            Assert.Equal("vertical", SpatialComponents.SurfaceSnapFields.Vertical);
-            Assert.Equal("horizontal", SpatialComponents.SurfaceSnapFields.Horizontal);
-            Assert.Equal("depth", SpatialComponents.SurfaceSnapFields.Depth);
-            Assert.Equal("target", SpatialComponents.SurfaceSnapFields.Target);
+            Assert.Equal("xMode", SpatialComponents.AlignToFields.XMode);
+            Assert.Equal("xOffset", SpatialComponents.AlignToFields.XOffset);
+            Assert.Equal("yMode", SpatialComponents.AlignToFields.YMode);
+            Assert.Equal("yOffset", SpatialComponents.AlignToFields.YOffset);
+            Assert.Equal("zMode", SpatialComponents.AlignToFields.ZMode);
+            Assert.Equal("zOffset", SpatialComponents.AlignToFields.ZOffset);
+            Assert.Equal("target", SpatialComponents.AlignToFields.Target);
+            Assert.Equal("frame", SpatialComponents.AlignToFields.Frame);
+            Assert.Equal("space", SpatialComponents.AlignToFields.Space);
+            Assert.Equal("captureThreshold", SpatialComponents.AlignToFields.CaptureThreshold);
         }
 
         // ---- b2-t1: .FitSize(...) parse arm ------------------------------------------------
@@ -203,192 +209,129 @@ public class TransformOnlyScene : ISceneDefinition
             Assert.Equal(ChannelMask.None, node.Transform.DrivenChannels);
         }
 
-        // ---- b2-t2: .SurfaceSnap(...) parse arm ----------------------------------------------
+        // ---- .AlignTo(...) parse arm (Down/Left/Forward/Back regression cases; the single/two-axis/
+        // offset/space/frame cases live in SpatialComponentTests.AlignTo.cs) --------------------------
 
-        private const string SurfaceSnapDownLeftSource = @"
-public class SurfaceSnapDownLeftScene : ISceneDefinition
-{
-    public void Build(SceneRoot scene)
-    {
-        scene.Add(""Crate"").SurfaceSnap(down: true, left: true);
-    }
-}
-";
-
-        private const string SurfaceSnapDownOnlySource = @"
-public class SurfaceSnapDownOnlyScene : ISceneDefinition
-{
-    public void Build(SceneRoot scene)
-    {
-        scene.Add(""Crate"").SurfaceSnap(down: true);
-    }
-}
-";
-
-        private const string SurfaceSnapBackOnlySource = @"
-public class SurfaceSnapBackOnlyScene : ISceneDefinition
-{
-    public void Build(SceneRoot scene)
-    {
-        scene.Add(""Crate"").SurfaceSnap(back: true);
-    }
-}
-";
-
-        private const string SurfaceSnapDownBackSource = @"
-public class SurfaceSnapDownBackScene : ISceneDefinition
-{
-    public void Build(SceneRoot scene)
-    {
-        scene.Add(""Crate"").SurfaceSnap(down: true, back: true);
-    }
-}
-";
-
-        private const string SurfaceSnapLeftRightSource = @"
-public class SurfaceSnapLeftRightScene : ISceneDefinition
-{
-    public void Build(SceneRoot scene)
-    {
-        scene.Add(""Crate"").SurfaceSnap(left: true, right: true);
-    }
-}
-";
-
-        private const string SurfaceSnapUpDownSource = @"
-public class SurfaceSnapUpDownScene : ISceneDefinition
-{
-    public void Build(SceneRoot scene)
-    {
-        scene.Add(""Crate"").SurfaceSnap(up: true, down: true);
-    }
-}
-";
-
-        private const string SurfaceSnapForwardBackSource = @"
-public class SurfaceSnapForwardBackScene : ISceneDefinition
-{
-    public void Build(SceneRoot scene)
-    {
-        scene.Add(""Crate"").SurfaceSnap(forward: true, back: true);
-    }
-}
-";
-
-        private const string SurfaceSnapWithTargetSource = @"
-public class SurfaceSnapTargetScene : ISceneDefinition
+        private const string AlignToDownLeftSource = @"
+public class AlignToDownLeftScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
         var floor = scene.Add(""Floor"");
-        scene.Add(""Crate"").SurfaceSnap(down: true, target: floor);
+        scene.Add(""Crate"").AlignTo(floor, x: AxisAlign.AbutMax, y: AxisAlign.AbutMax);
     }
 }
 ";
 
-        // A set axis is now carried as ValueNode.Enum(<axisTypeFullName>, [<MemberName>], false) — the
+        private const string AlignToDownOnlySource = @"
+public class AlignToDownOnlyScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, y: AxisAlign.AbutMax);
+    }
+}
+";
+
+        private const string AlignToBackOnlySource = @"
+public class AlignToBackOnlyScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, z: AxisAlign.AbutMax);
+    }
+}
+";
+
+        private const string AlignToDownBackSource = @"
+public class AlignToDownBackScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, y: AxisAlign.AbutMax, z: AxisAlign.AbutMax);
+    }
+}
+";
+
+        // A set axis is carried as ValueNode.Enum(AlignToEnums.ModeTypeName, [<MemberName>], false) — the
         // EXACT shape SerializedFieldBridge.ReadEnum yields, so reconcile diffs by value-equality and
-        // stays idempotent (research.md's REFINED finding: Primitive.Int would churn every sync).
+        // stays idempotent.
         [Fact]
-        public void Parse_SurfaceSnapDownLeft_SetsFlagsAndDrivenPositionXY()
+        public void Parse_AlignToDownLeft_SetsModeFieldsAndDrivenPositionXY()
         {
-            var result = BuilderParser.Parse(SurfaceSnapDownLeftSource);
+            var result = BuilderParser.Parse(AlignToDownLeftSource);
 
-            var node = Assert.Single(result.Model.Roots);
-            var component = Assert.Single(node.Components);
-
-            Assert.Equal(SpatialComponents.SurfaceSnapTypeName, component.Type.FullName);
-            Assert.Equal(
-                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false),
-                component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
-            Assert.Equal(
-                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.HorizontalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Left }, false),
-                component.Fields[SpatialComponents.SurfaceSnapFields.Horizontal]);
-            Assert.False(component.Fields.ContainsKey(SpatialComponents.SurfaceSnapFields.Depth));
-            Assert.Equal(ChannelMask.PositionX | ChannelMask.PositionY, node.Transform.DrivenChannels);
-        }
-
-        [Fact]
-        public void Parse_SurfaceSnapDownOnly_DrivesPositionYNotX()
-        {
-            var result = BuilderParser.Parse(SurfaceSnapDownOnlySource);
-
-            var node = Assert.Single(result.Model.Roots);
-            var component = Assert.Single(node.Components);
-
-            Assert.Single(component.Fields);
-            Assert.Equal(
-                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false),
-                component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
-            Assert.Equal(ChannelMask.PositionY, node.Transform.DrivenChannels);
-        }
-
-        // b2-t1 (Refined-finding pin): the exact ValueNode.Enum shape a `.SurfaceSnap(down:true)` parse
-        // produces must value-equal what SerializedFieldBridge.ReadEnum yields from the live component —
-        // this is what makes reconcile a no-op on an unchanged scene (see research.md ADVERSARIAL verdict).
-        [Fact]
-        public void Parse_SurfaceSnapDown_ProducesReaderShapedEnumValue()
-        {
-            var result = BuilderParser.Parse(SurfaceSnapDownOnlySource);
-            var component = Assert.Single(Assert.Single(result.Model.Roots).Components);
-
-            var expected = new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false);
-            Assert.Equal(expected, component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
-            Assert.IsType<ValueNode.Enum>(component.Fields[SpatialComponents.SurfaceSnapFields.Vertical]);
-        }
-
-        [Theory]
-        [InlineData(SurfaceSnapLeftRightSource)]
-        [InlineData(SurfaceSnapUpDownSource)]
-        [InlineData(SurfaceSnapForwardBackSource)]
-        public void Parse_SurfaceSnapContradictoryAxis_YieldsLocatedError(string source)
-        {
-            var ex = Assert.Throws<ParseException>(() => BuilderParser.Parse(source));
-
-            Assert.True(ex.Line > 0);
-            Assert.Contains("combine", ex.Message);
-        }
-
-        [Fact]
-        public void Parse_SurfaceSnapWithTarget_CarriesObjectRefToHandleLogicalId()
-        {
-            var result = BuilderParser.Parse(SurfaceSnapWithTargetSource);
-
-            var floor = Assert.Single(result.Model.Roots, r => r.Name == "Floor");
             var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
             var component = Assert.Single(crate.Components);
 
-            var target = Assert.IsType<ValueNode.ObjectRef>(component.Fields[SpatialComponents.SurfaceSnapFields.Target]);
-            Assert.Equal(floor.LogicalId, target.TargetLogicalId);
-            Assert.Equal(ChannelMask.PositionY, crate.Transform.DrivenChannels & ChannelMask.PositionY);
-        }
-
-        [Fact]
-        public void Parse_SurfaceSnapBack_DrivesPositionZ()
-        {
-            var result = BuilderParser.Parse(SurfaceSnapBackOnlySource);
-
-            var node = Assert.Single(result.Model.Roots);
-            var component = Assert.Single(node.Components);
-
-            Assert.Single(component.Fields);
+            Assert.Equal(SpatialComponents.AlignToTypeName, component.Type.FullName);
             Assert.Equal(
-                new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.DepthTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Back }, false),
-                component.Fields[SpatialComponents.SurfaceSnapFields.Depth]);
-            Assert.Equal(ChannelMask.PositionZ, node.Transform.DrivenChannels);
+                new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false),
+                component.Fields[SpatialComponents.AlignToFields.XMode]);
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false),
+                component.Fields[SpatialComponents.AlignToFields.YMode]);
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.AlignToFields.ZMode));
+            Assert.Equal(ChannelMask.PositionX | ChannelMask.PositionY, crate.Transform.DrivenChannels);
         }
 
         [Fact]
-        public void Parse_SurfaceSnapDownBack_DrivesPositionYAndZ()
+        public void Parse_AlignToDownOnly_DrivesPositionYNotX()
         {
-            var result = BuilderParser.Parse(SurfaceSnapDownBackSource);
+            var result = BuilderParser.Parse(AlignToDownOnlySource);
 
-            var node = Assert.Single(result.Model.Roots);
+            var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
+            var component = Assert.Single(crate.Components);
 
-            Assert.Equal(ChannelMask.PositionY | ChannelMask.PositionZ, node.Transform.DrivenChannels);
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false),
+                component.Fields[SpatialComponents.AlignToFields.YMode]);
+            Assert.False(component.Fields.ContainsKey(SpatialComponents.AlignToFields.XMode));
+            Assert.Equal(ChannelMask.PositionY, crate.Transform.DrivenChannels);
         }
 
-        // ---- b4-t1: dedicated .FitSize(...)/.SurfaceSnap(...) emit --------------------------------
+        // The exact ValueNode.Enum shape a `.AlignTo(floor, y: AxisAlign.AbutMax)` parse produces must
+        // value-equal what SerializedFieldBridge.ReadEnum yields from the live component — this is what
+        // makes reconcile a no-op on an unchanged scene.
+        [Fact]
+        public void Parse_AlignToDown_ProducesReaderShapedEnumValue()
+        {
+            var result = BuilderParser.Parse(AlignToDownOnlySource);
+            var component = Assert.Single(Assert.Single(result.Model.Roots, r => r.Name == "Crate").Components);
+
+            var expected = new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false);
+            Assert.Equal(expected, component.Fields[SpatialComponents.AlignToFields.YMode]);
+            Assert.IsType<ValueNode.Enum>(component.Fields[SpatialComponents.AlignToFields.YMode]);
+        }
+
+        [Fact]
+        public void Parse_AlignToBack_DrivesPositionZ()
+        {
+            var result = BuilderParser.Parse(AlignToBackOnlySource);
+
+            var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
+            var component = Assert.Single(crate.Components);
+
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false),
+                component.Fields[SpatialComponents.AlignToFields.ZMode]);
+            Assert.Equal(ChannelMask.PositionZ, crate.Transform.DrivenChannels);
+        }
+
+        [Fact]
+        public void Parse_AlignToDownBack_DrivesPositionYAndZ()
+        {
+            var result = BuilderParser.Parse(AlignToDownBackSource);
+
+            var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
+
+            Assert.Equal(ChannelMask.PositionY | ChannelMask.PositionZ, crate.Transform.DrivenChannels);
+        }
+
+        // ---- dedicated .FitSize(...)/.AlignTo(...) emit -------------------------------------
 
         [Fact]
         public void Emit_FitSize_EmitsDedicatedCallNotGenericComponent()
@@ -426,42 +369,38 @@ public class SurfaceSnapTargetScene : ISceneDefinition
             Assert.DoesNotContain("mode:", text);
         }
 
-        // b2-t1: the emitted TEXT is byte-identical to the pre-migration bool-keyword form; only the
-        // underlying FieldMap construction (enum fields, not bool fields) changes.
+        // The emitted TEXT groups target first, then each pinned axis keyword in x/y/z order.
         [Fact]
-        public void Emit_SurfaceSnap_EmitsOnlySetFlags()
+        public void Emit_AlignTo_EmitsTargetThenOnlySetAxes()
         {
             var fields = new FieldMap(new[]
             {
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, new ValueNode.ObjectRef("floor")),
                 new KeyValuePair<string, ValueNode>(
-                    SpatialComponents.SurfaceSnapFields.Vertical,
-                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Down }, false)),
+                    SpatialComponents.AlignToFields.XMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
                 new KeyValuePair<string, ValueNode>(
-                    SpatialComponents.SurfaceSnapFields.Horizontal,
-                    new ValueNode.Enum(SpatialComponents.SurfaceSnapEnums.HorizontalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.Left }, false)),
+                    SpatialComponents.AlignToFields.YMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
             });
+            var fieldExpressions = new Dictionary<string, string> { [SpatialComponents.AlignToFields.Target] = "floor" };
 
-            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.SurfaceSnapTypeName, fields, null);
+            var text = SpatialComponentSource.RenderStatement("crate", SpatialComponents.AlignToTypeName, fields, fieldExpressions);
 
-            Assert.Equal("crate.SurfaceSnap(down: true, left: true);", text);
-            Assert.DoesNotContain("up:", text);
-            Assert.DoesNotContain("right:", text);
-            Assert.DoesNotContain("forward:", text);
-            Assert.DoesNotContain("back:", text);
-            Assert.DoesNotContain("vertical:", text);
-            Assert.DoesNotContain("horizontal:", text);
+            Assert.Equal("crate.AlignTo(target: floor, x: AxisAlign.AbutMax, y: AxisAlign.AbutMax);", text);
+            Assert.DoesNotContain("z:", text);
         }
 
         [Fact]
-        public void Emit_FitSizeBeforeSurfaceSnap_OrderingDeterministicAndStable()
+        public void Emit_FitSizeBeforeAlignTo_OrderingDeterministicAndStable()
         {
             var sizer = new ComponentData { LogicalId = "x/FitSize#0", Type = new TypeRef(SpatialComponents.FitSizeTypeName), Fields = FieldMap.Empty };
-            var snapper = new ComponentData { LogicalId = "x/SurfaceSnap#0", Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName), Fields = FieldMap.Empty };
+            var aligner = new ComponentData { LogicalId = "x/AlignTo#0", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = FieldMap.Empty };
 
-            var ordered = SpatialComponentSource.OrderForEmit(new[] { snapper, sizer });
+            var ordered = SpatialComponentSource.OrderForEmit(new[] { aligner, sizer });
 
             Assert.Equal(SpatialComponents.FitSizeTypeName, ordered[0].Type.FullName);
-            Assert.Equal(SpatialComponents.SurfaceSnapTypeName, ordered[1].Type.FullName);
+            Assert.Equal(SpatialComponents.AlignToTypeName, ordered[1].Type.FullName);
 
             var reordered = SpatialComponentSource.OrderForEmit(ordered);
             Assert.Equal(ordered, reordered);
@@ -482,11 +421,14 @@ public class SurfaceSnapTargetScene : ISceneDefinition
                 "x.FitSize(size: (2f, 1f, 0.5f));",
                 SpatialComponentSource.RenderStatement("x", sizeComponent.Type.FullName, sizeComponent.Fields, null));
 
-            var snapperResult = BuilderParser.Parse(SurfaceSnapDownBackSource);
-            var snapperComponent = Assert.Single(Assert.Single(snapperResult.Model.Roots).Components);
+            var alignerResult = BuilderParser.Parse(AlignToDownBackSource);
+            var crate = Assert.Single(alignerResult.Model.Roots, r => r.Name == "Crate");
+            var alignerComponent = Assert.Single(crate.Components);
             Assert.Equal(
-                "x.SurfaceSnap(down: true, back: true);",
-                SpatialComponentSource.RenderStatement("x", snapperComponent.Type.FullName, snapperComponent.Fields, null));
+                "x.AlignTo(target: floor, y: AxisAlign.AbutMax, z: AxisAlign.AbutMax);",
+                SpatialComponentSource.RenderStatement(
+                    "x", alignerComponent.Type.FullName, alignerComponent.Fields,
+                    new Dictionary<string, string> { [SpatialComponents.AlignToFields.Target] = "floor" }));
         }
     }
 }

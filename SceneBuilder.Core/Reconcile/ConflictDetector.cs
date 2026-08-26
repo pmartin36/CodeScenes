@@ -362,7 +362,7 @@ namespace SceneBuilder.Core.Reconcile
                 "item, so no value for this field can be written to code.",
                 recurrenceKey: $"unrepresentable-list-item:{componentLogicalId}:{fieldKey}", location);
 
-        // A closed-grammar component (FitSize/SurfaceSnap) has a live field that returned to
+        // A closed-grammar component (FitSize/AlignTo) has a live field that returned to
         // its type default, but its dedicated fluent call throws on an empty argument list -- there
         // is no compiling form for "removed". Reuses MissingSourceAnchor's kind: same family as
         // UnanchorableComponentEdit ("no source construct can express this edit"), just with a
@@ -375,7 +375,7 @@ namespace SceneBuilder.Core.Reconcile
                 LogicalId = componentLogicalId,
                 GlobalObjectId = null,
                 Reason = $"Cannot remove field '{fieldKey}' for component '{componentLogicalId}': its closed-grammar " +
-                    "authoring call (FitSize/SurfaceSnap) has no compiling form for an empty argument list. The " +
+                    "authoring call (FitSize/AlignTo) has no compiling form for an empty argument list. The " +
                     "live value returned to its default; the setter was NOT removed and NOT patched (§7).",
                 Location = location,
             };

@@ -125,7 +125,7 @@ public class ComponentDefaultTemplateScene : ISceneDefinition
 
     // Regression (bug class): the default-template harvest AddComponents the probed type onto a
     // throwaway bare GameObject, firing its OnValidate with no siblings. Any user MonoBehaviour whose
-    // OnValidate logs (e.g. SurfaceSnap warning it has no Renderer to snap against) must NOT leak that
+    // OnValidate logs (e.g. AlignTo warning it has no Renderer to align against) must NOT leak that
     // to the console during the harvest. Suppression lives at the probe in ComponentDefaultTemplate,
     // so every current and future logging OnValidate inherits it -- not fixed per-component. A
     // purpose-built probe proves the CLASS, not one hard-coded component.
@@ -184,7 +184,7 @@ public class ComponentDefaultTemplateScene : ISceneDefinition
 }
 
 // A MonoBehaviour that logs an error from OnValidate on a bare object -- the exact shape (e.g.
-// SurfaceSnap with no Renderer) that leaks to the console during ComponentDefaultTemplate's harvest.
+// AlignTo with no Renderer) that leaks to the console during ComponentDefaultTemplate's harvest.
 // Only ever added to a throwaway HideAndDontSave GameObject by Register, never saved to a scene.
 public class LoggingOnValidateProbe : MonoBehaviour
 {

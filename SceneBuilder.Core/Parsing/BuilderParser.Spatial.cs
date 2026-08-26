@@ -7,13 +7,18 @@ using SceneBuilder.Core.Reconcile;
 
 namespace SceneBuilder.Core.Parsing
 {
-    // Spatial-authoring-component parse arms (`.FitSize(...)`, `.SurfaceSnap(...)`), split out of
+    // Spatial-authoring-component parse arms (`.FitSize(...)`, `.AlignTo(...)`), split out of
     // BuilderParser.cs for file-size discipline. Dispatch lives in BuilderParser's
     // ApplyChainedCalls switch; the resulting ComponentBuilder is an ordinary component, so
     // all downstream machinery (LogicalId synthesis, IdentityMap/anchors, BuildComponent)
     // applies unchanged.
     public static partial class BuilderParser
     {
+        // AxisAlign's authoring-form identifier ("SceneBuilder.Authoring.AxisAlign" -> "AxisAlign"),
+        // derived once from the runtime FullName rather than a separately hand-typed literal.
+        private static readonly string AxisAlignAuthoringName = SpatialComponents.AlignToEnums.AxisAlignTypeName
+            .Substring(SpatialComponents.AlignToEnums.AxisAlignTypeName.LastIndexOf('.') + 1);
+
         // `.FitSize(height: 2f)` (aspect-locked) | `.FitSize(size: (2,1,0.5f))` (explicit).
         // Total on VALUES (non-literal -> Unsupported); Fail (located) on STRUCTURE.
         private static void ApplyFitSize(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
@@ -116,83 +121,93 @@ namespace SceneBuilder.Core.Parsing
             return ValueNodeParser.Parse(expr, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings); // Vector3(...) -> Vec3; else Unsupported
         }
 
-        // `.SurfaceSnap(down: true, left: true, target: floor)` — bool axis flags + optional target ObjectRef.
-        // Structural errors (unnamed/unknown arg, contradictory pair, no axis) -> Fail (located).
-        // Non-literal flag value -> Unsupported (total); target -> ValueNodeParser (total, ObjectRef).
-        private static void ApplySurfaceSnap(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
+        // `.AlignTo(target, x: AxisAlign.AbutMin, y: AxisAlign.AbutMax.Offset(0.5f), frame: rig, space: AlignSpace.World)`.
+        // Structural errors (a later unnamed arg, an unknown named arg) -> Fail (located; the recognizer
+        // agrees). Value-level facts (non-literal .Offset(...), an unknown AxisAlign/AlignSpace member) are
+        // TOTAL -> Unsupported (never a throw). `target` is the sole positional-or-named arg; every other
+        // argument must be named. There is no "requires an axis"/empty-arg problem: target is always present.
+        private static void ApplyAlignTo(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
-            bool up = false, down = false, left = false, right = false, forward = false, back = false;
+            bool xPinned = false, yPinned = false, zPinned = false;
+            var sawPositional = false;
 
-            foreach (var arg in args.Arguments)
+            for (var i = 0; i < args.Arguments.Count; i++)
             {
+                var arg = args.Arguments[i];
+
                 if (arg.NameColon == null)
                 {
-                    throw Unreachable();
+                    if (i != 0 || sawPositional)
+                    {
+                        throw Unreachable();
+                    }
+
+                    sawPositional = true;
+                    var targetSpan = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
+                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
+                    spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.AlignToFields.Target, targetSpan));
+                    continue;
                 }
 
                 var name = arg.NameColon.Name.Identifier.Text;
                 var span = new SourceSpan(arg.Expression.SpanStart, arg.Expression.Span.Length);
-                // The enum-axis field renders as an AUTHORING keyword whose text encodes the member
-                // (down->up is a keyword swap, not just a value swap), so a member-flip patch must own
-                // the WHOLE `down: true` argument, not the `true` value alone. target: keeps the
-                // value-only span (its keyword never changes; only the ObjectRef handle is patched).
-                var argSpan = new SourceSpan(arg.SpanStart, arg.Span.Length);
 
-                if (name == SpatialComponents.SurfaceSnapFields.Target)
-                {
-                    fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Target, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
-                    spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.SurfaceSnapFields.Target, span));
-                    continue;
-                }
-
-                if (!SpatialComponents.TryAxisKeyword(name, out var fieldKey, out var enumTypeName, out var member))
-                {
-                    throw Unreachable();
-                }
-
-                var set = ApplyAxisFlag(arg.Expression, name, fieldKey, enumTypeName, member, span, argSpan, fields, spans);
                 switch (name)
                 {
-                    case "up": up = set; break;
-                    case "down": down = set; break;
-                    case "left": left = set; break;
-                    case "right": right = set; break;
-                    case "forward": forward = set; break;
-                    case "back": back = set; break;
+                    case SpatialComponents.AlignToFields.Target:
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.AlignToFields.Target, span));
+                        break;
+
+                    case SpatialComponents.AlignToFields.Frame:
+                        fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Frame, ValueNodeParser.Parse(arg.Expression, ctx.AssetCatalog, ctx.FacadeConflicts, ctx.ConstStrings)));
+                        spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.AlignToFields.Frame, span));
+                        break;
+
+                    case SpatialComponents.AlignToFields.Space:
+                        ValueNode spaceValue = arg.Expression is MemberAccessExpressionSyntax spaceMember
+                            && System.Array.IndexOf(SpatialComponents.AlignToEnums.SpaceMembers, spaceMember.Name.Identifier.Text) >= 0
+                                ? ValueNode.Enum.Canonical(SpatialComponents.AlignToEnums.AlignSpaceTypeName, new[] { spaceMember.Name.Identifier.Text })
+                                : new ValueNode.Unsupported(arg.Expression.ToString());
+                        // TargetLocal is the default; do not store it (default-value pruning parity
+                        // with every other AlignTo axis).
+                        if (spaceValue is not ValueNode.Enum(_, var spaceMembers, _) || spaceMembers[0] != SpatialComponents.AlignToEnums.TargetLocal)
+                        {
+                            fields.Add(new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Space, spaceValue));
+                            spans.Add(new KeyValuePair<string, SourceSpan>(SpatialComponents.AlignToFields.Space, span));
+                        }
+                        break;
+
+                    case "x":
+                    case "y":
+                    case "z":
+                        if (!SpatialComponents.TryAlignAxis(name, out _, out var modeField, out var offsetField))
+                        {
+                            throw Unreachable();
+                        }
+
+                        var argSpan = new SourceSpan(arg.SpanStart, arg.Span.Length);
+                        var pinned = ApplyAxisAlign(arg.Expression, modeField, offsetField, argSpan, fields, spans);
+                        switch (name)
+                        {
+                            case "x": xPinned = pinned; break;
+                            case "y": yPinned = pinned; break;
+                            case "z": zPinned = pinned; break;
+                        }
+                        break;
+
+                    default:
+                        throw Unreachable();
                 }
             }
-
-            if (up && down)
-            {
-                throw Unreachable();
-            }
-
-            if (left && right)
-            {
-                throw Unreachable();
-            }
-
-            if (forward && back)
-            {
-                throw Unreachable();
-            }
-
-            if (!(up || down || left || right || forward || back))
-            {
-                throw Unreachable();
-            }
-
-            var verticalSet = up || down;
-            var horizontalSet = left || right;
-            var depthSet = forward || back;
 
             var memberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
             var anchorStart = memberAccess.OperatorToken.SpanStart;
             var cb = new ComponentBuilder
             {
-                TypeFullName = SpatialComponents.SurfaceSnapTypeName,
+                TypeFullName = SpatialComponents.AlignToTypeName,
                 AnchorSpan = new SourceSpan(anchorStart, invocation.Span.End - anchorStart),
             };
             foreach (var f in fields)
@@ -206,33 +221,84 @@ namespace SceneBuilder.Core.Parsing
             }
 
             node.Components.Add(cb);
-            node.DrivenChannels |= SpatialComponents.SurfaceSnapMask(verticalSet, horizontalSet, depthSet);
+            node.DrivenChannels |= SpatialComponents.AlignToDrivenMask(xPinned, yPinned, zPinned);
         }
 
-        // An axis keyword: a literal `true` builds the per-axis ValueNode.Enum field and marks the axis
-        // SET (drives + contradiction) — returns true. A literal `false` is NOT stored and does not set
-        // the axis — returns false. A non-literal value stays TOTAL: stored as Unsupported under the
-        // ORIGINAL bool keyword (intent not silently dropped, never materialized/driven) — returns false.
-        private static bool ApplyAxisFlag(
-            ExpressionSyntax expr, string keyword, string fieldKey, string enumTypeName, string member, SourceSpan span,
-            SourceSpan argSpan, List<KeyValuePair<string, ValueNode>> fields, List<KeyValuePair<string, SourceSpan>> spans)
+        // An `x:`/`y:`/`z:` axis argument: `AxisAlign.<Preset>` or `AxisAlign.<Preset>.Offset(<literal>)`.
+        // A recognized preset stores the mode field (whole-argument span — a member flip rewrites the
+        // keyword too, mirroring the old ApplyAxisFlag) and marks the axis pinned; only a non-zero literal
+        // offset also stores the paired offset field. An unrecognized member, or a non-literal `.Offset`
+        // argument, stays TOTAL: stored as Unsupported under the axis's mode field key (never a throw).
+        private static bool ApplyAxisAlign(
+            ExpressionSyntax expr, string modeField, string offsetField, SourceSpan argSpan,
+            List<KeyValuePair<string, ValueNode>> fields, List<KeyValuePair<string, SourceSpan>> spans)
         {
-            if (expr.IsKind(SyntaxKind.TrueLiteralExpression))
+            var offset = 0f;
+            var baseExpr = expr;
+
+            if (expr is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "Offset" } offsetAccess } offsetInvocation)
             {
-                fields.Add(new KeyValuePair<string, ValueNode>(fieldKey, ValueNode.Enum.Canonical(enumTypeName, new[] { member })));
-                // Whole-argument span (`down: true`) — a member flip rewrites the keyword too.
-                spans.Add(new KeyValuePair<string, SourceSpan>(fieldKey, argSpan));
-                return true;
+                if (offsetInvocation.ArgumentList.Arguments.Count != 1
+                    || !TryEvalFloatLiteral(offsetInvocation.ArgumentList.Arguments[0].Expression, out offset))
+                {
+                    fields.Add(new KeyValuePair<string, ValueNode>(modeField, new ValueNode.Unsupported(expr.ToString())));
+                    spans.Add(new KeyValuePair<string, SourceSpan>(modeField, argSpan));
+                    return false;
+                }
+
+                baseExpr = offsetAccess.Expression;
             }
 
-            if (expr.IsKind(SyntaxKind.FalseLiteralExpression))
+            string? member = baseExpr switch
             {
-                // not set, not stored (only set axes round-trip — spec §Emit "only the set flags emitted")
+                MemberAccessExpressionSyntax ma when ma.Expression is IdentifierNameSyntax id
+                    && id.Identifier.Text == AxisAlignAuthoringName
+                    => ma.Name.Identifier.Text,
+                IdentifierNameSyntax bare => bare.Identifier.Text, // `using static AxisAlign;`
+                _ => null,
+            };
+
+            if (member == SpatialComponents.AlignToEnums.None)
+            {
+                // The inert default, authored explicitly — not set, not stored (mirrors the old
+                // ApplyAxisFlag's literal-`false` handling: only a pinned axis round-trips).
                 return false;
             }
 
-            fields.Add(new KeyValuePair<string, ValueNode>(keyword, new ValueNode.Unsupported(expr.ToString())));
-            spans.Add(new KeyValuePair<string, SourceSpan>(keyword, span));
+            if (member == null || !SpatialComponents.IsAlignPreset(member))
+            {
+                fields.Add(new KeyValuePair<string, ValueNode>(modeField, new ValueNode.Unsupported(expr.ToString())));
+                spans.Add(new KeyValuePair<string, SourceSpan>(modeField, argSpan));
+                return false;
+            }
+
+            fields.Add(new KeyValuePair<string, ValueNode>(modeField, ValueNode.Enum.Canonical(SpatialComponents.AlignToEnums.ModeTypeName, new[] { member })));
+            spans.Add(new KeyValuePair<string, SourceSpan>(modeField, argSpan));
+
+            if (offset != 0f)
+            {
+                fields.Add(new KeyValuePair<string, ValueNode>(offsetField, ValueNode.Primitive.Float(offset)));
+                spans.Add(new KeyValuePair<string, SourceSpan>(offsetField, argSpan));
+            }
+
+            return true;
+        }
+
+        private static bool TryEvalFloatLiteral(ExpressionSyntax expr, out float value)
+        {
+            if (expr is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.NumericLiteralExpression))
+            {
+                var token = literal.Token.Value;
+                switch (token)
+                {
+                    case float f: value = f; return true;
+                    case double d: value = (float)d; return true;
+                    case int i: value = i; return true;
+                    case long l: value = l; return true;
+                }
+            }
+
+            value = 0f;
             return false;
         }
 

@@ -7,7 +7,7 @@ using SceneBuilder.Authoring;
 // M-Between (spec 45) EditMode geometry coverage: the projected-extent corridor kernel driving
 // Between.Evaluate(), and the ProjectedExtent kernel it calls. Constructs Between directly against a
 // live scene (no builder/sidecar round trip needed for pure geometry, mirroring RoundTripSpatialTests.cs's
-// direct-AddComponent pattern for FitSize/SurfaceSnap). Every anchor and self object is a unit
+// direct-AddComponent pattern for FitSize/AlignTo). Every anchor and self object is a unit
 // (1x1x1) primitive cube (half-extent 0.5 on every axis) unless a test states otherwise, so expected
 // positions below are hand-derived from the corridor formula: fromInnerFace/toInnerFace are the anchors'
 // faces facing each other, ps0/ps1 are self's centre at fraction 0/1 (self's own extent placed flush

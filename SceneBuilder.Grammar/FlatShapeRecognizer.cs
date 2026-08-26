@@ -221,8 +221,8 @@ namespace SceneBuilder.Grammar
                     case "FitSize":
                         ApplyFitSize(args, invocation, ctx);
                         break;
-                    case "SurfaceSnap":
-                        ApplySurfaceSnap(args, invocation, ctx);
+                    case "AlignTo":
+                        ApplyAlignTo(args, invocation, ctx);
                         break;
                     case "Between":
                         ApplyBetween(args, invocation, ctx);

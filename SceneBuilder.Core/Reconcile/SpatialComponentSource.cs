@@ -4,13 +4,13 @@ using SceneBuilder.Core.Model;
 
 namespace SceneBuilder.Core.Reconcile
 {
-    // b4-t1: dedicated .FitSize(...)/.SurfaceSnap(...) fluent-call renderer + FitSize-before-SurfaceSnap
+    // Dedicated .FitSize(...)/.AlignTo(...) fluent-call renderer + FitSize-before-AlignTo
     // canonical ordering.
     internal static class SpatialComponentSource
     {
         internal static bool IsSpatial(string typeFullName) =>
             typeFullName == SpatialComponents.FitSizeTypeName
-            || typeFullName == SpatialComponents.SurfaceSnapTypeName
+            || typeFullName == SpatialComponents.AlignToTypeName
             || typeFullName == SpatialComponents.BetweenTypeName;
 
         // Between.Axis's authoring-form prefix, derived once from BetweenEnums.AxisTypeName's
@@ -19,6 +19,13 @@ namespace SceneBuilder.Core.Reconcile
         private static readonly string BetweenAxisAuthoringPrefix = SpatialComponents.BetweenEnums.AxisTypeName
             .Substring(SpatialComponents.BetweenEnums.AxisTypeName.LastIndexOf('.') + 1)
             .Replace('+', '.');
+
+        // AxisAlign's authoring-form identifier, derived once from AlignToEnums.AxisAlignTypeName
+        // ("SceneBuilder.Authoring.AxisAlign" -> "AxisAlign") rather than a separately hand-typed
+        // literal. Not nested ('+'-free unlike BetweenAxisAuthoringPrefix): AxisAlign is a standalone
+        // authoring value type.
+        private static readonly string AxisAlignAuthoringPrefix = SpatialComponents.AlignToEnums.AxisAlignTypeName
+            .Substring(SpatialComponents.AlignToEnums.AxisAlignTypeName.LastIndexOf('.') + 1);
 
         internal static string RenderStatement(
             string receiver,
@@ -40,6 +47,11 @@ namespace SceneBuilder.Core.Reconcile
             if (typeFullName == SpatialComponents.BetweenTypeName)
             {
                 return RenderBetweenArguments(fields, fieldExpressions);
+            }
+
+            if (typeFullName == SpatialComponents.AlignToTypeName)
+            {
+                return RenderAlignToArguments(fields, fieldExpressions);
             }
 
             return string.Join(", ", fields.Select(kv =>
@@ -79,6 +91,54 @@ namespace SceneBuilder.Core.Reconcile
             throw new System.NotSupportedException($"Between field 'axis' has an unrenderable value: {value}");
         }
 
+        // Fixed argument order (target, x, y, z[, frame][, space]) — never the FieldMap's insertion
+        // order. Only a pinned (Mode != None) axis renders; an offset renders as a chained
+        // `.Offset(f)` call on the axis keyword. frame:/space: render only when present (World is the
+        // only Space value ever stored — TargetLocal is pruned at parse).
+        private static string RenderAlignToArguments(FieldMap fields, IReadOnlyDictionary<string, string>? fieldExpressions)
+        {
+            var parts = new List<string>
+            {
+                $"target: {RenderFieldValue(SpatialComponents.AlignToFields.Target, fields[SpatialComponents.AlignToFields.Target], fieldExpressions)}",
+            };
+
+            foreach (var axis in new[] { SpatialAxis.X, SpatialAxis.Y, SpatialAxis.Z })
+            {
+                SpatialComponents.TryAlignAxisKeyword(axis, out var keyword);
+                SpatialComponents.TryAlignAxis(keyword, out _, out var modeField, out var offsetField);
+
+                if (!fields.TryGetValue(modeField, out var modeValue)
+                    || modeValue is not ValueNode.Enum(_, var members, _)
+                    || members.Count != 1)
+                {
+                    continue;
+                }
+
+                var axisExpr = $"{AxisAlignAuthoringPrefix}.{members[0]}";
+                if (fields.TryGetValue(offsetField, out var offsetValue)
+                    && offsetValue is ValueNode.Primitive(PrimitiveKind.Float, float offset)
+                    && offset != 0f)
+                {
+                    axisExpr = $"{axisExpr}.Offset({SourceExpr.Float(offset)})";
+                }
+
+                parts.Add($"{keyword}: {axisExpr}");
+            }
+
+            if (fields.ContainsKey(SpatialComponents.AlignToFields.Frame))
+            {
+                parts.Add($"frame: {RenderFieldValue(SpatialComponents.AlignToFields.Frame, fields[SpatialComponents.AlignToFields.Frame], fieldExpressions)}");
+            }
+
+            if (fields.TryGetValue(SpatialComponents.AlignToFields.Space, out var spaceValue)
+                && spaceValue is ValueNode.Enum(_, var spaceMembers, _) && spaceMembers.Count == 1)
+            {
+                parts.Add($"space: {SpatialComponents.AlignToEnums.AlignSpaceTypeName.Substring(SpatialComponents.AlignToEnums.AlignSpaceTypeName.LastIndexOf('.') + 1)}.{spaceMembers[0]}");
+            }
+
+            return string.Join(", ", parts);
+        }
+
         // b3-t1: FitSize's `mode` field discriminates which of `value` (aspect: width/height/depth)
         // or `size` (Explicit) is the authored dimension — the generic per-field renderer above can't
         // express that coupling, so FitSize gets its own arm. Never emits a bare `mode:`/`value:`
@@ -105,27 +165,27 @@ namespace SceneBuilder.Core.Reconcile
             throw new System.NotSupportedException($"FitSize field 'mode' has an unrenderable value: {mode}");
         }
 
-        // A SurfaceSnap per-axis enum field (vertical/horizontal/depth holding a ValueNode.Enum)
-        // renders as its authoring bool keyword ("down: true"), the single reverse mapping shared
-        // with the parser via SpatialComponents.TryAxisFromEnumField. Every other field (target:,
-        // FitSize's width/height/depth/size, or a non-literal flag kept under its original bool
-        // keyword as Unsupported) renders via the generic "key: value" form, unchanged.
+        // An AlignTo per-axis mode field (xMode/yMode/zMode holding a ValueNode.Enum) renders as its
+        // authoring axis keyword ("y: AxisAlign.AbutMax"), the single reverse mapping shared with the
+        // parser via SpatialComponents.TryAlignAxisFromModeField. Every other field (target:, frame:,
+        // FitSize's width/height/depth/size, or a non-literal value kept under its original keyword as
+        // Unsupported) renders via the generic "key: value" form, unchanged.
         private static string RenderArgumentKeyValue(
             string typeFullName, string key, ValueNode value, IReadOnlyDictionary<string, string>? fieldExpressions) =>
             RenderKeyValue(key, value, RenderFieldValue(key, value, fieldExpressions));
 
         // Shared by APPEND (RenderArguments, above) and by ComponentPatchApplier's spatial
         // introduce-field arm (a scene-side field newly present, absent from source, patched into
-        // an EXISTING `.SurfaceSnap(...)` call) — same "enum field -> bool keyword" translation, so
-        // an introduced axis (e.g. horizontal=Left set live) renders "left: true", never
-        // "horizontal: <enum literal>".
+        // an EXISTING `.AlignTo(...)` call) — same "mode field -> axis keyword" translation, so an
+        // introduced axis (e.g. yMode=AbutMax set live) renders "y: AxisAlign.AbutMax", never
+        // "yMode: <enum literal>".
         internal static string RenderKeyValue(string key, ValueNode value, string valueExpr)
         {
             if (value is ValueNode.Enum(_, var members, _)
                 && members.Count == 1
-                && SpatialComponents.TryAxisFromEnumField(key, members[0], out var keyword))
+                && SpatialComponents.TryAlignAxisFromModeField(key, out var keyword))
             {
-                return $"{keyword}: true";
+                return $"{keyword}: {AxisAlignAuthoringPrefix}.{members[0]}";
             }
 
             return $"{key}: {valueExpr}";
@@ -135,7 +195,7 @@ namespace SceneBuilder.Core.Reconcile
         {
             if (typeFullName == SpatialComponents.FitSizeTypeName) return "FitSize";
             if (typeFullName == SpatialComponents.BetweenTypeName) return "Between";
-            return "SurfaceSnap";
+            return "AlignTo";
         }
 
         // Reuses SourceExpr so float/vec formatting is byte-identical to the parser's accepted
@@ -163,9 +223,9 @@ namespace SceneBuilder.Core.Reconcile
                 _ => SourceExpr.ValueNodeLiteral(value), // total fallback (e.g. Unsupported)
             };
 
-        // Stable canonical order: a FitSize always precedes a SurfaceSnap; all other components keep
+        // Stable canonical order: a FitSize always precedes an AlignTo; all other components keep
         // their relative positions (only the spatial pair is pinned). At most one of each per
-        // node in practice; general form pins every FitSize ahead of the first SurfaceSnap.
+        // node in practice; general form pins every FitSize ahead of the first AlignTo.
         internal static ComponentData[] OrderForEmit(ComponentData[] components) =>
             components.OrderBy(RankFor).ToArray();
 
@@ -176,7 +236,7 @@ namespace SceneBuilder.Core.Reconcile
                 return -1;
             }
 
-            if (component.Type.FullName == SpatialComponents.SurfaceSnapTypeName)
+            if (component.Type.FullName == SpatialComponents.AlignToTypeName)
             {
                 return 1;
             }

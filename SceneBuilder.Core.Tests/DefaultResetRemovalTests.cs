@@ -103,10 +103,10 @@ public class DefaultResetScene1 : ISceneDefinition
             Assert.Equal(parsed.FieldArgumentSpans[componentLogicalId]["m_Mass"], removal.ValueSpan);
         }
 
-        // Closed-grammar guard: a FitSize/SurfaceSnap field returning to its
+        // Closed-grammar guard: a FitSize/AlignTo field returning to its
         // default has NO representable removal (the fluent call throws on an empty argument list),
         // so the reconciler must report a located conflict and emit NEITHER a PatchComponentField
-        // NOR a RemoveComponentField -- never the "vertical: " empty-argument splice today's patch
+        // NOR a RemoveComponentField -- never the "yMode: " empty-argument splice today's patch
         // path produces.
         [Fact]
         public void Reconcile_ClosedGrammarFieldReturnedToDefault_ReportsConflictAndEmitsNoEdit()
@@ -116,40 +116,45 @@ public class DefaultResetScene2 : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
+        var floor = scene.Add(""Floor"");
         var crate = scene.Add(""Crate"");
-        crate.SurfaceSnap(down: true);
+        crate.AlignTo(floor, y: AxisAlign.AbutMax);
     }
 }
 ";
             var parsed = BuilderParser.Parse(source);
-            var crateNode = Assert.Single(parsed.Model.Roots);
+            var floorNode = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
+            var crateNode = Assert.Single(parsed.Model.Roots, r => r.Name == "Crate");
             var component = Assert.Single(crateNode.Components);
 
             var map = new IdentityMap
             {
                 Entries = new[]
                 {
+                    new IdentityMapEntry { LogicalId = floorNode.LogicalId, GlobalObjectId = "goid-floor", Kind = "GameObject" },
                     new IdentityMapEntry { LogicalId = crateNode.LogicalId, GlobalObjectId = "goid-crate", Kind = "GameObject" },
                     new IdentityMapEntry
                     {
                         LogicalId = component.LogicalId,
                         GlobalObjectId = "",
                         Kind = "Component",
-                        ComponentType = SpatialComponents.SurfaceSnapTypeName,
+                        ComponentType = SpatialComponents.AlignToTypeName,
                         ParentLogicalId = crateNode.LogicalId,
                     },
                 },
             };
 
-            // Live axis reset to None -- the type default -- while source still authors "down".
+            // Live axis reset to None -- the type default -- while source still authors "y: AxisAlign.AbutMax".
             var noneEnum = new ValueNode.Enum(
-                SpatialComponents.SurfaceSnapEnums.VerticalTypeName, new[] { SpatialComponents.SurfaceSnapEnums.None }, false);
+                SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.None }, false);
+            var targetUnchanged = new ValueNode.ObjectRef(floorNode.LogicalId);
 
             var snapshot = new SceneSnapshot
             {
                 SchemaVersion = 1,
                 Roots = new[]
                 {
+                    new SnapshotNode { GlobalObjectId = "goid-floor", Name = "Floor" },
                     new SnapshotNode
                     {
                         GlobalObjectId = "goid-crate",
@@ -159,8 +164,12 @@ public class DefaultResetScene2 : ISceneDefinition
                             new ComponentData
                             {
                                 LogicalId = "unused",
-                                Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName),
-                                Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Vertical, noneEnum) }),
+                                Type = new TypeRef(SpatialComponents.AlignToTypeName),
+                                Fields = new FieldMap(new[]
+                                {
+                                    new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, targetUnchanged),
+                                    new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.YMode, noneEnum),
+                                }),
                             },
                         },
                     },
@@ -170,8 +179,8 @@ public class DefaultResetScene2 : ISceneDefinition
                     new ComponentData
                     {
                         LogicalId = "template",
-                        Type = new TypeRef(SpatialComponents.SurfaceSnapTypeName),
-                        Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(SpatialComponents.SurfaceSnapFields.Vertical, noneEnum) }),
+                        Type = new TypeRef(SpatialComponents.AlignToTypeName),
+                        Fields = new FieldMap(new[] { new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.YMode, noneEnum) }),
                     },
                 },
             };

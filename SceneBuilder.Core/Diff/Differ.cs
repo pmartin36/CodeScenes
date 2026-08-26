@@ -205,9 +205,9 @@ namespace SceneBuilder.Core.Diff
 
         // Unmasked whole-transform diff (revises spec 19's per-axis masking — see spec 23).
         // The scene->code direction (Reconciler.MaskDriven / SceneSnapshotReader.DeriveDrivenChannels)
-        // holds a driven FitSize/SurfaceSnap channel back from source; here, the code->scene direction
+        // holds a driven FitSize/AlignTo channel back from source; here, the code->scene direction
         // emits the full authored transform when it drifts from the live snapshot on any channel the
-        // model itself claims driven, so FitSize/SurfaceSnap re-drive from the authored start every
+        // model itself claims driven, so FitSize/AlignTo re-drive from the authored start every
         // sync. The ONE exception is the rect branch below: a base Position/Scale axis
         // driven by something the model does NOT author (e.g. a CanvasScaler) is held to the live
         // value instead of clobbered, because nothing here re-baselines a driver the plugin does not
@@ -223,7 +223,7 @@ namespace SceneBuilder.Core.Diff
             // driver the model's own DrivenChannels does not claim (RectTransformDiff.ForeignDrivenBase)
             // is additionally held to the live value — a Canvas/CanvasScaler re-drives its own scale and
             // the plugin cannot re-baseline it, so writing the authored default would dirty the scene on
-            // every sync. A base channel driven on BOTH sides (authored FitSize/SurfaceSnap, spec 23) is
+            // every sync. A base channel driven on BOTH sides (authored FitSize/AlignTo, spec 23) is
             // unaffected: the full authored value is still emitted because the adapter re-baselines that
             // driver on write.
             if (RectTransformDiff.Applies(desired, actual))

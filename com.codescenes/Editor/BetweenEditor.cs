@@ -7,7 +7,7 @@ namespace SceneBuilder.Editor
     /// Custom inspector for <see cref="Between"/>. Shows <see cref="Between.from"/>,
     /// <see cref="Between.to"/>, <see cref="Between.fraction"/>, <see cref="Between.axis"/>, and the
     /// optional <see cref="Between.orientation"/> override. Every field is always shown, mirroring
-    /// <see cref="SurfaceSnapEditor"/>.
+    /// <see cref="AlignToEditor"/>.
     /// </summary>
     [CustomEditor(typeof(Between))]
     public sealed class BetweenEditor : UnityEditor.Editor

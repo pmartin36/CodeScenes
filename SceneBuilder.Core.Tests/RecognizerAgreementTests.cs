@@ -138,12 +138,13 @@ public class ValidFitSizeScene : ISceneDefinition
     }
 }
 ");
-            yield return Case("Valid_SurfaceSnap", @"
-public class ValidSurfaceSnapScene : ISceneDefinition
+            yield return Case("Valid_AlignTo", @"
+public class ValidAlignToScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").SurfaceSnap(down: true);
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, y: AxisAlign.AbutMax);
     }
 }
 ");
@@ -289,40 +290,47 @@ public class FitSizeNoneScene : ISceneDefinition
 }
 ");
 
-            // ---- SurfaceSnap structural errors -----------------------------------------------------
-            yield return Case("SurfaceSnap_UnnamedArg", @"
-public class SurfaceSnapUnnamedScene : ISceneDefinition
+            // ---- AlignTo structural errors ----------------------------------------------------------
+            yield return Case("AlignTo_SecondArgUnnamed", @"
+public class AlignToSecondArgUnnamedScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").SurfaceSnap(true);
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, true);
     }
 }
 ");
-            yield return Case("SurfaceSnap_UnknownArg", @"
-public class SurfaceSnapUnknownArgScene : ISceneDefinition
+            yield return Case("AlignTo_UnknownArg", @"
+public class AlignToUnknownArgScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").SurfaceSnap(bogus: true);
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, bogus: true);
     }
 }
 ");
-            yield return Case("SurfaceSnap_Contradiction", @"
-public class SurfaceSnapContradictionScene : ISceneDefinition
+
+            // ---- AlignTo value-level facts (both sides ACCEPT — non-literal/unknown values are
+            // TOTAL, never a structural violation; the parser stores them Unsupported instead). -------
+            yield return Case("AlignTo_NonLiteralOffsetAccepted", @"
+public class AlignToNonLiteralOffsetScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").SurfaceSnap(up: true, down: true);
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, y: AxisAlign.AbutMax.Offset(GetOffset()));
     }
 }
 ");
-            yield return Case("SurfaceSnap_None", @"
-public class SurfaceSnapNoneScene : ISceneDefinition
+            yield return Case("AlignTo_UnknownPresetMemberAccepted", @"
+public class AlignToUnknownPresetMemberScene : ISceneDefinition
 {
     public void Build(SceneRoot scene)
     {
-        scene.Add(""Crate"").SurfaceSnap();
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, y: AxisAlign.Bogus);
     }
 }
 ");
@@ -471,8 +479,8 @@ public class ValidSetRefNullScene : ISceneDefinition
 
             // BuilderParser.Spatial.cs sites (the combinations not already in the corpus) ------------
             yield return Body("FitSize_AspectPlusExplicit", @"scene.Add(""A"").FitSize(width: 2f, size: (1,1,1));");
-            yield return Body("SurfaceSnap_LeftRight", @"scene.Add(""A"").SurfaceSnap(left: true, right: true);");
-            yield return Body("SurfaceSnap_ForwardBack", @"scene.Add(""A"").SurfaceSnap(forward: true, back: true);");
+            yield return Body("AlignTo_UnnamedThirdArg", @"var floor = scene.Add(""Floor""); scene.Add(""A"").AlignTo(floor, x: AxisAlign.AbutMin, floor);");
+            yield return Body("AlignTo_LegacyUpKeywordRejected", @"var floor = scene.Add(""Floor""); scene.Add(""A"").AlignTo(floor, up: true);");
 
             // ComponentRef<T> / .OnClick(...) ----------------------------------------------------------
             yield return Body("Ref_NotLastInChain", @"var x = scene.Add(""A"").Ref<Rigidbody>().Tag(""y"");");
@@ -565,6 +573,27 @@ public class {name}Scene : ISceneDefinition
         public void Analyze_WellFormedSetRefCall_ReportsZeroViolations(string caseName)
         {
             var source = (string)Corpus().Single(c => (string)c[0] == caseName)[1];
+
+            var tree = CSharpSyntaxTree.ParseText(source);
+            var root = tree.GetRoot();
+            var buildMethod = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .Single(m => m.Identifier.Text == "Build");
+            var sceneParamName = buildMethod.ParameterList.Parameters[0].Identifier.Text;
+            var body = buildMethod.Body!;
+
+            var violations = FlatShapeRecognizer.Analyze(body, sceneParamName);
+
+            Assert.Empty(violations);
+        }
+
+        // The Corpus agreement Theory only proves the two sides AGREE -- an `.AlignTo(...)` call both
+        // sides reject would satisfy it without AlignTo ever being accepted. This pins the actual
+        // acceptance: a well-formed `.AlignTo(target, y: AxisAlign.AbutMax)` call reports ZERO shape
+        // violations.
+        [Fact]
+        public void Analyze_WellFormedAlignToCall_ReportsZeroViolations()
+        {
+            var source = (string)Corpus().Single(c => (string)c[0] == "Valid_AlignTo")[1];
 
             var tree = CSharpSyntaxTree.ParseText(source);
             var root = tree.GetRoot();

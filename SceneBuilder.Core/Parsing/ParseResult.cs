@@ -67,7 +67,7 @@ namespace SceneBuilder.Core.Parsing
         public IReadOnlyList<string> Usings { get; init; } = new List<string>();
 
         // b3-t5: the LogicalId of every parsed component whose source construct is a CHAINED call
-        // (`.Component<T>`/`.FitSize`/`.SurfaceSnap` inside an `Add`/`Instance` chain, a
+        // (`.Component<T>`/`.FitSize`/`.AlignTo` inside an `Add`/`Instance` chain, a
         // multi-component chain, or an expression-bodied configure lambda) rather than its own
         // statement (`crate.Component<T>(...);`). A statement-scoped edit
         // (RemoveStatement/ReorderStatement) anchored on one of these must never resolve against

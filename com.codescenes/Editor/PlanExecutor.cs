@@ -486,14 +486,14 @@ namespace SceneBuilder.Editor
             {
                 case ValueNode.Vec3 v when op.Path == "m_LocalPosition":
                     t.localPosition = new Vector3(v.Value.X, v.Value.Y, v.Value.Z);
-                    // This raw write bypasses SurfaceSnap.Evaluate() entirely (it may land on a
+                    // This raw write bypasses AlignTo.Evaluate() entirely (it may land on a
                     // frozen driven-channel placeholder far from the live resolved position, e.g. a
                     // rebuild after Reconciler.MaskDriven froze the source's Y). Reset the sibling
                     // component's self-write baseline so its NEXT Evaluate() treats this materialize
                     // write as its own fresh starting point ("the components drive from that start",
                     // spec 23) rather than sticky-detaching off a stale pre-rebuild baseline as if it
                     // were a large manual drag.
-                    t.GetComponent<SurfaceSnap>()?.ResetBaseline();
+                    t.GetComponent<AlignTo>()?.ResetBaseline();
                     // Symmetric reset for Between (spec 45): the raw m_LocalPosition write is the
                     // plugin's own, not a user drag, so its next Evaluate() re-derives from this fresh
                     // baseline instead of treating the rebuild as a manual move.
@@ -501,7 +501,7 @@ namespace SceneBuilder.Editor
                     break;
                 case ValueNode.Vec3 v when op.Path == "m_LocalScale":
                     t.localScale = new Vector3(v.Value.X, v.Value.Y, v.Value.Z);
-                    // Symmetric to the m_LocalPosition/SurfaceSnap reset above: this raw materialize
+                    // Symmetric to the m_LocalPosition/AlignTo reset above: this raw materialize
                     // write of the full authored scale is the plugin's own, not a user rescale — reset
                     // FitSize's self-write baseline so its next Evaluate() re-derives from it instead of
                     // back-solving a WRONG value/size into source on a rebuild of a persisted object.

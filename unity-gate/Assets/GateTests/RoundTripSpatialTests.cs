@@ -9,10 +9,10 @@ using SceneBuilder.Core.Model;
 using SceneBuilder.Core.Plan;
 using SceneBuilder.Editor;
 
-// M-Spatial (FitSize/SurfaceSnap) EditMode geometry coverage. b5-t1 is this file's minimal slice — the exact
-// world-size solve and the serialized-field-name contract for FitSize. Constructs the MonoBehaviour
-// directly against a live scene (no builder/sidecar round trip needed for pure geometry). The full
-// checklist suite (SurfaceSnap, build-strip, ordering, disabled/re-snap, fallback) lands in b5-t2..b5-t4.
+// M-Spatial (FitSize/AlignTo) EditMode geometry coverage: the exact world-size solve and the
+// serialized-field-name contract for FitSize, plus the full AlignTo/build-strip/ordering/
+// disabled/re-snap/fallback checklist. Constructs the MonoBehaviour directly against a live scene
+// (no builder/sidecar round trip needed for pure geometry).
 public class RoundTripSpatialTests
 {
     private const float Tol = 1e-3f;
@@ -47,7 +47,7 @@ public class RoundTripSpatialTests
     // 2. The serialized field names ARE the write contract (SerializedFieldBridge writes M3 field-map
     //    keys by name) — they must literally match SpatialComponents.FitSizeFields.*. b3-t1: migrated
     //    from width/height/depth/size floats to mode(enum)/value/size; also pins the FQN + member-name
-    //    + None-is-index-0 reflection contract (mirrors SurfaceSnap_SerializedFields_... above).
+    //    + None-is-index-0 reflection contract (mirrors AlignTo_SerializedFields_... above).
     [Test]
     public void FitSize_SerializedFields_MatchSpatialComponentsFieldNameKeys()
     {
@@ -105,11 +105,11 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 4. b5-t2 minimal slice: down-snap rests the bottom face of the world Renderer.bounds flush on a
+    // 4. Down-align rests the bottom face of the world Renderer.bounds flush on a
     //    floor collider's top face, leaving the free axes (X/Z) untouched — pivot-agnostic because the
     //    delta is applied to transform.position on the snapped axis only.
     [Test]
-    public void SurfaceSnap_DownOnFloor_RestsBottomFaceOnFloorTop()
+    public void AlignTo_DownOnFloor_RestsBottomFaceOnFloorTop()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -119,8 +119,8 @@ public class RoundTripSpatialTests
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
 
             go.transform.position = new Vector3(1.5f, 5f, -2f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
             snapper.Evaluate();
 
@@ -137,66 +137,70 @@ public class RoundTripSpatialTests
     }
 
     // 5. The serialized field names ARE the write contract — they must literally match
-    //    SpatialComponents.SurfaceSnapFields.* (subset check: internal book-keeping fields are permitted).
-    //    b2-t1: migrated to the per-axis enum fields; also pins the fragile Core-string<->runtime-type
-    //    contract the ValueNode.Enum idempotence depends on (research.md's REFINED finding) — the enum
-    //    type FullName + member names + None-is-index-0 must equal SpatialComponents.SurfaceSnapEnums.
+    //    SpatialComponents.AlignToFields.* (subset check: internal book-keeping fields are permitted).
+    //    Also pins the fragile Core-string<->runtime-type contract the ValueNode.Enum idempotence
+    //    depends on — the Mode enum type FullName + member names + None-is-index-0, plus the AlignSpace
+    //    contract, must equal SpatialComponents.AlignToEnums.
     [Test]
-    public void SurfaceSnap_SerializedFields_MatchSpatialComponentsFieldNameKeys()
+    public void AlignTo_SerializedFields_MatchSpatialComponentsFieldNameKeys()
     {
-        var type = typeof(SurfaceSnap);
+        var type = typeof(AlignTo);
         string[] required =
         {
-            SpatialComponents.SurfaceSnapFields.Vertical,
-            SpatialComponents.SurfaceSnapFields.Horizontal,
-            SpatialComponents.SurfaceSnapFields.Depth,
-            SpatialComponents.SurfaceSnapFields.Target,
+            SpatialComponents.AlignToFields.XMode,
+            SpatialComponents.AlignToFields.XOffset,
+            SpatialComponents.AlignToFields.YMode,
+            SpatialComponents.AlignToFields.YOffset,
+            SpatialComponents.AlignToFields.ZMode,
+            SpatialComponents.AlignToFields.ZOffset,
+            SpatialComponents.AlignToFields.Target,
+            SpatialComponents.AlignToFields.Frame,
+            SpatialComponents.AlignToFields.Space,
+            SpatialComponents.AlignToFields.CaptureThreshold,
         };
 
         foreach (var fieldName in required)
         {
             var field = type.GetField(fieldName);
-            Assert.IsNotNull(field, $"SurfaceSnap must expose a public field named '{fieldName}' (SpatialComponents.SurfaceSnapFields).");
+            Assert.IsNotNull(field, $"AlignTo must expose a public field named '{fieldName}' (SpatialComponents.AlignToFields).");
         }
 
-        var targetField = type.GetField(SpatialComponents.SurfaceSnapFields.Target);
-        Assert.AreEqual(typeof(Transform), targetField.FieldType, "SurfaceSnap.target must be a Transform.");
+        var targetField = type.GetField(SpatialComponents.AlignToFields.Target);
+        Assert.AreEqual(typeof(Transform), targetField.FieldType, "AlignTo.target must be a Transform.");
+        var frameField = type.GetField(SpatialComponents.AlignToFields.Frame);
+        Assert.AreEqual(typeof(Transform), frameField.FieldType, "AlignTo.frame must be a Transform.");
+        var spaceField = type.GetField(SpatialComponents.AlignToFields.Space);
+        Assert.AreEqual(typeof(AlignSpace), spaceField.FieldType, "AlignTo.space must be an AlignSpace.");
 
-        Assert.AreEqual(SpatialComponents.SurfaceSnapEnums.VerticalTypeName, typeof(SurfaceSnap.Vertical).FullName,
-            "SurfaceSnap.Vertical's FullName must equal SpatialComponents.SurfaceSnapEnums.VerticalTypeName.");
-        Assert.AreEqual(SpatialComponents.SurfaceSnapEnums.HorizontalTypeName, typeof(SurfaceSnap.Horizontal).FullName,
-            "SurfaceSnap.Horizontal's FullName must equal SpatialComponents.SurfaceSnapEnums.HorizontalTypeName.");
-        Assert.AreEqual(SpatialComponents.SurfaceSnapEnums.DepthTypeName, typeof(SurfaceSnap.Depth).FullName,
-            "SurfaceSnap.Depth's FullName must equal SpatialComponents.SurfaceSnapEnums.DepthTypeName.");
+        Assert.AreEqual(SpatialComponents.AlignToEnums.ModeTypeName, typeof(AlignTo.Mode).FullName,
+            "AlignTo.Mode's FullName must equal SpatialComponents.AlignToEnums.ModeTypeName.");
+        CollectionAssert.AreEqual(
+            SpatialComponents.AlignToEnums.Members,
+            System.Enum.GetNames(typeof(AlignTo.Mode)),
+            "AlignTo.Mode member names/order must equal SpatialComponents.AlignToEnums.Members (None first == default == prunable).");
 
+        Assert.AreEqual(SpatialComponents.AlignToEnums.AlignSpaceTypeName, typeof(AlignSpace).FullName,
+            "AlignSpace's FullName must equal SpatialComponents.AlignToEnums.AlignSpaceTypeName.");
         CollectionAssert.AreEqual(
-            new[] { SpatialComponents.SurfaceSnapEnums.None, SpatialComponents.SurfaceSnapEnums.Up, SpatialComponents.SurfaceSnapEnums.Down },
-            System.Enum.GetNames(typeof(SurfaceSnap.Vertical)),
-            "SurfaceSnap.Vertical member names/order must equal SpatialComponents.SurfaceSnapEnums (None first == default == prunable).");
-        CollectionAssert.AreEqual(
-            new[] { SpatialComponents.SurfaceSnapEnums.None, SpatialComponents.SurfaceSnapEnums.Left, SpatialComponents.SurfaceSnapEnums.Right },
-            System.Enum.GetNames(typeof(SurfaceSnap.Horizontal)),
-            "SurfaceSnap.Horizontal member names/order must equal SpatialComponents.SurfaceSnapEnums (None first == default == prunable).");
-        CollectionAssert.AreEqual(
-            new[] { SpatialComponents.SurfaceSnapEnums.None, SpatialComponents.SurfaceSnapEnums.Forward, SpatialComponents.SurfaceSnapEnums.Back },
-            System.Enum.GetNames(typeof(SurfaceSnap.Depth)),
-            "SurfaceSnap.Depth member names/order must equal SpatialComponents.SurfaceSnapEnums (None first == default == prunable).");
+            SpatialComponents.AlignToEnums.SpaceMembers,
+            System.Enum.GetNames(typeof(AlignSpace)),
+            "AlignSpace member names/order must equal SpatialComponents.AlignToEnums.SpaceMembers.");
     }
 
     // 6. No Renderer/mesh bounds to snap ⇒ a located error naming the node, never a silent no-op or an
     //    exception, and the transform must be left untouched (no bounds-of-nothing guess).
     [Test]
-    public void SurfaceSnap_NoRenderer_LogsLocatedErrorAndDoesNotMove()
+    public void AlignTo_NoRenderer_LogsLocatedErrorAndDoesNotMove()
     {
-        var go = new GameObject("NoRendererSurfaceSnap");
+        var go = new GameObject("NoRendererAlignTo");
         try
         {
             var originalPosition = new Vector3(3f, 4f, 5f);
             go.transform.position = originalPosition;
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
-            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoRendererSurfaceSnap"));
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("NoRendererAlignTo"));
             snapper.Evaluate();
 
             Assert.AreEqual(originalPosition, go.transform.position, "No Renderer must never write a position.");
@@ -208,12 +212,12 @@ public class RoundTripSpatialTests
     }
 
     // 7. Build-strip (b5-t3): a real player build must bake the current transform then destroy the
-    //    FitSize/SurfaceSnap components entirely, leaving no missing-script stub. Drives the internal
+    //    FitSize/AlignTo components entirely, leaving no missing-script stub. Drives the internal
     //    StripScene(scene) entry point directly — BuildReport is not a ScriptableObject and cannot be
     //    constructed via CreateInstance in EditMode (confirmed CS0311), so this is the documented
     //    fallback for exercising the non-null-report path (same observable effect as OnProcessScene).
     [Test]
-    public void BuildStrip_WithReport_RemovesFitSizeAndSurfaceSnap_NoMissingScript()
+    public void BuildStrip_WithReport_RemovesFitSizeAndAlignTo_NoMissingScript()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -226,13 +230,13 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.mode = FitSize.Mode.Height;
             sizer.value = 2f;
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
             SpatialBuildStripper.StripScene(go.scene);
 
             Assert.IsNull(go.GetComponent<FitSize>(), "Build strip must remove FitSize.");
-            Assert.IsNull(go.GetComponent<SurfaceSnap>(), "Build strip must remove SurfaceSnap.");
+            Assert.IsNull(go.GetComponent<AlignTo>(), "Build strip must remove AlignTo.");
             Assert.AreEqual(0, GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(go),
                 "Build strip must leave no missing-script stub.");
         }
@@ -244,7 +248,7 @@ public class RoundTripSpatialTests
     }
 
     // 8. The strip must bake before destroying: the object's final world geometry (post FitSize resize,
-    //    post SurfaceSnap snap) must survive component removal exactly as if the components were still live.
+    //    post AlignTo snap) must survive component removal exactly as if the components were still live.
     [Test]
     public void BuildStrip_WithReport_KeepsBakedTransform()
     {
@@ -260,8 +264,8 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.mode = FitSize.Mode.Height;
             sizer.value = 2f;
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
             SpatialBuildStripper.StripScene(go.scene);
 
@@ -287,13 +291,13 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.mode = FitSize.Mode.Height;
             sizer.value = 2f;
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
             new SpatialBuildStripper().OnProcessScene(go.scene, null);
 
             Assert.IsNotNull(go.GetComponent<FitSize>(), "Null report (editor play) must leave FitSize in place.");
-            Assert.IsNotNull(go.GetComponent<SurfaceSnap>(), "Null report (editor play) must leave SurfaceSnap in place.");
+            Assert.IsNotNull(go.GetComponent<AlignTo>(), "Null report (editor play) must leave AlignTo in place.");
         }
         finally
         {
@@ -306,7 +310,7 @@ public class RoundTripSpatialTests
 
     /// <summary>8-vert/12-tri axis-aligned box mesh with an OFFSET centre, so
     /// <c>Renderer.bounds.center != transform.position</c> — the only way to produce genuine pivot
-    /// variance for the three-pivot SurfaceSnap test (a primitive cube is always centre-pivoted).</summary>
+    /// variance for the three-pivot AlignTo test (a primitive cube is always centre-pivoted).</summary>
     private static Mesh MakeBoxMesh(Vector3 center, Vector3 size)
     {
         Vector3 h = size * 0.5f;
@@ -417,7 +421,7 @@ public class RoundTripSpatialTests
     // 4. The headline pivot-agnostic case: three objects with different mesh pivots (feet/centre/head)
     //    down-snapped over the same floor must ALL land their bottom face flush, regardless of pivot.
     [Test]
-    public void SurfaceSnap_DownAcrossThreePivots_AllRestBottomOnFloor()
+    public void AlignTo_DownAcrossThreePivots_AllRestBottomOnFloor()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var feet = new GameObject("FeetPivot");
@@ -442,8 +446,8 @@ public class RoundTripSpatialTests
 
             foreach (var go in new[] { feet, centre, head })
             {
-                var snapper = go.AddComponent<SurfaceSnap>();
-                snapper.vertical = SurfaceSnap.Vertical.Down;
+                var snapper = go.AddComponent<AlignTo>();
+                snapper.yMode = AlignTo.Mode.AbutMax;
                 snapper.Evaluate();
             }
 
@@ -469,7 +473,7 @@ public class RoundTripSpatialTests
 
     // 5. Up-snap against a ceiling: the top face must land flush against the ceiling's bottom face.
     [Test]
-    public void SurfaceSnap_UpOntoCeiling_RestsTopFaceOnCeilingBottom()
+    public void AlignTo_UpOntoCeiling_RestsTopFaceOnCeilingBottom()
     {
         var ceiling = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -479,8 +483,8 @@ public class RoundTripSpatialTests
             float ceilingBottom = ceiling.GetComponent<Renderer>().bounds.min.y;
 
             go.transform.position = new Vector3(0f, 2f, 0f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Up;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMin;
 
             snapper.Evaluate();
 
@@ -497,7 +501,7 @@ public class RoundTripSpatialTests
     // 6. Corner: down+left combine must land BOTH the bottom face on the floor AND the left face flush
     //    against the wall's inner (right) face.
     [Test]
-    public void SurfaceSnap_DownLeftCorner_RestsBottomAndLeftFacesFlush()
+    public void AlignTo_DownLeftCorner_RestsBottomAndLeftFacesFlush()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var leftWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -511,9 +515,9 @@ public class RoundTripSpatialTests
             float leftWallInner = leftWall.GetComponent<Renderer>().bounds.max.x;
 
             go.transform.position = new Vector3(-1f, 5f, 0f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
-            snapper.horizontal = SurfaceSnap.Horizontal.Left;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
+            snapper.xMode = AlignTo.Mode.AbutMax;
 
             snapper.Evaluate();
 
@@ -529,10 +533,10 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 7. Ordering: FitSize resizes first, THEN SurfaceSnap reads the post-resize bounds — proving SurfaceSnap
+    // 7. Ordering: FitSize resizes first, THEN AlignTo reads the post-resize bounds — proving AlignTo
     //    never rests on the pre-FitSize size.
     [Test]
-    public void FitSizeThenSurfaceSnap_Ordering_PostResizeBottomRestsOnFloor()
+    public void FitSizeThenAlignTo_Ordering_PostResizeBottomRestsOnFloor()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -545,15 +549,15 @@ public class RoundTripSpatialTests
             var sizer = go.AddComponent<FitSize>();
             sizer.mode = FitSize.Mode.Height;
             sizer.value = 1.2f;
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
             sizer.Evaluate();
             snapper.Evaluate();
 
             var bounds = go.GetComponent<Renderer>().bounds;
             Assert.AreEqual(1.2f, bounds.size.y, Tol, "FitSize must still resize to the authored height.");
-            Assert.AreEqual(floorTop, bounds.min.y, Tol, "SurfaceSnap must rest the POST-resize bottom face on the floor.");
+            Assert.AreEqual(floorTop, bounds.min.y, Tol, "AlignTo must rest the POST-resize bottom face on the floor.");
         }
         finally
         {
@@ -565,7 +569,7 @@ public class RoundTripSpatialTests
     // 8. Live re-evaluation: after the floor moves, a fresh Evaluate() must track the NEW floor top
     //    (no Build/reconstruction needed).
     [Test]
-    public void SurfaceSnap_FloorMovesUp_ReEvaluateTracksNewFloorTop()
+    public void AlignTo_FloorMovesUp_ReEvaluateTracksNewFloorTop()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -574,8 +578,8 @@ public class RoundTripSpatialTests
             floor.transform.position = Vector3.zero;
 
             go.transform.position = new Vector3(0f, 5f, 0f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
             snapper.Evaluate();
 
             floor.transform.position = new Vector3(0f, 1f, 0f);
@@ -596,7 +600,7 @@ public class RoundTripSpatialTests
     // 9. Collider-less fallback: a floor with a Renderer but no Collider must still resolve the surface
     //    via the renderer-bounds fallback scan (no raycast hit possible).
     [Test]
-    public void SurfaceSnap_FloorWithoutCollider_FallbackScanStillLands()
+    public void AlignTo_FloorWithoutCollider_FallbackScanStillLands()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -607,8 +611,8 @@ public class RoundTripSpatialTests
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
 
             go.transform.position = new Vector3(0f, 5f, 0f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
             snapper.Evaluate();
 
@@ -625,7 +629,7 @@ public class RoundTripSpatialTests
     // 10. Explicit target override: a nearer obstacle would otherwise win the raycast, but an explicit
     //     target must be used instead of the raycast hit.
     [Test]
-    public void SurfaceSnap_ExplicitTarget_SnapsToTargetNotRaycastHit()
+    public void AlignTo_ExplicitTarget_SnapsToTargetNotRaycastHit()
     {
         var obstacle = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var ceiling = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -637,8 +641,8 @@ public class RoundTripSpatialTests
             float ceilingBottom = ceiling.GetComponent<Renderer>().bounds.min.y;
 
             go.transform.position = new Vector3(0f, 2f, 0f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Up;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMin;
             snapper.target = ceiling.transform;
 
             snapper.Evaluate();
@@ -657,7 +661,7 @@ public class RoundTripSpatialTests
     // 17. Back-snap: the object's −Z (back) face must land flush against the wall-behind's inner
     //     (+Z / max.z) face — i.e. bounds.min.z, NOT bounds.max.z (research.md correction).
     [Test]
-    public void SurfaceSnap_BackAgainstWall_RestsBackFaceFlush()
+    public void AlignTo_BackAgainstWall_RestsBackFaceFlush()
     {
         var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -667,8 +671,8 @@ public class RoundTripSpatialTests
             float wallInner = wall.GetComponent<Renderer>().bounds.max.z;
 
             go.transform.position = new Vector3(0f, 0f, 2f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.depth = SurfaceSnap.Depth.Back;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.zMode = AlignTo.Mode.AbutMax;
 
             snapper.Evaluate();
 
@@ -685,7 +689,7 @@ public class RoundTripSpatialTests
     // 17 (combine). down+back two-axis combine: both the bottom face on the floor AND the back face
     //    flush against the wall must land simultaneously.
     [Test]
-    public void SurfaceSnap_DownBack_TwoAxisCombineRestsBottomAndBackFlush()
+    public void AlignTo_DownBack_TwoAxisCombineRestsBottomAndBackFlush()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -705,9 +709,9 @@ public class RoundTripSpatialTests
             // Directly above the floor's x/z footprint so the down raycast lands on the floor, not a
             // fallback scan (see item 4's fix for the same reasoning).
             go.transform.position = new Vector3(0f, 5f, 0f);
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
-            snapper.depth = SurfaceSnap.Depth.Back;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
+            snapper.zMode = AlignTo.Mode.AbutMax;
 
             snapper.Evaluate();
 
@@ -749,10 +753,10 @@ public class RoundTripSpatialTests
         }
     }
 
-    // 19 (SurfaceSnap half). Disabled SurfaceSnap must drive nothing — a manual position set while disabled
+    // 19 (AlignTo half). Disabled AlignTo must drive nothing — a manual position set while disabled
     //    must stand untouched through Evaluate().
     [Test]
-    public void SurfaceSnap_Disabled_ManualMoveStands()
+    public void AlignTo_Disabled_ManualMoveStands()
     {
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -760,8 +764,8 @@ public class RoundTripSpatialTests
         {
             floor.transform.position = Vector3.zero;
 
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
             snapper.enabled = false;
 
             var manualPosition = new Vector3(3f, 7f, 1f);
@@ -769,7 +773,7 @@ public class RoundTripSpatialTests
 
             snapper.Evaluate();
 
-            Assert.AreEqual(manualPosition, go.transform.position, "A disabled SurfaceSnap must never write position; the manual position must stand.");
+            Assert.AreEqual(manualPosition, go.transform.position, "A disabled AlignTo must never write position; the manual position must stand.");
         }
         finally
         {
@@ -778,12 +782,12 @@ public class RoundTripSpatialTests
         }
     }
 
-    // ---- b6-t1: snapshot read stamps DrivenChannels from live enabled FitSize/SurfaceSnap -------------
+    // ---- Snapshot read stamps DrivenChannels from live enabled FitSize/AlignTo ---------------------
     // These stamp SnapshotNode.Transform.DrivenChannels — the "one subtle seam" the spec flags: an
     // enabled component must suppress the edit-path diff on its owned axes; a disabled one must
     // release them so a manual edit still syncs (Differ.cs:162 consumes this value). These tests
     // assert ONLY on the derived DrivenChannels value, not on geometry, so a bare (mesh-less)
-    // GameObject is deliberately used and any FitSize/SurfaceSnap "no mesh/renderer" Console noise —
+    // GameObject is deliberately used and any FitSize/AlignTo "no mesh/renderer" Console noise —
     // real or from the components' own [ExecuteAlways] ticking — is irrelevant here and ignored,
     // matching the SyncFuzzTests.cs precedent for tests whose reporting surface is the assertion,
     // not the Console.
@@ -854,22 +858,22 @@ public class RoundTripSpatialTests
     }
 
     [Test]
-    public void Read_EnabledSurfaceSnapDown_StampsPositionYOnly()
+    public void Read_EnabledAlignToDown_StampsPositionYOnly()
     {
         var prevIgnore = LogAssert.ignoreFailingMessages;
         LogAssert.ignoreFailingMessages = true;
-        var go = new GameObject("SurfaceSnapDownNode");
+        var go = new GameObject("AlignToDownNode");
         try
         {
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
 
             var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
-            var node = FindNode(snapshot.Roots, "SurfaceSnapDownNode");
+            var node = FindNode(snapshot.Roots, "AlignToDownNode");
 
-            Assert.IsNotNull(node, "SurfaceSnapDownNode not found in snapshot.");
+            Assert.IsNotNull(node, "AlignToDownNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.PositionY, node.Transform.DrivenChannels,
-                "An active-enabled down-SurfaceSnap must stamp DrivenChannels == PositionY only (X/Z free).");
+                "An active-enabled down-AlignTo must stamp DrivenChannels == PositionY only (X/Z free).");
         }
         finally
         {
@@ -879,23 +883,23 @@ public class RoundTripSpatialTests
     }
 
     [Test]
-    public void Read_EnabledSurfaceSnapDownLeft_StampsPositionXAndY()
+    public void Read_EnabledAlignToDownLeft_StampsPositionXAndY()
     {
         var prevIgnore = LogAssert.ignoreFailingMessages;
         LogAssert.ignoreFailingMessages = true;
-        var go = new GameObject("SurfaceSnapDownLeftNode");
+        var go = new GameObject("AlignToDownLeftNode");
         try
         {
-            var snapper = go.AddComponent<SurfaceSnap>();
-            snapper.vertical = SurfaceSnap.Vertical.Down;
-            snapper.horizontal = SurfaceSnap.Horizontal.Left;
+            var snapper = go.AddComponent<AlignTo>();
+            snapper.yMode = AlignTo.Mode.AbutMax;
+            snapper.xMode = AlignTo.Mode.AbutMax;
 
             var snapshot = SceneSnapshotReader.Read(go.scene, resolveSceneRef: null);
-            var node = FindNode(snapshot.Roots, "SurfaceSnapDownLeftNode");
+            var node = FindNode(snapshot.Roots, "AlignToDownLeftNode");
 
-            Assert.IsNotNull(node, "SurfaceSnapDownLeftNode not found in snapshot.");
+            Assert.IsNotNull(node, "AlignToDownLeftNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.PositionX | ChannelMask.PositionY, node.Transform.DrivenChannels,
-                "A down+left SurfaceSnap must OR both axes into DrivenChannels.");
+                "A down+left AlignTo must OR both axes into DrivenChannels.");
         }
         finally
         {
@@ -917,7 +921,7 @@ public class RoundTripSpatialTests
 
             Assert.IsNotNull(node, "PlainNode not found in snapshot.");
             Assert.AreEqual(ChannelMask.None, node.Transform.DrivenChannels,
-                "A node with no FitSize/SurfaceSnap must stamp DrivenChannels == None.");
+                "A node with no FitSize/AlignTo must stamp DrivenChannels == None.");
         }
         finally
         {
@@ -928,7 +932,7 @@ public class RoundTripSpatialTests
 
     // ---- b1-t1: write-seam full-vector write (PlanExecutor.ApplyTransformField) --------------------
     // The per-axis driven-channel skip is removed: a SetField op writes the whole authored vector
-    // unconditionally. The scene write always re-authors the full transform; FitSize/SurfaceSnap
+    // unconditionally. The scene write always re-authors the full transform; FitSize/AlignTo
     // re-drive their channel from there on the next evaluate.
 
     [Test]

@@ -181,9 +181,9 @@ namespace SceneBuilder.Core.Reconcile
                     // §13: representable (non-Transform) components force the owner to head
                     // a handle too, so the same-batch component append (ComponentPatchApplier) has
                     // an `OwnerHandle` to attach onto.
-                    // FitSize-before-SurfaceSnap canonical order, regardless of live
+                    // FitSize-before-AlignTo canonical order, regardless of live
                     // GetComponents order, so a created node's FitSize always attaches before its
-                    // SurfaceSnap.
+                    // AlignTo.
                     var representableComponents = SpatialComponentSource.OrderForEmit(
                         ComponentReconciler.ExcludeTransform(node.Components));
 
@@ -370,7 +370,7 @@ namespace SceneBuilder.Core.Reconcile
 
         // The deferred half of the §13 one-pass attach: calls EmitComponentAppend for every
         // buffered create-candidate component, in the SAME per-owner and per-node order the walk
-        // buffered them in (preserves FitSize-before-SurfaceSnap and any other canonical
+        // buffered them in (preserves FitSize-before-AlignTo and any other canonical
         // multi-component order). Called once, after DetectAppends' top-level call returns, so
         // every create-candidate's handle (batchHandleByGoidOrId) and same-batch-target
         // resolvability (resolvableTargets/pendingTargets) is already settled for the whole

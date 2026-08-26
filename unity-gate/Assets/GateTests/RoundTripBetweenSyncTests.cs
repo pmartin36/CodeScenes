@@ -283,7 +283,7 @@ public class RoundTripBetweenSyncScene : ISceneDefinition
     }
 
     // Player build: Between must be stripped after baking its final placement, mirroring
-    // SpatialBuildStripper's existing FitSize/SurfaceSnap contract.
+    // SpatialBuildStripper's existing FitSize/AlignTo contract.
     [Test]
     public void BuildStrip_RemovesBetween_BakesPlacement()
     {
@@ -319,11 +319,11 @@ public class RoundTripBetweenSyncScene : ISceneDefinition
     }
 
     // m_Enabled has no place in Between's closed (.Between(...)) authoring grammar — disabling it
-    // releases its driven channel via the transform, exactly like FitSize/SurfaceSnap.
+    // releases its driven channel via the transform, exactly like FitSize/AlignTo.
     [Test]
     public void Between_MEnabled_NotAuthorable()
     {
         Assert.IsTrue(SerializedFieldExclusions.IsExcluded(typeof(Between), "m_Enabled"),
-            "Between.m_Enabled must be excluded from builder source, mirroring FitSize/SurfaceSnap's ClosedGrammarComponents entry.");
+            "Between.m_Enabled must be excluded from builder source, mirroring FitSize/AlignTo's ClosedGrammarComponents entry.");
     }
 }

@@ -75,7 +75,7 @@ namespace SceneBuilder.Editor
         };
 
         // Components authored through a dedicated closed-keyword call (`.FitSize(height: 2f)`,
-        // `.SurfaceSnap(down: true)`) rather than `.Component<T>(c => c.Set(...))`. Their authoring
+        // `.AlignTo(target, y: AxisAlign.AbutMax)`) rather than `.Component<T>(c => c.Set(...))`. Their authoring
         // grammar has a FIXED argument set, so a field outside it cannot be rendered back into source:
         // the writer emits `.FitSize(m_Enabled: false)` and the parser then rejects its own output.
         // m_Enabled is the only property the serialized walk reaches on them that the grammar cannot
@@ -83,7 +83,7 @@ namespace SceneBuilder.Editor
         private static readonly HashSet<string> ClosedGrammarComponents = new()
         {
             SpatialComponents.FitSizeTypeName,
-            SpatialComponents.SurfaceSnapTypeName,
+            SpatialComponents.AlignToTypeName,
             SpatialComponents.BetweenTypeName,
         };
 

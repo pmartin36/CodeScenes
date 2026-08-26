@@ -334,7 +334,7 @@ namespace SceneBuilder.Core.Parsing
                 node.LogicalId = explicitId;
             }
 
-            // b3-t5: a lone `handle.Component<T>(...)`/`.FitSize(...)`/`.SurfaceSnap(...)` call
+            // A lone `handle.Component<T>(...)`/`.FitSize(...)`/`.AlignTo(...)` call
             // that IS this statement's whole expression is the "own statement" shape
             // (`crate.Component<T>(...);`) — the ONLY case a RemoveStatement/ReorderStatement
             // anchored on it may safely resolve against the ENCLOSING statement. Two or more
@@ -343,7 +343,7 @@ namespace SceneBuilder.Core.Parsing
             // they stay StatementAnchored = false (the pinned default) like every other chained
             // shape. Reads the ORIGINAL unsplit `calls` so a trailing `.Ref<T>()` keeps this
             // conservative false.
-            if (statementLevel && calls.Count == 1 && calls[0].Method is "Component" or "FitSize" or "SurfaceSnap" or "Between")
+            if (statementLevel && calls.Count == 1 && calls[0].Method is "Component" or "FitSize" or "AlignTo" or "Between")
             {
                 node.Components[node.Components.Count - 1].StatementAnchored = true;
             }
@@ -438,8 +438,8 @@ namespace SceneBuilder.Core.Parsing
                     case "FitSize":
                         ApplyFitSize(node, args, invocation, ctx);
                         break;
-                    case "SurfaceSnap":
-                        ApplySurfaceSnap(node, args, invocation, ctx);
+                    case "AlignTo":
+                        ApplyAlignTo(node, args, invocation, ctx);
                         break;
                     case "Between":
                         ApplyBetween(node, args, invocation, ctx);
@@ -924,7 +924,7 @@ namespace SceneBuilder.Core.Parsing
             public readonly List<KeyValuePair<string, SourceSpan>> ListenerCallSpans = new();
 
             // b3-t5: true only for a lone `handle.Component<T>(...)`/`.FitSize(...)`/
-            // `.SurfaceSnap(...)` call that is its OWN statement — set by ProcessBuilderChain's
+            // `.AlignTo(...)` call that is its OWN statement — set by ProcessBuilderChain's
             // setter-only arm. DEFAULT FALSE (pinned): every other source shape (chained onto an
             // `Add`/`Instance` chain, a multi-component chain, an expression-bodied configure
             // lambda) is treated conservatively as chained, because ONLY the statement-form case

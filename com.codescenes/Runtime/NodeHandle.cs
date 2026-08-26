@@ -55,16 +55,16 @@ namespace SceneBuilder.Authoring
         public NodeHandle FitSize((float x, float y, float z) size) => this;
 
         /// <summary>
-        /// Snap to a surface: at most one horizontal (<paramref name="left"/>/<paramref name="right"/>),
-        /// one vertical (<paramref name="up"/>/<paramref name="down"/>), and one depth
-        /// (<paramref name="forward"/>/<paramref name="back"/>) axis, with an optional explicit
-        /// <paramref name="target"/> override (skips the raycast/fallback scan). The target is any
-        /// scene object handle — a GameObject or a prefab instance root.
+        /// Align to <paramref name="target"/>'s extent on any of <paramref name="x"/>/<paramref name="y"/>/
+        /// <paramref name="z"/>: <see cref="AxisAlign.AbutMin"/> lands this object's max face against the
+        /// target's min face (and <see cref="AxisAlign.AbutMax"/> the mirror), each optionally offset an
+        /// extra world-unit distance via <c>.Offset(f)</c>. Each axis resolves in the target's own local
+        /// space by default, a <paramref name="frame"/> override's local space, or world space
+        /// (<paramref name="space"/>). <paramref name="target"/> is any scene object handle — a
+        /// GameObject or a prefab instance root.
         /// </summary>
-        public NodeHandle SurfaceSnap(bool up = false, bool down = false,
-                                  bool left = false, bool right = false,
-                                  bool forward = false, bool back = false,
-                                  SceneObjectHandle target = null) => this;
+        public NodeHandle AlignTo(SceneObjectHandle target, AxisAlign x = default, AxisAlign y = default,
+            AxisAlign z = default, SceneObjectHandle frame = null, AlignSpace space = AlignSpace.TargetLocal) => this;
 
         /// <summary>
         /// Single-axis corridor placement: lands this object's bounds flush against

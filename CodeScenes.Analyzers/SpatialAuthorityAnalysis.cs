@@ -9,11 +9,11 @@ using SceneBuilder.Grammar;
 namespace CodeScenes.Analyzers
 {
     /// <summary>
-    /// Detects two position-driver calls (SurfaceSnap/Between) on one node that claim the same axis
+    /// Detects two position-driver calls (AlignTo/Between) on one node that claim the same axis
     /// in the same frame, and reports SB1203. Purely syntactic (no SemanticModel), mirroring
     /// NudgeAnalysis's scope-to-Build-body posture. Grammar cannot reference SceneBuilder.Core's
     /// SpatialComponents keyword tables (netstandard2.0 vs 2.1), so the keyword-&gt;axis mapping is
-    /// reimplemented keyword-only below (see SpatialComponents.SurfaceSnapMask for the source of
+    /// reimplemented keyword-only below (see SpatialComponents.AlignToDrivenMask for the source of
     /// truth these keywords mirror).
     /// </summary>
     internal static class SpatialAuthorityAnalysis
@@ -38,13 +38,6 @@ namespace CodeScenes.Analyzers
             public readonly Dictionary<string, List<Claim>> ClaimsByNode = new();
             public int AnonCounter;
         }
-
-        private static readonly (string Keyword, Axis Axis)[] SurfaceSnapKeywordAxes =
-        {
-            ("up", Axis.Y), ("down", Axis.Y),
-            ("left", Axis.X), ("right", Axis.X),
-            ("forward", Axis.Z), ("back", Axis.Z),
-        };
 
         public static void AnalyzeCompilationUnit(SyntaxNodeAnalysisContext ctx)
         {
@@ -122,7 +115,7 @@ namespace CodeScenes.Analyzers
 
             foreach (var call in remaining)
             {
-                if (call.Method is not ("SurfaceSnap" or "Between"))
+                if (call.Method is not ("AlignTo" or "Between"))
                 {
                     continue;
                 }
@@ -195,36 +188,43 @@ namespace CodeScenes.Analyzers
             }
         }
 
-        // ---- Claim resolution — the single owner of SurfaceSnap keyword and Between `axis:` member
-        // recognition (rg -n 'SurfaceSnap|Between' inside this file resolves only here). ------------
+        // ---- Claim resolution — the single owner of AlignTo keyword and Between `axis:` member
+        // recognition (rg -n 'AlignTo|Between' inside this file resolves only here). ------------
 
         private static Claim? TryResolveClaim((string Method, ArgumentListSyntax Args, InvocationExpressionSyntax Invocation) call)
         {
             var nameNode = ((MemberAccessExpressionSyntax)call.Invocation.Expression).Name;
 
-            if (call.Method == "SurfaceSnap")
+            if (call.Method == "AlignTo")
             {
                 var axes = new HashSet<Axis>();
+                string? frame = null;
 
                 foreach (var arg in call.Args.Arguments)
                 {
-                    if (arg.NameColon == null || !arg.Expression.IsKind(SyntaxKind.TrueLiteralExpression))
+                    if (arg.NameColon == null)
                     {
                         continue;
                     }
 
-                    var keyword = arg.NameColon.Name.Identifier.Text;
-                    foreach (var (kw, axis) in SurfaceSnapKeywordAxes)
+                    switch (arg.NameColon.Name.Identifier.Text)
                     {
-                        if (kw == keyword)
-                        {
-                            axes.Add(axis);
+                        case "x" when IsPinnedAxisAlign(arg.Expression):
+                            axes.Add(Axis.X);
                             break;
-                        }
+                        case "y" when IsPinnedAxisAlign(arg.Expression):
+                            axes.Add(Axis.Y);
+                            break;
+                        case "z" when IsPinnedAxisAlign(arg.Expression):
+                            axes.Add(Axis.Z);
+                            break;
+                        case "frame":
+                            frame = arg.Expression.ToString().Trim();
+                            break;
                     }
                 }
 
-                return axes.Count == 0 ? null : new Claim { Frame = null, Axes = axes, NameNode = nameNode, SortKey = nameNode.SpanStart };
+                return axes.Count == 0 ? null : new Claim { Frame = frame, Axes = axes, NameNode = nameNode, SortKey = nameNode.SpanStart };
             }
 
             if (call.Method == "Between")
@@ -259,6 +259,20 @@ namespace CodeScenes.Analyzers
             }
 
             return null;
+        }
+
+        // An `x:`/`y:`/`z:` argument claims its axis whenever its value is anything other than the
+        // unpinned default: the parameterless `default` literal, or a member access ending in `None`
+        // (`AxisAlign.None`). Anything else — a preset, a preset with `.Offset(...)`, or an
+        // unrecognized expression — is conservatively treated as pinned.
+        private static bool IsPinnedAxisAlign(ExpressionSyntax expression)
+        {
+            if (expression.IsKind(SyntaxKind.DefaultLiteralExpression) || expression.IsKind(SyntaxKind.DefaultExpression))
+            {
+                return false;
+            }
+
+            return expression is not MemberAccessExpressionSyntax { Name.Identifier.Text: "None" };
         }
 
         private static Axis? ResolveAxisMember(ExpressionSyntax expression) =>

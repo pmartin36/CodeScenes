@@ -4,10 +4,10 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using SceneBuilder.Authoring;
 
-// Spec 45 bucket b3: runtime per-axis arbitration between two live position drivers (SurfaceSnap,
+// Spec 45 bucket b3: runtime per-axis arbitration between two live position drivers (AlignTo,
 // Between) sharing one object. Same world axis -> one deterministic winner + a one-time warning from
 // the yielding driver, stable across repeated evaluates and independent of call order. Different world
-// axes -> both apply, no warning. Fixtures place SurfaceSnap's raycast surface and Between's corridor
+// axes -> both apply, no warning. Fixtures place AlignTo's raycast surface and Between's corridor
 // anchors on non-overlapping rays so each driver's own math is exercised in isolation from the other's
 // fixture geometry.
 public class SpatialAuthorityRuntimeTests
@@ -34,12 +34,12 @@ public class SpatialAuthorityRuntimeTests
         return between;
     }
 
-    // Self at (0,10,0). Wall at (100,10,0) so a Right-horizontal raycast hits only the wall (the
-    // Between corridor anchors sit at y=0, off the ray's y=10 plane). SurfaceSnap wants x=99 (flush on
-    // the wall); Between wants x=0 (corridor midpoint) -- a genuine same-axis conflict. SurfaceSnap's
+    // Self at (0,10,0). Wall at (100,10,0) so a Right-equivalent (AbutMin) raycast hits only the wall
+    // (the Between corridor anchors sit at y=0, off the ray's y=10 plane). AlignTo wants x=99 (flush on
+    // the wall); Between wants x=0 (corridor midpoint) -- a genuine same-axis conflict. AlignTo's
     // execution order (-90) must win over Between's (-80).
     [Test]
-    public void SameAxis_SurfaceSnapAndBetween_DeterministicWinner_OneWarning_Stable()
+    public void SameAxis_AlignToAndBetween_DeterministicWinner_OneWarning_Stable()
     {
         var wall = UnitCube("Wall", new Vector3(100f, 10f, 0f));
         var from = UnitCube("From", new Vector3(-5f, 0f, 0f));
@@ -47,8 +47,8 @@ public class SpatialAuthorityRuntimeTests
         var self = UnitCube("Self", new Vector3(0f, 10f, 0f));
         try
         {
-            var snap = self.AddComponent<SurfaceSnap>();
-            snap.horizontal = SurfaceSnap.Horizontal.Right;
+            var snap = self.AddComponent<AlignTo>();
+            snap.xMode = AlignTo.Mode.AbutMin;
             var between = AddBetween(self, from.transform, to.transform, 0.5f, Between.Axis.X);
 
             LogAssert.Expect(LogType.Warning, new Regex(".*"));
@@ -57,7 +57,7 @@ public class SpatialAuthorityRuntimeTests
             LogAssert.NoUnexpectedReceived();
 
             Assert.AreEqual(99.0f, self.transform.position.x, Tol,
-                "SurfaceSnap (execution order -90) must win a same-axis conflict over Between (-80).");
+                "AlignTo (execution order -90) must win a same-axis conflict over Between (-80).");
             Assert.AreEqual(0.5f, between.fraction, Tol,
                 "A yielding Between must not back-solve fraction from the winner's write.");
 
@@ -85,8 +85,8 @@ public class SpatialAuthorityRuntimeTests
         var self = UnitCube("Self", new Vector3(0f, 10f, 0f));
         try
         {
-            var snap = self.AddComponent<SurfaceSnap>();
-            snap.horizontal = SurfaceSnap.Horizontal.Right;
+            var snap = self.AddComponent<AlignTo>();
+            snap.xMode = AlignTo.Mode.AbutMin;
             var between = AddBetween(self, from.transform, to.transform, 0.5f, Between.Axis.X);
 
             LogAssert.Expect(LogType.Warning, new Regex(".*"));
@@ -112,8 +112,8 @@ public class SpatialAuthorityRuntimeTests
         var self = UnitCube("Self", new Vector3(0f, 10f, 0f));
         try
         {
-            var snap = self.AddComponent<SurfaceSnap>();
-            snap.horizontal = SurfaceSnap.Horizontal.Right;
+            var snap = self.AddComponent<AlignTo>();
+            snap.xMode = AlignTo.Mode.AbutMin;
             var between = AddBetween(self, from.transform, to.transform, 0.5f, Between.Axis.X);
 
             LogAssert.Expect(LogType.Warning, new Regex(".*"));
@@ -131,7 +131,7 @@ public class SpatialAuthorityRuntimeTests
     }
 
     [Test]
-    public void DifferentAxes_SurfaceSnapY_BetweenX_Compose_NoWarning()
+    public void DifferentAxes_AlignToY_BetweenX_Compose_NoWarning()
     {
         var floor = UnitCube("Floor", Vector3.zero);
         var from = UnitCube("From", new Vector3(-5f, -20f, 0f));
@@ -139,8 +139,8 @@ public class SpatialAuthorityRuntimeTests
         var self = UnitCube("Self", new Vector3(0f, 5f, 0f));
         try
         {
-            var snap = self.AddComponent<SurfaceSnap>();
-            snap.vertical = SurfaceSnap.Vertical.Down;
+            var snap = self.AddComponent<AlignTo>();
+            snap.yMode = AlignTo.Mode.AbutMax;
             var between = AddBetween(self, from.transform, to.transform, 0.5f, Between.Axis.X);
 
             snap.Evaluate();
@@ -150,7 +150,7 @@ public class SpatialAuthorityRuntimeTests
             var bounds = self.GetComponent<Renderer>().bounds;
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
             Assert.AreEqual(floorTop, bounds.min.y, Tol,
-                "SurfaceSnap must still rest self on the floor when Between claims a different axis.");
+                "AlignTo must still rest self on the floor when Between claims a different axis.");
             Assert.AreEqual(0f, self.transform.position.x, Tol,
                 "Between must still place self at the corridor fraction on X.");
             Assert.AreEqual(0f, self.transform.position.z, Tol, "Z stays free and untouched.");
@@ -162,10 +162,10 @@ public class SpatialAuthorityRuntimeTests
     }
 
     // Root rotated 45deg about Y; d = root.right lies in the world XZ plane (d.y == 0), so an oriented
-    // Between claims world {X,Z} only -- it must compose with a co-authored SurfaceSnap on world Y,
+    // Between claims world {X,Z} only -- it must compose with a co-authored AlignTo on world Y,
     // never treated as a Y conflict.
     [Test]
-    public void OrientedBetweenXZ_PlusSurfaceSnapY_Compose_NoWarning()
+    public void OrientedBetweenXZ_PlusAlignToY_Compose_NoWarning()
     {
         var root = new GameObject("Root");
         root.transform.rotation = Quaternion.Euler(0f, 45f, 0f);
@@ -178,8 +178,8 @@ public class SpatialAuthorityRuntimeTests
         var self = UnitCube("Self", d * 3f + Vector3.up * 5f);
         try
         {
-            var snap = self.AddComponent<SurfaceSnap>();
-            snap.vertical = SurfaceSnap.Vertical.Down;
+            var snap = self.AddComponent<AlignTo>();
+            snap.yMode = AlignTo.Mode.AbutMax;
             var between = AddBetween(self, from.transform, to.transform, 0.5f, Between.Axis.X, root.transform);
 
             snap.Evaluate();
@@ -189,7 +189,7 @@ public class SpatialAuthorityRuntimeTests
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
             var bounds = self.GetComponent<Renderer>().bounds;
             Assert.AreEqual(floorTop, bounds.min.y, Tol,
-                "SurfaceSnap on Y must still apply when Between's oriented claim is world {X,Z}.");
+                "AlignTo on Y must still apply when Between's oriented claim is world {X,Z}.");
             Assert.AreEqual(0f, self.transform.position.x, Tol, "Between must still follow the tilted axis on X.");
             Assert.AreEqual(0f, self.transform.position.z, Tol, "Between must still follow the tilted axis on Z.");
         }
@@ -209,8 +209,8 @@ public class SpatialAuthorityRuntimeTests
         var go = UnitCube("Go", new Vector3(1.5f, 5f, -2f));
         try
         {
-            var snap = go.AddComponent<SurfaceSnap>();
-            snap.vertical = SurfaceSnap.Vertical.Down;
+            var snap = go.AddComponent<AlignTo>();
+            snap.yMode = AlignTo.Mode.AbutMax;
 
             snap.Evaluate();
             LogAssert.NoUnexpectedReceived();
@@ -218,7 +218,7 @@ public class SpatialAuthorityRuntimeTests
             var bounds = go.GetComponent<Renderer>().bounds;
             float floorTop = floor.GetComponent<Renderer>().bounds.max.y;
             Assert.AreEqual(floorTop, bounds.min.y, Tol,
-                "A lone SurfaceSnap must be unaffected by the arbitration fast path.");
+                "A lone AlignTo must be unaffected by the arbitration fast path.");
         }
         finally
         {

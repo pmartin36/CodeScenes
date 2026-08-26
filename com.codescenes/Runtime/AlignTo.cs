@@ -4,46 +4,54 @@ using UnityEngine;
 namespace SceneBuilder.Authoring
 {
     /// <summary>
-    /// Editor-time (and play-mode-guarded) world-bounds snap. Drives <c>transform.position</c> on the
-    /// set world axes so a sibling <see cref="Renderer"/>'s world bounds face lands flush against a
-    /// resolved surface (raycast hit, collider-less fallback scan, or an explicit <see cref="target"/>
-    /// override), independent of the object's own pivot.
+    /// Editor-time (and play-mode-guarded) alignment. Drives <c>transform.position</c> on the set
+    /// axes so a sibling <see cref="Renderer"/>'s bounds land against a resolved surface — an
+    /// explicit <see cref="target"/>'s extent (abut/align, per axis), or (with no target) a
+    /// raycast hit / collider-less fallback scan — independent of the object's own pivot.
     /// </summary>
     /// <remarks>
-    /// Add it from a builder with <see cref="NodeHandle.SurfaceSnap"/> or in the inspector. It runs in
-    /// edit mode only, and re-snaps when the surface underneath moves. Drag the object further than
-    /// <see cref="captureThreshold"/> to detach it deliberately. Axes you leave unset are never touched,
-    /// so an object can snap down to the floor while staying free to move horizontally.
+    /// Add it from a builder with <see cref="NodeHandle.AlignTo"/> or in the inspector. It runs in
+    /// edit mode only, and re-snaps when the target/frame underneath moves. Drag the object further
+    /// than <see cref="captureThreshold"/> to detach it deliberately. Axes you leave unset are never
+    /// touched, so an object can align down to a floor while staying free to move horizontally. Each
+    /// axis resolves in the target's local space by default, a <see cref="frame"/> override's local
+    /// space, or world space (<see cref="AlignSpace.World"/>).
     /// </remarks>
     // Serialized field names are the write contract: they must equal
-    // SceneBuilder.Core.Model.SpatialComponents.SurfaceSnapFields.* so Materialize's by-name write
+    // SceneBuilder.Core.Model.SpatialComponents.AlignToFields.* so Materialize's by-name write
     // hits the right field.
     [ExecuteAlways]
     [DefaultExecutionOrder(-90)] // after FitSize(-100): snaps the post-resize size
-    public sealed class SurfaceSnap : MonoBehaviour, IPositionDriver
+    public sealed class AlignTo : MonoBehaviour, IPositionDriver
     {
         private const float RayMargin = 0.05f;
         private const float RayMaxDistance = 10000f;
         private const float SideEpsilon = 1e-3f;
         private const float MoveEpsilon = 1e-3f;
 
-        // Per-axis enum fields — the live write/read/dispatch contract (SpatialComponents.
-        // SurfaceSnapFields.Vertical/Horizontal/Depth + SurfaceSnapEnums mirror these type
-        // FullNames/member names byte-for-byte). None MUST stay index 0 (default-value pruning
-        // on read relies on it).
-        public enum Vertical { None, Up, Down }
-        public enum Horizontal { None, Left, Right }
-        public enum Depth { None, Forward, Back }
+        // The per-axis alignment mode — the live write/read/dispatch contract
+        // (SpatialComponents.AlignToEnums mirrors this type FullName/member names byte-for-byte).
+        // None MUST stay index 0 (default-value pruning on read relies on it). AlignMin/AlignMax/
+        // AlignCenter resolve against a target's extent (see ApplyAxis) and are a no-op with no
+        // target set.
+        public enum Mode { None, AbutMin, AbutMax, AlignMin, AlignMax, AlignCenter }
 
-        public Vertical vertical;
-        public Horizontal horizontal;
-        public Depth depth;
+        public Mode xMode, yMode, zMode;
+        public float xOffset, yOffset, zOffset;
 
         public Transform target;
 
-        /// <summary>World-unit drag distance (measured on snapped axes only) beyond which a manual move
-        /// is treated as an intentional detach rather than a re-snap. Sticky: once detached the component
-        /// disables itself (see <see cref="Evaluate"/>) until re-enabled.</summary>
+        /// <summary>Overrides which transform's local axes an alignment resolves in (default: the
+        /// target's own local axes). Ignored when <see cref="space"/> is <see cref="AlignSpace.World"/>.</summary>
+        public Transform frame;
+
+        /// <summary>The reference frame each axis resolves in: the target's (or <see cref="frame"/>'s)
+        /// local axes, or world axes.</summary>
+        public AlignSpace space;
+
+        /// <summary>World-unit drag distance (measured on aligned axes only) beyond which a manual move
+        /// is treated as an intentional detach rather than a re-align. Sticky: once detached the
+        /// component disables itself (see <see cref="Evaluate"/>) until re-enabled.</summary>
         public float captureThreshold = 2.5f;
 
         private bool _loggedError;
@@ -53,15 +61,15 @@ namespace SceneBuilder.Authoring
         AxisFlags IPositionDriver.ClaimedWorldAxes()
         {
             AxisFlags claim = AxisFlags.None;
-            if (horizontal != Horizontal.None) claim |= AxisFlags.X;
-            if (vertical != Vertical.None) claim |= AxisFlags.Y;
-            if (depth != Depth.None) claim |= AxisFlags.Z;
+            if (xMode != Mode.None) claim |= AxisFlags.X;
+            if (yMode != Mode.None) claim |= AxisFlags.Y;
+            if (zMode != Mode.None) claim |= AxisFlags.Z;
             return claim;
         }
         int IPositionDriver.PriorityOrder => -90;
 
-        /// <summary>The last surface this component snapped against — used only to gate recompute
-        /// (re-snap when the surface itself moves) without a raycast every idle frame.</summary>
+        /// <summary>The last surface this component aligned against — used only to gate recompute
+        /// (re-align when the surface itself moves) without a raycast every idle frame.</summary>
         private Transform _lastSurface;
         private bool _needsSnap = true;
 
@@ -82,8 +90,8 @@ namespace SceneBuilder.Authoring
         private void OnEnable() => ResetBaseline();
 
         // Plugin-internal coordination hook, public only because the editor assembly calls it across
-        // the asmdef boundary. Forgets the last-self-write baseline and forces a fresh snap on the next
-        // Evaluate. Called on enable, and by PlanExecutor right after it writes m_LocalPosition
+        // the asmdef boundary. Forgets the last-self-write baseline and forces a fresh align on the
+        // next Evaluate. Called on enable, and by PlanExecutor right after it writes m_LocalPosition
         // directly on this object's Transform (materialize always writes the full authored transform
         // per spec 23, including a frozen driven-channel placeholder — that write is the plugin's own,
         // not a user drag, so it must not count toward captureThreshold; the very next Evaluate
@@ -103,9 +111,10 @@ namespace SceneBuilder.Authoring
             Evaluate();
         }
 
-        /// <summary>Recompute the position of each set axis so the corresponding bounds face lands
-        /// flush against the resolved surface for that axis (target override &gt; raycast &gt;
-        /// collider-less fallback scan). Free (unset) axes are left untouched.</summary>
+        /// <summary>Recompute the position of each set axis so the corresponding bounds feature lands
+        /// against the resolved surface for that axis (target extent alignment, or — with no target —
+        /// raycast &gt; collider-less fallback scan, Abut modes only). Free (unset) axes are left
+        /// untouched.</summary>
         public void Evaluate()
         {
             if (Application.isPlaying) return;
@@ -116,7 +125,7 @@ namespace SceneBuilder.Authoring
             {
                 if (!_loggedError)
                 {
-                    Debug.LogError($"[CodeScenes] SurfaceSnap on '{name}' has no Renderer/mesh bounds to snap.", this);
+                    Debug.LogError($"[CodeScenes] AlignTo on '{name}' has no Renderer/mesh bounds to align.", this);
                     _loggedError = true;
                 }
                 return;
@@ -127,20 +136,20 @@ namespace SceneBuilder.Authoring
             var owned = PositionAuthority.ResolveOwned(this, this, out bool yielded);
             if (yielded && !_loggedConflict)
             {
-                Debug.LogWarning($"[CodeScenes] SurfaceSnap on '{name}' yields a contested axis to a higher-priority driver on the same object.", this);
+                Debug.LogWarning($"[CodeScenes] AlignTo on '{name}' yields a contested axis to a higher-priority driver on the same object.", this);
                 _loggedConflict = true;
             }
 
-            bool axis0Snapped = horizontal != Horizontal.None && (owned & AxisFlags.X) != 0;
-            bool axis1Snapped = vertical != Vertical.None && (owned & AxisFlags.Y) != 0;
-            bool axis2Snapped = depth != Depth.None && (owned & AxisFlags.Z) != 0;
+            bool axis0Set = xMode != Mode.None && (owned & AxisFlags.X) != 0;
+            bool axis1Set = yMode != Mode.None && (owned & AxisFlags.Y) != 0;
+            bool axis2Set = zMode != Mode.None && (owned & AxisFlags.Z) != 0;
 
             if (HasWrittenBefore)
             {
                 Vector3 current = transform.position;
-                float dx = axis0Snapped ? current.x - _lastWritten.x : 0f;
-                float dy = axis1Snapped ? current.y - _lastWritten.y : 0f;
-                float dz = axis2Snapped ? current.z - _lastWritten.z : 0f;
+                float dx = axis0Set ? current.x - _lastWritten.x : 0f;
+                float dy = axis1Set ? current.y - _lastWritten.y : 0f;
+                float dz = axis2Set ? current.z - _lastWritten.z : 0f;
                 float dragSq = dx * dx + dy * dy + dz * dz;
 
                 if (dragSq > MoveEpsilon * MoveEpsilon)
@@ -154,7 +163,7 @@ namespace SceneBuilder.Authoring
                         return;
                     }
 
-                    // Within threshold: fall through and re-snap (constraint wins).
+                    // Within threshold: fall through and re-align (constraint wins).
                 }
             }
 
@@ -164,12 +173,9 @@ namespace SceneBuilder.Authoring
             Vector3 pos = transform.position;
             Transform lastSurface = null;
 
-            if (vertical == Vertical.Down && axis1Snapped) ResolveAndApplyAxis(r, bounds, 1, -1, ref pos, ref lastSurface);
-            if (vertical == Vertical.Up && axis1Snapped) ResolveAndApplyAxis(r, bounds, 1, 1, ref pos, ref lastSurface);
-            if (horizontal == Horizontal.Left && axis0Snapped) ResolveAndApplyAxis(r, bounds, 0, -1, ref pos, ref lastSurface);
-            if (horizontal == Horizontal.Right && axis0Snapped) ResolveAndApplyAxis(r, bounds, 0, 1, ref pos, ref lastSurface);
-            if (depth == Depth.Forward && axis2Snapped) ResolveAndApplyAxis(r, bounds, 2, 1, ref pos, ref lastSurface);
-            if (depth == Depth.Back && axis2Snapped) ResolveAndApplyAxis(r, bounds, 2, -1, ref pos, ref lastSurface);
+            if (axis0Set) ApplyAxis(r, bounds, 0, xMode, xOffset, ref pos, ref lastSurface);
+            if (axis1Set) ApplyAxis(r, bounds, 1, yMode, yOffset, ref pos, ref lastSurface);
+            if (axis2Set) ApplyAxis(r, bounds, 2, zMode, zOffset, ref pos, ref lastSurface);
 
             transform.position = pos;
             _lastWritten = pos;
@@ -178,32 +184,75 @@ namespace SceneBuilder.Authoring
             transform.hasChanged = false;
         }
 
-        /// <summary>Resolves the surface for one axis/direction and applies the flush delta to
-        /// <paramref name="pos"/> on that axis only (the whole world AABB translates by it, so the
-        /// face lands exactly on the surface regardless of pivot). No move if no surface resolves.</summary>
-        private void ResolveAndApplyAxis(Renderer r, Bounds bounds, int axis, int dirSign, ref Vector3 pos, ref Transform lastSurface)
+        /// <summary>Resolves one axis: extent alignment against <see cref="target"/> along the
+        /// resolved frame axis when a target is set, else the no-target world-axis raycast/fallback
+        /// scan (Abut modes only). Applies the flush-plus-offset delta to <paramref name="pos"/> on
+        /// that axis only.</summary>
+        private void ApplyAxis(Renderer r, Bounds bounds, int axis, Mode mode, float offset, ref Vector3 pos, ref Transform lastSurface)
         {
-            float half = ProjectedExtent.HalfExtentAlong(r, AxisDir(axis));
-            float faceCoord = bounds.center[axis] + dirSign * half;
-            float? surface = null;
-            Transform surfaceTransform = null;
-
             if (target != null)
             {
                 var targetRenderer = target.GetComponent<Renderer>();
-                if (targetRenderer != null)
+                if (targetRenderer == null) return;
+
+                Vector3 d = FrameAxisDir(axis);
+                float hs = ProjectedExtent.HalfExtentAlong(r, d);
+                float ht = ProjectedExtent.HalfExtentAlong(targetRenderer, d);
+                float cSelf = Vector3.Dot(bounds.center, d);
+                float cTgt = Vector3.Dot(targetRenderer.bounds.center, d);
+
+                float cNew = mode switch
                 {
-                    Bounds tb = targetRenderer.bounds;
-                    float tHalf = ProjectedExtent.HalfExtentAlong(targetRenderer, AxisDir(axis));
-                    surface = tb.center[axis] - dirSign * tHalf;
-                    surfaceTransform = target;
-                }
+                    Mode.AbutMin => cTgt - ht - hs, // my MAX face -> target MIN face
+                    Mode.AbutMax => cTgt + ht + hs, // my MIN face -> target MAX face
+                    Mode.AlignMin => cTgt - ht + hs, // my MIN face -> target MIN face (near faces flush)
+                    Mode.AlignMax => cTgt + ht - hs, // my MAX face -> target MAX face (far faces flush)
+                    Mode.AlignCenter => cTgt, // my center -> target center
+                    _ => cSelf,
+                };
+                cNew += offset;
+
+                pos += (cNew - cSelf) * d;
+                lastSurface = target;
+                return;
             }
 
-            if (surface == null)
-            {
-                surface = RaycastSurface(bounds, axis, dirSign, out surfaceTransform);
-            }
+            // No target: Align* modes need a target's extent to resolve against and are inert without
+            // one (authored scenes can never reach this — the recognizer rejects Align*-without-target
+            // — kept here so a directly-constructed component with no target stays total).
+            if (mode is Mode.AlignMin or Mode.AlignMax or Mode.AlignCenter) return;
+
+            // Abut modes only, unchanged world-axis raycast/fallback-scan surface resolution (AbutMin
+            // looks in the world's +axis direction, AbutMax in -axis).
+            int dirSign = mode == Mode.AbutMin ? 1 : -1;
+            ResolveAndApplyAxisWorld(r, bounds, axis, dirSign, offset, ref pos, ref lastSurface);
+        }
+
+        /// <summary>The unit direction axis <paramref name="axis"/> (0=X, 1=Y, 2=Z) resolves along:
+        /// world axes when <see cref="space"/> is <see cref="AlignSpace.World"/>; else the local axes
+        /// of <see cref="frame"/> when set, else <see cref="target"/>'s own local axes; else world
+        /// (no target, no frame — unreachable from <see cref="ApplyAxis"/>'s target-set branch, kept
+        /// as a safe fallback).</summary>
+        private Vector3 FrameAxisDir(int axis)
+        {
+            if (space == AlignSpace.World) return AxisDir(axis);
+
+            Transform fr = frame != null ? frame : target;
+            if (fr != null) return axis == 0 ? fr.right : axis == 1 ? fr.up : fr.forward;
+
+            return AxisDir(axis);
+        }
+
+        /// <summary>Resolves the surface for one axis/direction via raycast (falling back to a
+        /// collider-less scene scan) and applies the flush-plus-offset delta to <paramref name="pos"/>
+        /// on that axis only (the whole world AABB translates by it, so the face lands exactly on the
+        /// surface regardless of pivot). No move if no surface resolves.</summary>
+        private void ResolveAndApplyAxisWorld(Renderer r, Bounds bounds, int axis, int dirSign, float offset, ref Vector3 pos, ref Transform lastSurface)
+        {
+            float half = ProjectedExtent.HalfExtentAlong(r, AxisDir(axis));
+            float faceCoord = bounds.center[axis] + dirSign * half;
+
+            float? surface = RaycastSurface(bounds, axis, dirSign, out var surfaceTransform);
 
             if (surface == null)
             {
@@ -213,7 +262,9 @@ namespace SceneBuilder.Authoring
             if (surface.HasValue)
             {
                 Vector3 delta = Vector3.zero;
-                delta[axis] = surface.Value - faceCoord;
+                // Offset is a uniform world-unit push in the frame axis's POSITIVE direction,
+                // regardless of which side the surface was found on.
+                delta[axis] = surface.Value - faceCoord + offset;
                 pos += delta;
                 lastSurface = surfaceTransform;
             }
