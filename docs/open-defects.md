@@ -234,3 +234,11 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   succeeds clean and the intended `.Set` is silently dropped, no diagnostic. On-theme for
   parse-error-not-silent-dead-sync (a user's asset assignment silently disappears). OWNER: unassigned.
   FOUND-BY: parse-error-not-silent-dead-sync.
+
+- SEVERITY low — `../CodeScenesSite/.claude/skills/api-reference-sync/SKILL.md:46,175` hand-written
+  tooling-skill prose still names `SurfaceSnap` ("SurfaceSnap.ResetBaseline", "FitSize and SurfaceSnap
+  publish ..."). It is not generated from api.json, so the site's `api:sync` regen never rewrites it;
+  it is stale doc drift left by the SurfaceSnap -> AlignTo rename. Lives in the CodeScenesSite repo,
+  outside this feature's CodeScenesUnity owner inventory and outside b2-t1's declared TOUCHES. Low
+  value (internal tooling doc, not user-facing published copy). Does not relax b2-t1's deliverable.
+  OWNER: unassigned. FOUND-BY: alignto-generalize-surfacesnap (b2-t1 validation).

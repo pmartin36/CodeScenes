@@ -23,9 +23,11 @@ Before you reach for the editor to measure an asset's bounds or compute coordina
 don't have to. CodeScenes has editor-time solvers that position and size objects by their
 *relationship* to others, and they re-solve when things move. Prefer these over measured numbers:
 
-- **`.SurfaceSnap(down: true)`** — rest an object flush on whatever is beneath it (drop the ball onto
-  the green, sit a prop on the floor). No computing a Y from the mesh's bounds. Any axis:
-  `up/down/left/right/forward/back`, or an explicit `target`.
+- **`.AlignTo(target, y: AxisAlign.AbutMax)`** — rest or align an object against another's face (drop
+  the ball onto the green, sit a prop on the floor). No computing a Y from the mesh's bounds. Each axis
+  (`x`/`y`/`z`) takes an `AxisAlign` preset — `AbutMin`/`AbutMax` (flush outside, on the target's min/max
+  side), `AlignMin`/`AlignMax` (near/far faces coincide), or `AlignCenter` — with an optional
+  `.Offset(f)`.
 - **`.FitSize(width: 2f)`** — make an object an exact **world** size regardless of the mesh's native
   dimensions, rotation, or parent scale. No computing a scale factor. Pass any of `width/height/depth`.
 - **`.Between(from, to, fraction, axis)`** — place an object flush between two others at a fraction
@@ -86,7 +88,7 @@ Component fields use Unity's **serialized names** (`m_Mesh`, `m_Materials`, `m_I
 component in the Inspector's Debug mode or the authoring-api.md notes.
 
 Other `NodeHandle` calls: `.RectTransform(...)` (UI), `.Tag`, `.Layer`, `.Active(false)`,
-`.Static(true)` (the spatial solvers `.FitSize` / `.SurfaceSnap` / `.Between` are covered above).
+`.Static(true)` (the spatial solvers `.FitSize` / `.AlignTo` / `.Between` are covered above).
 `ComponentHandle` also has `.OnClick(...)` / `.OnEvent(...)` for wiring UnityEvents. See the reference.
 
 ## A complete builder

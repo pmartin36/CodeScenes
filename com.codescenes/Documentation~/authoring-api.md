@@ -2,6 +2,114 @@
 
 Every type and member you can use inside `ISceneDefinition.Build` (and `IPrefabDefinition.Build`). Namespace `SceneBuilder.Authoring`, assembly `SceneBuilder.Authoring`. Generated from the C# source by SceneBuilder.DocGen.
 
+## AlignSpace
+
+```csharp
+public enum AlignSpace
+```
+
+The reference frame an AlignTo alignment resolves edges and centers in: the target's own local axes, or world axes.
+
+- `TargetLocal`
+- `World`
+
+## AlignTo
+
+```csharp
+public sealed class AlignTo : MonoBehaviour, IPositionDriver
+```
+
+Editor-time (and play-mode-guarded) alignment. Drives `transform.position` on the set axes so a sibling [Renderer](https://docs.unity3d.com/ScriptReference/Renderer.html)'s bounds land against a resolved surface — an explicit `target`'s extent (abut/align, per axis), or (with no target) a raycast hit / collider-less fallback scan — independent of the object's own pivot.
+
+Add it from a builder with `NodeHandle.AlignTo` or in the inspector. It runs in edit mode only, and re-snaps when the target/frame underneath moves. Drag the object further than `captureThreshold` to detach it deliberately. Axes you leave unset are never touched, so an object can align down to a floor while staying free to move horizontally. Each axis resolves in the target's local space by default, a `frame` override's local space, or world space (`AlignSpace.World`).
+
+### AlignTo.xMode
+
+```csharp
+public Mode xMode
+```
+
+### AlignTo.yMode
+
+```csharp
+public Mode yMode
+```
+
+### AlignTo.zMode
+
+```csharp
+public Mode zMode
+```
+
+### AlignTo.xOffset
+
+```csharp
+public float xOffset
+```
+
+### AlignTo.yOffset
+
+```csharp
+public float yOffset
+```
+
+### AlignTo.zOffset
+
+```csharp
+public float zOffset
+```
+
+### AlignTo.target
+
+```csharp
+public Transform target
+```
+
+### AlignTo.frame
+
+Overrides which transform's local axes an alignment resolves in (default: the target's own local axes). Ignored when `space` is `AlignSpace.World`.
+
+```csharp
+public Transform frame
+```
+
+### AlignTo.space
+
+The reference frame each axis resolves in: the target's (or `frame`'s) local axes, or world axes.
+
+```csharp
+public AlignSpace space
+```
+
+### AlignTo.captureThreshold
+
+World-unit drag distance (measured on aligned axes only) beyond which a manual move is treated as an intentional detach rather than a re-align. Sticky: once detached the component disables itself (see `Evaluate`) until re-enabled.
+
+```csharp
+public float captureThreshold
+```
+
+### AlignTo.Evaluate
+
+Recompute the position of each set axis so the corresponding bounds feature lands against the resolved surface for that axis (target extent alignment, or — with no target — raycast > collider-less fallback scan, Abut modes only). Free (unset) axes are left untouched.
+
+```csharp
+public void Evaluate()
+```
+
+## Mode
+
+```csharp
+public enum Mode
+```
+
+- `None`
+- `AbutMin`
+- `AbutMax`
+- `AlignMin`
+- `AlignMax`
+- `AlignCenter`
+
 ## AssetReference
 
 ```csharp
@@ -67,6 +175,72 @@ Reference the Unity built-in resource named name, qualified by typeHint (the con
 
 - `name` (`string`)
 - `typeHint` (`string`)
+
+## AxisAlign
+
+```csharp
+public readonly struct AxisAlign
+```
+
+A single-axis alignment mode for AlignTo: which edge or center of self lands on which reference plane of the target, plus an optional world-unit offset applied after alignment. UnityEngine-free so it can appear in generated authoring source without pulling in the runtime component.
+
+### AxisAlign.None
+
+No alignment on this axis.
+
+```csharp
+public static readonly AxisAlign None
+```
+
+### AxisAlign.AbutMin
+
+Self's maximum-side edge abuts the target's minimum-side edge (self sits outside, on the target's min side).
+
+```csharp
+public static readonly AxisAlign AbutMin
+```
+
+### AxisAlign.AbutMax
+
+Self's minimum-side edge abuts the target's maximum-side edge (self sits outside, on the target's max side).
+
+```csharp
+public static readonly AxisAlign AbutMax
+```
+
+### AxisAlign.AlignMin
+
+Self's minimum-side edge is flush with the target's minimum-side edge (near faces coincide). Requires a target.
+
+```csharp
+public static readonly AxisAlign AlignMin
+```
+
+### AxisAlign.AlignMax
+
+Self's maximum-side edge is flush with the target's maximum-side edge (far faces coincide). Requires a target.
+
+```csharp
+public static readonly AxisAlign AlignMax
+```
+
+### AxisAlign.AlignCenter
+
+Self's center coincides with the target's center. Requires a target.
+
+```csharp
+public static readonly AxisAlign AlignCenter
+```
+
+### AxisAlign.Offset
+
+Returns a copy of this alignment carrying an additional world-unit offset applied after the alignment is resolved.
+
+```csharp
+public AxisAlign Offset(float worldUnits)
+```
+
+- `worldUnits` (`float`)
 
 ## Between
 
@@ -447,7 +621,7 @@ A handle to a prefab instance in a scene definition, returned by `SceneRoot.Inst
 
 Compile-time scaffolding only — SceneBuilder parses the source text to build the scene, so these methods return handles for chaining but perform no work at runtime.
 
-A prefab instance is authored as one whole unit: you do not author child GameObjects inside its hierarchy. Change what the instance carries with `Override`, `AddComponent` and `RemoveComponent`, and reach a nested target with `On`.
+A prefab instance is authored as one whole unit: you do not author child GameObjects inside its hierarchy. Change what the instance carries with `Override`, `AddComponent` (or its `Component` alias) and `RemoveComponent`, and reach a nested target with `On`.
 
 ### InstanceHandle.Transform
 
@@ -513,6 +687,20 @@ public InstanceHandle AddComponent<T>(Action<ComponentHandle<T>> configure)
 ```
 
 Add a component of type T to the instance root and set its serialized fields in a closure.
+
+- `configure` (`Action<ComponentHandle<T>>`)
+
+### InstanceHandle.Component
+
+Alias for `AddComponent`.
+
+```csharp
+public InstanceHandle Component<T>()
+```
+
+```csharp
+public InstanceHandle Component<T>(Action<ComponentHandle<T>> configure)
+```
 
 - `configure` (`Action<ComponentHandle<T>>`)
 
@@ -621,6 +809,20 @@ public new InstanceHandle<TRef> AddComponent<T>(Action<ComponentHandle<T>> confi
 ```
 
 Add a component of type T to the instance root and set its serialized fields in a closure.
+
+- `configure` (`Action<ComponentHandle<T>>`)
+
+### InstanceHandle.Component
+
+Alias for `AddComponent`.
+
+```csharp
+public new InstanceHandle<TRef> Component<T>()
+```
+
+```csharp
+public new InstanceHandle<TRef> Component<T>(Action<ComponentHandle<T>> configure)
+```
 
 - `configure` (`Action<ComponentHandle<T>>`)
 
@@ -782,21 +984,20 @@ Explicit per-axis world size (non-uniform allowed).
 
 - `size` (`(float x, float y, float z)`)
 
-### NodeHandle.SurfaceSnap
+### NodeHandle.AlignTo
 
-Snap to a surface: at most one horizontal (left/right), one vertical (up/down), and one depth (forward/back) axis, with an optional explicit target override (skips the raycast/fallback scan). The target is any scene object handle — a GameObject or a prefab instance root.
+Align to target's extent on any of x/y/ z: `AxisAlign.AbutMin` lands this object's max face against the target's min face (and `AxisAlign.AbutMax` the mirror), each optionally offset an extra world-unit distance via `.Offset(f)`. Each axis resolves in the target's own local space by default, a frame override's local space, or world space (space). target is any scene object handle — a GameObject or a prefab instance root.
 
 ```csharp
-public NodeHandle SurfaceSnap(bool up = false, bool down = false, bool left = false, bool right = false, bool forward = false, bool back = false, SceneObjectHandle target = null)
+public NodeHandle AlignTo(SceneObjectHandle target, AxisAlign x = default, AxisAlign y = default, AxisAlign z = default, SceneObjectHandle frame = null, AlignSpace space = AlignSpace.TargetLocal)
 ```
 
-- `up` (`bool`)
-- `down` (`bool`)
-- `left` (`bool`)
-- `right` (`bool`)
-- `forward` (`bool`)
-- `back` (`bool`)
 - `target` (`SceneObjectHandle`)
+- `x` (`AxisAlign`)
+- `y` (`AxisAlign`)
+- `z` (`AxisAlign`)
+- `frame` (`SceneObjectHandle`)
+- `space` (`AlignSpace`)
 
 ### NodeHandle.Between
 
@@ -1101,86 +1302,6 @@ Remove a component of type T from the scoped target (must exist on the source pr
 ```csharp
 public ScopedHandle RemoveComponent<T>()
 ```
-
-## SurfaceSnap
-
-```csharp
-public sealed class SurfaceSnap : MonoBehaviour, IPositionDriver
-```
-
-Editor-time (and play-mode-guarded) world-bounds snap. Drives `transform.position` on the set world axes so a sibling [Renderer](https://docs.unity3d.com/ScriptReference/Renderer.html)'s world bounds face lands flush against a resolved surface (raycast hit, collider-less fallback scan, or an explicit `target` override), independent of the object's own pivot.
-
-Add it from a builder with `NodeHandle.SurfaceSnap` or in the inspector. It runs in edit mode only, and re-snaps when the surface underneath moves. Drag the object further than `captureThreshold` to detach it deliberately. Axes you leave unset are never touched, so an object can snap down to the floor while staying free to move horizontally.
-
-### SurfaceSnap.vertical
-
-```csharp
-public Vertical vertical
-```
-
-### SurfaceSnap.horizontal
-
-```csharp
-public Horizontal horizontal
-```
-
-### SurfaceSnap.depth
-
-```csharp
-public Depth depth
-```
-
-### SurfaceSnap.target
-
-```csharp
-public Transform target
-```
-
-### SurfaceSnap.captureThreshold
-
-World-unit drag distance (measured on snapped axes only) beyond which a manual move is treated as an intentional detach rather than a re-snap. Sticky: once detached the component disables itself (see `Evaluate`) until re-enabled.
-
-```csharp
-public float captureThreshold
-```
-
-### SurfaceSnap.Evaluate
-
-Recompute the position of each set axis so the corresponding bounds face lands flush against the resolved surface for that axis (target override > raycast > collider-less fallback scan). Free (unset) axes are left untouched.
-
-```csharp
-public void Evaluate()
-```
-
-## Vertical
-
-```csharp
-public enum Vertical
-```
-
-- `None`
-- `Up`
-- `Down`
-
-## Horizontal
-
-```csharp
-public enum Horizontal
-```
-
-- `None`
-- `Left`
-- `Right`
-
-## Depth
-
-```csharp
-public enum Depth
-```
-
-- `None`
-- `Forward`
-- `Back`
 
 ## VariantRoot
 
