@@ -657,3 +657,34 @@ GameObject/Transform/MeshFilter/MeshRenderer name collision, and a same-type col
 a Build-body `const string` local folded through `Instance(Kit + ...)`, `Add(Grp + ...)`, and
 `Asset(Kit + ..., "start")`, while a non-const `prefix +` was still refused located (`SB1000`). Console
 clean of product errors.
+
+## 52 - AlignTo: generalize + rename SurfaceSnap to per-axis extent alignment
+
+`SurfaceSnap` (which only expressed outside-face contact, `mine + theirs = 1`) is renamed to `AlignTo`
+and generalized to a named per-axis alignment. Per axis X/Y/Z the author picks a `Mode`
+(`None`/`AbutMin`/`AbutMax`/`AlignMin`/`AlignMax`/`AlignCenter`) with an optional world-unit
+`.Offset(...)`. `AbutMin`/`AbutMax` are the old contact directions (Up/Down/Left/Right/Forward/Back all
+collapse to these two per axis); `AlignMin`/`AlignMax` are the new same-side face-flush cases (bottoms
+or tops aligned), `AlignCenter` centers. Evaluated in a frame that defaults to the TARGET's local space
+(so a rotated/sloped target aligns along its own axes, not a world box), with `space: World` and a
+`frame:` transform override; the frame math reuses spec 45's `ProjectedExtent` kernel. `None` at enum
+index 0 keeps the unpinned-axis default-prune. No-target raycast/scan supports `AbutMin`/`AbutMax` only;
+`Align*` without a target is a located error. Live re-snap, `captureThreshold` detach, `PositionAuthority`
+arbitration, and execution order -90 are preserved. Clean rename, no back-compat alias (pre-launch); a
+guard test fails if `SurfaceSnap` reappears in tracked source.
+
+Built through the tdd-pipeline (commits `fed9659` feat, `9c4d712` docs) plus a live-verify follow-up fix
+`1259a59` (see below). Gate `GATE PASS: Core + Unity EditMode green (passed=1006 failed=0 skipped=0)`
+(`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec52.log`): regression
+(`AbutMax` rests the bottom face on the floor top; no-target raycast lands); the minigolf case
+`AlignTo(green, x: AlignCenter, y: AlignMax, z: AbutMax)` placed with tops co-planar, X-centered, and
+abutting past the green's max-Z, each read from live bounds; `AlignMin`/`AlignCenter` and a
+`.Offset(0.5f)` gap confirmed; the FRAME default followed a 30deg-tilted target's own up
+(`(-0.158, 0.275, 0)`) while `space: World` gave world Y (`(0, 0.866, 0)`); a no-target `AlignMax`
+threw a located `SB1000`; and `SurfaceSnap` no longer resolves as a symbol. Live-verify also caught a
+real emission defect (an introduced/edited per-axis offset synced back as a non-compiling bare
+`zOffset:` keyword instead of folding into `z: AxisAlign.AbutMax.Offset(...)`) which the product's own
+`BuilderCompileCheck` flagged; fixed RED-first in `1259a59` by folding the axis (mode, offset) into one
+rendered argument shared by the append and incremental paths, with Core + EditMode regression tests.

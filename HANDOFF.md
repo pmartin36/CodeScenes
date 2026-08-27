@@ -19,7 +19,7 @@ host engine message by exact text (`69a74df`); a crash or any other error still 
 silently never run). Live log: `SceneBuilderTest/Logs/live-verify-spec36.log`.
 
 Measured during that live pass, NOT caused by 36 and unowned: the demo scene reports a steady
-9 plan ops on every build (its `FitSize`/`SurfaceSnap` move transforms after a build, so the next
+9 plan ops on every build (its `FitSize`/`AlignTo` move transforms after a build, so the next
 build sees real drift; an isolated probe without spatial components went 11 ops then 0). Not in
 `docs/open-defects.md` yet, and not investigated.
 
