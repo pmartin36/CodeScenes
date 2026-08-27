@@ -242,3 +242,15 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   outside this feature's CodeScenesUnity owner inventory and outside b2-t1's declared TOUCHES. Low
   value (internal tooling doc, not user-facing published copy). Does not relax b2-t1's deliverable.
   OWNER: unassigned. FOUND-BY: alignto-generalize-surfacesnap (b2-t1 validation).
+
+- SEVERITY med — reconcile has NO field-value diff for a MATCHED prefab-instance AddedComponent.
+  `ReconcilerInstances.ReconcileAddedComponents` keys added components only by
+  `(Target, TypeFullName)` and `continue`s when the key is present on BOTH model and snapshot
+  (`SceneBuilder.Core/Reconcile/ReconcilerInstances.cs:416-419`); the comment at `:606-610` confirms
+  the instance branch never runs `ComponentReconciler.ReconcileComponents`, so "no field-value-diff
+  pass exists for it." Consequence: a live FIELD edit to any component ADDED onto a prefab instance
+  (editing `FitSize.value`/`AlignTo` axis in the inspector on an instance's added solver, or any
+  `.AddComponent<T>()` field) is silently NOT synced back into source. Broader than spec 53 (affects
+  every instance-added component type, not only solvers). Does NOT relax b2-t2's DELIVERABLE: its
+  in-scope round-trip (driven-channel masking + free-axis syncback + byte-stable convergence)
+  satisfies the spec accept clause without it. OWNER: unassigned. FOUND-BY: solvers-size-instanced-prefabs.
