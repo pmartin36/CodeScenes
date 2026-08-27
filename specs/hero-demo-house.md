@@ -47,10 +47,11 @@ Browse these folders and use whatever fits — nothing is assigned to a particul
 - The house **shell** is not an asset — build floor / walls / room dividers / doorways from primitive
   cubes and planes with `FitSize` + `AlignTo`.
 
-Character animation: `Character_Casual_Quaternius_CC0.fbx` is an un-rigged mesh. Rig + animate it via
-Mixamo (manual, one-time) and re-import, or drive a simpler capsule if the walkthrough only needs
-locomotion. Movement (WASD controller, free camera) is ordinary Unity MonoBehaviour gameplay, not part
-of the authored scene.
+Character animation: `Character_Casual_Quaternius_CC0.fbx` is already rigged (`CharacterArmature`) and
+ships with its own animation clips in the same FBX — `Walk`, `Run` (+ Back/Left/Right), `Idle`, `Roll`,
+`Wave`, and more. Set the FBX import `Rig` appropriately and drive those clips from an Animator; no
+Mixamo or external animation is needed. Movement (WASD controller, free camera) is ordinary Unity
+MonoBehaviour gameplay, not part of the authored scene.
 
 ## How to build it
 
