@@ -287,6 +287,30 @@ namespace SceneBuilder.Core.Model
             return false;
         }
 
+        /// <summary>Reconcile direction (per-axis fold): EITHER paired field of an axis (its mode
+        /// xMode/yMode/zMode OR its offset xOffset/yOffset/zOffset) -&gt; the axis keyword plus BOTH
+        /// field names, so an offset edit/introduce can re-render the WHOLE axis argument (mode +
+        /// offset together) instead of a bare `zOffset:` keyword. Superset of
+        /// <see cref="TryAlignAxisFromModeField"/> (which matches the mode field only).</summary>
+        public static bool TryAlignAxisGroupFromField(string field, out string keyword, out string modeField, out string offsetField)
+        {
+            foreach (var entry in AlignAxisFields)
+            {
+                if (entry.ModeField == field || entry.OffsetField == field)
+                {
+                    keyword = entry.Keyword;
+                    modeField = entry.ModeField;
+                    offsetField = entry.OffsetField;
+                    return true;
+                }
+            }
+
+            keyword = null!;
+            modeField = null!;
+            offsetField = null!;
+            return false;
+        }
+
         /// <summary>The set of AlignTo.Mode presets the parser/recognizer accept as authoring
         /// identifiers (preset name == Mode member name — identity mapping). Distinct from
         /// <see cref="AlignToEnums.Members"/>, which fixes the full enum SCHEMA; this registry is the

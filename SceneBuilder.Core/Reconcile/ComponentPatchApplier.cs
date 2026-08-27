@@ -271,7 +271,15 @@ namespace SceneBuilder.Core.Reconcile
                 {
                     var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(invocation)!;
                     var existingArgsText = string.Join(", ", current.ArgumentList.Arguments.Select(a => a.ToString()));
-                    var newArgText = SpatialComponentSource.RenderKeyValue(edit.FieldKey, edit.Value, valueExpr);
+
+                    // An AlignTo axis introduce carries its WHOLE folded argument
+                    // (`z: AxisAlign.AbutMax.Offset(0.75f)`) pre-rendered in NewExpr — the mode +
+                    // offset pair renders as one keyword, which RenderKeyValue (single field) cannot
+                    // fold. Append it verbatim; every other spatial field keeps the per-field render.
+                    var newArgText = edit.NewExpr != null
+                        && SpatialComponents.TryAlignAxisFromModeField(edit.FieldKey, out _)
+                            ? edit.NewExpr
+                            : SpatialComponentSource.RenderKeyValue(edit.FieldKey, edit.Value, valueExpr);
                     var combined = existingArgsText.Length > 0 ? $"{existingArgsText}, {newArgText}" : newArgText;
                     var newArgList = SyntaxFactory.ParseArgumentList($"({combined})");
                     return currentRoot.ReplaceNode(current, current.WithArgumentList(newArgList));

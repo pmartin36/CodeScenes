@@ -247,8 +247,20 @@ namespace SceneBuilder.Core.Reconcile
                 }
 
                 var snapshotComp = snapshotComps[i];
+
+                // An AlignTo axis renders as ONE argument (`z: AxisAlign.AbutMax.Offset(0.75f)`) but
+                // is carried as TWO fields (mode + offset), reconciled as a unit (see
+                // TryReconcileAlignAxis) so an introduced/edited offset never leaks a bare `zOffset:`.
+                var handledAlignAxes = new HashSet<string>();
+
                 foreach (var (fieldKey, snapVal) in snapshotComp.Fields)
                 {
+                    if (TryReconcileAlignAxis(
+                        sourceComp, snapshotComp, fieldKey, fieldArgumentSpans, handledAlignAxes, edits, conflicts))
+                    {
+                        continue;
+                    }
+
                     // A `[SerializeReference]` field authored via `.SetRef(...)` is owned entirely
                     // by the managed-ref intercept, before EVERY other branch below — including the
                     // default-reset branch, whose applier has no form for a `.SetRef(...)` statement

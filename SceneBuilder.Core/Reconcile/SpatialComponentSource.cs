@@ -107,22 +107,13 @@ namespace SceneBuilder.Core.Reconcile
                 SpatialComponents.TryAlignAxisKeyword(axis, out var keyword);
                 SpatialComponents.TryAlignAxis(keyword, out _, out var modeField, out var offsetField);
 
-                if (!fields.TryGetValue(modeField, out var modeValue)
-                    || modeValue is not ValueNode.Enum(_, var members, _)
-                    || members.Count != 1)
-                {
-                    continue;
-                }
+                fields.TryGetValue(modeField, out var modeValue);
+                fields.TryGetValue(offsetField, out var offsetValue);
 
-                var axisExpr = $"{AxisAlignAuthoringPrefix}.{members[0]}";
-                if (fields.TryGetValue(offsetField, out var offsetValue)
-                    && offsetValue is ValueNode.Primitive(PrimitiveKind.Float, float offset)
-                    && offset != 0f)
+                if (RenderAlignAxisArgument(keyword, modeValue, offsetValue) is { } axisArg)
                 {
-                    axisExpr = $"{axisExpr}.Offset({SourceExpr.Float(offset)})";
+                    parts.Add(axisArg);
                 }
-
-                parts.Add($"{keyword}: {axisExpr}");
             }
 
             if (fields.ContainsKey(SpatialComponents.AlignToFields.Frame))
@@ -137,6 +128,30 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             return string.Join(", ", parts);
+        }
+
+        // Renders ONE AlignTo axis argument ("z: AxisAlign.AbutMax.Offset(0.75f)") from its paired
+        // (mode, offset) fields — the SINGLE fold shared by the full append emitter
+        // (RenderAlignToArguments) and the incremental patch/introduce arm
+        // (ComponentReconciler's per-axis reconcile), so a per-axis offset can never render as the
+        // bare `zOffset:` keyword that does not compile. Returns null for an unpinned axis (mode
+        // absent, not a single Enum member, or the inert None): an unpinned axis emits no argument.
+        internal static string? RenderAlignAxisArgument(string keyword, ValueNode? modeValue, ValueNode? offsetValue)
+        {
+            if (modeValue is not ValueNode.Enum(_, var members, _)
+                || members.Count != 1
+                || members[0] == SpatialComponents.AlignToEnums.None)
+            {
+                return null;
+            }
+
+            var axisExpr = $"{AxisAlignAuthoringPrefix}.{members[0]}";
+            if (offsetValue is ValueNode.Primitive(PrimitiveKind.Float, float offset) && offset != 0f)
+            {
+                axisExpr = $"{axisExpr}.Offset({SourceExpr.Float(offset)})";
+            }
+
+            return $"{keyword}: {axisExpr}";
         }
 
         // b3-t1: FitSize's `mode` field discriminates which of `value` (aspect: width/height/depth)

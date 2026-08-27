@@ -349,6 +349,44 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         Assert.IsFalse(second.Changed, "NOT CONVERGED: a Sync immediately after the patch, with no further edit, reported Changed=true.");
     }
 
+    // spec 52 (AlignTo offset) regression: introducing/editing a per-axis AlignTo OFFSET on a live
+    // component must fold into the axis keyword (`z: AxisAlign.AbutMax.Offset(0.75f)`), never emit a
+    // bare `zOffset:` argument (which does NOT compile: 'AlignTo' has no `zOffset` parameter, so
+    // BuilderCompileCheck logs "emitted builder source DOES NOT COMPILE"). SyncAndAssertCompiles
+    // fails on any such non-compiling emission; a second Sync must converge byte-stable.
+    [Test]
+    public void SceneToCode_IntroducedAlignToAxisOffset_FoldsIntoAxisKeyword_Compiles_SecondSyncNoOp()
+    {
+        const string body =
+            "        var crate = scene.Add(\"Crate\")\n" +
+            "            .Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cube\")))\n" +
+            "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
+            "            .AlignTo(NodeHandle.None, z: AxisAlign.AbutMax);\n";
+        File.WriteAllText(_builderPath, Source(body));
+
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        RunBuild(scene);
+
+        var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
+        Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
+
+        // Introduce a per-axis offset on the ALREADY-pinned z axis (mode stays AbutMax).
+        crate.GetComponent<AlignTo>().zOffset = 0.75f;
+
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsTrue(result.Changed, "Introducing an AlignTo z-offset is a real scene change; Sync must report Changed.");
+
+        var rewritten = File.ReadAllText(_builderPath);
+        StringAssert.Contains("z: AxisAlign.AbutMax.Offset(0.75f)", rewritten,
+            "The introduced z-offset must fold into the z: axis keyword.\n" + rewritten);
+        StringAssert.DoesNotContain("zOffset", rewritten,
+            "The offset must never emit as a bare zOffset: argument (does not compile).\n" + rewritten);
+
+        var second = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsFalse(second.Changed, "NOT CONVERGED: a Sync immediately after the offset fold, with no further edit, reported Changed=true.");
+    }
+
     // 14. Created-in-editor object with an AlignTo: a GameObject added directly in the scene (not via
     //     the builder) with an AlignTo attached (target set to the pre-existing Floor) must append a new
     //     .Add(...) statement carrying .AlignTo(target: floor, y: AxisAlign.AbutMax) on scene->code

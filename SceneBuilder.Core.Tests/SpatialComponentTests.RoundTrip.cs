@@ -459,6 +459,181 @@ public class EmptySpatialScene : ISceneDefinition
             Assert.DoesNotContain("AlignTo+", applied);
         }
 
+        // spec 52 (AlignTo offset) regression: introducing a per-axis offset on an ALREADY-pinned
+        // axis (`z: AxisAlign.AbutMax` gains a live z-offset) must fold the offset into the SAME
+        // axis keyword — `z: AxisAlign.AbutMax.Offset(0.75f)` — NOT emit a bare `zOffset: 0.75f`
+        // keyword (which does not compile / re-parse: 'AlignTo' has no `zOffset` parameter). The
+        // patch rewrites the WHOLE `z:` argument (mode + offset together).
+        [Fact]
+        public void Reconcile_AlignToIntroduceOffsetOnPinnedAxis_FoldsIntoAxisKeyword_SecondSyncNoOp()
+        {
+            var parsed = BuilderParser.Parse(AlignToBackOnlySource);
+            var floor = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
+            var crate = Assert.Single(parsed.Model.Roots, r => r.Name == "Crate");
+            var aligner = Assert.Single(crate.Components);
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = floor.LogicalId, GlobalObjectId = "goid-floor", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = crate.LogicalId, GlobalObjectId = "goid-crate", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = aligner.LogicalId,
+                        GlobalObjectId = "",
+                        Kind = "Component",
+                        ComponentType = SpatialComponents.AlignToTypeName,
+                        ParentLogicalId = crate.LogicalId,
+                    },
+                },
+            };
+
+            // Live scene: same AbutMax z axis, now carrying a 0.75 offset the source never authored.
+            var editedFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.AlignToFields.ZMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.ZOffset, ValueNode.Primitive.Float(0.75f)),
+            });
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode { GlobalObjectId = "goid-floor", Name = "Floor" },
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-crate",
+                        Name = "Crate",
+                        Transform = new TransformData { DrivenChannels = ChannelMask.PositionZ },
+                        Components = new[]
+                        {
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = editedFields },
+                        },
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(
+                parsed.Model,
+                snapshot,
+                map,
+                parsed.Anchors,
+                componentAnchors: parsed.ComponentAnchors,
+                fieldArgumentSpans: parsed.FieldArgumentSpans);
+
+            Assert.Empty(result.Conflicts);
+            var patch = Assert.IsType<PatchComponentField>(Assert.Single(result.Patch.Edits));
+            Assert.Equal("z: AxisAlign.AbutMax.Offset(0.75f)", patch.NewExpr);
+
+            var applied = SourcePatchApplier.Apply(AlignToBackOnlySource, result.Patch, parsed.Anchors);
+            Assert.Contains(".AlignTo(floor, z: AxisAlign.AbutMax.Offset(0.75f))", applied);
+            Assert.DoesNotContain("zOffset", applied);
+
+            // The emitted builder must re-parse (it did not before: a bare `zOffset:` argument
+            // fails BuilderParser's known-AlignTo-argument check) and converge byte-stable.
+            var reparsed = BuilderParser.Parse(applied, map);
+            var pass2 = Reconciler.Reconcile(
+                reparsed.Model,
+                snapshot,
+                reparsed.IdentityMap,
+                reparsed.Anchors,
+                componentAnchors: reparsed.ComponentAnchors,
+                fieldArgumentSpans: reparsed.FieldArgumentSpans);
+
+            Assert.Empty(pass2.Patch.Edits);
+            Assert.Empty(pass2.Conflicts);
+        }
+
+        // spec 52 (AlignTo offset) regression: EDITING the offset on an axis already authored WITH
+        // an offset (`z: AxisAlign.AbutMax.Offset(0.5f)` -> 0.75f) rewrites the whole `z:` argument
+        // in place, never a bare `zOffset:` keyword, and re-syncs byte-stable.
+        [Fact]
+        public void Reconcile_AlignToEditOffsetOnPinnedAxis_RewritesAxisKeyword_SecondSyncNoOp()
+        {
+            var parsed = BuilderParser.Parse(AlignToOffsetSource);
+            var floor = Assert.Single(parsed.Model.Roots, r => r.Name == "Floor");
+            var crate = Assert.Single(parsed.Model.Roots, r => r.Name == "Crate");
+            var aligner = Assert.Single(crate.Components);
+
+            var map = new IdentityMap
+            {
+                Entries = new[]
+                {
+                    new IdentityMapEntry { LogicalId = floor.LogicalId, GlobalObjectId = "goid-floor", Kind = "GameObject" },
+                    new IdentityMapEntry { LogicalId = crate.LogicalId, GlobalObjectId = "goid-crate", Kind = "GameObject" },
+                    new IdentityMapEntry
+                    {
+                        LogicalId = aligner.LogicalId,
+                        GlobalObjectId = "",
+                        Kind = "Component",
+                        ComponentType = SpatialComponents.AlignToTypeName,
+                        ParentLogicalId = crate.LogicalId,
+                    },
+                },
+            };
+
+            var editedFields = new FieldMap(new[]
+            {
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.Target, new ValueNode.ObjectRef(floor.LogicalId)),
+                new KeyValuePair<string, ValueNode>(
+                    SpatialComponents.AlignToFields.ZMode,
+                    new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false)),
+                new KeyValuePair<string, ValueNode>(SpatialComponents.AlignToFields.ZOffset, ValueNode.Primitive.Float(0.75f)),
+            });
+
+            var snapshot = new SceneSnapshot
+            {
+                SchemaVersion = 1,
+                Roots = new[]
+                {
+                    new SnapshotNode { GlobalObjectId = "goid-floor", Name = "Floor" },
+                    new SnapshotNode
+                    {
+                        GlobalObjectId = "goid-crate",
+                        Name = "Crate",
+                        Transform = new TransformData { DrivenChannels = ChannelMask.PositionZ },
+                        Components = new[]
+                        {
+                            new ComponentData { LogicalId = "unused", Type = new TypeRef(SpatialComponents.AlignToTypeName), Fields = editedFields },
+                        },
+                    },
+                },
+            };
+
+            var result = Reconciler.Reconcile(
+                parsed.Model,
+                snapshot,
+                map,
+                parsed.Anchors,
+                componentAnchors: parsed.ComponentAnchors,
+                fieldArgumentSpans: parsed.FieldArgumentSpans);
+
+            Assert.Empty(result.Conflicts);
+            var patch = Assert.IsType<PatchComponentField>(Assert.Single(result.Patch.Edits));
+            Assert.Equal("z: AxisAlign.AbutMax.Offset(0.75f)", patch.NewExpr);
+
+            var applied = SourcePatchApplier.Apply(AlignToOffsetSource, result.Patch, parsed.Anchors);
+            Assert.Contains(".AlignTo(floor, z: AxisAlign.AbutMax.Offset(0.75f))", applied);
+            Assert.DoesNotContain("zOffset", applied);
+
+            var reparsed = BuilderParser.Parse(applied, map);
+            var pass2 = Reconciler.Reconcile(
+                reparsed.Model,
+                snapshot,
+                reparsed.IdentityMap,
+                reparsed.Anchors,
+                componentAnchors: reparsed.ComponentAnchors,
+                fieldArgumentSpans: reparsed.FieldArgumentSpans);
+
+            Assert.Empty(pass2.Patch.Edits);
+            Assert.Empty(pass2.Conflicts);
+        }
+
         // An authored `.Transform(scale:)` co-existing with `.FitSize` on the
         // same node must never re-emit the driven scale as a `.Transform(scale:)` patch, even when
         // the scene-write side does not suppress the channel: the code-emit direction exercised
