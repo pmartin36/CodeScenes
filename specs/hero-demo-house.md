@@ -7,7 +7,12 @@ Build a small, polished, third-person walkthrough of a single-floor house in Uni
 One floor of a house with **three rooms** — a **dining room**, a **living room** (with a TV), and a
 **kitchen** — connected so the player can walk between them:
 
-- A character walks room to room with **WASD**, and the camera pans / looks around freely.
+- A **player character** walks room to room with **WASD**, and the camera pans / looks around freely.
+- A **second character wanders the house on its own** using a **NavMesh** — a `NavMeshAgent` pathing
+  between rooms/waypoints. The furniture placed in the scene are baked as NavMesh obstacles, so the
+  NPC walks *around* the sofa, table, and counters rather than through them (a natural showcase of the
+  authored layout driving navigation). Bake the NavMesh over the authored floor (the AI Navigation
+  package is already in the project).
 - Each room is **furnished and dressed** so it reads as a real room: the dining room has a table and
   chairs; the living room has a sofa, a coffee table, and a TV; the kitchen has counters, a fridge, and
   a stove. Add rugs, lamps, shelves, plants, wall art as suits each room.
@@ -42,16 +47,18 @@ Browse these folders and use whatever fits — nothing is assigned to a particul
   `Plant_scaranto`, `FloorLamp_DanniBittman`, `Rug_AlexSafayan`, `DiningTable_CreativeTrio`,
   `DiningChair_CMHTOculus` (instance it 4+ times), `Chandelier_CreativeTrio`.
 - `Assets/House/Quaternius/` — kitchen (FBX): `Kitchen_Fridge`, `Kitchen_Oven`, `Kitchen_Sink`,
-  `Kitchen_Cabinet1/2/Small`, `Kitchen_1/2/3Drawers`. Plus the character: `Character_Casual_Quaternius_CC0.fbx`
-  (a static humanoid mesh — see note).
+  `Kitchen_Cabinet1/2/Small`, `Kitchen_1/2/3Drawers`. Plus **two rigged characters**:
+  `Character_Casual_Quaternius_CC0.fbx` (use as the WASD player) and `Character_Suit_Quaternius_CC0.fbx`
+  (use as the NavMesh wanderer) — both ship with `Walk`/`Run`/`Idle` clips (see note).
 - The house **shell** is not an asset — build floor / walls / room dividers / doorways from primitive
   cubes and planes with `FitSize` + `AlignTo`.
 
-Character animation: `Character_Casual_Quaternius_CC0.fbx` is already rigged (`CharacterArmature`) and
-ships with its own animation clips in the same FBX — `Walk`, `Run` (+ Back/Left/Right), `Idle`, `Roll`,
-`Wave`, and more. Set the FBX import `Rig` appropriately and drive those clips from an Animator; no
-Mixamo or external animation is needed. Movement (WASD controller, free camera) is ordinary Unity
-MonoBehaviour gameplay, not part of the authored scene.
+Character animation: both `Character_Casual_...` and `Character_Suit_...` are already rigged
+(`CharacterArmature`) and ship with their own clips in the same FBX — `Walk`, `Run` (+ Back/Left/Right),
+`Idle`, `Roll`, `Wave`, and more. Set the FBX import `Rig` appropriately and drive those clips from an
+Animator (a walk/idle blend keyed off `NavMeshAgent.velocity` for the wanderer); no Mixamo or external
+animation is needed. Movement (the WASD controller, the free camera, the NavMesh agent + baking) is
+ordinary Unity gameplay/setup, not part of the CodeScenes-authored scene.
 
 ## How to build it
 
