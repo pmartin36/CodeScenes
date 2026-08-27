@@ -688,3 +688,30 @@ real emission defect (an introduced/edited per-axis offset synced back as a non-
 `zOffset:` keyword instead of folding into `z: AxisAlign.AbutMax.Offset(...)`) which the product's own
 `BuilderCompileCheck` flagged; fixed RED-first in `1259a59` by folding the axis (mode, offset) into one
 rendered argument shared by the append and incremental paths, with Core + EditMode regression tests.
+
+## 53 - the spatial solvers size and place instanced prefabs (whole-hierarchy bounds)
+
+The "drop it in, size/rest by relationship, never hand-measure" workflow broke for the most common
+real asset: a downloaded prefab instanced with `scene.Instance(...)`. Surfaced by the house one-shot
+(the author fell back to a hand-written `PropMeasure.cs` that walked the prefab's children). Three
+stacked defects fixed: (1) `FitSize`/`AlignTo`/`Between` read a Renderer/MeshFilter on their OWN
+GameObject only, so an instanced prefab whose mesh lives in child nodes couldn't be sized/placed — the
+solvers now resolve their extent from the WHOLE hierarchy (`GetComponentsInChildren`, combined in the
+solver object's local space so rotation isn't inflated) via the shared `ProjectedExtent` kernel, so all
+three inherit it; a single-mesh node is byte-identical to before. (2) The solver verbs didn't exist on
+`InstanceHandle` and the fluent form was silently discarded (parser stored into `node.Components`, which
+`BuildInstanceNode` throws away) — the verbs are now on `InstanceHandle` and route to `AddedComponents`.
+(3) A builder call on an instance that maps to no destination is now a located error, not a
+clean-console no-op.
+
+Built through the tdd-pipeline (commits `3ff46f1`, `0bec67f`). Gate
+`GATE PASS: Core + Unity EditMode green (passed=1017 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec53.log`), 5/5 against a
+real nested-mesh model (`Kenney/CarKit/sedan.fbx` — 0 renderers on the root, 5 in children):
+`scene.Instance(sedan).FitSize(width: 2f).AlignTo(floor, y: AbutMax)` produced a live combined-bounds
+width of exactly 2.0000 m and rested the combined-bounds bottom exactly on the floor top (0.00000 gap),
+with `FitSize`/`AlignTo` components actually present on the instance (not dropped); a 45deg-rotated
+instance solved scale 0.6984, matching the oriented-extent projection (not a world-AABB); an unrouted
+`.Bogus()` gave a located `SB1000` with the scene untouched; and the re-sync was byte-stable
+(`PatchEdits=0`). Console clean of product errors. The `PropMeasure.cs` workaround is now unnecessary.
