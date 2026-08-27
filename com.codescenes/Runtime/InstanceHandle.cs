@@ -71,6 +71,43 @@ namespace SceneBuilder.Authoring
         public InstanceHandle RemoveComponent<T>() => this;
 
         /// <summary>
+        /// Aspect-locked world size: exactly one of <paramref name="width"/>/<paramref name="height"/>/
+        /// <paramref name="depth"/> drives the size, aspect preserved on the other two axes.
+        /// </summary>
+        public InstanceHandle FitSize(float? width = null, float? height = null, float? depth = null) => this;
+
+        /// <summary>Explicit per-axis world size (non-uniform allowed).</summary>
+        public InstanceHandle FitSize((float x, float y, float z) size) => this;
+
+        /// <summary>
+        /// Align to <paramref name="target"/>'s extent on any of <paramref name="x"/>/<paramref name="y"/>/
+        /// <paramref name="z"/>: <see cref="AxisAlign.AbutMin"/> lands this object's max face against the
+        /// target's min face (and <see cref="AxisAlign.AbutMax"/> the mirror), each optionally offset an
+        /// extra world-unit distance via <c>.Offset(f)</c>. Each axis resolves in the target's own local
+        /// space by default, a <paramref name="frame"/> override's local space, or world space
+        /// (<paramref name="space"/>). <paramref name="target"/> is any scene object handle — a
+        /// GameObject or a prefab instance root.
+        /// </summary>
+        public InstanceHandle AlignTo(SceneObjectHandle target, AxisAlign x = default, AxisAlign y = default,
+            AxisAlign z = default, SceneObjectHandle frame = null, AlignSpace space = AlignSpace.TargetLocal) => this;
+
+        /// <summary>
+        /// Single-axis corridor placement: lands this object's bounds flush against
+        /// <paramref name="from"/> at <paramref name="fraction"/> 0 and flush against
+        /// <paramref name="to"/> at <paramref name="fraction"/> 1, moving only along
+        /// <paramref name="axis"/>. <paramref name="fraction"/> is unclamped, so a value outside
+        /// [0, 1] places past the respective anchor. <paramref name="axis"/> is a world direction by
+        /// default, or the matching local axis of <paramref name="alongOrientationOf"/> when given, so
+        /// placement can follow a tilted reference. Which anchor owns the fraction-0 end is fixed by
+        /// argument order (<paramref name="from"/>), not by which anchor sits at the higher world
+        /// coordinate. Hierarchy-independent — anchors and self may live under unrelated parents.
+        /// Chaining more than two <c>Between</c> calls into a longer anchor cycle is undefined: each
+        /// evaluates independently and the last one to run wins.
+        /// </summary>
+        public InstanceHandle Between(SceneObjectHandle from, SceneObjectHandle to, float fraction,
+            Between.Axis axis, SceneObjectHandle alongOrientationOf = null) => this;
+
+        /// <summary>
         /// Author overrides scoped to a nested target inside the instance's hierarchy, addressed by
         /// child path (e.g. <c>"Turret/Barrel"</c>). Fallback for the typed selector overload on
         /// <see cref="InstanceHandle{TRef}"/> when no generated ref type is available.
@@ -152,6 +189,43 @@ namespace SceneBuilder.Authoring
 
         /// <summary>Remove a component of type <typeparamref name="T"/> from the instance root (must exist on the source prefab).</summary>
         public new InstanceHandle<TRef> RemoveComponent<T>() => this;
+
+        /// <summary>
+        /// Aspect-locked world size: exactly one of <paramref name="width"/>/<paramref name="height"/>/
+        /// <paramref name="depth"/> drives the size, aspect preserved on the other two axes.
+        /// </summary>
+        public new InstanceHandle<TRef> FitSize(float? width = null, float? height = null, float? depth = null) => this;
+
+        /// <summary>Explicit per-axis world size (non-uniform allowed).</summary>
+        public new InstanceHandle<TRef> FitSize((float x, float y, float z) size) => this;
+
+        /// <summary>
+        /// Align to <paramref name="target"/>'s extent on any of <paramref name="x"/>/<paramref name="y"/>/
+        /// <paramref name="z"/>: <see cref="AxisAlign.AbutMin"/> lands this object's max face against the
+        /// target's min face (and <see cref="AxisAlign.AbutMax"/> the mirror), each optionally offset an
+        /// extra world-unit distance via <c>.Offset(f)</c>. Each axis resolves in the target's own local
+        /// space by default, a <paramref name="frame"/> override's local space, or world space
+        /// (<paramref name="space"/>). <paramref name="target"/> is any scene object handle — a
+        /// GameObject or a prefab instance root.
+        /// </summary>
+        public new InstanceHandle<TRef> AlignTo(SceneObjectHandle target, AxisAlign x = default, AxisAlign y = default,
+            AxisAlign z = default, SceneObjectHandle frame = null, AlignSpace space = AlignSpace.TargetLocal) => this;
+
+        /// <summary>
+        /// Single-axis corridor placement: lands this object's bounds flush against
+        /// <paramref name="from"/> at <paramref name="fraction"/> 0 and flush against
+        /// <paramref name="to"/> at <paramref name="fraction"/> 1, moving only along
+        /// <paramref name="axis"/>. <paramref name="fraction"/> is unclamped, so a value outside
+        /// [0, 1] places past the respective anchor. <paramref name="axis"/> is a world direction by
+        /// default, or the matching local axis of <paramref name="alongOrientationOf"/> when given, so
+        /// placement can follow a tilted reference. Which anchor owns the fraction-0 end is fixed by
+        /// argument order (<paramref name="from"/>), not by which anchor sits at the higher world
+        /// coordinate. Hierarchy-independent — anchors and self may live under unrelated parents.
+        /// Chaining more than two <c>Between</c> calls into a longer anchor cycle is undefined: each
+        /// evaluates independently and the last one to run wins.
+        /// </summary>
+        public new InstanceHandle<TRef> Between(SceneObjectHandle from, SceneObjectHandle to, float fraction,
+            Between.Axis axis, SceneObjectHandle alongOrientationOf = null) => this;
 
         /// <summary>
         /// Author overrides scoped to a nested target inside the instance's hierarchy, addressed by a

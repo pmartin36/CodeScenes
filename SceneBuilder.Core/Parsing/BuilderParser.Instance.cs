@@ -127,8 +127,17 @@ namespace SceneBuilder.Core.Parsing
                     case "RemoveComponent":
                         ApplyRemoveComponent(node, call.Invocation);
                         break;
+                    case "FitSize":
+                        ApplyFitSize(node, call.Args, call.Invocation, ctx, node.AddedComponents);
+                        break;
+                    case "AlignTo":
+                        ApplyAlignTo(node, call.Args, call.Invocation, ctx, node.AddedComponents);
+                        break;
+                    case "Between":
+                        ApplyBetween(node, call.Args, call.Invocation, ctx, node.AddedComponents);
+                        break;
                     case "On":
-                        // b4-t2 (test-writer stub): real resolution lands in BuilderParser.Facade.cs.
+                        // Resolution lands in BuilderParser.Facade.cs.
                         ApplyScopedOn(node, call.Args, ctx);
                         break;
                     case "RemoveChild":
@@ -218,39 +227,49 @@ namespace SceneBuilder.Core.Parsing
         }
 
         // Mirrors BuildPlainNode's base-field copy, but emits a PrefabInstanceNode: Components
-        // stays empty (v1 — whole-instance only, no per-component authoring) and SourcePrefab
-        // carries the unresolved DisplayPath (GUID lowering is b2-t3's job, not parse's).
+        // stays empty (whole-instance only, no per-component authoring) and SourcePrefab carries
+        // the unresolved DisplayPath (GUID lowering happens later, not at parse time).
         // Overrides/RemovedComponents map straight from the NodeBuilder collections; AddedComponents
         // get their LogicalId (`{instanceLogicalId}/{TypeFullName}#{ordinal}`) assigned HERE, since
         // this only runs once the instance's own LogicalId is final (see ProcessInstanceChain).
-        private static PrefabInstanceNode BuildInstanceNode(NodeBuilder builder) => new()
+        private static PrefabInstanceNode BuildInstanceNode(NodeBuilder builder)
         {
-            LogicalId = builder.LogicalId,
-            Name = builder.Name,
-            Tag = builder.Tag,
-            Layer = builder.Layer,
-            Active = builder.Active,
-            IsStatic = builder.IsStatic,
-            Transform = BuildTransformData(builder),
-            Components = System.Array.Empty<ComponentData>(),
-            Children = builder.Children.Where(c => c.IsInstance).Select(BuildNode).ToArray(),
-            SourcePrefab = new AssetRef { DisplayPath = builder.SourcePrefabPath ?? "", Guid = builder.SourcePrefabGuid ?? "" },
-            OpaqueOverrides = null,
-            Overrides = builder.Overrides.ToArray(),
-            AddedComponents = BuildAddedComponents(builder),
-            RemovedComponents = builder.RemovedComponents.ToArray(),
-            ScopedOverrides = builder.ScopedOverrides.Count == 0 ? null : builder.ScopedOverrides.ToArray(),
-            AddedGameObjects = builder.AddedGameObjects.Select(a => new AddedGameObject
+            if (builder.Components.Count != 0)
             {
-                Parent = a.ParentPath == "" ? new OverrideTarget() : new OverrideTarget { ChildPath = a.ParentPath },
-                Node = BuildNode(a.Node),
-            }).Concat(builder.Children.Where(c => !c.IsInstance).Select(c => new AddedGameObject
+                throw new System.InvalidOperationException(
+                    $"Instance node '{builder.LogicalId}' carries {builder.Components.Count} component(s) in " +
+                    "Components; solver/component verbs on an instance must route to AddedComponents.");
+            }
+
+            return new()
             {
-                Parent = new OverrideTarget(),
-                Node = BuildNode(c),
-            })).ToArray(),
-            RemovedGameObjects = builder.RemovedGameObjects.ToArray(),
-        };
+                LogicalId = builder.LogicalId,
+                Name = builder.Name,
+                Tag = builder.Tag,
+                Layer = builder.Layer,
+                Active = builder.Active,
+                IsStatic = builder.IsStatic,
+                Transform = BuildTransformData(builder),
+                Components = System.Array.Empty<ComponentData>(),
+                Children = builder.Children.Where(c => c.IsInstance).Select(BuildNode).ToArray(),
+                SourcePrefab = new AssetRef { DisplayPath = builder.SourcePrefabPath ?? "", Guid = builder.SourcePrefabGuid ?? "" },
+                OpaqueOverrides = null,
+                Overrides = builder.Overrides.ToArray(),
+                AddedComponents = BuildAddedComponents(builder),
+                RemovedComponents = builder.RemovedComponents.ToArray(),
+                ScopedOverrides = builder.ScopedOverrides.Count == 0 ? null : builder.ScopedOverrides.ToArray(),
+                AddedGameObjects = builder.AddedGameObjects.Select(a => new AddedGameObject
+                {
+                    Parent = a.ParentPath == "" ? new OverrideTarget() : new OverrideTarget { ChildPath = a.ParentPath },
+                    Node = BuildNode(a.Node),
+                }).Concat(builder.Children.Where(c => !c.IsInstance).Select(c => new AddedGameObject
+                {
+                    Parent = new OverrideTarget(),
+                    Node = BuildNode(c),
+                })).ToArray(),
+                RemovedGameObjects = builder.RemovedGameObjects.ToArray(),
+            };
+        }
 
         private static AddedComponent[] BuildAddedComponents(NodeBuilder builder)
         {

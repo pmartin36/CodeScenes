@@ -436,13 +436,13 @@ namespace SceneBuilder.Core.Parsing
                         ApplyComponent(node, args, invocation, ctx);
                         break;
                     case "FitSize":
-                        ApplyFitSize(node, args, invocation, ctx);
+                        ApplyFitSize(node, args, invocation, ctx, node.Components);
                         break;
                     case "AlignTo":
-                        ApplyAlignTo(node, args, invocation, ctx);
+                        ApplyAlignTo(node, args, invocation, ctx, node.Components);
                         break;
                     case "Between":
-                        ApplyBetween(node, args, invocation, ctx);
+                        ApplyBetween(node, args, invocation, ctx, node.Components);
                         break;
                     case "RectTransform":
                         ApplyRectTransform(node, args);

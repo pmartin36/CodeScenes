@@ -5,9 +5,11 @@ namespace SceneBuilder.Authoring
 {
     /// <summary>
     /// Editor-time (and play-mode-guarded) alignment. Drives <c>transform.position</c> on the set
-    /// axes so a sibling <see cref="Renderer"/>'s bounds land against a resolved surface — an
-    /// explicit <see cref="target"/>'s extent (abut/align, per axis), or (with no target) a
-    /// raycast hit / collider-less fallback scan — independent of the object's own pivot.
+    /// axes so the combined bounds of every <see cref="Renderer"/> in the object's hierarchy (root and
+    /// descendants) land against a resolved surface — an explicit <see cref="target"/>'s extent
+    /// (abut/align, per axis, itself resolved from the target's own combined hierarchy bounds), or
+    /// (with no target) a raycast hit / collider-less fallback scan — independent of the object's own
+    /// pivot.
     /// </summary>
     /// <remarks>
     /// Add it from a builder with <see cref="NodeHandle.AlignTo"/> or in the inspector. It runs in
@@ -120,8 +122,7 @@ namespace SceneBuilder.Authoring
             if (Application.isPlaying) return;
             if (!isActiveAndEnabled) return;
 
-            var r = GetComponent<Renderer>();
-            if (r == null)
+            if (!ProjectedExtent.TryCombinedWorldBounds(transform, out Bounds bounds))
             {
                 if (!_loggedError)
                 {
@@ -169,13 +170,12 @@ namespace SceneBuilder.Authoring
 
             Physics.SyncTransforms();
 
-            Bounds bounds = r.bounds;
             Vector3 pos = transform.position;
             Transform lastSurface = null;
 
-            if (axis0Set) ApplyAxis(r, bounds, 0, xMode, xOffset, ref pos, ref lastSurface);
-            if (axis1Set) ApplyAxis(r, bounds, 1, yMode, yOffset, ref pos, ref lastSurface);
-            if (axis2Set) ApplyAxis(r, bounds, 2, zMode, zOffset, ref pos, ref lastSurface);
+            if (axis0Set) ApplyAxis(bounds, 0, xMode, xOffset, ref pos, ref lastSurface);
+            if (axis1Set) ApplyAxis(bounds, 1, yMode, yOffset, ref pos, ref lastSurface);
+            if (axis2Set) ApplyAxis(bounds, 2, zMode, zOffset, ref pos, ref lastSurface);
 
             transform.position = pos;
             _lastWritten = pos;
@@ -188,18 +188,13 @@ namespace SceneBuilder.Authoring
         /// resolved frame axis when a target is set, else the no-target world-axis raycast/fallback
         /// scan (Abut modes only). Applies the flush-plus-offset delta to <paramref name="pos"/> on
         /// that axis only.</summary>
-        private void ApplyAxis(Renderer r, Bounds bounds, int axis, Mode mode, float offset, ref Vector3 pos, ref Transform lastSurface)
+        private void ApplyAxis(Bounds bounds, int axis, Mode mode, float offset, ref Vector3 pos, ref Transform lastSurface)
         {
             if (target != null)
             {
-                var targetRenderer = target.GetComponent<Renderer>();
-                if (targetRenderer == null) return;
-
                 Vector3 d = FrameAxisDir(axis);
-                float hs = ProjectedExtent.HalfExtentAlong(r, d);
-                float ht = ProjectedExtent.HalfExtentAlong(targetRenderer, d);
-                float cSelf = Vector3.Dot(bounds.center, d);
-                float cTgt = Vector3.Dot(targetRenderer.bounds.center, d);
+                if (!ProjectedExtent.TryCombinedProjection(transform, d, out float cSelf, out float hs)) return;
+                if (!ProjectedExtent.TryCombinedProjection(target, d, out float cTgt, out float ht)) return;
 
                 float cNew = mode switch
                 {
@@ -225,7 +220,7 @@ namespace SceneBuilder.Authoring
             // Abut modes only, unchanged world-axis raycast/fallback-scan surface resolution (AbutMin
             // looks in the world's +axis direction, AbutMax in -axis).
             int dirSign = mode == Mode.AbutMin ? 1 : -1;
-            ResolveAndApplyAxisWorld(r, bounds, axis, dirSign, offset, ref pos, ref lastSurface);
+            ResolveAndApplyAxisWorld(bounds, axis, dirSign, offset, ref pos, ref lastSurface);
         }
 
         /// <summary>The unit direction axis <paramref name="axis"/> (0=X, 1=Y, 2=Z) resolves along:
@@ -247,9 +242,9 @@ namespace SceneBuilder.Authoring
         /// collider-less scene scan) and applies the flush-plus-offset delta to <paramref name="pos"/>
         /// on that axis only (the whole world AABB translates by it, so the face lands exactly on the
         /// surface regardless of pivot). No move if no surface resolves.</summary>
-        private void ResolveAndApplyAxisWorld(Renderer r, Bounds bounds, int axis, int dirSign, float offset, ref Vector3 pos, ref Transform lastSurface)
+        private void ResolveAndApplyAxisWorld(Bounds bounds, int axis, int dirSign, float offset, ref Vector3 pos, ref Transform lastSurface)
         {
-            float half = ProjectedExtent.HalfExtentAlong(r, AxisDir(axis));
+            ProjectedExtent.TryCombinedProjection(transform, AxisDir(axis), out _, out float half);
             float faceCoord = bounds.center[axis] + dirSign * half;
 
             float? surface = RaycastSurface(bounds, axis, dirSign, out var surfaceTransform);

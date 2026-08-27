@@ -5,9 +5,10 @@ namespace SceneBuilder.Authoring
 {
     /// <summary>
     /// Editor-time (and play-mode-guarded) world-size solver. Drives <c>transform.localScale</c> from
-    /// a sibling <see cref="MeshFilter"/>'s local bounds so an authored width/height/depth (aspect-locked)
-    /// or explicit per-axis <see cref="size"/> becomes an exact WORLD size, independent of the mesh's
-    /// native dimensions, rotation, or a scaled parent.
+    /// the combined local bounds of every <see cref="MeshFilter"/> in the object's hierarchy (root and
+    /// descendants) so an authored width/height/depth (aspect-locked) or explicit per-axis
+    /// <see cref="size"/> becomes an exact WORLD size, independent of the mesh's native dimensions,
+    /// rotation, or a scaled parent.
     /// </summary>
     /// <remarks>
     /// Add it from a builder with <see cref="NodeHandle.FitSize(float?, float?, float?)"/> or in the
@@ -77,8 +78,7 @@ namespace SceneBuilder.Authoring
             if (!isActiveAndEnabled) return;
             if (mode == Mode.None) return;
 
-            var mf = GetComponent<MeshFilter>();
-            if (mf == null || mf.sharedMesh == null)
+            if (!ProjectedExtent.TryCombinedLocalMeshBounds(transform, out Bounds meshBounds))
             {
                 if (!_loggedError)
                 {
@@ -88,7 +88,7 @@ namespace SceneBuilder.Authoring
                 return;
             }
 
-            Vector3 local = mf.sharedMesh.bounds.size;
+            Vector3 local = meshBounds.size;
             Vector3 pls = transform.parent != null ? transform.parent.lossyScale : Vector3.one;
             int drivingAxis = DrivingAxis();
 
@@ -116,7 +116,7 @@ namespace SceneBuilder.Authoring
             Vector3 newScale = transform.localScale;
             if (drivingAxis >= 0)
             {
-                float denom = 2f * ProjectedExtent.HalfExtentAlong(mf.sharedMesh.bounds, transform.rotation, pls, AxisDir(drivingAxis));
+                float denom = 2f * ProjectedExtent.HalfExtentAlong(meshBounds, transform.rotation, pls, AxisDir(drivingAxis));
                 if (Mathf.Approximately(denom, 0f))
                 {
                     WarnDegenerate();
@@ -131,7 +131,7 @@ namespace SceneBuilder.Authoring
                 bool anyDegenerate = false;
                 for (int i = 0; i < 3; i++)
                 {
-                    float denom = 2f * ProjectedExtent.HalfExtentAlong(mf.sharedMesh.bounds, transform.rotation, pls, AxisDir(i));
+                    float denom = 2f * ProjectedExtent.HalfExtentAlong(meshBounds, transform.rotation, pls, AxisDir(i));
                     if (Mathf.Approximately(denom, 0f))
                     {
                         anyDegenerate = true;

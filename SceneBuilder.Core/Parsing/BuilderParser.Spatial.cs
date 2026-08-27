@@ -21,7 +21,7 @@ namespace SceneBuilder.Core.Parsing
 
         // `.FitSize(height: 2f)` (aspect-locked) | `.FitSize(size: (2,1,0.5f))` (explicit).
         // Total on VALUES (non-literal -> Unsupported); Fail (located) on STRUCTURE.
-        private static void ApplyFitSize(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
+        private static void ApplyFitSize(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx, List<ComponentBuilder> target)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
@@ -94,7 +94,7 @@ namespace SceneBuilder.Core.Parsing
                 cb.FieldValueSpans.Add(s);
             }
 
-            node.Components.Add(cb);
+            target.Add(cb);
             node.DrivenChannels |= SpatialComponents.FitSizeMask;
         }
 
@@ -126,7 +126,7 @@ namespace SceneBuilder.Core.Parsing
         // agrees). Value-level facts (non-literal .Offset(...), an unknown AxisAlign/AlignSpace member) are
         // TOTAL -> Unsupported (never a throw). `target` is the sole positional-or-named arg; every other
         // argument must be named. There is no "requires an axis"/empty-arg problem: target is always present.
-        private static void ApplyAlignTo(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
+        private static void ApplyAlignTo(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx, List<ComponentBuilder> target)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
@@ -220,7 +220,7 @@ namespace SceneBuilder.Core.Parsing
                 cb.FieldValueSpans.Add(s);
             }
 
-            node.Components.Add(cb);
+            target.Add(cb);
             node.DrivenChannels |= SpatialComponents.AlignToDrivenMask(xPinned, yPinned, zPinned);
         }
 
@@ -307,7 +307,7 @@ namespace SceneBuilder.Core.Parsing
         // from/to/alongOrientationOf are ObjectRefs (total via ValueNodeParser); axis is parsed
         // directly from the rightmost member identifier (never the generic MemberAccess->Enum arm,
         // which would yield the runtime '+' TypeFullName) into the canonical authoring TypeFullName.
-        private static void ApplyBetween(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx)
+        private static void ApplyBetween(NodeBuilder node, ArgumentListSyntax args, InvocationExpressionSyntax invocation, ParserContext ctx, List<ComponentBuilder> target)
         {
             var fields = new List<KeyValuePair<string, ValueNode>>();
             var spans = new List<KeyValuePair<string, SourceSpan>>();
@@ -381,7 +381,7 @@ namespace SceneBuilder.Core.Parsing
                 cb.FieldValueSpans.Add(s);
             }
 
-            node.Components.Add(cb);
+            target.Add(cb);
 
             if (axisResolved)
             {

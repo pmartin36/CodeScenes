@@ -5,9 +5,10 @@ namespace SceneBuilder.Authoring
 {
     /// <summary>
     /// Editor-time (and play-mode-guarded) single-axis corridor placement. Drives
-    /// <c>transform.position</c> along one axis so a sibling <see cref="Renderer"/>'s bounds land flush
-    /// against <see cref="from"/> at fraction 0 and flush against <see cref="to"/> at fraction 1,
-    /// independent of the object's own pivot.
+    /// <c>transform.position</c> along one axis so the combined bounds of every <see cref="Renderer"/>
+    /// in the object's hierarchy (root and descendants) land flush against <see cref="from"/> at
+    /// fraction 0 and flush against <see cref="to"/> at fraction 1 (each anchor resolved from its own
+    /// combined hierarchy bounds), independent of the object's own pivot.
     /// </summary>
     // Serialized field names are the write contract: they must equal
     // SceneBuilder.Core.Model.SpatialComponents.BetweenFields.* so Materialize's by-name write hits
@@ -107,11 +108,13 @@ namespace SceneBuilder.Authoring
                 return;
             }
 
-            var selfRenderer = GetComponent<Renderer>();
-            var fromRenderer = from != null ? from.GetComponent<Renderer>() : null;
-            var toRenderer = to != null ? to.GetComponent<Renderer>() : null;
+            Vector3 d = AxisDirection();
 
-            if (selfRenderer == null || fromRenderer == null || toRenderer == null)
+            bool hasSelf = ProjectedExtent.TryCombinedProjection(transform, d, out float cself, out float es);
+            bool hasFrom = ProjectedExtent.TryCombinedProjection(from, d, out float cf, out float ef);
+            bool hasTo = ProjectedExtent.TryCombinedProjection(to, d, out float ct, out float et);
+
+            if (!hasSelf || !hasFrom || !hasTo)
             {
                 if (!_loggedError)
                 {
@@ -120,16 +123,6 @@ namespace SceneBuilder.Authoring
                 }
                 return;
             }
-
-            Vector3 d = AxisDirection();
-
-            float cf = Vector3.Dot(fromRenderer.bounds.center, d);
-            float ct = Vector3.Dot(toRenderer.bounds.center, d);
-            float cself = Vector3.Dot(selfRenderer.bounds.center, d);
-
-            float ef = ProjectedExtent.HalfExtentAlong(fromRenderer, d);
-            float et = ProjectedExtent.HalfExtentAlong(toRenderer, d);
-            float es = ProjectedExtent.HalfExtentAlong(selfRenderer, d);
 
             float s = ct >= cf ? 1f : -1f;
 

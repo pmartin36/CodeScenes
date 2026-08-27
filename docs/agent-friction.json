@@ -2,25 +2,25 @@
   "entries": {
     "Assertion failed on expression: '!gAlreadyClosing'": {
       "class": "ENVIRONMENT",
-      "count": 20,
+      "count": 21,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-25",
+      "last_seen": "2026-08-26",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "Assertion failed on expression: '!gAlreadyClosing'"
     },
     "Assertion failed on expression: 'm_PodArrays.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 19,
+      "count": 20,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-25",
+      "last_seen": "2026-08-26",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
       "verbatim": "Assertion failed on expression: 'm_PodArrays.empty()'"
     },
     "Assertion failed on expression: 'm_RendererNodes.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 9,
+      "count": 10,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-25",
+      "last_seen": "2026-08-26",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
       "verbatim": "Assertion failed on expression: 'm_RendererNodes.empty()'"
     },
@@ -111,6 +111,22 @@
       "last_seen": "2026-07-31",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-console-capture.log",
       "verbatim": "[SceneBuilder] Sync wrote LiveVerifyConsole.cs: emitted builder source DOES NOT COMPILE (1 error(s)). | line 23: CS0841: Cannot use local variable 'button' before it is declared"
+    },
+    "[SceneBuilder] Sync wrote Spec52Rt.cs: emitted builder source DOES NOT COMPILE (<n> error(s)). | line 20: CS1739: The best overload for 'AlignTo' does not have a parameter named 'zOffset'": {
+      "class": "PRODUCT",
+      "count": 1,
+      "first_seen": "2026-08-26",
+      "last_seen": "2026-08-26",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-spec52.log",
+      "verbatim": "[SceneBuilder] Sync wrote Spec52Rt.cs: emitted builder source DOES NOT COMPILE (1 error(s)). | line 20: CS1739: The best overload for 'AlignTo' does not have a parameter named 'zOffset'"
+    },
+    "[SceneBuilder] Sync wrote Spec52Verify.cs: emitted builder source DOES NOT COMPILE (<n> error(s)). | line 21: CS1739: The best overload for 'AlignTo' does not have a parameter named 'zOffset'": {
+      "class": "PRODUCT",
+      "count": 2,
+      "first_seen": "2026-08-26",
+      "last_seen": "2026-08-26",
+      "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/live-verify-spec52.log",
+      "verbatim": "[SceneBuilder] Sync wrote Spec52Verify.cs: emitted builder source DOES NOT COMPILE (2 error(s)). | line 21: CS1739: The best overload for 'AlignTo' does not have a parameter named 'zOffset'"
     }
   },
   "seen_logs": {
@@ -213,6 +229,11 @@
       "bytes": 258282,
       "head": "2fae93007ccbf185",
       "size": 258282
+    },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec52.log": {
+      "bytes": 357362,
+      "head": "fd0a5294eaed50ba",
+      "size": 357362
     }
   }
 }
