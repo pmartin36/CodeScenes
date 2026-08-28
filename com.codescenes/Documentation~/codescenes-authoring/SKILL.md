@@ -23,19 +23,32 @@ Before you reach for the editor to measure an asset's bounds or compute coordina
 don't have to. CodeScenes has editor-time solvers that position and size objects by their
 *relationship* to others, and they re-solve when things move. Prefer these over measured numbers:
 
-- **`.AlignTo(target, y: AxisAlign.AbutMax)`** — rest or align an object against another's face (drop
-  the ball onto the green, sit a prop on the floor). No computing a Y from the mesh's bounds. Each axis
+- **`.AlignTo(target, y: AxisAlign.AbutMax)`** — rest or align an object against another object's face
+  (rest one object on another's surface, or sit it flush against a face). No computing a Y from the
+  mesh's bounds. Each axis
   (`x`/`y`/`z`) takes an `AxisAlign` preset — `AbutMin`/`AbutMax` (flush outside, on the target's min/max
   side), `AlignMin`/`AlignMax` (near/far faces coincide), or `AlignCenter` — with an optional
   `.Offset(f)`.
 - **`.FitSize(width: 2f)`** — make an object an exact **world** size regardless of the mesh's native
   dimensions, rotation, or parent scale. No computing a scale factor. Pass any of `width/height/depth`.
-- **`.Between(from, to, fraction, axis)`** — place an object flush between two others at a fraction
-  along one axis (0 = against `from`, 1 = against `to`). No computing a midpoint.
+- **`.Between(from, to, fraction, Between.Axis.X)`** — position an object along ONE axis at a fraction
+  between two anchor objects (`0` = against `from`, `1` = against `to`, unclamped). Use it to position one
+  object along a line, and to *spread several* objects evenly: N objects at fractions like
+  `0.2f/0.4f/0.6f/0.8f`, one call each, not N guessed coordinates. `AlignCenter` would stack them all at
+  the same centre; `Between` is what spaces them out.
 
-So instead of "measure the tile, then place the next at x+2.4", snap and fit and fit-between. You will
-still use plain `Transform(pos: ...)` for deliberate absolute layout, but reach for the solvers first
-whenever a position or size is really "relative to that other thing."
+So instead of "measure the tile, then place the next at x+2.4", snap and fit and fit-between. Placement
+is a per-axis decision, and each axis can be driven relative to another object: rest on a surface with
+`AlignTo(surface, y: AxisAlign.AbutMax)`, sit flush against another object's face with
+`AlignTo(other, x: AxisAlign.AbutMax)`, edge-align or centre with `AlignMin`/`AlignMax`/`AlignCenter`,
+and spread along an axis with `Between`. One `AlignTo` can drive several axes against a single target in
+one call.
+
+If a position is really "relative to that other object," reach for `AlignTo`/`Between` — do NOT write a
+literal `Transform(pos: ...)` for it. A guessed coordinate ignores the object's own size (after
+`FitSize`) and the thing it should sit relative to, so it drifts or overlaps; that is the bug the solvers
+exist to prevent. Reserve `Transform(pos:)` for deliberate absolute anchors, never for an object placed
+relative to another.
 
 ## Where the file goes
 
