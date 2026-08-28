@@ -232,7 +232,9 @@ namespace SceneBuilder.Editor
                 assetCatalog: assetCatalog,
                 chainedComponents: parse.ChainedComponents,
                 componentHandles: parse.ComponentHandles,
-                listenerCallSpans: parse.ListenerCallSpans);
+                listenerCallSpans: parse.ListenerCallSpans,
+                authoredSelectorNames: loaded.AuthoredSelectorNames,
+                overrideAuthoredSelectorNames: loaded.OverrideAuthoredSelectorNames);
 
             // Built AFTER the reconcile so a report anchored on a LogicalId this sync itself
             // introduced (a handle for a handle-less owner, a brand-new scene node) still resolves:
@@ -290,7 +292,7 @@ namespace SceneBuilder.Editor
                 var anchors = MergeAnchors(parse.Anchors, parse.ComponentAnchors);
                 var newSource = SourcePatchApplier.Apply(
                     source, result.Patch, anchors, assetCatalog,
-                    inaccessibleMembers: InaccessibleMemberIndex.Build(snapshot.InaccessibleMembers));
+                    safeMembers: SafeMemberIndex.Build(snapshot.SafeMembers));
                 if (SceneBuilderPaths.WriteIfChanged(builderPath, newSource))
                 {
                     currentSource = newSource;
@@ -453,7 +455,9 @@ namespace SceneBuilder.Editor
                 assetCatalog: assetCatalog,
                 chainedComponents: baselineLoaded.Parse.ChainedComponents,
                 componentHandles: baselineLoaded.Parse.ComponentHandles,
-                listenerCallSpans: baselineLoaded.Parse.ListenerCallSpans);
+                listenerCallSpans: baselineLoaded.Parse.ListenerCallSpans,
+                authoredSelectorNames: baselineLoaded.AuthoredSelectorNames,
+                overrideAuthoredSelectorNames: baselineLoaded.OverrideAuthoredSelectorNames);
 
             var sceneKeys = new HashSet<FieldKey>(
                 sceneReconcile.Patch.Edits
@@ -497,7 +501,9 @@ namespace SceneBuilder.Editor
                 assetCatalog: assetCatalog,
                 chainedComponents: newLoaded.Parse.ChainedComponents,
                 componentHandles: newLoaded.Parse.ComponentHandles,
-                listenerCallSpans: newLoaded.Parse.ListenerCallSpans);
+                listenerCallSpans: newLoaded.Parse.ListenerCallSpans,
+                authoredSelectorNames: newLoaded.AuthoredSelectorNames,
+                overrideAuthoredSelectorNames: newLoaded.OverrideAuthoredSelectorNames);
 
             // Built AFTER `applicable` (the reconcile whose reports are actually surfaced below) so a
             // report anchored on a LogicalId this sync itself introduced still resolves — see Run's
@@ -584,7 +590,7 @@ namespace SceneBuilder.Editor
                 var filteredPatch = new SourcePatch { FilePath = builderPath, Edits = keptEdits.ToArray() };
                 var patchedSource = SourcePatchApplier.Apply(
                     newSource, filteredPatch, anchors, assetCatalog,
-                    inaccessibleMembers: InaccessibleMemberIndex.Build(liveSnapshot.InaccessibleMembers));
+                    safeMembers: SafeMemberIndex.Build(liveSnapshot.SafeMembers));
 
                 if (conflicts.Count > 0)
                 {

@@ -69,15 +69,6 @@ namespace GateFixtures
         public MixedPrivateBacked Mixed;
     }
 
-    // A component's OWN top-level serialized field is private with no public property setter (unlike
-    // PrivateBacked's struct member above) -- an authored typed selector naming it (`r => r.m_Secret`)
-    // parses but never compiles.
-    public class InaccessibleFieldFixtureBehaviour : MonoBehaviour
-    {
-        [SerializeField] private float m_Secret;
-        public float ReadSecret => m_Secret;
-    }
-
     [Serializable]
     public struct DeepInner
     {

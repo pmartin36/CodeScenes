@@ -192,6 +192,20 @@ namespace SceneBuilder.Core.Reconcile
         public string NewExpr { get; init; } = "";
     }
 
+    // spec 54: the diff-independent self-heal. An authored typed selector (`sel => sel.M`) over a
+    // member the adapter has NOT proven safe, whose VALUE has not changed (a changed value already
+    // downgrades via PatchComponentField's own selector-downgrade arm) -- rewrites ONLY the selector
+    // argument to its string-key form, leaving the value argument untouched, so the heal cannot
+    // itself reformat a value that never moved.
+    public sealed record DowngradeComponentSelector : SourceEdit
+    {
+        // Inherited Anchor = owning component LogicalId.
+        // Serialized field key the selector resolves to -- locates the enclosing `.Set(...)` call.
+        public string FieldKey { get; init; } = "";
+        // The AUTHORED selector identifier text (e.g. "m_Secret") rewritten to a string literal.
+        public string MemberName { get; init; } = "";
+    }
+
     // A source-authored field whose LIVE value returned to the type's constructed default —
     // the `.Set(...)` call is REMOVED from source, never patched to the default literal (spec 32 C2).
     // The inverse of IntroduceComponentField; both key on the same component anchor.

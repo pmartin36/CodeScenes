@@ -27,11 +27,11 @@ namespace SceneBuilder.Core.Reconcile
             // to the `Asset("path")` string form. Optional/trailing so every pre-existing call site
             // stays green unchanged.
             AssetCatalog? assetCatalog = null,
-            // Per (component TYPE, member name) fact that a typed selector naming that member would
-            // not compile. Optional/trailing, default Empty (via ResolvePatchComponentField's own
-            // default), so every pre-existing call site keeps its current behavior — same pattern as
-            // assetCatalog above.
-            InaccessibleMemberIndex? inaccessibleMembers = null)
+            // spec 54: positive-proof whitelist. Threaded to BOTH emit sites (the component `.Set`
+            // selector-downgrade arm AND the prefab-instance override render) -- the two share no
+            // caller, so each must receive it independently. Optional/trailing, default null, so
+            // every pre-existing call site stays green unchanged.
+            SafeMemberIndex? safeMembers = null)
         {
             var tree = CSharpSyntaxTree.ParseText(source);
             var root = (CompilationUnitSyntax)tree.GetRoot();
@@ -72,7 +72,7 @@ namespace SceneBuilder.Core.Reconcile
             // splice onto the SAME anchor's chain expression; folded here — once per anchor — for
             // the same reason transform args are folded above. See
             // SourcePatchApplier.Instances.cs's ResolveInstanceChainedCallAppends.
-            var consumedChainedCallEdits = ResolveInstanceChainedCallAppends(root, anchors, patch, allTargets, appliers);
+            var consumedChainedCallEdits = ResolveInstanceChainedCallAppends(root, anchors, patch, allTargets, appliers, safeMembers);
 
             foreach (var edit in patch.Edits)
             {
@@ -116,7 +116,10 @@ namespace SceneBuilder.Core.Reconcile
                         // left to do in the main dispatch loop.
                         break;
                     case PatchComponentField patchComponentField:
-                        ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers, inaccessibleMembers);
+                        ResolvePatchComponentField(root, anchors, patchComponentField, allTargets, appliers, safeMembers);
+                        break;
+                    case DowngradeComponentSelector downgradeComponentSelector:
+                        ResolveDowngradeComponentSelector(root, anchors, downgradeComponentSelector, allTargets, appliers);
                         break;
                     case IntroduceComponentField introduceComponentField:
                         ResolveIntroduceComponentField(root, anchors, introduceComponentField, allTargets, appliers, assetCatalog);
@@ -155,7 +158,15 @@ namespace SceneBuilder.Core.Reconcile
 
                         break;
                     case DropScopedOnCall dropScopedOnCall:
-                        ResolveDropScopedOnCall(root, anchors, dropScopedOnCall, allTargets, appliers);
+                        // spec 54: a drop sharing an (anchor, matchKey) with a same-batch
+                        // AppendScopedOn was already folded into that closure's single ReplaceNode
+                        // by ResolveScopedOnAppends above — see its doc comment on the chain-collision
+                        // hazard (mirrors DropInstanceCall's fold, just above).
+                        if (!consumedChainedCallEdits.Contains(edit))
+                        {
+                            ResolveDropScopedOnCall(root, anchors, dropScopedOnCall, allTargets, appliers);
+                        }
+
                         break;
                     default:
                         throw Fail(root, $"Unsupported SourceEdit kind '{edit.GetType().Name}'.");

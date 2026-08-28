@@ -18,6 +18,41 @@ namespace SceneBuilder.Editor
     /// type. Runs on the desired model BEFORE any Diff, in both directions. Unresolvable member ->
     /// located error (§7). Post-resolution every <c>Fields</c> key is a serialized path.
     /// </summary>
+    /// <summary>
+    /// <see cref="AuthoredPathResolver.Resolve"/>'s result: the resolved model, its remapped field
+    /// spans, and, per spec 54, the AUTHORED selector identifier text the model's own resolved-path
+    /// field keys no longer carry.
+    /// </summary>
+    public sealed class AuthoredPathResolution
+    {
+        internal AuthoredPathResolution(
+            SceneModel model,
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> spans,
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> authoredSelectorNames,
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> overrideAuthoredSelectorNames)
+        {
+            Model = model;
+            Spans = spans;
+            AuthoredSelectorNames = authoredSelectorNames;
+            OverrideAuthoredSelectorNames = overrideAuthoredSelectorNames;
+        }
+
+        public SceneModel Model { get; }
+        public IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> Spans { get; }
+
+        /// <summary>componentLogicalId -&gt; (resolved field key -&gt; AUTHORED selector identifier).</summary>
+        public IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> AuthoredSelectorNames { get; }
+
+        /// <summary>
+        /// spec 54: instanceLogicalId -&gt; (<see cref="OverrideSelectorKey.For"/> -&gt; AUTHORED override
+        /// selector identifier), the override-path analogue of <see cref="AuthoredSelectorNames"/>. Only
+        /// an override whose original <c>PropertyPath</c> carried the <c>member:</c> sigil has an entry —
+        /// an already-string-form override is absent, which is exactly how the reconcile self-heal
+        /// skips it.
+        /// </summary>
+        public IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> OverrideAuthoredSelectorNames { get; }
+    }
+
     public static class AuthoredPathResolver
     {
         private const string MemberSigil = "member:";
@@ -38,27 +73,63 @@ namespace SceneBuilder.Editor
         /// to exist here was exactly that trap and is deliberately gone: Build used it and, by pairing
         /// it with a lowering call Sync forgot, produced the two directions' silent divergence.
         /// </remarks>
-        public static (SceneModel Model, IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> Spans) Resolve(
+        public static AuthoredPathResolution Resolve(
             SceneModel model,
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> fieldArgumentSpans,
             IReadOnlyList<string> usings)
         {
             var resolved = ResolveModel(model, usings);
             var spans = RemapSpans(fieldArgumentSpans, resolved.KeyRewrites);
-            return (resolved.Model, spans);
+            var authoredSelectorNames = InvertKeyRewrites(resolved.KeyRewrites);
+            var overrideAuthoredSelectorNames = ToReadOnly(resolved.OverrideAuthoredSelectorNames);
+            return new AuthoredPathResolution(resolved.Model, spans, authoredSelectorNames, overrideAuthoredSelectorNames);
         }
 
-        private static (SceneModel Model, Dictionary<string, Dictionary<string, string>> KeyRewrites) ResolveModel(
+        private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> ToReadOnly(
+            Dictionary<string, Dictionary<string, string>> nested)
+        {
+            var result = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+            foreach (var (outerKey, inner) in nested)
+            {
+                result[outerKey] = inner;
+            }
+
+            return result;
+        }
+
+        // spec 54: keyRewrites is keyed by the ORIGINAL "member:<name>" sigil (needed for span
+        // remap above); the reconcile self-heal instead needs the RESOLVED serialized path -> the
+        // AUTHORED identifier (the substring after the sigil) -- the inverse mapping, same data.
+        private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> InvertKeyRewrites(
+            Dictionary<string, Dictionary<string, string>> keyRewrites)
+        {
+            var result = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+            foreach (var (componentId, rewrites) in keyRewrites)
+            {
+                var byResolvedPath = new Dictionary<string, string>();
+                foreach (var (originalKey, resolvedPath) in rewrites)
+                {
+                    byResolvedPath[resolvedPath] = originalKey.Substring(MemberSigil.Length);
+                }
+
+                result[componentId] = byResolvedPath;
+            }
+
+            return result;
+        }
+
+        private static (SceneModel Model, Dictionary<string, Dictionary<string, string>> KeyRewrites, Dictionary<string, Dictionary<string, string>> OverrideAuthoredSelectorNames) ResolveModel(
             SceneModel model, IReadOnlyList<string> usings)
         {
             var probes = new List<GameObject>();
             var soByType = new Dictionary<Type, SerializedObject>();
             var keyRewrites = new Dictionary<string, Dictionary<string, string>>();
+            var overrideAuthoredSelectorNames = new Dictionary<string, Dictionary<string, string>>();
 
             try
             {
-                var roots = model.Roots.Select(n => ResolveNode(n, soByType, probes, keyRewrites, usings)).ToArray();
-                return (model with { Roots = roots }, keyRewrites);
+                var roots = model.Roots.Select(n => ResolveNode(n, soByType, probes, keyRewrites, overrideAuthoredSelectorNames, usings)).ToArray();
+                return (model with { Roots = roots }, keyRewrites, overrideAuthoredSelectorNames);
             }
             finally
             {
@@ -74,14 +145,15 @@ namespace SceneBuilder.Editor
             Dictionary<Type, SerializedObject> soByType,
             List<GameObject> probes,
             Dictionary<string, Dictionary<string, string>> keyRewrites,
+            Dictionary<string, Dictionary<string, string>> overrideAuthoredSelectorNames,
             IReadOnlyList<string> usings)
         {
             var components = node.Components.Select(c => ResolveComponent(c, soByType, probes, keyRewrites)).ToArray();
-            var children = node.Children.Select(c => ResolveNode(c, soByType, probes, keyRewrites, usings)).ToArray();
+            var children = node.Children.Select(c => ResolveNode(c, soByType, probes, keyRewrites, overrideAuthoredSelectorNames, usings)).ToArray();
             var rebuilt = node with { Components = components, Children = children };
 
             return rebuilt is PrefabInstanceNode instance
-                ? NormalizeInstanceOverrides(instance, soByType, probes, usings)
+                ? NormalizeInstanceOverrides(instance, soByType, probes, overrideAuthoredSelectorNames, usings)
                 : rebuilt;
         }
 
@@ -170,15 +242,34 @@ namespace SceneBuilder.Editor
             PrefabInstanceNode pin,
             Dictionary<Type, SerializedObject> soByType,
             List<GameObject> probes,
+            Dictionary<string, Dictionary<string, string>> overrideAuthoredSelectorNames,
             IReadOnlyList<string> usings)
         {
             var overrides = pin.Overrides
                 .Select(o =>
                 {
                     var (target, type) = NormalizeTargetType(o.Target, usings);
+                    var originalPath = o.PropertyPath;
                     var path = type != null
-                        ? NormalizeOverridePath(o.PropertyPath, type, soByType, probes)
-                        : o.PropertyPath;
+                        ? NormalizeOverridePath(originalPath, type, soByType, probes)
+                        : originalPath;
+
+                    // spec 54: record ONLY when the original path carried the "member:<name>" sigil —
+                    // an already-string-form override gets no entry, which is exactly how the
+                    // reconcile self-heal (OverrideSelectorKey-keyed lookup) skips it.
+                    if (type != null && originalPath.StartsWith(MemberSigil, StringComparison.Ordinal))
+                    {
+                        var authoredName = originalPath.Substring(MemberSigil.Length);
+                        var key = OverrideSelectorKey.For(target, path);
+                        if (!overrideAuthoredSelectorNames.TryGetValue(pin.LogicalId, out var byKey))
+                        {
+                            byKey = new Dictionary<string, string>();
+                            overrideAuthoredSelectorNames[pin.LogicalId] = byKey;
+                        }
+
+                        byKey[key] = authoredName;
+                    }
+
                     return o with { Target = target, PropertyPath = path };
                 })
                 .ToArray();

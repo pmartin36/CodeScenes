@@ -112,11 +112,12 @@ namespace SceneBuilder.Editor
             // carries no entry for it, and the reconciler's existing UnsyncableListener path fires.
             List<(string SerializedPath, string PublicName)>? spellings = null;
 
-            // Every top-level serialized field with no compiling public typed-selector spelling
-            // (SerializedMemberMap.IsInaccessibleViaSelector), gathered alongside the field read so
-            // ComponentDefaultTemplate.RegisterInaccessibleMembers sees the exact same set the live
-            // read does — read and signal can never diverge.
-            List<string>? inaccessibleMembers = null;
+            // spec 54: every top-level serialized field's PROVEN-safe public selector spelling
+            // (SerializedMemberMap.TrySafeSelectorName), gathered alongside the field read so
+            // ComponentDefaultTemplate.RegisterSafeMembers sees the exact same set the live read
+            // does — read and signal can never diverge. A field with no proven-safe spelling is left
+            // out; the reconciler's self-heal then downgrades any typed selector naming it.
+            List<string>? safeMembers = null;
 
             // Computed ONCE per component, ahead of the field loop: the propertyPath of every
             // managed-ref occurrence that is either a sibling-shared instance or a cycle's
@@ -145,9 +146,9 @@ namespace SceneBuilder.Editor
                     (spellings ??= new List<(string, string)>()).Add((it.propertyPath, publicName));
                 }
 
-                if (ownerType != null && SerializedMemberMap.IsInaccessibleViaSelector(ownerType, it.propertyPath))
+                if (ownerType != null && SerializedMemberMap.TrySafeSelectorName(ownerType, it.propertyPath, out var safeName))
                 {
-                    (inaccessibleMembers ??= new List<string>()).Add(it.propertyPath);
+                    (safeMembers ??= new List<string>()).Add(safeName);
                 }
 
                 // Field types M3 cannot represent — object/asset references (mesh, material, physics
@@ -171,9 +172,13 @@ namespace SceneBuilder.Editor
                 ComponentDefaultTemplate.RegisterMemberSpellings(ownerTypeFullName, spellings);
             }
 
-            if (ownerType?.FullName is { } ownerTypeFullNameForInaccessible && inaccessibleMembers is { Count: > 0 })
+            // Registered unconditionally (even zero safe members) for every read with a known owner
+            // type — an entry, not its count, is what marks the type INSPECTED (spec 54's
+            // self-heal conservatism gate: absence of knowledge must never read as proof of not-safe).
+            if (ownerType?.FullName is { } ownerTypeFullNameForSafe)
             {
-                ComponentDefaultTemplate.RegisterInaccessibleMembers(ownerTypeFullNameForInaccessible, inaccessibleMembers);
+                ComponentDefaultTemplate.RegisterSafeMembers(
+                    ownerTypeFullNameForSafe, (IReadOnlyList<string>?)safeMembers ?? Array.Empty<string>());
             }
 
             return fields;

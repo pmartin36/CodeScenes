@@ -41,13 +41,17 @@ namespace SceneBuilder.Editor
                 ParseResult parse,
                 IReadOnlyDictionary<string, IReadOnlyDictionary<string, SourceSpan>> fieldArgumentSpans,
                 IReadOnlyList<AssetEntry> harvestedAssets,
-                IReadOnlyList<Conflict> bootstrapConflicts)
+                IReadOnlyList<Conflict> bootstrapConflicts,
+                IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> authoredSelectorNames,
+                IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> overrideAuthoredSelectorNames)
             {
                 Desired = desired;
                 Parse = parse;
                 FieldArgumentSpans = fieldArgumentSpans;
                 HarvestedAssets = harvestedAssets;
                 BootstrapConflicts = bootstrapConflicts;
+                AuthoredSelectorNames = authoredSelectorNames;
+                OverrideAuthoredSelectorNames = overrideAuthoredSelectorNames;
             }
 
             /// <summary>
@@ -85,6 +89,22 @@ namespace SceneBuilder.Editor
             /// when <c>existingMap</c> was null — no sidecar means no instance is live yet).
             /// </summary>
             public IReadOnlyList<Conflict> BootstrapConflicts { get; }
+
+            /// <summary>
+            /// spec 54: componentLogicalId -&gt; (resolved field key -&gt; the AUTHORED selector
+            /// identifier text), from <see cref="AuthoredPathResolver"/>'s member:&lt;name&gt; rewrite
+            /// — the one channel that still tells Reconcile's diff-independent self-heal a field was
+            /// authored as a typed selector at all, since <see cref="Desired"/> only ever carries the
+            /// resolved serialized path.
+            /// </summary>
+            public IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> AuthoredSelectorNames { get; }
+
+            /// <summary>
+            /// spec 54: instanceLogicalId -&gt; (<see cref="SceneBuilder.Core.Reconcile.OverrideSelectorKey.For"/>
+            /// -&gt; the AUTHORED override selector identifier text), the override-path analogue of
+            /// <see cref="AuthoredSelectorNames"/> — feeds Reconcile's override converged-skip self-heal.
+            /// </summary>
+            public IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> OverrideAuthoredSelectorNames { get; }
         }
 
         /// <summary>
@@ -101,7 +121,9 @@ namespace SceneBuilder.Editor
 
             // §M3: resolve transient member:<name> field keys to serialized paths BEFORE any diff,
             // remapping the field-argument spans in lockstep so span-local field patches still match.
-            var (resolved, spans) = AuthoredPathResolver.Resolve(parse.Model, parse.FieldArgumentSpans, parse.Usings);
+            var pathResolution = AuthoredPathResolver.Resolve(parse.Model, parse.FieldArgumentSpans, parse.Usings);
+            var resolved = pathResolution.Model;
+            var spans = pathResolution.Spans;
 
             // Normalize every enum-backed field (raw int OR an already-typed Enum node) to the SAME
             // canonical shape SerializedFieldBridge's read produces, via the SAME SerializedMemberMap
@@ -171,7 +193,9 @@ namespace SceneBuilder.Editor
             // stages above. Wired ONCE here so both directions inherit it by default.
             desired = RectTransformPromotion.Promote(desired, RequireComponentPredicate.RequiresRectTransform);
 
-            return new Loaded(desired, parse, spans, assetResolver.Harvested, bootstrapConflicts);
+            return new Loaded(
+                desired, parse, spans, assetResolver.Harvested, bootstrapConflicts,
+                pathResolution.AuthoredSelectorNames, pathResolution.OverrideAuthoredSelectorNames);
         }
     }
 }

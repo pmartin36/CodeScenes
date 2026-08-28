@@ -88,7 +88,8 @@ namespace SceneBuilder.Editor
 
             var defaults = new List<ComponentData>(typeNames.Count);
             var memberSpellings = new List<MemberSpelling>();
-            var inaccessibleMembers = new List<InaccessibleMember>();
+            var safeMembers = new List<SafeMember>();
+            var inspectedTypes = new List<string>();
             foreach (var typeName in typeNames)
             {
                 if (ComponentDefaultTemplate.TryGet(typeName, out var fields))
@@ -110,12 +111,13 @@ namespace SceneBuilder.Editor
                     }
                 }
 
-                if (ComponentDefaultTemplate.TryGetInaccessibleMembers(typeName, out var members))
+                if (ComponentDefaultTemplate.TryGetSafeMembers(typeName, out var members))
                 {
+                    inspectedTypes.Add(typeName);
                     var type = new TypeRef(typeName);
                     foreach (var memberName in members)
                     {
-                        inaccessibleMembers.Add(new InaccessibleMember { Type = type, MemberName = memberName });
+                        safeMembers.Add(new SafeMember { Type = type, MemberName = memberName });
                     }
                 }
             }
@@ -126,7 +128,8 @@ namespace SceneBuilder.Editor
                 Roots = roots,
                 ComponentDefaults = defaults.ToArray(),
                 MemberSpellings = memberSpellings.ToArray(),
-                InaccessibleMembers = inaccessibleMembers.ToArray(),
+                SafeMembers = safeMembers.ToArray(),
+                InspectedTypes = inspectedTypes.ToArray(),
                 FieldExclusions = SerializedFieldExclusions.Policy.Instance,
             };
         }
@@ -143,6 +146,18 @@ namespace SceneBuilder.Editor
                 foreach (var added in node.AddedComponents)
                 {
                     typeNames.Add(added.Component.Type.FullName);
+                }
+
+                // spec 54: a property-override target (root or nested sub-object) is never read
+                // through the normal component walk above (a prefab-instance root is opaque, see
+                // ReadNode) — its type must still be registered so the self-heal can tell "type
+                // inspected, member not safe" from "type never inspected" on an override selector.
+                foreach (var propertyOverride in node.Overrides)
+                {
+                    if (!string.IsNullOrEmpty(propertyOverride.Target.ComponentType))
+                    {
+                        typeNames.Add(propertyOverride.Target.ComponentType);
+                    }
                 }
 
                 foreach (var addedGo in node.AddedGameObjects)

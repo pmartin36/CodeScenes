@@ -42,7 +42,20 @@ namespace SceneBuilder.Core.Reconcile
             // as componentAnchors/fieldArgumentSpans above; every existing caller/test stays green
             // unchanged.
             IReadOnlyDictionary<string, string>? componentHandles = null,
-            IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>>? listenerCallSpans = null)
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<SourceSpan>>>? listenerCallSpans = null,
+            // spec 54: componentLogicalId -> (resolved serialized field key -> the AUTHORED
+            // selector identifier text). The desired model only ever carries the RESOLVED path
+            // (AuthoredPathResolver rewrites `member:X` before Core sees it), so this is the one
+            // channel that still tells the value-equality gate a field was authored as a typed
+            // selector at all, and under what identifier. Threaded through to ReconcileComponents
+            // unsliced. `null` = "no source information" (every hand-built model/snapshot/map test
+            // call stays green unchanged).
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? authoredSelectorNames = null,
+            // spec 54: instanceLogicalId -> (OverrideSelectorKey.For(target, resolvedPath) -> the
+            // AUTHORED override selector identifier text), the override-path analogue of
+            // authoredSelectorNames above. `null` = "no source information" (every hand-built
+            // model/snapshot/map test call stays green unchanged).
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? overrideAuthoredSelectorNames = null)
         {
             var changeSet = Differ.Diff(expected, actual, identityMap);
 
@@ -61,6 +74,10 @@ namespace SceneBuilder.Core.Reconcile
             // (mirrors defaultsIndex above) and threaded to every ReconcileComponents call — the
             // UnityEventListeners intercept's `.OnEvent(...)`-form lookup.
             var memberSpellingsIndex = MemberSpellingIndex.Build(actual.MemberSpellings);
+
+            // spec 54: the ONE per-type positive-proof whitelist, built ONCE per Reconcile (mirrors
+            // memberSpellingsIndex above) and threaded to every ReconcileComponents call.
+            var safeMemberIndex = SafeMemberIndex.Build(actual.SafeMembers, actual.InspectedTypes);
 
             var logicalIdToGlobalObjectId = IdentityNodeIndex.LogicalIdToGlobalObjectId(identityMap);
 
@@ -580,7 +597,12 @@ namespace SceneBuilder.Core.Reconcile
                         resolvableTargets,
                         pendingTargets,
                         assetCatalog,
-                        defaultsIndex);
+                        defaultsIndex,
+                        safeMembers: safeMemberIndex,
+                        overrideAuthoredSelectorNames: overrideAuthoredSelectorNames != null
+                            && overrideAuthoredSelectorNames.TryGetValue(ownerLogicalId, out var overrideNamesForInstance)
+                                ? overrideNamesForInstance
+                                : null);
                     continue;
                 }
 
@@ -606,7 +628,9 @@ namespace SceneBuilder.Core.Reconcile
                     defaultsIndex,
                     componentHandles,
                     listenerCallSpans,
-                    memberSpellingsIndex);
+                    memberSpellingsIndex,
+                    safeMemberIndex,
+                    authoredSelectorNames);
             }
 
             // Every create-candidate goid some OTHER same-batch create-candidate's component

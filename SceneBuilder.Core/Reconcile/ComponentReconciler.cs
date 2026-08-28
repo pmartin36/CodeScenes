@@ -69,7 +69,18 @@ namespace SceneBuilder.Core.Reconcile
             // `.OnEvent(...)`-form listener with no entry here is UnsyncableListener
             // (UnresolvedEventMemberName), never guessed. `null` = Empty (every hand-built test call
             // that doesn't supply MemberSpellings stays green unchanged).
-            MemberSpellingIndex? memberSpellings = null)
+            MemberSpellingIndex? memberSpellings = null,
+            // spec 54: the per-type positive-proof whitelist (Reconciler.Reconcile builds this ONCE
+            // from `actual.SafeMembers`), consulted by the diff-independent self-heal below.
+            // `null` = SafeMemberIndex.Empty semantics (every hand-built test call stays green
+            // unchanged).
+            SafeMemberIndex? safeMembers = null,
+            // spec 54: componentLogicalId -> (resolved field key -> the AUTHORED selector
+            // identifier text), Reconciler.Reconcile's own trailing param threaded through
+            // unsliced -- keyed per COMPONENT, not per owner, since two components on one owner
+            // can share a field key. `null` = "no source information" (every hand-built test call
+            // stays green unchanged).
+            IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? authoredSelectorNames = null)
         {
             // Canonicalize FitSize-before-AlignTo BEFORE the ADD/REORDER passes so both emit
             // in canonical order and the REORDER pass compares canonical-vs-canonical for the
@@ -346,6 +357,24 @@ namespace SceneBuilder.Core.Reconcile
                             {
                                 NestedValueEmission.Project(snapVal, fieldDefault)
                                     .IsEmptyNested(sourceComp.LogicalId, sourceComp.Type.FullName, fieldKey, conflicts);
+                            }
+
+                            // spec 54: diff-independent self-heal. The value hasn't changed, so
+                            // this field would otherwise be silently skipped entirely -- but a
+                            // field authored as a typed selector over a member NOT proven safe
+                            // never compiles, regardless of whether its value moved. Rewrite ONLY
+                            // the selector, leaving the (unchanged) value argument untouched.
+                            if (authoredSelectorNames != null
+                                && authoredSelectorNames.TryGetValue(sourceComp.LogicalId, out var selectorNames)
+                                && selectorNames.TryGetValue(fieldKey, out var authoredSelectorName)
+                                && !(safeMembers ?? SafeMemberIndex.Empty).IsSafe(sourceComp.Type.FullName, authoredSelectorName))
+                            {
+                                edits.Add(new DowngradeComponentSelector
+                                {
+                                    Anchor = sourceComp.LogicalId,
+                                    FieldKey = fieldKey,
+                                    MemberName = authoredSelectorName,
+                                });
                             }
 
                             continue;

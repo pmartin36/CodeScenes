@@ -183,7 +183,13 @@ namespace SceneBuilder.Core.Reconcile
             // The ONE per-type default-field index, built ONCE by Reconciler.Reconcile —
             // threaded to ReconcileAddedComponents/BuildAddInstanceComponent for its own
             // instance-emission site.
-            ComponentDefaultOmission.Index? defaults = null)
+            ComponentDefaultOmission.Index? defaults = null,
+            // spec 54: the ONE per-type positive-proof whitelist (mirrors the component path's
+            // safeMemberIndex) and, for THIS instance, the authored override-selector carrier keyed
+            // by OverrideSelectorKey.For(target, resolvedPath) -> the authored member name. Threaded
+            // to ReconcileOverrides' converged-skip self-heal.
+            SafeMemberIndex? safeMembers = null,
+            IReadOnlyDictionary<string, string>? overrideAuthoredSelectorNames = null)
         {
             if (anchors != null && !anchors.ContainsKey(instanceLogicalId))
             {
@@ -196,7 +202,7 @@ namespace SceneBuilder.Core.Reconcile
 
             var prefabGuid = snapshot.SourcePrefabGuid;
 
-            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, resolvableTargets, pendingTargets, assetCatalog);
+            ReconcileOverrides(model, snapshot, instanceLogicalId, staleKeys, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, conflicts, addedAssets, resolvableTargets, pendingTargets, assetCatalog, safeMembers, overrideAuthoredSelectorNames);
             ReconcileAddedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, resolveOwnerHandle, edits, addedAssets, conflicts, resolvableTargets, pendingTargets, assetCatalog, defaults);
             ReconcileRemovedComponents(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits);
             ReconcileAddedGameObjects(model, snapshot, instanceLogicalId, facadeCatalog, prefabGuid, edits, conflicts, resolvableTargets, pendingTargets, resolveOwnerHandle, addedAssets, assetCatalog, defaults);
@@ -225,7 +231,12 @@ namespace SceneBuilder.Core.Reconcile
             // Resolvable classification the plain-component append path already runs.
             ISet<string> resolvableTargets,
             ISet<string> pendingTargets,
-            AssetCatalog? assetCatalog = null)
+            AssetCatalog? assetCatalog = null,
+            // spec 54: threaded from ReconcileInstanceOverrides for the converged-skip self-heal
+            // below (an unchanged, converged override authored as a not-proven-safe typed selector
+            // must still be rewritten to string form).
+            SafeMemberIndex? safeMembers = null,
+            IReadOnlyDictionary<string, string>? overrideAuthoredSelectorNames = null)
         {
             var modelByKey = new Dictionary<(OverrideTarget Target, string PropertyPath), PropertyOverride>();
             foreach (var modelOverride in model.Overrides)
@@ -253,7 +264,11 @@ namespace SceneBuilder.Core.Reconcile
                     // (a variant/instance override edited in place): drop the stale `.Set(...)` and
                     // fall through to re-append it below with the live value, the same drop-then-append
                     // fold AppendChainedCalls already does for any other same-anchor drop+append pair.
-                    if (OverrideValueConverged(modelOverride, snapshotOverride))
+                    // A converged override authored as a typed selector that is INSPECTED and not
+                    // proven safe still falls through: the drop+re-append below renders the string
+                    // form, healing the source without touching the (unchanged) value.
+                    if (OverrideValueConverged(modelOverride, snapshotOverride)
+                        && !IsUnsafeConvergedOverrideSelector(modelOverride, safeMembers, overrideAuthoredSelectorNames))
                     {
                         continue;
                     }
@@ -337,6 +352,31 @@ namespace SceneBuilder.Core.Reconcile
                         PropertyPath = modelOverride.PropertyPath,
                     });
             }
+        }
+
+        // A converged override is safe to leave byte-identical unless it was authored as a typed
+        // selector (member: sigil, resolved by AuthoredPathResolver into overrideAuthoredSelectorNames)
+        // AND the target type was actually inspected AND that selector is NOT proven safe on it.
+        // Absence of an authored-selector entry (already string form) or of inspection (unknown type)
+        // both retain byte-identically — positive proof of not-safe is required to rewrite.
+        private static bool IsUnsafeConvergedOverrideSelector(
+            PropertyOverride modelOverride,
+            SafeMemberIndex? safeMembers,
+            IReadOnlyDictionary<string, string>? overrideAuthoredSelectorNames)
+        {
+            if (safeMembers is null || overrideAuthoredSelectorNames is null)
+            {
+                return false;
+            }
+
+            var key = OverrideSelectorKey.For(modelOverride.Target, modelOverride.PropertyPath);
+            if (!overrideAuthoredSelectorNames.TryGetValue(key, out var authoredName))
+            {
+                return false;
+            }
+
+            var componentType = modelOverride.Target.ComponentType;
+            return safeMembers.IsInspected(componentType) && !safeMembers.IsSafe(componentType, authoredName);
         }
 
         // The snapshot side's Value is always a Kind=String primitive (OverrideMapper.ToOverrides

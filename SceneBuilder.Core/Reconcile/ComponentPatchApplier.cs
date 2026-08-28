@@ -179,11 +179,10 @@ namespace SceneBuilder.Core.Reconcile
             PatchComponentField edit,
             List<SyntaxNode> allTargets,
             List<Func<SyntaxNode, SyntaxNode>> appliers,
-            // A component member-set whose typed selector names a member the adapter has marked
-            // inaccessible (a managed serialized field with no compiling public spelling) is
-            // downgraded to string-key form in the SAME edit that patches the value — a typed
-            // selector over such a member never compiles (CS0122).
-            InaccessibleMemberIndex? inaccessibleMembers = null)
+            // spec 54: positive-proof whitelist. A component member-set whose typed selector names a
+            // member NOT proven safe is downgraded to string-key form in the SAME edit that patches
+            // the value — a typed selector over such a member never compiles (CS0122/CS1061).
+            SafeMemberIndex? safeMembers = null)
         {
             var textSpan = TextSpan.FromBounds(edit.ValueSpan.Start, edit.ValueSpan.Start + edit.ValueSpan.Length);
             var target = root.FindNode(textSpan, getInnermostNodeForTie: true);
@@ -209,9 +208,9 @@ namespace SceneBuilder.Core.Reconcile
                 && setInvocation.ArgumentList.Arguments.Count > 0
                 && setInvocation.ArgumentList.Arguments[0].Expression is SimpleLambdaExpressionSyntax
                     { Body: MemberAccessExpressionSyntax selectorMember }
-                && inaccessibleMembers != null
+                && safeMembers != null
                 && ComponentTargetResolution.TryParseLogicalId(edit.Anchor, out _, out var typeFullName, out _)
-                && inaccessibleMembers.IsInaccessible(typeFullName, selectorMember.Name.Identifier.Text))
+                && !safeMembers.IsSafe(typeFullName, selectorMember.Name.Identifier.Text))
             {
                 var memberName = selectorMember.Name.Identifier.Text;
 
@@ -234,6 +233,45 @@ namespace SceneBuilder.Core.Reconcile
                     ? SyntaxFactory.ParseArgumentList("(" + edit.NewExpr + ")").Arguments[0].WithTriviaFrom(current)
                     : SyntaxFactory.ParseExpression(edit.NewExpr).WithTriviaFrom(current);
                 return currentRoot.ReplaceNode(current, replacement);
+            });
+        }
+
+        // ---- DowngradeComponentSelector (spec 54 diff-independent self-heal) -----------------
+
+        // Locates the `.Set(sel => sel.MemberName, value)` call inside the component's own
+        // invocation (resolved by the component anchor, not a value span — the field's VALUE has
+        // not changed, so no ValueSpan/PatchComponentField reaches this edit) and rewrites ONLY
+        // the selector argument to its string-key form. Reuses the identical arg0-only rewrite
+        // shape ResolvePatchComponentField's downgrade arm uses, but never touches arg1 — the
+        // heal must not itself reformat a value that never moved.
+        private static void ResolveDowngradeComponentSelector(
+            CompilationUnitSyntax root,
+            IReadOnlyDictionary<string, SourceSpan> anchors,
+            DowngradeComponentSelector edit,
+            List<SyntaxNode> allTargets,
+            List<Func<SyntaxNode, SyntaxNode>> appliers)
+        {
+            var componentInvocation = FindComponentInvocation(root, anchors, edit.Anchor);
+
+            var setInvocation = componentInvocation.DescendantNodesAndSelf()
+                .OfType<InvocationExpressionSyntax>()
+                .FirstOrDefault(inv =>
+                    inv.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "Set" }
+                    && inv.ArgumentList.Arguments.Count > 0
+                    && inv.ArgumentList.Arguments[0].Expression is SimpleLambdaExpressionSyntax
+                        { Body: MemberAccessExpressionSyntax selectorMember }
+                    && selectorMember.Name.Identifier.Text == edit.MemberName)
+                ?? throw Fail(componentInvocation, $"Could not resolve typed selector '{edit.MemberName}' on '{edit.Anchor}' to downgrade.");
+
+            allTargets.Add(setInvocation);
+            appliers.Add(currentRoot =>
+            {
+                var current = (InvocationExpressionSyntax)currentRoot.GetCurrentNode(setInvocation)!;
+                var arg0 = current.ArgumentList.Arguments[0];
+                var newArg0 = SyntaxFactory.Argument(SyntaxFactory.ParseExpression(SourceExpr.StringLiteral(edit.MemberName)))
+                    .WithTriviaFrom(arg0);
+                var newArgList = current.ArgumentList.WithArguments(current.ArgumentList.Arguments.Replace(arg0, newArg0));
+                return currentRoot.ReplaceNode(current.ArgumentList, newArgList);
             });
         }
 

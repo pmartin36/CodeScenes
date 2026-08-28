@@ -21,11 +21,17 @@ namespace SceneBuilder.Core.Model
         // producer fills it. See MemberSpellingIndex for the lookup over this array.
         public MemberSpelling[] MemberSpellings { get; init; } = Array.Empty<MemberSpelling>();
 
-        // Per-(component TYPE, member name) fact that a typed selector naming that member would not
-        // compile (a managed serialized field that is private/[SerializeField]-private with no public
-        // property setter). A reflection fact of the type, carried once per snapshot for the same
-        // reason MemberSpellings is. See InaccessibleMemberIndex for the lookup over this array.
-        public InaccessibleMember[] InaccessibleMembers { get; init; } = Array.Empty<InaccessibleMember>();
+        // spec 54: per-(component TYPE, member name) positive proof that `r => r.MemberName`
+        // compiles AND names the real serialized member -- the whitelist. A reflection fact of the
+        // type, carried once per snapshot rather than per component instance, same rationale as
+        // MemberSpellings above. See SafeMemberIndex for the lookup over this array.
+        public SafeMember[] SafeMembers { get; init; } = Array.Empty<SafeMember>();
+
+        // spec 54: component/override-target TYPE full names the adapter has actually inspected
+        // (read via ReadComponent or a type-level template), independent of whether that read
+        // produced any SafeMember row. See SafeMemberIndex.IsInspected -- a self-heal must never
+        // rewrite converged source over a type it has no knowledge of.
+        public string[] InspectedTypes { get; init; } = Array.Empty<string>();
 
         // The adapter/Core crossing: which serialized-field roots are not author intent for a given
         // component type. Default excludes nothing, so a snapshot that does not set this diffs and

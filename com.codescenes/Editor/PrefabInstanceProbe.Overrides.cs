@@ -94,6 +94,18 @@ namespace SceneBuilder.Editor
                 }
 
                 var kind = ClassifyTarget(sourceRoot, mod.target);
+
+                // spec 54: an override target's Component type never reaches ReadComponent (a
+                // prefab-instance root is read as one opaque unit — its internals, root or nested,
+                // are never walked). Register it through the SAME type-level template path a
+                // top-level component uses, so the type's FULL safe-member set (and its inspected
+                // status) is known before the self-heal decides whether a converged override
+                // selector is safe. Idempotent/cached (Attempted guard) — cheap to call per mod.
+                if (kind != ModTargetKind.Modelled && mod.target is Component)
+                {
+                    ComponentDefaultTemplate.Register(mod.target.GetType());
+                }
+
                 switch (kind)
                 {
                     case ModTargetKind.Modelled:

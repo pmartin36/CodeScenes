@@ -93,16 +93,39 @@ namespace SceneBuilder.Editor
         }
 
         /// <summary>
-        /// True when <paramref name="serializedPath"/> is backed by a managed field on
-        /// <paramref name="componentType"/> (a user-authored serializable field the selector identifier
-        /// names) but has no compiling public spelling (<see cref="TryPublicMemberName"/> false) — a
-        /// typed selector naming it would not compile. A NATIVE field (no managed <see cref="FieldInfo"/>
-        /// backing it at all, e.g. <c>Rigidbody.m_Mass</c>) is never marked: its accessible spelling
-        /// (<c>mass</c>) is a property with no field of its own, so a typed selector over it compiles.
+        /// spec 54: positive-proof whitelist. True when a typed selector <c>r =&gt; r.safeName</c>
+        /// naming <paramref name="serializedPath"/> on <paramref name="componentType"/> is PROVEN to
+        /// compile and name the real serialized member — a public field's own name
+        /// (<see cref="TryPublicMemberName"/>), a private field's public property alias
+        /// (also <see cref="TryPublicMemberName"/>), or a NATIVE field with no managed
+        /// <see cref="FieldInfo"/> backing at all whose conventional <c>m_Xxx</c>-&gt;<c>xxx</c>
+        /// property is public, readable, non-indexed, non-obsolete and publicly settable (e.g.
+        /// <c>Rigidbody.m_Mass</c>-&gt;<c>mass</c>, <c>Canvas.m_RenderMode</c>-&gt;<c>renderMode</c>).
+        /// Absence means NOT proven safe, never "assumed fine" — every other managed field
+        /// (private/[SerializeField]-private with no public property setter) downgrades.
         /// </summary>
-        internal static bool IsInaccessibleViaSelector(Type componentType, string serializedPath) =>
-            GetFieldRecursive(componentType, serializedPath) != null
-            && !TryPublicMemberName(componentType, serializedPath, out _);
+        internal static bool TrySafeSelectorName(Type componentType, string serializedPath, out string safeName)
+        {
+            if (TryPublicMemberName(componentType, serializedPath, out safeName!))
+            {
+                return true;
+            }
+
+            var conventional = ConventionalName(serializedPath);
+            if (conventional != null)
+            {
+                var prop = componentType.GetProperty(conventional, BindingFlags.Public | BindingFlags.Instance);
+                if (prop != null && !IsObsolete(prop) && prop.GetIndexParameters().Length == 0
+                    && prop.CanRead && prop.GetSetMethod()?.IsPublic == true)
+                {
+                    safeName = conventional;
+                    return true;
+                }
+            }
+
+            safeName = null!;
+            return false;
+        }
 
         private static FieldInfo? GetFieldRecursive(Type type, string name)
         {

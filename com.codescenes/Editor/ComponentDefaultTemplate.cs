@@ -52,11 +52,11 @@ namespace SceneBuilder.Editor
         // SceneSnapshotReader.FromRoots into SceneSnapshot.MemberSpellings.
         private static readonly Dictionary<string, IReadOnlyList<(string SerializedPath, string PublicName)>> MemberSpellingsByTypeName = new();
 
-        // The per-domain inaccessible-member registry TryGetInaccessibleMembers answers from, keyed
-        // by Type.FullName. First-wins per type, same reasoning as MemberSpellingsByTypeName.
+        // spec 54: the per-domain safe-member registry TryGetSafeMembers answers from, keyed by
+        // Type.FullName. First-wins per type, same reasoning as MemberSpellingsByTypeName.
         // Populated by SerializedFieldBridge.CollectFields, drained by SceneSnapshotReader.FromRoots
-        // into SceneSnapshot.InaccessibleMembers.
-        private static readonly Dictionary<string, IReadOnlyList<string>> InaccessibleMembersByTypeName = new();
+        // into SceneSnapshot.SafeMembers.
+        private static readonly Dictionary<string, IReadOnlyList<string>> SafeMembersByTypeName = new();
 
         /// <summary>
         /// THE component-creation primitive: <c>AddComponent</c> plus the <see cref="EditorCreationDefaults"/>
@@ -178,28 +178,29 @@ namespace SceneBuilder.Editor
             MemberSpellingsByTypeName.TryGetValue(typeFullName, out spellings!);
 
         /// <summary>
-        /// Records <paramref name="typeFullName"/>'s inaccessible-member names (managed serialized
-        /// fields with no compiling public spelling), first-wins. Called by
-        /// <see cref="SerializedFieldBridge.CollectFields"/> for every component read; ignored when
-        /// <paramref name="members"/> is empty, so a type with no inaccessible member never occupies
-        /// an entry.
+        /// spec 54: records <paramref name="typeFullName"/>'s safe-member names (public selectable
+        /// members proven to compile as a typed selector), first-wins. Called by
+        /// <see cref="SerializedFieldBridge.CollectFields"/> for every component read, INCLUDING a read
+        /// that proves zero safe members — an entry (even empty) marks the type INSPECTED, which
+        /// <see cref="TryGetSafeMembers"/> and <see cref="SceneSnapshotReader"/> rely on to distinguish
+        /// "type read, no safe member" from "type never read" (the self-heal's positive-proof gate).
         /// </summary>
-        internal static void RegisterInaccessibleMembers(string typeFullName, IReadOnlyList<string> members)
+        internal static void RegisterSafeMembers(string typeFullName, IReadOnlyList<string> members)
         {
-            if (members.Count == 0 || InaccessibleMembersByTypeName.ContainsKey(typeFullName))
+            if (SafeMembersByTypeName.ContainsKey(typeFullName))
             {
                 return;
             }
 
-            InaccessibleMembersByTypeName[typeFullName] = members;
+            SafeMembersByTypeName[typeFullName] = members;
         }
 
         /// <summary>
         /// The registry <see cref="SceneSnapshotReader.FromRoots"/> drains into
-        /// <see cref="SceneSnapshot.InaccessibleMembers"/>. Absent for a type with no inaccessible
-        /// serialized member.
+        /// <see cref="SceneSnapshot.SafeMembers"/>/<see cref="SceneSnapshot.InspectedTypes"/>. Absent
+        /// for a type never read; present (possibly with zero members) for any type that was.
         /// </summary>
-        internal static bool TryGetInaccessibleMembers(string typeFullName, out IReadOnlyList<string> members) =>
-            InaccessibleMembersByTypeName.TryGetValue(typeFullName, out members!);
+        internal static bool TryGetSafeMembers(string typeFullName, out IReadOnlyList<string> members) =>
+            SafeMembersByTypeName.TryGetValue(typeFullName, out members!);
     }
 }

@@ -72,6 +72,41 @@ namespace SceneBuilder.Core.Reconcile
                     var body = lambda.Body as ExpressionSyntax
                         ?? throw Fail(lambda, $"Block-bodied .On(...) closure for anchor '{anchor}' is not supported.");
 
+                    // spec 54: a same-batch DropScopedOnCall targeting THIS (anchor, matchKey) is the
+                    // in-place-value-change / self-heal shape (drop the stale op, re-append the live
+                    // one) — resolving it independently (the default suffix-append path below) would
+                    // have this applier AND ResolveDropScopedOnCall's independent applier both target
+                    // nodes inside the SAME closure; the drop's "sole op" check runs against the
+                    // ORIGINAL closure and, applied after this append extends it, deletes the whole
+                    // `.On(...)` call — new op included. Fold them into ONE ReplaceNode instead: keep
+                    // every surviving op's own text, drop the matched op(s), append the new one(s),
+                    // and consume the matched drops so the main dispatch loop never re-targets them.
+                    var matchingDrops = patch.Edits.OfType<DropScopedOnCall>()
+                        .Where(d => d.Anchor == anchor && d.SelectorMatchKey == matchKey)
+                        .ToList();
+
+                    if (matchingDrops.Count > 0)
+                    {
+                        var survivingTexts = SurvivingOpTexts(body, matchingDrops);
+                        var paramName = lambda.Parameter.Identifier.Text;
+                        var newBodyText = paramName + "." + string.Join(".", survivingTexts.Concat(opTexts));
+
+                        allTargets.Add(body);
+                        appliers.Add(currentRoot =>
+                        {
+                            var current = currentRoot.GetCurrentNode(body)!;
+                            var newBody = SyntaxFactory.ParseExpression(newBodyText).WithTrailingTrivia(current.GetTrailingTrivia());
+                            return currentRoot.ReplaceNode(current, newBody);
+                        });
+
+                        foreach (var drop in matchingDrops)
+                        {
+                            consumed.Add(drop);
+                        }
+
+                        continue;
+                    }
+
                     allTargets.Add(body);
                     appliers.Add(currentRoot =>
                     {
@@ -187,6 +222,49 @@ namespace SceneBuilder.Core.Reconcile
             }
 
             return count;
+        }
+
+        // spec 54: the closure-body twin of ResolveDropScopedOnCall's op-matching walk, used when a
+        // same-batch AppendScopedOn folds one or more DropScopedOnCall edits into its own
+        // ReplaceNode (see ResolveScopedOnAppends). Walks the chain outermost-to-innermost (same
+        // direction as CountChainedScopedOps), matches each op against the drop list using the
+        // IDENTICAL predicate ResolveDropScopedOnCall uses (method name + OverrideCallMatches/
+        // GenericTypeArgMatches) so the two can never disagree on which op a drop targets, then
+        // reverses back to the source's original left-to-right order. A drop matches at most one op
+        // (first hit wins, then removed from the candidate list) so two drops can never both consume
+        // the same surviving op.
+        private static List<string> SurvivingOpTexts(ExpressionSyntax closureBody, List<DropScopedOnCall> drops)
+        {
+            var chain = new List<(MemberAccessExpressionSyntax Member, InvocationExpressionSyntax Invocation)>();
+            var current = closureBody;
+            while (current is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax member)
+            {
+                chain.Add((member, invocation));
+                current = member.Expression;
+            }
+
+            chain.Reverse();
+
+            var remainingDrops = new List<DropScopedOnCall>(drops);
+            var survivors = new List<string>();
+            foreach (var (member, invocation) in chain)
+            {
+                var dropIndex = remainingDrops.FindIndex(d =>
+                    member.Name.Identifier.Text == InstanceCallMethodName(d.Kind)
+                    && (d.Kind == InstanceCallKind.Override
+                        ? OverrideCallMatches(invocation, d.PropertyPath)
+                        : GenericTypeArgMatches(invocation, d.TypeFullName)));
+
+                if (dropIndex >= 0)
+                {
+                    remainingDrops.RemoveAt(dropIndex);
+                    continue;
+                }
+
+                survivors.Add(member.Name.ToFullString() + invocation.ArgumentList.ToFullString());
+            }
+
+            return survivors;
         }
 
         // ---- Shared: find-or-match an `.On` invocation by resolved-child selector key -----------

@@ -49,43 +49,4 @@ namespace SceneBuilder.Core.Model
         public bool TryGet(string typeFullName, string serializedPath, out string publicName) =>
             _publicNames.TryGetValue((typeFullName, serializedPath), out publicName!);
     }
-
-    // A (component TYPE, member name) pair the adapter has determined has NO compiling typed-selector
-    // spelling (a managed serialized field that is private/[SerializeField]-private with no public
-    // property setter). MemberName is the selector identifier the user/LLM would author, which for a
-    // field with no public alias is the field's own name.
-    public sealed record InaccessibleMember
-    {
-        [JsonPropertyOrder(0)]
-        public TypeRef Type { get; init; } = new TypeRef("");
-
-        [JsonPropertyOrder(1)]
-        public string MemberName { get; init; } = "";
-    }
-
-    // Lookup over SceneSnapshot.InaccessibleMembers, mirroring MemberSpellingIndex's shape exactly.
-    // Keyed on (Type.FullName, MemberName), ordinal equality; first-wins on a duplicate. Absence
-    // (Empty, or no entry for a given key) means "keep whatever selector form is authored" — the
-    // signal is opt-in, never inferred from silence.
-    public sealed class InaccessibleMemberIndex
-    {
-        public static readonly InaccessibleMemberIndex Empty = new InaccessibleMemberIndex(Array.Empty<InaccessibleMember>());
-
-        private readonly HashSet<(string TypeFullName, string MemberName)> _inaccessible;
-
-        private InaccessibleMemberIndex(IReadOnlyList<InaccessibleMember> members)
-        {
-            _inaccessible = new HashSet<(string, string)>();
-            foreach (var member in members)
-            {
-                _inaccessible.Add((member.Type.FullName, member.MemberName));
-            }
-        }
-
-        public static InaccessibleMemberIndex Build(InaccessibleMember[]? members) =>
-            members is null || members.Length == 0 ? Empty : new InaccessibleMemberIndex(members);
-
-        public bool IsInaccessible(string typeFullName, string memberName) =>
-            _inaccessible.Contains((typeFullName, memberName));
-    }
 }

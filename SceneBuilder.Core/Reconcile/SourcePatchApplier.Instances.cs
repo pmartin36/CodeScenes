@@ -35,7 +35,10 @@ namespace SceneBuilder.Core.Reconcile
             IReadOnlyDictionary<string, SourceSpan> anchors,
             SourcePatch patch,
             List<SyntaxNode> allTargets,
-            List<Func<SyntaxNode, SyntaxNode>> appliers)
+            List<Func<SyntaxNode, SyntaxNode>> appliers,
+            // spec 54: threaded to RenderInstanceOverrideCall so the override render site can gate
+            // a `member:`-sigil OverrideSetSpec the same way the component `.Set` arm does.
+            SafeMemberIndex? safeMembers = null)
         {
             var consumed = new HashSet<SourceEdit>();
             var callTextsByAnchor = new Dictionary<string, List<string>>();
@@ -62,7 +65,7 @@ namespace SceneBuilder.Core.Reconcile
                 switch (edit)
                 {
                     case AppendInstanceOverride appendOverride:
-                        Collect(appendOverride.Anchor, RenderInstanceOverrideCall(appendOverride.Sets), appendOverride);
+                        Collect(appendOverride.Anchor, RenderInstanceOverrideCall(appendOverride.Sets, safeMembers), appendOverride);
                         break;
                     case AppendInstanceAddComponent appendAddComponent:
                         Collect(
@@ -269,9 +272,9 @@ namespace SceneBuilder.Core.Reconcile
 
         // Inverse of BuilderParser.Instance.cs's ApplyOverride/ParseOverrideSet: multiple Sets fold
         // into ONE `.Override(e => e.Set(a).Set(b))` fluent chain.
-        private static string RenderInstanceOverrideCall(IReadOnlyList<OverrideSetSpec> sets)
+        private static string RenderInstanceOverrideCall(IReadOnlyList<OverrideSetSpec> sets, SafeMemberIndex? safeMembers = null)
         {
-            var body = "e." + string.Join(".", sets.Select(RenderOverrideSetCall));
+            var body = "e." + string.Join(".", sets.Select(set => RenderOverrideSetCall(set, safeMembers)));
             return $"Override(e => {body})";
         }
 
@@ -281,13 +284,21 @@ namespace SceneBuilder.Core.Reconcile
         // which is Unity's serialized propertyPath, so the sigil form here serves patches built
         // directly against this API. The sigil does reach this file from a drop edit, where
         // OverrideSetTargetsPath matches it as a call-match key.
-        private static string RenderOverrideSetCall(OverrideSetSpec set)
+        // spec 54: `safeMembers` gates the sigil arm exactly as the component `.Set` arm gates its
+        // own selector-downgrade -- a typed selector over a member NOT proven safe renders in
+        // string-key form instead, since it would not compile (CS0122/CS1061).
+        private static string RenderOverrideSetCall(OverrideSetSpec set, SafeMemberIndex? safeMembers = null)
         {
             var valueText = set.ValueExpression ?? SourceExpr.ValueNodeLiteral(set.Value);
 
             if (set.PropertyPath.StartsWith("member:", StringComparison.Ordinal))
             {
                 var name = set.PropertyPath.Substring("member:".Length);
+                if (safeMembers != null && !safeMembers.IsSafe(set.TypeFullName, name))
+                {
+                    return $"Set<{set.TypeFullName}>({SourceExpr.StringLiteral(name)}, {valueText})";
+                }
+
                 return $"Set(({set.TypeFullName} x) => x.{name}, {valueText})";
             }
 
