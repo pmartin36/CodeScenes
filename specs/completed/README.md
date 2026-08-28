@@ -715,3 +715,33 @@ with `FitSize`/`AlignTo` components actually present on the instance (not droppe
 instance solved scale 0.6984, matching the oriented-extent projection (not a world-AABB); an unrouted
 `.Bogus()` gave a located `SB1000` with the scene untouched; and the re-sync was byte-stable
 (`PatchEdits=0`). Console clean of product errors. The `PropMeasure.cs` workaround is now unnecessary.
+
+## 54 - sync emits a typed member selector only on positive proof of a public C# member
+
+scene->code sync wrote/retained a typed selector `c.Set(r => r.M, v)` even when `M` is not a public C#
+member — a native `m_`-prefixed serialized field (CS1061) or a `[SerializeField] private` field
+(CS0122) — producing source the product's own `BuilderCompileCheck` flags as
+`DOES NOT COMPILE`. (The house one-shot hit the CS1061 native case; the building agent misdiagnosed it
+as a private-field issue, and the first spec-54 draft was aimed at the wrong error until an
+exact-error grounding corrected it.) The blacklist `InaccessibleMemberIndex` was structurally blind to
+native fields (it required a managed `FieldInfo`). The fix flips the guard to a positive-proof
+WHITELIST: a new `SafeSelectableMembers` set (the reflected `SerializedMemberMap.PublicToSerialized`
+keys = provably selectable public members), produced adapter-side by `SerializedFieldBridge`, threaded
+to the two emit sites — the component `ComponentPatchApplier.ResolvePatchComponentField` and the
+prefab-override `RenderOverrideSetCall`. A selector is emitted only when the member is proven safe;
+otherwise the always-compiling string form `c.Set("M", v)`. Subsumes spec 46's private case.
+
+Built through the tdd-pipeline (survived a mid-run session crash, resumed from cache to GREEN; commits
+`e049fa5` feat, `bd7c5de` test). Gate
+`GATE PASS: Core + Unity EditMode green (passed=1022 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec54.log`), 4/5 fully plus
+the override member-form: a native `r.Set(r2 => r2.m_Mass, 3f)` synced back as the string form
+`r.Set("m_Mass", 3f)` and re-materialized `mass=3`; a `[SerializeField] private` selector synced to
+string form; a PUBLIC selector on the same type was RETAINED as a selector (whitelist discriminates,
+no over-downgrade); no `Convergence defect` on the healed re-sync; and a prefab `.Override` native
+selector downgraded to the string-key form and compiled. Live-verify also surfaced a NEW, distinct
+defect it made reachable: a healed prefab-instance override compiles but silently drops its VALUE
+(`Set<T>("m_Mass", "5")` from Unity's raw `PropertyModification` string builds to the prefab default,
+not 5) — the component path is unaffected; filed in `docs/open-defects.md` as a follow-up (value
+rendering on the override heal path, distinct from 54's member-form fix).

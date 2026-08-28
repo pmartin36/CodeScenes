@@ -236,3 +236,23 @@ feature whose run found it. Entries are removed only when the fix ships with a r
   every instance-added component type, not only solvers). Does NOT relax b2-t2's DELIVERABLE: its
   in-scope round-trip (driven-channel masking + free-axis syncback + byte-stable convergence)
   satisfies the spec accept clause without it. OWNER: unassigned. FOUND-BY: solvers-size-instanced-prefabs.
+
+- SEVERITY med — a healed prefab-instance override compiles but SILENTLY DROPS its value. When
+  scene->code sync downgrades a native/private-field override typed selector to the string-key form
+  (spec 54's positive-proof rule), `RenderOverrideSetCall`
+  (`SceneBuilder.Core/Reconcile/SourcePatchApplier.Instances.cs:290`) renders `valueText =
+  set.ValueExpression ?? SourceExpr.ValueNodeLiteral(set.Value)`. On the heal path `ValueExpression`
+  is null and `set.Value` is Unity's `PropertyModification.value` as a raw STRING (e.g. `"5"`), so it
+  emits a QUOTED string literal: `Override(e => e.Set<UnityEngine.Rigidbody>("m_Mass", "5"))`. That
+  compiles, but the override-apply path does not coerce the string `"5"` into the float property, so
+  the rebuilt value is the prefab DEFAULT (`mass=1`), not `5`. Verified live by isolation on one
+  prefab: `Set(r => r.m_Mass, 5f)` -> 5; `Set<Rigidbody>("m_Mass", 5f)` -> 5; `Set<Rigidbody>("m_Mass",
+  "5")` (the product's actual heal emission) -> 1. The component `.Set` heal is UNAFFECTED (its value
+  is a typed Float node -> `5f`, re-materializes to 5). NEWLY REACHABLE via spec 54: before 54 these
+  native/private overrides emitted a non-compiling selector (CS1061/CS0122), so no compiling-but-wrong
+  override existed; 54 makes them compile+build, exposing the value gap. Not covered by spec 54's
+  accept-when (member form + byte-stability only) nor by `SafeSelectableMemberSyncTests` (asserts the
+  string key + byte-stability, never re-materializes the value), so the offline gate is blind. Fix
+  direction: on the override heal render the value faithfully (the typed value node -> `5f`) rather
+  than the raw `PropertyModification` string, or coerce the string at override-apply. OWNER:
+  unassigned. FOUND-BY: spec-54 live-verify.
