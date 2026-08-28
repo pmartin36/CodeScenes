@@ -324,6 +324,16 @@ public class AlignToNonLiteralOffsetScene : ISceneDefinition
     }
 }
 ");
+            yield return Case("AlignTo_NegativeOffsetAccepted", @"
+public class AlignToNegativeOffsetScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, y: AxisAlign.AbutMax.Offset(-0.5f));
+    }
+}
+");
             yield return Case("AlignTo_UnknownPresetMemberAccepted", @"
 public class AlignToUnknownPresetMemberScene : ISceneDefinition
 {

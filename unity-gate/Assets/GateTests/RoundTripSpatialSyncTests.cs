@@ -387,6 +387,52 @@ public class RoundTripSpatialSyncScene : ISceneDefinition
         Assert.IsFalse(second.Changed, "NOT CONVERGED: a Sync immediately after the offset fold, with no further edit, reported Changed=true.");
     }
 
+    // spec 52 (AlignTo offset) NEGATIVE-value regression: `-0.5f` is a unary-minus over a numeric
+    // literal, not a bare literal, so the old literal-only offset eval silently DROPPED it — the axis
+    // applied no alignment at all. This drives the full loop: an authored `.Offset(-0.5f)` must
+    // MATERIALIZE the negative offset onto the live component and measurably shift the object DOWN by
+    // 0.5 along the frame axis (bottom face at floorTop - 0.5, not resting flush at floorTop as a
+    // dropped offset would), and the unedited round-trip must re-sync byte-stable (Changed == false,
+    // i.e. zero patch edits) — the negative literal must survive emit->parse.
+    [Test]
+    public void RoundTrip_NegativeAlignToOffset_AppliesDownwardAndReSyncsByteStable()
+    {
+        const string crateNegOffsetBody =
+            "        var crate = scene.Add(\"Crate\")\n" +
+            "            .Component<UnityEngine.MeshFilter>(c => c.Set(\"m_Mesh\", Builtin(\"Cube\")))\n" +
+            "            .Component<UnityEngine.MeshRenderer>(c => c.Set(\"m_Materials\", new[] { Builtin(\"Default-Material\") }))\n" +
+            "            .Transform(pos: (0f, 5f, 0f))\n" +
+            "            .AlignTo(floor, y: AxisAlign.AbutMax.Offset(-0.5f));\n";
+        File.WriteAllText(_builderPath, Source(FloorBody + crateNegOffsetBody));
+
+        EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        var scene = EditorSceneManager.GetActiveScene();
+        RunBuild(scene);
+
+        var floor = FindRoot(EditorSceneManager.GetActiveScene(), "Floor");
+        var crate = FindRoot(EditorSceneManager.GetActiveScene(), "Crate");
+        Assert.IsNotNull(crate, "Crate was not created by SceneBuilderBuild.Run");
+
+        var aligner = crate.GetComponent<AlignTo>();
+        Assert.AreEqual(-0.5f, aligner.yOffset, Tol,
+            "The authored negative offset must materialize onto the live AlignTo (never dropped to 0).");
+
+        float floorTop = floor.GetComponent<Renderer>().bounds.max.y; // 0.5 (unit-height floor scaled 10x1x10)
+        aligner.Evaluate();
+
+        var bounds = crate.GetComponent<Renderer>().bounds;
+        Assert.AreEqual(floorTop - 0.5f, bounds.min.y, Tol,
+            "A negative offset must push the down-snapped object 0.5 BELOW the floor top, not rest flush on it.");
+
+        var result = EmittedCodeCompiles.SyncAndAssertCompiles(_builderPath, _sidecarPath, EditorSceneManager.GetActiveScene());
+        Assert.IsFalse(result.Changed,
+            "An unedited negative-offset AlignTo must re-sync byte-stable (zero patch edits) — the -0.5f literal must survive emit->parse.");
+
+        var rewritten = File.ReadAllText(_builderPath);
+        StringAssert.Contains("y: AxisAlign.AbutMax.Offset(-0.5f)", rewritten,
+            "The negative offset must round-trip verbatim into the rewritten source.\n" + rewritten);
+    }
+
     // 14. Created-in-editor object with an AlignTo: a GameObject added directly in the scene (not via
     //     the builder) with an AlignTo attached (target set to the pre-existing Floor) must append a new
     //     .Add(...) statement carrying .AlignTo(target: floor, y: AxisAlign.AbutMax) on scene->code

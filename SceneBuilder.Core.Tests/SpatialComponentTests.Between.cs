@@ -61,6 +61,56 @@ public class BetweenIdempotentScene : ISceneDefinition
 }
 ";
 
+        private const string BetweenNegativeFractionSource = @"
+public class BetweenNegativeFractionScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var a = scene.Add(""A"");
+        var b = scene.Add(""B"");
+        scene.Add(""Crate"").Between(from: a, to: b, fraction: -0.25f, axis: Between.Axis.X);
+    }
+}
+";
+
+        private const string BetweenOverOneFractionSource = @"
+public class BetweenOverOneFractionScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var a = scene.Add(""A"");
+        var b = scene.Add(""B"");
+        scene.Add(""Crate"").Between(from: a, to: b, fraction: 1.25f, axis: Between.Axis.X);
+    }
+}
+";
+
+        // Spec 45 allows an UNCLAMPED fraction: negative for undershoot, >1 for overshoot. Between's
+        // fraction goes through ValueNodeParser (which peels unary-minus), NOT the literal-only offset
+        // eval AlignTo's .Offset used, so a negative fraction parses to the negative Float rather than
+        // dropping to Unsupported.
+        [Fact]
+        public void Parse_Between_NegativeFraction_ParsesToNegativeFloat()
+        {
+            var result = BuilderParser.Parse(BetweenNegativeFractionSource);
+
+            var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
+            var component = Assert.Single(crate.Components);
+
+            Assert.Equal(ValueNode.Primitive.Float(-0.25f), component.Fields[SpatialComponents.BetweenFields.Fraction]);
+        }
+
+        [Fact]
+        public void Parse_Between_OverOneFraction_ParsesToFloat()
+        {
+            var result = BuilderParser.Parse(BetweenOverOneFractionSource);
+
+            var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
+            var component = Assert.Single(crate.Components);
+
+            Assert.Equal(ValueNode.Primitive.Float(1.25f), component.Fields[SpatialComponents.BetweenFields.Fraction]);
+        }
+
         // Pins the mapped field shapes (ObjectRef for from/to, Float for fraction, the CANONICAL
         // Between.Axis enum shape for axis) that the parse arm must produce from a world (no
         // alongOrientationOf) call.

@@ -284,8 +284,26 @@ namespace SceneBuilder.Core.Parsing
             return true;
         }
 
+        // A SIGNED numeric literal (`-0.5f`, `+2`) is a PrefixUnaryExpressionSyntax wrapping the
+        // NumericLiteralExpression, not a literal token — so a bare-literal-only check silently drops
+        // every negative offset/fraction. Peel a unary `-` (negate the inner value) or `+` (pass
+        // through) around a numeric literal, mirroring BuilderParser.EvalFloat; anything else stays
+        // literal-only (no arbitrary-expression evaluation).
         private static bool TryEvalFloatLiteral(ExpressionSyntax expr, out float value)
         {
+            if (expr is PrefixUnaryExpressionSyntax unary
+                && (unary.OperatorToken.IsKind(SyntaxKind.MinusToken) || unary.OperatorToken.IsKind(SyntaxKind.PlusToken)))
+            {
+                if (!TryEvalFloatLiteral(unary.Operand, out var inner))
+                {
+                    value = 0f;
+                    return false;
+                }
+
+                value = unary.OperatorToken.IsKind(SyntaxKind.MinusToken) ? -inner : inner;
+                return true;
+            }
+
             if (expr is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.NumericLiteralExpression))
             {
                 var token = literal.Token.Value;

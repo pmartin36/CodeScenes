@@ -44,6 +44,17 @@ public class AlignToOffsetScene : ISceneDefinition
 }
 ";
 
+        private const string AlignToNegativeOffsetSource = @"
+public class AlignToNegativeOffsetScene : ISceneDefinition
+{
+    public void Build(SceneRoot scene)
+    {
+        var floor = scene.Add(""Floor"");
+        scene.Add(""Crate"").AlignTo(floor, y: AxisAlign.AbutMax.Offset(-0.5f));
+    }
+}
+";
+
         private const string AlignToWorldSpaceSource = @"
 public class AlignToWorldSpaceScene : ISceneDefinition
 {
@@ -119,6 +130,26 @@ public class AlignToFrameOverrideScene : ISceneDefinition
                 component.Fields[SpatialComponents.AlignToFields.ZMode]);
             Assert.Equal(ValueNode.Primitive.Float(0.5f), component.Fields[SpatialComponents.AlignToFields.ZOffset]);
             Assert.Equal(ChannelMask.PositionZ, crate.Transform.DrivenChannels);
+        }
+
+        // A NEGATIVE `.Offset(-0.5f)` is a unary-minus over a numeric literal, not a bare literal, so
+        // the literal-only offset eval used to drop it: the axis stored ValueNode.Unsupported and applied
+        // no alignment at all (silent). The axis must PIN (mode AbutMax, driven Z) and carry the paired
+        // offset field as the negative float — never Unsupported, never dropped.
+        [Fact]
+        public void Parse_AlignToNegativeOffset_SetsPairedOffsetFieldNegativeAndPinsAxis()
+        {
+            var result = BuilderParser.Parse(AlignToNegativeOffsetSource);
+
+            var crate = Assert.Single(result.Model.Roots, r => r.Name == "Crate");
+            var component = Assert.Single(crate.Components);
+
+            Assert.Equal(
+                new ValueNode.Enum(SpatialComponents.AlignToEnums.ModeTypeName, new[] { SpatialComponents.AlignToEnums.AbutMax }, false),
+                component.Fields[SpatialComponents.AlignToFields.YMode]);
+            Assert.IsNotType<ValueNode.Unsupported>(component.Fields[SpatialComponents.AlignToFields.YMode]);
+            Assert.Equal(ValueNode.Primitive.Float(-0.5f), component.Fields[SpatialComponents.AlignToFields.YOffset]);
+            Assert.Equal(ChannelMask.PositionY, crate.Transform.DrivenChannels);
         }
 
         [Fact]
