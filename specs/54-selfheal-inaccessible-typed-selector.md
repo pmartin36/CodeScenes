@@ -1,110 +1,135 @@
-# Spec 54: sync self-heals an authored typed selector on an inaccessible field to compiling source
+# Spec 54: sync emits a typed member selector only on positive proof of a public C# member
 
-An author writes the idiomatic Unity form — a `[SerializeField] private` field — and references it with the
-TYPED selector `c.Set(r => r.myField, value)` in a builder. CodeScenes parses source (never compiles it),
-so the selector is accepted at author time; code→scene apply WORKS (spec 47's `AuthoredPathResolver`
-resolves a private serialized field). But scene→code sync RETAINS a typed selector referencing the private
-member, which cannot compile (a lambda cannot read a private member, CS0122), and the product's own
-`BuilderCompileCheck` logs `emitted builder source DOES NOT COMPILE`. Spec 46 fixed the emit side only for a
-scene-ORIGINATED value change (downgrade to the raw-string form for non-public fields); an author-written
-private selector whose value does NOT change is never rewritten, so it sits non-compiling forever. This is
-the defect that forced the house one-shot to disable auto-sync — the flagship value prop (invisible two-way
-sync) actively producing non-compiling code. CLAUDE.md: "a write path that can emit non-compiling source is
-a bug, not a style issue."
+scene→code sync writes or retains a typed member selector — `c.Set(r => r.M, v)` on a component, or
+`.Override(e => e.Set(x => x.M, v))` on a prefab instance — for members it cannot prove are public C#
+members, so the emitted builder does not compile and the product flags its own output
+(`emitted builder source DOES NOT COMPILE`). Observed live in the house one-shot as two `CS1061`
+(`'PlayerController' does not contain a definition for <member>`) — a real non-compiling EMISSION, distinct
+from a "Sync failed" abort. CLAUDE.md: "a write path that can emit non-compiling source is a bug, not a
+style issue." The approved fix: **emit a typed selector ONLY when the adapter can prove the member is a
+public, existing, type-consistent serialized member of the component's declaring type; otherwise emit the
+always-compiling string form `c.Set("M", v)`.** This subsumes spec 46's private-field case and additionally
+catches the native / not-a-public-member case the current guard is structurally blind to.
 
-Two emitters exhibit the same class; both are covered here.
+## The measured defect
 
-## The measured defects
+Today the guard is a BLACKLIST, `InaccessibleMemberIndex.IsInaccessible`
+(`SceneBuilder.Core/Model/MemberSpelling.cs:88`), built by `SerializedMemberMap.IsInaccessibleViaSelector`
+(`com.codescenes/Editor/SerializedMemberMap.cs:103-105`):
 
-Both filed as open-defects during spec 46 (`docs/open-defects.md`), same class on two emitters:
+```csharp
+GetFieldRecursive(componentType, serializedPath) != null      // requires a MANAGED FieldInfo
+    && !TryPublicMemberName(componentType, serializedPath, out _);
+```
 
-1. **Component `.Set` — no self-heal without a value change.** An authored inaccessible typed selector in an
-   already-converged builder produces no `PatchComponentField`: the field-reconcile value-equality gate
-   (`SceneBuilder.Core/Reconcile/ComponentReconciler.cs:338-352`) `continue`s when the emittable source value
-   equals the snapshot value and `AuthoredTextIsCurrent`, so nothing is emitted and sync never rewrites the
-   selector. Spec 46's downgrade (`ComponentPatchApplier.ResolvePatchComponentField`,
-   `ComponentPatchApplier.cs:208-227`) only runs when an edit IS produced (the value-diff branch,
-   `:427-432`). Unchanged → skipped → `BuilderCompileCheck` stays red for that file.
+It can only flag a member that is a MANAGED serialized field with no public spelling (the private case,
+CS0122). It is blind by construction to:
+- **Native serialized fields** (e.g. `Rigidbody.m_Mass`): no managed `FieldInfo`, so never flagged. A
+  retained/authored `r => r.m_Mass` resolves at load (exact `FindProperty` hit,
+  `AuthoredPathResolver.cs:344`), is not in the blacklist, and is retained/re-rendered → **CS1061**. This is
+  the reachable emission defect.
+- **Any serialized property whose name is not a public C# member** of the current type.
 
-2. **Prefab-instance `.Override` — the render has no accessibility check at all.**
-   `.Override(e => e.Set(x => x.priv, v))` re-renders via `RenderOverrideSetCall`'s `member:` arm
-   (`SceneBuilder.Core/Reconcile/SourcePatchApplier.Instances.cs:288-291`) as a typed selector
-   `(T x) => x.<name>` unconditionally — the same CS0122 class, on the prefab-instance override path, which
-   spec 46's accept-when (a plain component field) never exercised. `SourcePatchApplier.Apply` already holds
-   the `inaccessibleMembers` index (`SourcePatchApplier.cs:34`) but never forwards it to this instance path.
+Spec 46 downgrades to the string form only on the VALUE-CHANGE branch
+(`ComponentPatchApplier.ResolvePatchComponentField`, `ComponentPatchApplier.cs:205-227`, reached only when a
+`PatchComponentField` is produced) and only for `InaccessibleMemberIndex`-flagged members — so an UNCHANGED
+selector, and every native/not-a-public-member selector, slip through. The prefab-override render
+`RenderOverrideSetCall` (`SourcePatchApplier.Instances.cs:288-291`) emits the `member:` selector
+**unconditionally**, with no accessibility check at all.
 
-The apply direction is confirmed working: `AuthoredPathResolver.ResolvePath`
-(`com.codescenes/Editor/AuthoredPathResolver.cs:342`) resolves the `member:` sigil against a live
-`SerializedObject` probe, explicitly handling `[SerializeField] private m_foo`. The defect is emit-only.
+Out of this spec (separate failure mode): a truly REMOVED member — `member:X` with no live serialized
+property — throws in `AuthoredPathResolver.ResolvePath` (`:430-432`), caught by `SceneBuilderSync`
+(`:112-115`), which aborts the sync and writes nothing. That is a different bug (a resolver-side abort, no
+serialized path to downgrade against) and its own follow-up.
 
 ## The fix
 
-The two emitters have no single shared caller (one is a rewrite-in-place applier, one is a string
-renderer), so the shared thing is the **predicate + the invariant**, and one guard test enforces the
-invariant across both. Reuse spec 46's form-choice decision; introduce no new one.
+The two emit sites share no caller, so the shared thing is the **predicate + the invariant**; one guard
+test enforces both.
 
-- **Component path — OWNER: the value-equality gate in `ComponentReconciler`
-  (`ComponentReconciler.cs:338-352`).** Thread a trailing `InaccessibleMemberIndex? inaccessibleMembers`
-  param (precedent: `memberSpellings` is already the last param at `:72`), built once in
-  `Reconciler.Reconcile` from `actual.InaccessibleMembers` beside the existing
-  `MemberSpellingIndex.Build(actual.MemberSpellings)` (`Reconciler.cs:63`) and passed at the
-  `ReconcileComponents(...)` call (`Reconciler.cs:609`). At the gate, before the `continue` at `:351`, when
-  the value is unchanged: if the field key starts with `member:` (the typed-selector sigil composed by
-  `BuilderParser.MemberFieldKey`, `BuilderParser.cs:607-608`) AND
-  `inaccessibleMembers.IsInaccessible(sourceComp.Type.FullName, <member name after the sigil>)`
-  (`MemberSpelling.cs:88`), emit a value-preserving `PatchComponentField { Anchor = sourceComp.LogicalId,
-  ValueSpan = fieldArgumentSpans[LogicalId][fieldKey], NewExpr = <the same RenderFieldValue construction the
-  diff branch uses at :416-426> }`. That anchored edit routes into the EXISTING
-  `ComponentPatchApplier.ResolvePatchComponentField` downgrade (`:208-227`), which rewrites arg0 to
-  `SourceExpr.StringLiteral(member)`. The reconciler only supplies the trigger the diff gate withholds; the
-  accessible-field path is untouched (the branch fires only on `member:` keys flagged inaccessible, so public
-  fields still `continue`).
+**The positive-proof whitelist (Core cannot reflect — produced adapter-side per `00-foundation.md`).** A new
+per-type set `SafeSelectableMembers` = the keys of `SerializedMemberMap`'s `PublicToSerialized`
+(`SerializedMemberMap.cs:279-323`): every public field name, plus a `[SerializeField] private` field's
+conventional `m_Xxx→xxx` property spelling only when that property is non-obsolete, non-indexed, has a public
+setter, and `PropertyType == FieldType` (`:294-303`). Membership means exactly "`r => r.M` compiles as a
+public serialized member of T"; native `m_` fields and names the type does not declare are absent by
+construction, and the type-consistency the selector needs is already enforced by the map (name +
+public-readability suffices; no separate value-type check at the emit site). The public-setter requirement
+is deliberately conservative — a getter-only public alias downgrades to string form, which is always safe.
 
-- **Override path — OWNER: `RenderOverrideSetCall` (`SourcePatchApplier.Instances.cs:284-295`).** Forward the
-  `inaccessibleMembers` index `SourcePatchApplier.Apply` already holds (`:34`) into this renderer, and in the
-  `member:` arm render the string form `Set<{TypeFullName}>("{name}", {valueText})` when
-  `IsInaccessible(TypeFullName, name)`, instead of the `(T x) => x.<name>` selector. Same predicate, same
-  string spelling as the component path.
+**Produced and threaded like the existing signals.** `SerializedFieldBridge.CollectFields`
+(`com.codescenes/Editor/SerializedFieldBridge.cs:97-179`) registers the owner type's safe member names into a
+`ComponentDefaultTemplate` registry, mirroring `RegisterInaccessibleMembers`
+(`ComponentDefaultTemplate.cs:187-203`), gathered from the same read so the signal cannot diverge from what
+was read. `SceneSnapshotReader.FromRoots` (`SceneSnapshotReader.cs:90-129`) drains it into a new
+`SceneSnapshot` array beside `InaccessibleMembers` (`SceneSnapshot.cs:22-28`); a `SafeMemberIndex` is built
+once in `Reconciler.Reconcile` beside `MemberSpellingIndex.Build(actual.MemberSpellings)` (`Reconciler.cs:63`)
+and threaded through `ReconcileComponents` (`Reconciler.cs:609`) to the two emit sites — including the
+override plumbing gap where `SourcePatchApplier.Apply` currently forwards `inaccessibleMembers` only to
+`ResolvePatchComponentField` (`SourcePatchApplier.cs:119`), not to the instance path (`:75`).
 
-- **String spelling is inherited, not reinvented.** The applier writes the string form from the selector
-  identifier text (`ComponentPatchApplier.cs:216`) — `"myField"`, not a mangled `m_` path — which
-  `AuthoredPathResolver.ResolvePath` resolves back to the serialized path. Spec 54 must use that same
-  spelling on both paths; it introduces no new string form.
+**Both emitters invert the predicate.**
+- **Component OWNER: `ComponentPatchApplier.ResolvePatchComponentField` (`:205-227`).** Retain the typed
+  selector iff `SafeMemberIndex.IsSafe(typeFullName, M)`; otherwise take the existing string-form arm
+  (`SourceExpr.StringLiteral(M)`, `:216`). Same rewrite mechanism, whitelist predicate.
+- **Override OWNER: `RenderOverrideSetCall` `member:` arm (`SourcePatchApplier.Instances.cs:288-291`).** Render
+  `Set<{T}>("{M}", {value})` (the string form the applier already uses) unless `IsSafe(T, M)`.
+- **Unchanged-selector self-heal.** A converged builder whose authored selector's value did not change never
+  reaches the value-change downgrade. Emit a diff-independent heal so an unchanged NOT-safe selector is
+  rewritten to the string form on the next sync (the value-equality gate,
+  `ComponentReconciler.cs:338-352`, is where the field is currently skipped). This heal MUST fire only for a
+  field actually authored as a selector over a not-safe member — never for a field already in string form —
+  so an already-healed file produces no edit (see the byte-stability + no-convergence-defect accept-when,
+  which is the check that forces this).
+
+**String spelling is inherited, not reinvented** — the identifier text `AuthoredPathResolver.ResolvePath`
+resolves back (`ComponentPatchApplier.cs:216`). `InaccessibleMemberIndex` (blacklist ⊂ "not in whitelist")
+is subsumed and retired. The append/introduce path already emits string form only
+(`ComponentPatchApplier.cs:414-417`) — no selector to gate there, leave it.
 
 ## Invariant and check
 
 - **INVARIANT.** After any scene→code sync, no emitted or retained builder source contains a typed member
-  selector (`sel => sel.M` on a component `.Set`, or `(T x) => x.M` on an override `.Set`) for a `(T, M)`
-  the probe reports inaccessible. Convergence: after the first heal the source is
-  `c.Set("myField", v)` (a verbatim string key on re-parse), so the `member:` trigger no longer matches, the
-  equality gate holds, and sync is byte-stable — one extra sync to heal, stable thereafter.
-- **CHECK that fails on bypass.** A Core guard test that runs reconcile+apply over a fixture authoring
-  `c.Set(r => r.priv, v)` AND `.Override(e => e.Set(x => x.priv, v))` with `(T, priv)` in the
-  `InaccessibleMemberIndex`, then scans the applied source and FAILS if any `.Set(<lambda>.priv, …)` survives
-  on either path — so a future emitter that reintroduces a selector for an inaccessible member is caught. The
-  guard covers both emitters, since they do not share a caller.
+  selector (`sel => sel.M` on a component `.Set`, or `(T x) => x.M` on an override `.Set`) for a `(T, M)` the
+  adapter did not prove is a safe public selectable member. A public C# field authored as a selector is
+  retained as a selector (no downgrade); a native/private/not-a-public-member selector becomes the string
+  form.
+- **CHECK.** A Core guard test runs reconcile+apply over a fixture authoring `c.Set(r => r.M, v)` AND
+  `.Override(e => e.Set(x => x.M, v))` for a `(T, M)` absent from `SafeMemberIndex`, then scans the applied
+  source and FAILS if any `.Set(<lambda>.M, …)` survives on either path (covers both emitters, which share no
+  caller). A companion case asserts a `(T, M)` that IS in `SafeMemberIndex` (a public field) is retained as a
+  selector, so the fix does not over-downgrade.
 
 ## Accept when
 
-- **Core, diff-independent (both paths).** Given source authoring `c.Set(r => r.priv, v)` for a `(T, priv)`
-  marked inaccessible and a snapshot whose value equals `v` (NO scene change), reconcile+apply rewrites it to
-  `c.Set("priv", v)`; a second reconcile against the healed source produces zero edits (byte-stable). A
-  parallel case for `.Override(e => e.Set(x => x.priv, v))` → `.Override(e => e.Set<T>("priv", v))` (or the
-  shipped string-override form).
-- **EditMode gate (the real Unity boundary).** Author `c.Set(r => r.privateField, v)` on a live component
-  whose field is `[SerializeField] private`, build to scene, then sync back: `BuilderCompileCheck` reports
-  ZERO errors (no `DOES NOT COMPILE` `Debug.LogError` at `SceneBuilderSync.cs:303`), the file now uses the
-  string form, and a re-sync is byte-stable. This exercises the real `SerializedProperty`/`GlobalObjectId`
-  path so the `InaccessibleMembers` set is produced by `SerializedFieldBridge`, not a fixture. Use a plain
-  MonoBehaviour with a `[SerializeField] private` field — NOT TMP or any import-forcing component.
-- **The guard is green** and the two open-defect entries (`docs/open-defects.md`, the low component-heal and
+- **Core, diff-independent (both paths).** Given source authoring `c.Set(r => r.M, v)` for a `(T, M)` NOT in
+  `SafeMemberIndex` and a snapshot whose value equals `v` (NO scene change), reconcile+apply rewrites it to
+  `c.Set("M", v)`, and a second reconcile against the healed source produces ZERO edits (byte-stable). A
+  parallel case for `.Override(e => e.Set(x => x.M, v))`. A public-field selector `c.Set(r => r.PublicX, v)`
+  is retained unchanged (byte-stable, no downgrade).
+- **No churn / convergence-defect.** Re-syncing an already-healed (string-form) builder produces zero patch
+  edits and logs NO `[SceneBuilder] Convergence defect` error (`SceneBuilderSync.cs:314`) — the self-heal
+  must not emit a byte-identical no-op edit for a field already in string form. (This is the acceptance
+  criterion that forces the heal to fire only on an actual not-safe selector.)
+- **EditMode gate (the real Unity boundary).** On a live component, author a typed selector over a member
+  that is a serialized property but NOT a public C# member — a native `m_`-prefixed field (the CS1061 case)
+  AND, separately, a `[SerializeField] private` field (the CS0122 case) — build to scene, then sync back:
+  `BuilderCompileCheck.CheckAndReport` (`SceneBuilderSync.cs:303`) reports ZERO errors (no
+  `DOES NOT COMPILE`), the file now uses the string form, and a re-sync is byte-stable. Repeat for a
+  prefab-instance `.Override`. Exercises the real `SerializedProperty` path so `SafeSelectableMembers` is
+  produced by `SerializedFieldBridge`, not a fixture. Use a plain MonoBehaviour / a stock component —
+  never TMP or any import-forcing component.
+- **The guard is green** and the two open-defect entries (`docs/open-defects.md`, the low unchanged-heal and
   med override-render entries) are removed.
 
 ## Out of scope
 
-- **The author-time analyzer diagnostic** (an SB12xx warning in the IDE for a typed selector over an
-  inaccessible serialized member). Feasible — the analyzer has a semantic model
-  (`CodeScenes.Analyzers/UnityEventAnalysis.cs:46`) — but a separate follow-up. The emit-side self-heal is
-  the guarantee: the product must never emit non-compiling source regardless of author diligence.
+- **The removed-member load-time throw.** `member:X` for a member the type no longer declares throws in
+  `AuthoredPathResolver.ResolvePath` (`:430-432`) and aborts sync — a distinct resolver-side change with no
+  serialized path to downgrade against. Separate follow-up.
+- **The author-time analyzer diagnostic** (an SB12xx warning for a typed selector over a non-public
+  serialized member) — feasible via `CodeScenes.Analyzers`, but a separate follow-up; the emit-side heal is
+  the guarantee.
 - **`[FormerlySerializedAs]` resolution** (`docs/open-defects.md`, a separate resolver gap).
-- **No change to spec 46's form-choice or the string spelling** — both are reused as-is.
+- **No change to spec 46's string spelling** — reused as-is; the blacklist predicate is generalized to the
+  whitelist, not replaced with a new string form.
