@@ -745,3 +745,29 @@ defect it made reachable: a healed prefab-instance override compiles but silentl
 (`Set<T>("m_Mass", "5")` from Unity's raw `PropertyModification` string builds to the prefab default,
 not 5) — the component path is unaffected; filed in `docs/open-defects.md` as a follow-up (value
 rendering on the override heal path, distinct from 54's member-form fix).
+
+## 55 - a CodeScenes menu to bind a builder to the current scene
+
+A builder binds to a scene by its filename plus the `Scene` path in its sidecar
+(`SceneBuilders/<Name>.sbmap.json`); default `Assets/SceneBuilder/<Name>.unity`. Previously the only way
+to point a builder at an existing scene at another path was to hand-write that JSON. This adds the
+human-facing equivalent: a factored `SceneBuilderBind.BindSceneToBuilder(builderName, scenePath,
+overwriteExisting)` (adapter-only) that writes the sidecar `Scene` field — preserving `Entries[]`/`Assets[]`
+via the record with-expression, `WriteIfChanged` for self-write suppression, `SceneBuilderRouter.Invalidate()`
+after — behind a `CodeScenes/Bind Current Scene To/<BuilderName>` dynamic submenu (one entry per discovered
+builder; explicit pick, no guessing). Refuses an untitled scene; won't silently clobber a builder already
+bound to a different scene. Adopting an existing scene stays non-destructive (unmanaged objects preserved).
+
+Built through the tdd-pipeline (commit `19ab3e3`), plus a live-verify follow-up fix `5b61735`. Gate
+`GATE PASS: Core + Unity EditMode green (passed=1030 failed=0 skipped=0)` (`GATE_FORCE_UNITY=1`).
+
+Live-verified via `unity-live-verify` (`SceneBuilderTest/Logs/live-verify-spec55.log`), action 6/6: bind
+wrote the sidecar `Scene` path; the router routed the builder to it with no domain reload (proving
+`Invalidate()`); a build adopted the existing scene non-destructively (a hand-made object AND the coded
+object both survived); the untitled-scene guard refused; a would-clobber was refused (sidecar unchanged)
+until `overwriteExisting: true`, which preserved `Entries[]`/`Assets[]`. Live-verify also caught that the
+submenu itself never registered — the items were added only in the `[InitializeOnLoad]` static ctor, which
+Unity's post-load `[MenuItem]` rebuild discards; fixed by deferring/re-registering via
+`EditorApplication.update += Refresh` (mirroring `SceneBuilderBuildStatusMenu`), with a
+`BindMenuRegistrationTests` guard and a confirming live check (`MenuItemExists` true after a clean load, no
+manual refresh — `live-verify-spec55-menu.log`).
