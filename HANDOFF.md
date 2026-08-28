@@ -6,10 +6,13 @@ This file says only what to do next and in what order.
 ## State of `main`
 
 Tree clean except the auto-populated `docs/agent-friction.*` (a `Stop` hook writes them). Gate
-`GATE PASS: Core + Unity EditMode green (passed=921 failed=0 skipped=0)` (2026-08-19,
+`GATE PASS: Core + Unity EditMode green (passed=1030 failed=0 skipped=0)` (2026-08-28,
 `GATE_FORCE_UNITY=1`; the Core-only trigger skips layer 2 on a pure-Core change, and a skip is not a
 Unity pass — force it). M-Licensing (spec 34) shipped 2026-08-19. `verify.sh` discounts one known
 host engine message by exact text (`69a74df`); a crash or any other error still fails.
+
+Specs 46-55 are all shipped, live-verified, and in `specs/completed/` (records in its README). The
+46-55 queue is CLEAR. Next work is section 3 (launch / hero demo) and the parked follow-ups in §4b.
 
 **Spec 36 (uniform value descent) SHIPPED and live-verified 2026-08-06** — moved to
 `specs/completed/`. All five passes route container descent through `ValueWalk`, which gained
@@ -114,6 +117,25 @@ even disabled two-way sync as "untenable" after the emitter wrote non-compiling 
 (46-51) are shipped and live-verified; records in `specs/completed/README.md`. A forward-ref reconcile
 convergence defect surfaced by 46's live-verify was also fixed (`8f34dfb`). Next work is section 3
 (launch) and the hero demo, not this backlog.
+
+### 4b. House one-shot batch (52-55) SHIPPED — three follow-ups PARKED for Paul's call
+
+Specs 52 (AlignTo), 53 (whole-hierarchy bounds), 54 (positive-proof selector emission) and 55 (bind
+menu) all shipped and live-verified from the AlignTo/house stress one-shot. Three items surfaced there
+are NOT specced yet — each waits on a Paul decision, do not start unprompted:
+
+1. **Override value-drop defect** (filed `docs/open-defects.md`, SEVERITY med). The healed OVERRIDE
+   path emits `Set<T>("m_Mass", "5")` from the raw `PropertyModification` string, so it builds to the
+   prefab default, not 5 (`SourcePatchApplier.Instances.cs:290`). Distinct from 54's member-form fix
+   (which was the component path). Needs a spec if Paul wants it fixed.
+2. **Asset-import orientation** — Paul said "I want to add something to CodeScenes" for the case where
+   an imported model's up-axis is wrong (props jutting/tipped). Not yet shaped into a spec; the skill
+   was updated to teach Between/AlignTo placement in the interim.
+3. **Auto-sync cold-start open race** — spec-55 menu live-verify observed one startup error:
+   `[CodeScenes] <Builder>: scene ... did not open after 10 attempts — code->scene build abandoned`,
+   whole stack in `com.codescenes/Editor/SceneBuilderAutoSync.cs` (`DeferCodeToScene:795`). Pre-existing
+   (frames last changed `c30160f`, spec-50 era), the scene exists on disk — a cold-start open-timing
+   race, not the bind fix's fault. File as its own spec if it recurs.
 
 `specs/00-foundation.md` stays in `specs/` as the living contract.
 
