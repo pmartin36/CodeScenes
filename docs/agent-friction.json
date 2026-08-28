@@ -10,9 +10,9 @@
     },
     "Assertion failed on expression: 'm_PodArrays.empty()'": {
       "class": "ENVIRONMENT",
-      "count": 21,
+      "count": 22,
       "first_seen": "2026-07-31",
-      "last_seen": "2026-08-27",
+      "last_seen": "2026-08-28",
       "source": "/home/paul/Source/CodeScenesUnity/../Unity/SceneBuilderTest/Logs/Editor.log",
       "verbatim": "Assertion failed on expression: 'm_PodArrays.empty()'"
     },
@@ -233,12 +233,17 @@
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec52.log": {
       "bytes": 357362,
       "head": "fd0a5294eaed50ba",
-      "size": 357362
+      "size": 357945
     },
     "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec53.log": {
       "bytes": 288937,
       "head": "7f511427a646ce5f",
       "size": 288937
+    },
+    "/home/paul/Source/Unity/SceneBuilderTest/Logs/live-verify-spec54.log": {
+      "bytes": 388785,
+      "head": "4f85d13cd9831559",
+      "size": 389732
     }
   }
 }
