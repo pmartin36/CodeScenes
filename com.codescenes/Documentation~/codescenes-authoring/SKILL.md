@@ -65,6 +65,31 @@ relative to another.
 The scene it governs is created/updated on build. When you change the file, the scene updates; when
 you edit the scene in the editor, the file updates. You do not press a button — sync is automatic.
 
+### Which scene a builder drives (and targeting one that already exists)
+
+A builder is matched to a scene by its filename plus a scene path recorded in a sidecar file next to it,
+`SceneBuilders/<Name>.sbmap.json`. By default a builder `<Name>.cs` drives a scene at
+`Assets/SceneBuilder/<Name>.unity`, creating it on the first build if it does not exist. You normally
+never touch the sidecar — CodeScenes writes and maintains it.
+
+To drive a scene that **already exists** at another path (one you built by hand, or anywhere under
+`Assets/`), point CodeScenes at it before the first build by creating the sidecar yourself next to the
+builder:
+
+```json
+// SceneBuilders/<Name>.sbmap.json
+{ "Scene": "Assets/<YourFolder>/<YourScene>.unity" }
+```
+
+Then open that scene and let sync run (or `CodeScenes > Build > Current Scene`); from then on the builder
+drives that scene and CodeScenes fills in the rest of the sidecar.
+
+Adopting an existing scene is **non-destructive**: objects already in the scene that your builder does
+not declare are left untouched — CodeScenes only removes an object it created itself and you have since
+deleted from the code. You can point a builder at a populated scene and add statements for its objects
+incrementally; nothing you have not written about is wiped. (Existing objects are not reverse-imported
+into the code — they coexist in the scene alongside what the builder manages.)
+
 ## Authoring API — the calls you use inside `Build`
 
 Full reference: **`Packages/com.codescenes/Documentation~/authoring-api.md`** (every type and member).
